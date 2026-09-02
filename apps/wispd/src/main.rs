@@ -1,6 +1,7 @@
 mod media;
 mod shortcut;
 mod surface;
+mod tray;
 
 use anyhow::{Context, anyhow, bail};
 use clap::Parser;
@@ -9,6 +10,7 @@ use reqwest::StatusCode;
 use serde_json::{Value, json};
 use std::{
     path::{Path, PathBuf},
+    process::Stdio,
     sync::{
         Arc,
         atomic::{AtomicU64, Ordering},
@@ -33,6 +35,7 @@ use wisp_protocol::{
 
 use crate::media::{AudioInventory, MediaEvent, MediaManager};
 use crate::shortcut::ShortcutManager;
+use crate::tray::TrayAction;
 
 #[derive(Debug, Parser)]
 #[command(about = "Wisp's persistent desktop daemon")]
@@ -1318,6 +1321,130 @@ async fn synchronize_surface_event(daemon: &Daemon, event: MediaEvent) {
     }
 }
 
+fn repository_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(2)
+        .expect("wispd manifest is nested under the repository root")
+        .to_path_buf()
+}
+
+fn installed_ui_script() -> Option<PathBuf> {
+    if let Some(path) = std::env::var_os("WISP_UI_BIN") {
+        return Some(PathBuf::from(path));
+    }
+    let bin_root = std::env::var_os("XDG_BIN_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/bin")))?;
+    let path = bin_root.join("wisp-ui");
+    path.is_file().then_some(path)
+}
+
+async fn run_ui_script(script: &Path, selector: Option<&Path>, arguments: &[String]) -> bool {
+    let mut command = tokio::process::Command::new(script);
+    command
+        .args(arguments)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    if let Some(path) = selector {
+        command.env("WISP_QUICKSHELL_PATH", path);
+    }
+    match command.status().await {
+        Ok(status) => status.success(),
+        Err(error) => {
+            debug!(script = %script.display(), %error, "could not run Wisp UI control command");
+            false
+        }
+    }
+}
+
+async fn control_ui(arguments: Vec<String>) {
+    let root = repository_root();
+    let repository_script = root.join("scripts/wisp-ui.sh");
+    let repository_ui = root.join("quickshell/app");
+    if let Some(selector) = std::env::var_os("WISP_QUICKSHELL_PATH").map(PathBuf::from)
+        && repository_script.is_file()
+        && run_ui_script(&repository_script, Some(&selector), &arguments).await
+    {
+        return;
+    }
+    if let Some(script) = installed_ui_script()
+        && run_ui_script(&script, None, &arguments).await
+    {
+        return;
+    }
+    if repository_script.is_file() {
+        let _ = run_ui_script(&repository_script, Some(&repository_ui), &arguments).await;
+    }
+}
+
+async fn quit_all_ui_instances() {
+    let root = repository_root();
+    let arguments = vec!["quit".into()];
+    let repository_script = root.join("scripts/wisp-ui.sh");
+    let repository_ui = root.join("quickshell/app");
+    if let Some(selector) = std::env::var_os("WISP_QUICKSHELL_PATH").map(PathBuf::from)
+        && repository_script.is_file()
+    {
+        let _ = run_ui_script(&repository_script, Some(&selector), &arguments).await;
+    }
+    if repository_script.is_file() {
+        let _ = run_ui_script(&repository_script, Some(&repository_ui), &arguments).await;
+    }
+    if let Some(script) = installed_ui_script() {
+        let _ = run_ui_script(&script, None, &arguments).await;
+    }
+}
+
+async fn next_tray_action(
+    receiver: &mut Option<tokio::sync::mpsc::UnboundedReceiver<TrayAction>>,
+) -> Option<TrayAction> {
+    match receiver {
+        Some(receiver) => receiver.recv().await,
+        None => std::future::pending().await,
+    }
+}
+
+async fn handle_tray_action(action: TrayAction, daemon: &Arc<Daemon>) -> bool {
+    match action {
+        TrayAction::Activate { x, y } => {
+            tokio::spawn(control_ui(vec![
+                "activate".into(),
+                x.to_string(),
+                y.to_string(),
+            ]));
+        }
+        TrayAction::Show => {
+            tokio::spawn(control_ui(vec!["open".into()]));
+        }
+        TrayAction::Hide => {
+            tokio::spawn(control_ui(vec!["hide".into()]));
+        }
+        TrayAction::SetAnchor(anchor) => {
+            tokio::spawn(control_ui(vec!["anchor".into(), anchor.into()]));
+        }
+        TrayAction::ToggleMuted => {
+            daemon.update_manual_mute(None).await;
+        }
+        TrayAction::ToggleDeafened => {
+            let deafened = {
+                let mut state = daemon.state.write().await;
+                state.self_state.deafened = !state.self_state.deafened;
+                state.self_state.deafened
+            };
+            daemon.media.set_deafened(deafened).await;
+            daemon.publish_current("self_state_changed").await;
+        }
+        TrayAction::Exit => {
+            info!("exit requested from system tray");
+            quit_all_ui_instances().await;
+            return false;
+        }
+    }
+    true
+}
+
 fn describe_media_failure(error: &anyhow::Error) -> (String, String) {
     let detail = error.to_string();
     let (code, label) = if detail.contains("publish microphone") {
@@ -1376,6 +1503,18 @@ async fn main() -> anyhow::Result<()> {
             warn!(%error, "initial media connection failed");
         }
     });
+
+    let (mut tray_actions, _tray_handle) = if std::env::var_os("WISP_DISABLE_TRAY").is_some() {
+        (None, None)
+    } else {
+        match tray::spawn().await {
+            Ok((receiver, handle)) => (Some(receiver), Some(handle)),
+            Err(error) => {
+                warn!(%error, "system tray is unavailable; continuing without a tray icon");
+                (None, None)
+            }
+        }
+    };
     info!(socket = %socket_path.display(), "wispd ready");
 
     let shutdown = tokio::signal::ctrl_c();
@@ -1391,6 +1530,15 @@ async fn main() -> anyhow::Result<()> {
                 result?;
                 info!("shutting down");
                 break;
+            }
+            action = next_tray_action(&mut tray_actions) => {
+                let Some(action) = action else {
+                    tray_actions = None;
+                    continue;
+                };
+                if !handle_tray_action(action, &daemon).await {
+                    break;
+                }
             }
         }
     }

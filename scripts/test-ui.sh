@@ -48,6 +48,19 @@ printf '%s' "$status" | jq -e '
 
 qs --path "$config_dir" ipc call dev.wisp hide
 qs --path "$config_dir" ipc call dev.wisp open
+desktop=$(qs --path "$config_dir" ipc call dev.wisp desktop)
+printf '%s' "$desktop" | jq -e '
+  .visible == true and
+  (.resolved_anchor | IN("bottom-right", "bottom-left", "top-right", "top-left")) and
+  (.screen | type == "string")
+' >/dev/null
+
+qs --path "$config_dir" ipc call dev.wisp anchor top-left
+desktop=$(qs --path "$config_dir" ipc call dev.wisp desktop)
+printf '%s' "$desktop" | jq -e '
+  .visible == true and .anchor == "top-left" and .resolved_anchor == "top-left"
+' >/dev/null
+
 qs --path "$config_dir" ipc call dev.wisp quit
 wait "$ui_pid"
 ui_pid=""

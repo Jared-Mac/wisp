@@ -22,7 +22,15 @@ case "$action" in
 
     case "$action" in
       open|show|toggle)
-        exec qs "${selector[@]}" --daemonize
+        qs "${selector[@]}" --daemonize
+        for _ in $(seq 1 40); do
+          if qs "${selector[@]}" ipc call dev.wisp open 2>/dev/null; then
+            exit 0
+          fi
+          sleep 0.05
+        done
+        echo "Wisp UI started but its IPC endpoint did not become ready" >&2
+        exit 1
         ;;
       *)
         # Closing an application that is not running is already complete.
@@ -30,11 +38,52 @@ case "$action" in
         ;;
     esac
     ;;
+  activate)
+    x=${2:-0}
+    y=${3:-0}
+    if qs "${selector[@]}" ipc call dev.wisp activate "$x" "$y"; then
+      exit 0
+    fi
+    qs "${selector[@]}" --daemonize
+    for _ in $(seq 1 40); do
+      if qs "${selector[@]}" ipc call dev.wisp activate "$x" "$y" 2>/dev/null; then
+        exit 0
+      fi
+      sleep 0.05
+    done
+    echo "Wisp UI started but its IPC endpoint did not become ready" >&2
+    exit 1
+    ;;
+  anchor)
+    position=${2:-}
+    case "$position" in
+      auto|bottom-right|bottom-left|top-right|top-left) ;;
+      *)
+        echo "anchor must be auto, bottom-right, bottom-left, top-right, or top-left" >&2
+        exit 2
+        ;;
+    esac
+    if qs "${selector[@]}" ipc call dev.wisp anchor "$position"; then
+      exit 0
+    fi
+    qs "${selector[@]}" --daemonize
+    for _ in $(seq 1 40); do
+      if qs "${selector[@]}" ipc call dev.wisp anchor "$position" 2>/dev/null; then
+        exit 0
+      fi
+      sleep 0.05
+    done
+    echo "Wisp UI started but its IPC endpoint did not become ready" >&2
+    exit 1
+    ;;
   status)
     exec qs "${selector[@]}" ipc call dev.wisp.bridge status
     ;;
+  desktop)
+    exec qs "${selector[@]}" ipc call dev.wisp desktop
+    ;;
   *)
-    echo "usage: wisp-ui {open|show|close|hide|toggle|quit|status}" >&2
+    echo "usage: wisp-ui {open|show|close|hide|toggle|quit|activate X Y|anchor POSITION|status|desktop}" >&2
     exit 2
     ;;
 esac

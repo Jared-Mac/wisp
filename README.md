@@ -34,6 +34,18 @@ wisp-ui toggle
 The standalone process stays connected to `wispd` when its window is hidden,
 so reopening is immediate and voice state remains owned by the daemon.
 
+`wispd` also publishes a Wisp system-tray icon on desktops that support
+StatusNotifierItem. Left-click the icon to toggle the Wisp panel beside the
+tray. Right-click for Show/Hide, mute, deafen, panel-anchor, and **Exit Wisp**
+actions. The panel remembers Auto, corner, and monitor choices from
+**Settings → Desktop position**. Auto uses the tray click coordinates so the
+panel opens on the tray's monitor and clears the panel edge.
+
+**Exit Wisp** closes the Quickshell UI and the tray-owning daemon. When Wisp
+was started with `just dev`, that daemon exit also makes the development
+supervisor stop its local server and LiveKit children, leaving no Wisp
+background processes behind.
+
 ## Optional Omarchy integration
 
 Omarchy users can additionally install the center-bar adapter:

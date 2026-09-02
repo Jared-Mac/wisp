@@ -8,6 +8,7 @@ FocusScope {
   required property var bridge
   required property var theme
   required property url logoSource
+  property var anchorController: null
   property int contentPadding: theme.spacing.huge
   property bool dismissOnNavigate: false
   property bool showCloseButton: false
@@ -198,6 +199,7 @@ FocusScope {
         width: parent.width
         bridge: root.bridge
         theme: root.theme
+        anchorController: root.anchorController
       }
 
       Column {
