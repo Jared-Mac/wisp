@@ -82,12 +82,30 @@ Item {
   })
   readonly property bool inHangout: selfState.hangout_id !== null && selfState.hangout_id !== undefined
   readonly property bool hasError: !daemonConnected || selfState.connection === "failed" || !!mediaState.error || !!mediaState.surface_error
+  readonly property string selfStatusLabel: buildSelfStatusLabel()
   readonly property string errorMessage: !daemonConnected
     ? "wispd is not running"
     : String(lastError || mediaState.error || mediaState.surface_error || "")
   readonly property string barText: buildBarText()
 
   signal commandFailed(string message)
+
+  function buildSelfStatusLabel() {
+    if (!daemonConnected) return "Disconnected"
+    var connection = String(selfState.connection || "offline")
+    if (connection === "offline") return "Offline"
+    if (connection === "connecting_to_server") return "Connecting"
+    if (connection === "joining") return "Joining"
+    if (connection === "reconnecting") return "Reconnecting"
+    if (connection === "failed") return "Connection failed"
+
+    var presence = String(selfState.presence || "away")
+    if (presence === "open") return "Open"
+    if (presence === "knock") return "Knock first"
+    if (presence === "closed") return "Closed"
+    if (presence === "away") return "Away"
+    return presence.charAt(0).toUpperCase() + presence.slice(1)
+  }
 
   function buildBarText() {
     if (!daemonConnected) return "󰍬  disconnected"

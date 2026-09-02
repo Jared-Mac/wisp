@@ -81,8 +81,9 @@ just friend
 `friend-config` stores the host and assigned identity in
 `~/.config/wisp/friend.env` with user-only permissions. The setting is local to
 that computer and is never committed to the repository. The panel header shows
-the active profile name so an incorrectly launched identity is immediately
-visible. Explicit arguments such as `just friend <host>.ts.net Tyler` override
+the active profile name and live Open, Knock first, Closed, or Away presence so
+identity and availability are immediately visible. Explicit arguments such as
+`just friend <host>.ts.net Tyler` override
 and update the saved values. `wispd` itself also requires a profile argument or
 `WISP_PROFILE`, so an unconfigured client can no longer silently become Jared.
 

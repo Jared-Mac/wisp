@@ -128,6 +128,7 @@ ShellRoot {
         "connected": bridge.daemonConnected,
         "socket": bridge.socketPath,
         "error": bridge.lastError,
+        "self_status": bridge.selfStatusLabel,
         "snapshot": bridge.snapshot
       })
     }

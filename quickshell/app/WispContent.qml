@@ -104,14 +104,26 @@ FocusScope {
               font.weight: Font.DemiBold
             }
 
-            Text {
-              text: root.bridge.daemonConnected
-                ? String(root.bridge.selfState.display_name || "Unknown profile")
-                  + " · " + String(root.bridge.selfState.connection || "available")
-                : "wispd disconnected"
-              color: root.bridge.hasError ? root.theme.danger : root.theme.muted
-              font.family: root.theme.font.family
-              font.pixelSize: root.theme.font.caption
+            Row {
+              spacing: root.theme.spacing.xs
+
+              PresenceDot {
+                anchors.verticalCenter: parent.verticalCenter
+                presence: root.bridge.daemonConnected
+                  ? String(root.bridge.selfState.presence || "away")
+                  : "closed"
+                theme: root.theme
+              }
+
+              Text {
+                text: root.bridge.daemonConnected
+                  ? String(root.bridge.selfState.display_name || "Unknown profile")
+                    + " · " + root.bridge.selfStatusLabel
+                  : "wispd disconnected"
+                color: root.bridge.hasError ? root.theme.danger : root.theme.muted
+                font.family: root.theme.font.family
+                font.pixelSize: root.theme.font.caption
+              }
             }
           }
         }
