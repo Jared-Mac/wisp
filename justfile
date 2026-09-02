@@ -51,10 +51,20 @@ cli-install:
     cargo install --path apps/wispctl --locked --root "${HOME}/.local"
 
 app:
-    WISP_QUICKSHELL_PATH="{{justfile_directory()}}/quickshell/app" ./scripts/wisp-ui.sh open
+    ./scripts/app-sync.sh
+    wisp-ui app open
 
 app-toggle:
-    WISP_QUICKSHELL_PATH="{{justfile_directory()}}/quickshell/app" ./scripts/wisp-ui.sh toggle
+    ./scripts/app-sync.sh
+    wisp-ui app toggle
+
+panel:
+    ./scripts/app-sync.sh
+    wisp-ui panel open
+
+panel-toggle:
+    ./scripts/app-sync.sh
+    wisp-ui panel toggle
 
 test:
     cargo test --workspace

@@ -65,12 +65,13 @@ human-readable message; the panel displays the message while tests and future
 clients can branch on the code.
 
 The primary desktop UI is the named `wisp` Quickshell configuration in
-`quickshell/app`. It uses only upstream Quickshell and QtQuick APIs and presents
-an on-demand `FloatingWindow`, so it can run without Omarchy's shell modules.
-`quickshell/Panel.qml` is a thin optional Omarchy adapter that provides the bar
-button and anchored popup while reusing the portable content and design-token
-interface. Each active frontend has its own pushed IPC connection; neither owns
-call state.
+`quickshell/app`. It uses only upstream Quickshell and QtQuick APIs and hosts two
+presentations over one bridge: a compositor-managed `FloatingWindow` app and a
+compact layer-shell `PanelWindow` for the generic system tray. The shared
+content switches between one and two columns as the application window changes
+size. `quickshell/Panel.qml` is a thin optional Omarchy adapter that embeds the
+same compact presentation in Omarchy's native anchored popup. Each active
+frontend has its own pushed IPC connection; none owns call state.
 
 The Voice MVP reliability gate is intentionally short and deterministic rather
 than a one-hour soak. It connects Jared plus Tyler, Jack, and Charlie; cycles the

@@ -6,6 +6,7 @@ pub enum TrayAction {
     Activate { x: i32, y: i32 },
     Show,
     Hide,
+    OpenApp,
     ToggleMuted,
     ToggleDeafened,
     SetAnchor(&'static str),
@@ -136,8 +137,9 @@ impl ksni::Tray for WispTray {
         };
 
         vec![
-            action("Show Wisp", "window-new", TrayAction::Show),
-            action("Hide Wisp", "window-close", TrayAction::Hide),
+            action("Show Wisp panel", "window-new", TrayAction::Show),
+            action("Hide Wisp panel", "window-close", TrayAction::Hide),
+            action("Open Wisp app", "view-fullscreen", TrayAction::OpenApp),
             MenuItem::Separator,
             muted.into(),
             deafened.into(),

@@ -7,9 +7,17 @@ import Quickshell.Io
 ShellRoot {
   id: app
 
-  function openWindow() { appWindow.reveal() }
-  function closeWindow() { appWindow.visible = false }
-  function toggleWindow() { appWindow.visible ? closeWindow() : openWindow() }
+  function openApp() {
+    panelWindow.visible = false
+    appWindow.reveal()
+  }
+  function closeApp() { appWindow.visible = false }
+  function toggleApp() { appWindow.visible ? closeApp() : openApp() }
+
+  function openPanel() { panelWindow.reveal() }
+  function closePanel() { panelWindow.visible = false }
+  function togglePanel() { panelWindow.visible ? closePanel() : openPanel() }
+
   function validAnchor(value) {
     return value === "auto"
       || value === "bottom-right"
@@ -17,45 +25,82 @@ ShellRoot {
       || value === "top-right"
       || value === "top-left"
   }
-  function primaryScreen() {
+  function screenNamed(name) {
     for (var index = 0; index < Quickshell.screens.length; index++)
-      if (Quickshell.screens[index].name === primaryScreenName)
+      if (Quickshell.screens[index].name === name)
         return Quickshell.screens[index]
-    return Quickshell.screens.length > 0 ? Quickshell.screens[0] : null
+    return null
+  }
+  function primaryScreen() {
+    return screenNamed(primaryScreenName)
+      || (Quickshell.screens.length > 0 ? Quickshell.screens[0] : null)
+  }
+  function screenAt(globalX, globalY) {
+    for (var index = 0; index < Quickshell.screens.length; index++) {
+      var candidate = Quickshell.screens[index]
+      if (globalX >= candidate.x && globalX < candidate.x + candidate.width
+          && globalY >= candidate.y && globalY < candidate.y + candidate.height)
+        return candidate
+    }
+    return null
+  }
+  function panelScreen() {
+    return screenNamed(activePanelScreenName) || primaryScreen()
   }
   function setAnchor(value) {
     if (!validAnchor(value)) return
     appSettings.anchor = value
-    openWindow()
+    openPanel()
   }
   function activateFromTray(globalX, globalY) {
-    var target = primaryScreen()
+    var target = screenAt(globalX, globalY) || primaryScreen()
+    if (target) activePanelScreenName = target.name
     var localX = target ? globalX - target.x : globalX
     var localY = target ? globalY - target.y : globalY
     var width = target ? target.width : 1
     var height = target ? target.height : 1
-    var clickIsOnPrimary = localX >= 0 && localX < width && localY >= 0 && localY < height
-    trayRight = clickIsOnPrimary ? localX >= width / 2 : true
-    trayBottom = clickIsOnPrimary ? localY >= height / 2 : true
-    autoAnchor = (trayBottom ? "bottom-" : "top-") + (trayRight ? "right" : "left")
-    trayVerticalInset = clickIsOnPrimary
+    var clickIsOnTarget = localX >= 0 && localX < width
+      && localY >= 0 && localY < height
+    trayRight = clickIsOnTarget ? localX >= width / 2 : true
+    trayBottom = clickIsOnTarget ? localY >= height / 2 : true
+    autoAnchor = (trayBottom ? "bottom-" : "top-")
+      + (trayRight ? "right" : "left")
+    trayVerticalInset = clickIsOnTarget
       ? Math.max(appTheme.space(44),
           (trayBottom ? height - localY : localY) + appTheme.space(22))
       : appTheme.space(52)
-    toggleWindow()
+    togglePanel()
+  }
+  function appDesktop() {
+    return JSON.stringify({
+      "visible": appWindow.visible,
+      "width": appWindow.width,
+      "height": appWindow.height,
+      "wide_layout": appWindow.width >= appTheme.space(760)
+    })
+  }
+  function panelDesktop() {
+    return JSON.stringify({
+      "visible": panelWindow.visible,
+      "anchor": appSettings.anchor,
+      "resolved_anchor": app.resolvedAnchor,
+      "screen": app.selectedPanelScreen ? app.selectedPanelScreen.name : null,
+      "vertical_inset": panelWindow.verticalInset
+    })
   }
 
   readonly property string primaryScreenName: Quickshell.env("WISP_PRIMARY_SCREEN")
+  property string activePanelScreenName: ""
   property string autoAnchor: "bottom-right"
   property bool trayRight: true
   property bool trayBottom: true
   property int trayVerticalInset: appTheme.space(52)
   readonly property string resolvedAnchor: appSettings.anchor === "auto"
     ? autoAnchor : appSettings.anchor
-  readonly property var selectedScreen: primaryScreen()
+  readonly property var selectedPanelScreen: panelScreen()
   readonly property var anchorController: ({
     "anchor": appSettings.anchor,
-    "primaryScreen": app.selectedScreen,
+    "screen": app.selectedPanelScreen,
     "setAnchor": function(value) { app.setAnchor(value) }
   })
 
@@ -74,34 +119,47 @@ ShellRoot {
 
   WispBridge {
     id: bridge
-    clientName: "quickshell-app"
+    clientName: "quickshell-desktop"
   }
 
+  // Compatibility endpoint: direct Wisp launches now mean the full app.
   IpcHandler {
     target: "dev.wisp"
-
-    function open(): void { app.openWindow() }
-    function close(): void { app.closeWindow() }
-    function show(): void { app.openWindow() }
-    function hide(): void { app.closeWindow() }
-    function toggle(): void { app.toggleWindow() }
+    function open(): void { app.openApp() }
+    function close(): void { app.closeApp() }
+    function show(): void { app.openApp() }
+    function hide(): void { app.closeApp() }
+    function toggle(): void { app.toggleApp() }
     function activate(x: int, y: int): void { app.activateFromTray(x, y) }
     function anchor(position: string): void { app.setAnchor(position) }
-    function desktop(): string {
-      return JSON.stringify({
-        "visible": appWindow.visible,
-        "anchor": appSettings.anchor,
-        "resolved_anchor": app.resolvedAnchor,
-        "screen": app.selectedScreen ? app.selectedScreen.name : null,
-        "vertical_inset": appWindow.verticalInset
-      })
-    }
+    function desktop(): string { return app.appDesktop() }
     function quit(): void { Qt.quit() }
   }
 
   IpcHandler {
-    target: "dev.wisp.bridge"
+    target: "dev.wisp.app"
+    function open(): void { app.openApp() }
+    function close(): void { app.closeApp() }
+    function show(): void { app.openApp() }
+    function hide(): void { app.closeApp() }
+    function toggle(): void { app.toggleApp() }
+    function desktop(): string { return app.appDesktop() }
+  }
 
+  IpcHandler {
+    target: "dev.wisp.panel"
+    function open(): void { app.openPanel() }
+    function close(): void { app.closePanel() }
+    function show(): void { app.openPanel() }
+    function hide(): void { app.closePanel() }
+    function toggle(): void { app.togglePanel() }
+    function activate(x: int, y: int): void { app.activateFromTray(x, y) }
+    function anchor(position: string): void { app.setAnchor(position) }
+    function desktop(): string { return app.panelDesktop() }
+  }
+
+  IpcHandler {
+    target: "dev.wisp.bridge"
     function status(): string {
       return JSON.stringify({
         "connected": bridge.daemonConnected,
@@ -113,12 +171,12 @@ ShellRoot {
     }
   }
 
-  WispWindow {
-    id: appWindow
+  WispPanelWindow {
+    id: panelWindow
     visible: false
     bridge: bridge
     theme: appTheme
-    screen: app.selectedScreen
+    screen: app.selectedPanelScreen
     anchorMode: app.resolvedAnchor
     verticalInset: {
       var sameEdge = anchorMode.indexOf("bottom-") === 0
@@ -126,6 +184,15 @@ ShellRoot {
       return sameEdge ? app.trayVerticalInset : appTheme.space(12)
     }
     anchorController: app.anchorController
-    onHideRequested: app.closeWindow()
+    onAppRequested: app.openApp()
+    onHideRequested: app.closePanel()
+  }
+
+  WispWindow {
+    id: appWindow
+    visible: false
+    bridge: bridge
+    theme: appTheme
+    onHideRequested: app.closeApp()
   }
 }

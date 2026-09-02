@@ -21,31 +21,37 @@ cargo run -p wispctl -- status
 cargo run -p wispctl -- join Tyler
 ```
 
-`just app` runs the portable Quickshell frontend directly from the repository.
+`just app` syncs and opens the portable, resizable Quickshell application.
+`just panel` syncs and opens its compact anchored presentation.
 To install it as the named `wisp` Quickshell configuration, application
 launcher, and `wisp-ui` command:
 
 ```bash
 just app-sync
-wisp-ui open
-wisp-ui toggle
+wisp-ui app open
+wisp-ui app toggle
+wisp-ui panel toggle
 ```
 
-The standalone process stays connected to `wispd` when its window is hidden,
-so reopening is immediate and voice state remains owned by the daemon.
+The app uses a single column at narrow sizes and a two-column layout when more
+space is available. The standalone process stays connected to `wispd` when
+both surfaces are hidden, so reopening is immediate and voice state remains
+owned by the daemon. The legacy `wisp-ui open` and `wisp-ui toggle` forms remain
+aliases for the full app.
 
 `wispd` also publishes a Wisp system-tray icon on desktops that support
 StatusNotifierItem. Left-click the icon to toggle the Wisp panel beside the
-tray. Right-click for Show/Hide, mute, deafen, panel-anchor, and **Exit Wisp**
-actions. Muted and deafened states update the tray icon, tooltip, checked menu
+tray. Right-click for panel Show/Hide, **Open Wisp app**, mute, deafen,
+panel-anchor, and **Exit Wisp** actions. The panel also has an **Open app**
+button. Muted and deafened states update the tray icon, tooltip, checked menu
 items, and compact icons in the panel. Microphone mute is orange; deafen is red
 and always forces microphone mute. Clicking the headset again leaves the
 microphone muted; clicking the microphone while deafened clears both states.
 The lower in-call controls contain only video, sharing, and leave actions;
 small mute/deafen icons appear beside the local member name in a hangout.
-The panel always opens on the operating system's primary display and remembers
-its corner choice under **Settings → Desktop position**. Auto uses the tray edge
-when the tray is on the primary display and otherwise falls back to the
+The panel remembers its corner choice under **Settings → Desktop position**.
+Auto uses the tray icon's display and edge when the desktop supplies its click
+position; otherwise it falls back to the current system display and its
 bottom-right corner.
 
 **Exit Wisp** closes the Quickshell UI and the tray-owning daemon. When Wisp
@@ -62,9 +68,12 @@ just plugin-sync
 omarchy-shell shell toggle dev.wisp
 ```
 
-The adapter and standalone application use the same portable controls and
-independent connections to `wispd`. The adapter is not required on CachyOS or
-other desktops.
+The Omarchy adapter and generic tray popup use the same compact `WispContent`
+presentation; the adapter simply supplies Omarchy's native anchored popup host.
+Both offer **Open app** for the separate resizable layout. The adapter and the
+standalone configuration have independent pushed connections to `wispd`; call
+state remains daemon-owned. The adapter is not required on CachyOS or other
+desktops.
 
 ## Trusted Tailscale friend test
 
@@ -175,7 +184,8 @@ just lint
 ```
 
 `just test-ui` launches an isolated standalone Quickshell instance and checks
-load, daemon status, hide/open, and clean shutdown. `just bootstrap` installs
+the full app and compact panel lifecycles, daemon status, anchoring, and clean
+shutdown. `just bootstrap` installs
 the pinned, checksum-verified LiveKit development
 binary into `.tools/`, and `just dev` starts it on loopback. `just test-media`
 tests real local LiveKit audio/video, surface close/reopen independence, and SFU

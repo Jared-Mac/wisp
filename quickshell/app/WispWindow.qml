@@ -1,39 +1,24 @@
 import QtQuick
 import Quickshell
 
-PanelWindow {
+// Normal application host. Compact anchored surfaces live in
+// WispPanelWindow.qml and the optional Omarchy Panel.qml adapter.
+FloatingWindow {
   id: root
 
   required property var bridge
   required property var theme
-  required property string anchorMode
-  required property var anchorController
-  property int verticalInset: theme.space(12)
   signal hideRequested()
 
-  implicitWidth: theme.space(460)
-  implicitHeight: theme.space(700)
-  color: "transparent"
-  focusable: true
-  aboveWindows: true
-  exclusiveZone: -1
-
-  anchors {
-    left: root.anchorMode.endsWith("left")
-    right: root.anchorMode.endsWith("right")
-    top: root.anchorMode.startsWith("top")
-    bottom: root.anchorMode.startsWith("bottom")
-  }
-
-  margins {
-    left: root.anchorMode.endsWith("left") ? root.theme.space(12) : 0
-    right: root.anchorMode.endsWith("right") ? root.theme.space(12) : 0
-    top: root.anchorMode.startsWith("top") ? root.verticalInset : 0
-    bottom: root.anchorMode.startsWith("bottom") ? root.verticalInset : 0
-  }
+  title: "Wisp"
+  implicitWidth: theme.space(960)
+  implicitHeight: theme.space(720)
+  minimumSize: Qt.size(theme.space(420), theme.space(520))
+  color: theme.background
 
   function reveal() {
     visible = true
+    minimized = false
     Qt.callLater(function() {
       content.forceActiveFocus()
       if (root.contentItem && root.contentItem.window)
@@ -57,7 +42,7 @@ PanelWindow {
       bridge: root.bridge
       theme: root.theme
       logoSource: Qt.resolvedUrl("assets/waveform.svg")
-      anchorController: root.anchorController
+      presentation: "app"
       showCloseButton: true
       dismissOnNavigate: false
       onCloseRequested: root.hideRequested()

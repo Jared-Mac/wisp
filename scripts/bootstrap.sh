@@ -18,6 +18,7 @@ mkdir -p "${XDG_CONFIG_HOME:-$HOME/.config}/wisp"
 mkdir -p "${XDG_DATA_HOME:-$HOME/.local/share}/wisp/server"
 mkdir -p "${XDG_STATE_HOME:-$HOME/.local/state}/wisp"
 mkdir -p "${XDG_RUNTIME_DIR:?XDG_RUNTIME_DIR is required}/wisp"
+./scripts/app-sync.sh >/dev/null
 
 echo "Wisp development dependencies are ready."
 echo "Run 'just dev', then 'just plugin-sync' in another terminal."

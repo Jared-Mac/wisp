@@ -16,7 +16,14 @@ cp -a "$repo_dir/quickshell/app/". "$config_dir/"
 
 ui_pid=""
 primary_screen=""
-if command -v kscreen-doctor >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
+if command -v hyprctl >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
+  primary_screen=$(hyprctl monitors -j 2>/dev/null \
+    | jq -r '([.[] | select(.focused == true)][0].name // .[0].name) // empty' \
+    2>/dev/null || true)
+fi
+if [[ -z "$primary_screen" ]] \
+  && command -v kscreen-doctor >/dev/null 2>&1 \
+  && command -v jq >/dev/null 2>&1; then
   primary_screen=$(kscreen-doctor -j 2>/dev/null | jq -r '
     ([.outputs[] | select(.enabled == true and .connected == true and (.priority // 0) > 0)]
       | min_by(.priority) | .name) // empty
@@ -40,7 +47,8 @@ WISP_PRIMARY_SCREEN="$primary_screen" \
 ui_pid=$!
 
 for _ in $(seq 1 80); do
-  if qs --path "$config_dir" ipc show 2>/dev/null | grep -q "target dev.wisp"; then
+  if qs --path "$config_dir" ipc show 2>/dev/null \
+    | grep -q "target dev.wisp.app"; then
     break
   fi
   if ! kill -0 "$ui_pid" 2>/dev/null; then
@@ -57,24 +65,33 @@ printf '%s' "$status" | jq -e '
   (.snapshot | type == "object")
 ' >/dev/null
 
-qs --path "$config_dir" ipc call dev.wisp hide
-qs --path "$config_dir" ipc call dev.wisp open
-desktop=$(qs --path "$config_dir" ipc call dev.wisp desktop)
-printf '%s' "$desktop" | jq -e '
+qs --path "$config_dir" ipc call dev.wisp.panel hide
+qs --path "$config_dir" ipc call dev.wisp.panel open
+panel=$(qs --path "$config_dir" ipc call dev.wisp.panel desktop)
+printf '%s' "$panel" | jq -e '
   .visible == true and
   (.resolved_anchor | IN("bottom-right", "bottom-left", "top-right", "top-left")) and
   (.screen | type == "string")
 ' >/dev/null
 if [[ -n "$primary_screen" ]]; then
-  printf '%s' "$desktop" | jq -e --arg primary "$primary_screen" \
+  printf '%s' "$panel" | jq -e --arg primary "$primary_screen" \
     '.screen == $primary' >/dev/null
 fi
 
-qs --path "$config_dir" ipc call dev.wisp anchor top-left
-desktop=$(qs --path "$config_dir" ipc call dev.wisp desktop)
-printf '%s' "$desktop" | jq -e '
+qs --path "$config_dir" ipc call dev.wisp.panel anchor top-left
+panel=$(qs --path "$config_dir" ipc call dev.wisp.panel desktop)
+printf '%s' "$panel" | jq -e '
   .visible == true and .anchor == "top-left" and .resolved_anchor == "top-left"
 ' >/dev/null
+
+qs --path "$config_dir" ipc call dev.wisp.app open
+app=$(qs --path "$config_dir" ipc call dev.wisp.app desktop)
+panel=$(qs --path "$config_dir" ipc call dev.wisp.panel desktop)
+printf '%s' "$app" | jq -e '
+  .visible == true and .width >= 420 and .height >= 520 and
+  (.wide_layout | type == "boolean")
+' >/dev/null
+printf '%s' "$panel" | jq -e '.visible == false' >/dev/null
 
 qs --path "$config_dir" ipc call dev.wisp quit
 wait "$ui_pid"
@@ -85,4 +102,4 @@ if grep -Eq "Failed to load configuration|QQmlApplicationEngine failed|Reference
   exit 1
 fi
 
-echo "Standalone Quickshell UI loaded and passed IPC lifecycle checks"
+echo "Standalone Quickshell app and compact panel passed IPC lifecycle checks"

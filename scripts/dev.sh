@@ -48,8 +48,7 @@ for _ in $(seq 1 80); do
   sleep 0.1
 done
 
-WISP_QUICKSHELL_PATH="$repo_dir/quickshell/app" \
-  cargo run -p wispd -- --profile "${WISP_PROFILE:-Jared}" &
+cargo run -p wispd -- --profile "${WISP_PROFILE:-Jared}" &
 child_pids+=("$!")
 
 echo "Wisp is running. Use 'just sim Tyler' or 'cargo run -p wispctl -- status'."

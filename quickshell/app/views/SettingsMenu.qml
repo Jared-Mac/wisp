@@ -74,7 +74,7 @@ Column {
 
       Text {
         width: parent.width
-        text: "Wisp always opens on the primary display. Auto follows the tray edge when the tray is on that display; otherwise it uses the bottom-right corner."
+        text: "Auto follows the tray icon's display and edge when the desktop provides its position. Otherwise Wisp uses the current system display and the bottom-right corner."
         color: root.theme.muted
         wrapMode: Text.WordWrap
         font.family: root.theme.font.family
@@ -131,9 +131,9 @@ Column {
       }
 
       Text {
-        text: root.anchorController && root.anchorController.primaryScreen
-          ? "Primary display: " + root.anchorController.primaryScreen.name
-          : "Primary display unavailable"
+        text: root.anchorController && root.anchorController.screen
+          ? "Panel display: " + root.anchorController.screen.name
+          : "Panel display unavailable"
         color: root.theme.muted
         font.family: root.theme.font.family
         font.pixelSize: root.theme.font.caption

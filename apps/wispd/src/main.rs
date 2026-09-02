@@ -1482,19 +1482,27 @@ async fn handle_tray_action(action: TrayAction, daemon: &Arc<Daemon>) -> bool {
     match action {
         TrayAction::Activate { x, y } => {
             tokio::spawn(control_ui(vec![
+                "panel".into(),
                 "activate".into(),
                 x.to_string(),
                 y.to_string(),
             ]));
         }
         TrayAction::Show => {
-            tokio::spawn(control_ui(vec!["open".into()]));
+            tokio::spawn(control_ui(vec!["panel".into(), "open".into()]));
         }
         TrayAction::Hide => {
-            tokio::spawn(control_ui(vec!["hide".into()]));
+            tokio::spawn(control_ui(vec!["panel".into(), "hide".into()]));
+        }
+        TrayAction::OpenApp => {
+            tokio::spawn(control_ui(vec!["app".into(), "open".into()]));
         }
         TrayAction::SetAnchor(anchor) => {
-            tokio::spawn(control_ui(vec!["anchor".into(), anchor.into()]));
+            tokio::spawn(control_ui(vec![
+                "panel".into(),
+                "anchor".into(),
+                anchor.into(),
+            ]));
         }
         TrayAction::ToggleMuted => {
             daemon.update_manual_mute(None).await;

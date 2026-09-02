@@ -41,6 +41,11 @@ Panel {
     clientName: "omarchy-plugin"
   }
 
+  Process {
+    id: appLauncher
+    command: ["wisp-ui", "app", "open"]
+  }
+
   IpcHandler {
     target: root.ipcTarget
     function open(): void { root.open() }
@@ -91,9 +96,15 @@ Panel {
       bridge: bridge
       theme: pluginTheme
       logoSource: Qt.resolvedUrl("app/assets/waveform.svg")
+      presentation: "panel"
       contentPadding: 0
+      showAppButton: true
       showCloseButton: false
       dismissOnNavigate: true
+      onAppRequested: {
+        root.close()
+        if (!appLauncher.running) appLauncher.running = true
+      }
       onCloseRequested: root.close()
     }
   }

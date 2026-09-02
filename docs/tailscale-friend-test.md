@@ -73,9 +73,11 @@ Use `Jack` or `Charlie` only when that is the profile assigned by the host.
 The assignment is stored outside the Git checkout, so pulls and reinstalls do
 not overwrite it. The original explicit form, `just friend <host>.ts.net
 Tyler`, remains supported and saves the same assignment automatically.
-Keep the terminal open; `Ctrl+C` stops the local daemon and UI. The Wisp window
-opens automatically. Set presence to **Open**, then one person can join another
-by name.
+Keep the terminal open; `Ctrl+C` stops the local daemon and UI. The resizable
+Wisp app opens automatically. Set presence to **Open**, then one person can
+join another by name. The tray icon opens the same compact panel presentation
+used by Wisp's optional Omarchy bar adapter; choose **Open app** to return to the
+full layout.
 
 The standalone UI works without Omarchy. The settings screen supports audio
 device selection, processing presets, push-to-talk, mute, and deafen. Global

@@ -77,6 +77,6 @@ if [[ ! -S "$socket_path" ]]; then
   exit 1
 fi
 
-wisp-ui open
+wisp-ui app open
 echo "Wisp is connected as $profile through $host. Keep this terminal open; Ctrl+C exits."
 wait "$daemon_pid"
