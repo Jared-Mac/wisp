@@ -10,7 +10,6 @@ mkdir -p "$runtime_dir" "$state_dir"
 
 exec 9>"$runtime_dir/launcher.lock"
 if ! flock -n 9; then
-  wisp-ui open >/dev/null 2>&1 || true
   exit 0
 fi
 
