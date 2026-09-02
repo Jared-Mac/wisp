@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Wisp
+GenericName=Voice hangouts
+Comment=Voice-first presence and hangouts for close friends
+Exec=wisp-ui open
+Icon=dev.wisp
+Terminal=false
+Categories=Network;Chat;
+Keywords=voice;friends;hangout;
+StartupWMClass=dev.wisp

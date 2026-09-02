@@ -1,0 +1,14 @@
+port: 7880
+# Public, loopback-only development configuration. The Tailscale mode generates
+# a random keypair at runtime and does not use this known test value.
+bind_addresses:
+  - "127.0.0.1"
+rtc:
+  tcp_port: 7881
+  port_range_start: 50000
+  port_range_end: 50100
+  use_external_ip: false
+keys:
+  devkey: wisp-local-development-secret-32
+logging:
+  level: info

@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="wispGradient" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#32E6F4"/>
+      <stop offset="38%" stop-color="#19BDF5"/>
+      <stop offset="72%" stop-color="#2B72F6"/>
+      <stop offset="100%" stop-color="#6752F4"/>
+    </linearGradient>
+  </defs>
+  <g fill="url(#wispGradient)">
+    <rect x="154" y="466" width="72" height="92" rx="36"/>
+    <rect x="261" y="398" width="78" height="228" rx="39"/>
+    <rect x="369" y="292" width="82" height="440" rx="41"/>
+    <rect x="469" y="218" width="86" height="588" rx="43"/>
+    <rect x="573" y="292" width="82" height="440" rx="41"/>
+    <rect x="685" y="398" width="78" height="228" rx="39"/>
+    <rect x="798" y="466" width="72" height="92" rx="36"/>
+  </g>
+</svg>

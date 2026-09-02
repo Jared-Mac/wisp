@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "id": "dev.wisp",
+  "name": "Wisp",
+  "version": "0.1.0",
+  "author": "Wisp contributors",
+  "license": "AGPL-3.0-only",
+  "description": "Voice-first presence and hangouts for a small circle of friends.",
+  "kinds": ["bar-widget"],
+  "activation": "on-demand",
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "Wisp",
+    "description": "See who is around, join hangouts, and control local media.",
+    "category": "Social",
+    "aliases": ["friends", "voice", "hangout"],
+    "allowMultiple": false,
+    "defaultSection": "center",
+    "defaults": {}
+  }
+}

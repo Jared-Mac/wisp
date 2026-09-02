@@ -1,0 +1,5 @@
+[Desktop Entry]
+Type=Application
+Name=Wisp media surface
+NoDisplay=true
+StartupWMClass=dev.wisp.surface

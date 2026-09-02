@@ -1,0 +1,360 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+cd "$repo_dir"
+
+test_dir=$(mktemp -d)
+livekit_pid=""
+server_pid=""
+daemon_pid=""
+sim_pid=""
+
+stop_process() {
+  local signal=$1
+  local pid=$2
+  [[ -z "$pid" ]] || kill "-$signal" "$pid" 2>/dev/null || true
+}
+
+cleanup() {
+  trap - EXIT INT TERM
+  stop_process INT "$daemon_pid"
+  stop_process INT "$sim_pid"
+  for _ in $(seq 1 50); do
+    if { [[ -z "$daemon_pid" ]] || ! kill -0 "$daemon_pid" 2>/dev/null; } &&
+       { [[ -z "$sim_pid" ]] || ! kill -0 "$sim_pid" 2>/dev/null; }; then
+      break
+    fi
+    sleep 0.05
+  done
+  stop_process TERM "$daemon_pid"
+  stop_process TERM "$sim_pid"
+  stop_process TERM "$server_pid"
+  stop_process TERM "$livekit_pid"
+  for pid in "$daemon_pid" "$sim_pid" "$server_pid" "$livekit_pid"; do
+    [[ -z "$pid" ]] || wait "$pid" 2>/dev/null || true
+  done
+  rm -rf -- "$test_dir"
+}
+trap cleanup EXIT INT TERM
+
+livekit_port=$(shuf -i 22000-28000 -n 1)
+livekit_tcp_port=$((livekit_port + 1))
+server_port=$(shuf -i 30000-38000 -n 1)
+rtc_port_start=$(shuf -i 42000-58000 -n 1)
+rtc_port_end=$((rtc_port_start + 50))
+
+sed \
+  -e "s/port: 7880/port: $livekit_port/" \
+  -e "s/tcp_port: 7881/tcp_port: $livekit_tcp_port/" \
+  -e "s/port_range_start: 50000/port_range_start: $rtc_port_start/" \
+  -e "s/port_range_end: 50100/port_range_end: $rtc_port_end/" \
+  infra/local/livekit.yaml >"$test_dir/livekit.yaml"
+
+./scripts/livekit-install.sh >/dev/null
+cargo build --workspace
+
+"$repo_dir/.tools/livekit/livekit-server" --config "$test_dir/livekit.yaml" \
+  >"$test_dir/livekit.log" 2>&1 &
+livekit_pid=$!
+for _ in $(seq 1 100); do
+  if ss -ltn | rg -q ":$livekit_port\\b"; then break; fi
+  sleep 0.05
+done
+ss -ltn | rg -q ":$livekit_port\\b"
+
+WISP_SERVER_ADDR="127.0.0.1:$server_port" \
+WISP_DATABASE_URL="sqlite://$test_dir/wisp.sqlite3" \
+WISP_LIVEKIT_URL="ws://127.0.0.1:$livekit_port" \
+RUST_LOG=info \
+target/debug/wisp-server >"$test_dir/server.log" 2>&1 &
+server_pid=$!
+for _ in $(seq 1 100); do
+  if curl --silent --fail "http://127.0.0.1:$server_port/healthz" >/dev/null; then break; fi
+  sleep 0.05
+done
+curl --silent --fail "http://127.0.0.1:$server_port/healthz" >/dev/null
+
+WISP_SERVER_URL="http://127.0.0.1:$server_port" RUST_LOG=info \
+  target/debug/wisp-sim --profile Tyler --publish-tone --publish-video >"$test_dir/sim.log" 2>&1 &
+sim_pid=$!
+WISP_SERVER_URL="http://127.0.0.1:$server_port" WISP_PTT_LEASE_MS=400 RUST_LOG=info \
+  target/debug/wispd --profile Jared --socket "$test_dir/wispd.sock" \
+  >"$test_dir/daemon.log" 2>&1 &
+daemon_pid=$!
+
+for _ in $(seq 1 200); do
+  [[ -S "$test_dir/wispd.sock" ]] && break
+  sleep 0.05
+done
+[[ -S "$test_dir/wispd.sock" ]]
+
+target/debug/wispctl --socket "$test_dir/wispd.sock" join Tyler
+status_json=""
+for _ in $(seq 1 100); do
+  status_json=$(target/debug/wispctl --socket "$test_dir/wispd.sock" status)
+  if jq -e '
+    .self.connection == "connected" and
+    .self.media.livekit_connected == true and
+    .self.media.microphone_published == true and
+    .self.media.received_audio_frames > 0 and
+    .self.media.last_audio_from == "Tyler" and
+    .self.media.received_video_frames > 0 and
+    .self.media.rendered_video_frames > 0 and
+    .self.media.surface_open == true and
+    .self.media.last_video_from == "Tyler" and
+    .self.media.video_width == 640 and
+    .self.media.video_height == 360 and
+    (.self.media.active_speakers | type) == "array" and
+    .self.push_to_talk.enabled == false and
+    .self.push_to_talk.active == false and
+    (.self.media.audio.input_devices | length) > 0 and
+    (.self.media.audio.output_devices | length) > 0 and
+    (.self.media.audio.selected_input_id | type) == "string" and
+    (.self.media.audio.selected_output_id | type) == "string" and
+    .self.media.audio.preset == "clear" and
+    .self.media.audio.input_level >= 0 and
+    .self.media.audio.input_level <= 100
+  ' <<<"$status_json" >/dev/null; then
+    break
+  fi
+  sleep 0.1
+done
+jq -e '
+  .self.connection == "connected" and
+  .self.media.livekit_connected == true and
+  .self.media.microphone_published == true and
+  .self.media.received_audio_frames > 0 and
+  .self.media.last_audio_from == "Tyler" and
+  .self.media.received_video_frames > 0 and
+  .self.media.rendered_video_frames > 0 and
+  .self.media.surface_open == true and
+  .self.media.last_video_from == "Tyler" and
+  .self.media.video_width == 640 and
+  .self.media.video_height == 360 and
+  (.self.media.active_speakers | type) == "array" and
+  .self.push_to_talk.enabled == false and
+  .self.push_to_talk.active == false and
+  (.self.media.audio.input_devices | length) > 0 and
+  (.self.media.audio.output_devices | length) > 0 and
+  (.self.media.audio.selected_input_id | type) == "string" and
+  (.self.media.audio.selected_output_id | type) == "string" and
+  .self.media.audio.preset == "clear" and
+  .self.media.audio.input_level >= 0 and
+  .self.media.audio.input_level <= 100
+' <<<"$status_json" >/dev/null
+
+speaker_json=""
+for _ in $(seq 1 100); do
+  speaker_json=$(target/debug/wispctl --socket "$test_dir/wispd.sock" status)
+  if jq -e '.self.media.active_speakers | index("Tyler") != null' \
+    <<<"$speaker_json" >/dev/null; then
+    break
+  fi
+  sleep 0.05
+done
+jq -e '.self.media.active_speakers | index("Tyler") != null' \
+  <<<"$speaker_json" >/dev/null
+
+audio_json=$(target/debug/wispctl --socket "$test_dir/wispd.sock" audio devices)
+jq -e '
+  (.input_devices | length) > 0 and
+  (.output_devices | length) > 0 and
+  ([.input_devices[].id] | all(. != "") and length == (unique | length)) and
+  ([.output_devices[].id] | all(. != "") and length == (unique | length)) and
+  (.selected_input_id | type) == "string" and
+  (.selected_output_id | type) == "string"
+' <<<"$audio_json" >/dev/null
+input_id=$(jq -r '.selected_input_id' <<<"$audio_json")
+output_id=$(jq -r '.selected_output_id' <<<"$audio_json")
+alternate_input_id=$(jq -r '. as $root | [.input_devices[].id | select(. != $root.selected_input_id)][0] // .selected_input_id' <<<"$audio_json")
+alternate_output_id=$(jq -r '. as $root | [.output_devices[].id | select(. != $root.selected_output_id)][0] // .selected_output_id' <<<"$audio_json")
+target/debug/wispctl --socket "$test_dir/wispd.sock" audio input -- "$alternate_input_id" \
+  | jq -e --arg id "$alternate_input_id" '.selected_input_id == $id' >/dev/null
+target/debug/wispctl --socket "$test_dir/wispd.sock" audio input -- "$input_id" \
+  | jq -e --arg id "$input_id" '.selected_input_id == $id' >/dev/null
+target/debug/wispctl --socket "$test_dir/wispd.sock" audio output -- "$alternate_output_id" \
+  | jq -e --arg id "$alternate_output_id" '.selected_output_id == $id' >/dev/null
+target/debug/wispctl --socket "$test_dir/wispd.sock" audio output -- "$output_id" \
+  | jq -e --arg id "$output_id" '.selected_output_id == $id' >/dev/null
+target/debug/wispctl --socket "$test_dir/wispd.sock" audio preset studio \
+  | jq -e '.preset == "studio"' >/dev/null
+target/debug/wispctl --socket "$test_dir/wispd.sock" audio preset clear \
+  | jq -e '.preset == "clear"' >/dev/null
+
+target/debug/wispctl --socket "$test_dir/wispd.sock" ptt enable \
+  | jq -e '
+    .push_to_talk.enabled == true and
+    .push_to_talk.active == false and
+    .effective_muted == true
+  ' >/dev/null
+target/debug/wispctl --socket "$test_dir/wispd.sock" ptt press \
+  | jq -e '
+    .push_to_talk.active == true and
+    .effective_muted == false and
+    .blocked_by_mute == false
+  ' >/dev/null
+target/debug/wispctl --socket "$test_dir/wispd.sock" mute \
+  | jq -e '
+    .muted == true and
+    .push_to_talk.active == false and
+    .effective_muted == true
+  ' >/dev/null
+target/debug/wispctl --socket "$test_dir/wispd.sock" ptt press \
+  | jq -e '
+    .push_to_talk.active == false and
+    .effective_muted == true and
+    .blocked_by_mute == true
+  ' >/dev/null
+target/debug/wispctl --socket "$test_dir/wispd.sock" unmute \
+  | jq -e '
+    .muted == false and
+    .push_to_talk.active == false and
+    .effective_muted == true
+  ' >/dev/null
+target/debug/wispctl --socket "$test_dir/wispd.sock" ptt press \
+  | jq -e '.push_to_talk.active == true' >/dev/null
+sleep 0.25
+target/debug/wispctl --socket "$test_dir/wispd.sock" ptt press \
+  | jq -e '.push_to_talk.active == true' >/dev/null
+sleep 0.25
+target/debug/wispctl --socket "$test_dir/wispd.sock" status \
+  | jq -e '.self.push_to_talk.active == true' >/dev/null
+target/debug/wispctl --socket "$test_dir/wispd.sock" ptt release \
+  | jq -e '.push_to_talk.active == false and .effective_muted == true' >/dev/null
+target/debug/wispctl --socket "$test_dir/wispd.sock" ptt press \
+  | jq -e '.push_to_talk.active == true' >/dev/null
+expired_json=""
+for _ in $(seq 1 30); do
+  expired_json=$(target/debug/wispctl --socket "$test_dir/wispd.sock" status)
+  if jq -e '.self.push_to_talk.active == false' <<<"$expired_json" >/dev/null; then
+    break
+  fi
+  sleep 0.05
+done
+jq -e '
+  .self.push_to_talk.enabled == true and
+  .self.push_to_talk.active == false and
+  .self.media.audio.input_level == 0
+' <<<"$expired_json" >/dev/null
+target/debug/wispctl --socket "$test_dir/wispd.sock" ptt disable \
+  | jq -e '
+    .push_to_talk.enabled == false and
+    .push_to_talk.active == false and
+    .effective_muted == false
+  ' >/dev/null
+if target/debug/wispctl --socket "$test_dir/wispd.sock" ptt press \
+  >"$test_dir/ptt-disabled.out" 2>"$test_dir/ptt-disabled.err"; then
+  echo "PTT press unexpectedly succeeded while disabled" >&2
+  exit 1
+fi
+rg -q 'push-to-talk is disabled' "$test_dir/ptt-disabled.err"
+
+if command -v hyprctl >/dev/null && [[ -n "${WAYLAND_DISPLAY:-}" ]]; then
+  hyprctl clients -j | jq -e \
+    'any(.[]; .class == "dev.wisp.surface")' >/dev/null
+fi
+
+audio_before_close=$(jq -r '.self.media.received_audio_frames' <<<"$status_json")
+target/debug/wispctl --socket "$test_dir/wispd.sock" surface close \
+  | jq -e '.surface == "closing"' >/dev/null
+closed_json=""
+for _ in $(seq 1 100); do
+  closed_json=$(target/debug/wispctl --socket "$test_dir/wispd.sock" status)
+  if jq -e --argjson before "$audio_before_close" '
+    .self.connection == "connected" and
+    .self.media.livekit_connected == true and
+    .self.media.surface_open == false and
+    .self.media.received_audio_frames > $before
+  ' <<<"$closed_json" >/dev/null; then
+    break
+  fi
+  sleep 0.1
+done
+jq -e --argjson before "$audio_before_close" '
+  .self.connection == "connected" and
+  .self.media.livekit_connected == true and
+  .self.media.surface_open == false and
+  .self.media.received_audio_frames > $before
+' <<<"$closed_json" >/dev/null
+
+target/debug/wispctl --socket "$test_dir/wispd.sock" surface open \
+  | jq -e '.surface == "opening"' >/dev/null
+reopened_json=""
+for _ in $(seq 1 100); do
+  reopened_json=$(target/debug/wispctl --socket "$test_dir/wispd.sock" status)
+  if jq -e '
+    .self.connection == "connected" and
+    .self.media.surface_open == true and
+    .self.media.rendered_video_frames > 0
+  ' <<<"$reopened_json" >/dev/null; then
+    break
+  fi
+  sleep 0.1
+done
+jq -e '
+  .self.connection == "connected" and
+  .self.media.surface_open == true and
+  .self.media.rendered_video_frames > 0
+' <<<"$reopened_json" >/dev/null
+
+target/debug/wispctl --socket "$test_dir/wispd.sock" mute \
+  | jq -e '.muted == true' >/dev/null
+target/debug/wispctl --socket "$test_dir/wispd.sock" deafen \
+  | jq -e '.deafened == true' >/dev/null
+target/debug/wispctl --socket "$test_dir/wispd.sock" unmute \
+  | jq -e '.muted == false' >/dev/null
+target/debug/wispctl --socket "$test_dir/wispd.sock" undeafen \
+  | jq -e '.deafened == false' >/dev/null
+
+pre_restart_json=$(target/debug/wispctl --socket "$test_dir/wispd.sock" status)
+frames_before_restart=$(jq -r '.self.media.received_audio_frames' <<<"$pre_restart_json")
+video_frames_before_restart=$(jq -r '.self.media.received_video_frames' <<<"$pre_restart_json")
+kill -KILL "$livekit_pid"
+wait "$livekit_pid" 2>/dev/null || true
+livekit_pid=""
+sleep 0.3
+
+"$repo_dir/.tools/livekit/livekit-server" --config "$test_dir/livekit.yaml" \
+  >>"$test_dir/livekit.log" 2>&1 &
+livekit_pid=$!
+for _ in $(seq 1 100); do
+  if ss -ltn | rg -q ":$livekit_port\\b"; then break; fi
+  sleep 0.05
+done
+ss -ltn | rg -q ":$livekit_port\\b"
+
+reconnected_json=""
+for _ in $(seq 1 200); do
+  reconnected_json=$(target/debug/wispctl --socket "$test_dir/wispd.sock" status)
+  if jq -e --argjson before "$frames_before_restart" --argjson video_before "$video_frames_before_restart" '
+    .self.connection == "connected" and
+    .self.media.livekit_connected == true and
+    .self.media.received_audio_frames > $before and
+    .self.media.received_video_frames > $video_before and
+    .self.media.surface_open == true
+  ' <<<"$reconnected_json" >/dev/null; then
+    break
+  fi
+  sleep 0.1
+done
+jq -e --argjson before "$frames_before_restart" --argjson video_before "$video_frames_before_restart" '
+  .self.connection == "connected" and
+  .self.media.livekit_connected == true and
+  .self.media.received_audio_frames > $before and
+  .self.media.received_video_frames > $video_before and
+  .self.media.surface_open == true
+' <<<"$reconnected_json" >/dev/null
+rg -q 'LiveKit media reconnecting' "$test_dir/daemon.log"
+rg -q 'LiveKit media reconnected' "$test_dir/daemon.log"
+
+target/debug/wispctl --socket "$test_dir/wispd.sock" leave
+final_json=$(target/debug/wispctl --socket "$test_dir/wispd.sock" status)
+jq -e '
+  .self.connection == "available" and
+  .self.hangout_id == null and
+  .self.media.livekit_connected == false
+' <<<"$final_json" >/dev/null
+
+jq '.self.media' <<<"$status_json"
+echo "LiveKit media integration test passed."
