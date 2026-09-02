@@ -17,25 +17,10 @@ ShellRoot {
       || value === "top-right"
       || value === "top-left"
   }
-  function screenAt(globalX, globalY) {
-    for (var index = 0; index < Quickshell.screens.length; index++) {
-      var candidate = Quickshell.screens[index]
-      if (globalX >= candidate.x && globalX < candidate.x + candidate.width
-          && globalY >= candidate.y && globalY < candidate.y + candidate.height)
-        return candidate
-    }
-    return Quickshell.screens.length > 0 ? Quickshell.screens[0] : null
-  }
-  function selectScreen(name) {
-    if (name && name !== "auto") {
-      for (var index = 0; index < Quickshell.screens.length; index++)
-        if (Quickshell.screens[index].name === name) return Quickshell.screens[index]
-    }
-    if (transientScreenName) {
-      for (var transientIndex = 0; transientIndex < Quickshell.screens.length; transientIndex++)
-        if (Quickshell.screens[transientIndex].name === transientScreenName)
-          return Quickshell.screens[transientIndex]
-    }
+  function primaryScreen() {
+    for (var index = 0; index < Quickshell.screens.length; index++)
+      if (Quickshell.screens[index].name === primaryScreenName)
+        return Quickshell.screens[index]
     return Quickshell.screens.length > 0 ? Quickshell.screens[0] : null
   }
   function setAnchor(value) {
@@ -43,40 +28,35 @@ ShellRoot {
     appSettings.anchor = value
     openWindow()
   }
-  function setScreen(value) {
-    appSettings.screen = value || "auto"
-    transientScreenName = ""
-    openWindow()
-  }
   function activateFromTray(globalX, globalY) {
-    var target = screenAt(globalX, globalY)
-    if (target) transientScreenName = target.name
+    var target = primaryScreen()
     var localX = target ? globalX - target.x : globalX
     var localY = target ? globalY - target.y : globalY
     var width = target ? target.width : 1
     var height = target ? target.height : 1
-    trayRight = localX >= width / 2
-    trayBottom = localY >= height / 2
+    var clickIsOnPrimary = localX >= 0 && localX < width && localY >= 0 && localY < height
+    trayRight = clickIsOnPrimary ? localX >= width / 2 : true
+    trayBottom = clickIsOnPrimary ? localY >= height / 2 : true
     autoAnchor = (trayBottom ? "bottom-" : "top-") + (trayRight ? "right" : "left")
-    trayVerticalInset = Math.max(appTheme.space(44),
-      (trayBottom ? height - localY : localY) + appTheme.space(22))
+    trayVerticalInset = clickIsOnPrimary
+      ? Math.max(appTheme.space(44),
+          (trayBottom ? height - localY : localY) + appTheme.space(22))
+      : appTheme.space(52)
     toggleWindow()
   }
 
-  property string transientScreenName: ""
+  readonly property string primaryScreenName: Quickshell.env("WISP_PRIMARY_SCREEN")
   property string autoAnchor: "bottom-right"
   property bool trayRight: true
   property bool trayBottom: true
   property int trayVerticalInset: appTheme.space(52)
   readonly property string resolvedAnchor: appSettings.anchor === "auto"
     ? autoAnchor : appSettings.anchor
-  readonly property var selectedScreen: selectScreen(appSettings.screen)
+  readonly property var selectedScreen: primaryScreen()
   readonly property var anchorController: ({
     "anchor": appSettings.anchor,
-    "screen": appSettings.screen,
-    "screens": Quickshell.screens,
-    "setAnchor": function(value) { app.setAnchor(value) },
-    "setScreen": function(value) { app.setScreen(value) }
+    "primaryScreen": app.selectedScreen,
+    "setAnchor": function(value) { app.setAnchor(value) }
   })
 
   WispTheme { id: appTheme }
@@ -89,7 +69,6 @@ ShellRoot {
     JsonAdapter {
       id: appSettings
       property string anchor: "auto"
-      property string screen: "auto"
     }
   }
 

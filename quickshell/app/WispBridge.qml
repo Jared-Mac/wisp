@@ -98,6 +98,7 @@ Item {
     if (connection === "joining") return "Joining"
     if (connection === "reconnecting") return "Reconnecting"
     if (connection === "failed") return "Connection failed"
+    if (connection === "connected") return "Connected"
 
     var presence = String(selfState.presence || "away")
     if (presence === "open") return "Open"

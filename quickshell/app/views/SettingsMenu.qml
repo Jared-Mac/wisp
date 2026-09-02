@@ -74,7 +74,7 @@ Column {
 
       Text {
         width: parent.width
-        text: "Auto follows the system tray. Choose a corner or monitor to pin the Wisp panel elsewhere."
+        text: "Wisp always opens on the primary display. Auto follows the tray edge when the tray is on that display; otherwise it uses the bottom-right corner."
         color: root.theme.muted
         wrapMode: Text.WordWrap
         font.family: root.theme.font.family
@@ -131,66 +131,12 @@ Column {
       }
 
       Text {
-        text: "Monitor"
+        text: root.anchorController && root.anchorController.primaryScreen
+          ? "Primary display: " + root.anchorController.primaryScreen.name
+          : "Primary display unavailable"
         color: root.theme.muted
         font.family: root.theme.font.family
         font.pixelSize: root.theme.font.caption
-        font.weight: Font.DemiBold
-      }
-
-      Flow {
-        width: parent.width
-        height: childrenRect.height
-        spacing: root.theme.spacing.sm
-
-        Repeater {
-          model: {
-            var values = [{ "value": "auto", "label": "Auto" }]
-            if (!root.anchorController) return values
-            for (var index = 0; index < root.anchorController.screens.length; index++) {
-              var screen = root.anchorController.screens[index]
-              values.push({
-                "value": screen.name,
-                "label": screen.model && screen.model !== screen.name
-                  ? screen.name + " · " + screen.model : screen.name
-              })
-            }
-            return values
-          }
-
-          delegate: Rectangle {
-            required property var modelData
-            readonly property bool selected: root.anchorController
-              && root.anchorController.screen === modelData.value
-            width: screenLabel.implicitWidth + root.theme.spacing.xl * 2
-            height: root.theme.space(30)
-            radius: root.theme.cornerRadius
-            color: selected
-              ? root.theme.alpha(root.theme.accent, 0.24)
-              : screenMouse.containsMouse
-                ? root.theme.alpha(root.theme.foreground, 0.11)
-                : root.theme.alpha(root.theme.foreground, 0.055)
-            border.width: selected ? 1 : 0
-            border.color: root.theme.alpha(root.theme.accent, 0.75)
-
-            Text {
-              id: screenLabel
-              anchors.centerIn: parent
-              text: modelData.label
-              color: selected ? root.theme.foreground : root.theme.muted
-              font.family: root.theme.font.family
-              font.pixelSize: root.theme.font.caption
-            }
-
-            MouseArea {
-              id: screenMouse
-              anchors.fill: parent
-              hoverEnabled: true
-              cursorShape: Qt.PointingHandCursor
-              onClicked: root.anchorController.setScreen(modelData.value)
-            }
-          }
-        }
       }
     }
   }

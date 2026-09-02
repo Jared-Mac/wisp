@@ -3,6 +3,32 @@ set -euo pipefail
 
 action=${1:-open}
 
+detect_primary_screen() {
+  if [[ -n ${WISP_PRIMARY_SCREEN:-} ]]; then
+    printf '%s\n' "$WISP_PRIMARY_SCREEN"
+    return
+  fi
+  if command -v kscreen-doctor >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
+    local screen
+    screen=$(kscreen-doctor -j 2>/dev/null | jq -r '
+      ([.outputs[] | select(.enabled == true and .connected == true and (.priority // 0) > 0)]
+        | min_by(.priority) | .name) // empty
+    ' 2>/dev/null || true)
+    if [[ -n "$screen" ]]; then
+      printf '%s\n' "$screen"
+      return
+    fi
+  fi
+  if command -v xrandr >/dev/null 2>&1; then
+    xrandr --query 2>/dev/null | awk '/ connected primary / { print $1; exit }'
+  fi
+}
+
+primary_screen=$(detect_primary_screen)
+if [[ -n "$primary_screen" ]]; then
+  export WISP_PRIMARY_SCREEN="$primary_screen"
+fi
+
 if ! command -v qs >/dev/null 2>&1; then
   echo "Quickshell is required to run the Wisp UI" >&2
   exit 1

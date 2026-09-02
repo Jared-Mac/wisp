@@ -41,9 +41,12 @@ actions. Muted and deafened states update the tray icon, tooltip, checked menu
 items, and compact icons in the panel. Microphone mute is orange; deafen is red
 and always forces microphone mute. Clicking the headset again leaves the
 microphone muted; clicking the microphone while deafened clears both states.
-The panel remembers Auto, corner, and monitor choices from
-**Settings → Desktop position**. Auto uses the tray click coordinates so the
-panel opens on the tray's monitor and clears the panel edge.
+The lower in-call controls contain only video, sharing, and leave actions;
+small mute/deafen icons appear beside the local member name in a hangout.
+The panel always opens on the operating system's primary display and remembers
+its corner choice under **Settings → Desktop position**. Auto uses the tray edge
+when the tray is on the primary display and otherwise falls back to the
+bottom-right corner.
 
 **Exit Wisp** closes the Quickshell UI and the tray-owning daemon. When Wisp
 was started with `just dev`, that daemon exit also makes the development
@@ -84,7 +87,8 @@ just friend
 `~/.config/wisp/friend.env` with user-only permissions. The setting is local to
 that computer and is never committed to the repository. The panel header shows
 the active profile name and live Open, Knock first, Closed, or Away presence so
-identity and availability are immediately visible. Explicit arguments such as
+identity and availability are immediately visible. During an active voice
+connection the header shows Connected instead. Explicit arguments such as
 `just friend <host>.ts.net Tyler` override
 and update the saved values. `wispd` itself also requires a profile argument or
 `WISP_PROFILE`, so an unconfigured client can no longer silently become Jared.

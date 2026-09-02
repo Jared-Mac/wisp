@@ -29,14 +29,8 @@ Rectangle {
     return false
   }
 
-  function memberNames() {
-    var names = []
-    var members = hangout.members || []
-    for (var i = 0; i < members.length; i++) {
-      var name = members[i].display_name
-      names.push((memberSpeaking(name) ? "● " : "") + name)
-    }
-    return names.join(" + ")
+  function isSelf(member) {
+    return member && member.id === bridge.selfState.id
   }
 
   Column {
@@ -45,12 +39,49 @@ Rectangle {
     anchors.verticalCenter: parent.verticalCenter
     spacing: root.theme.spacing.xs
 
-    Text {
-      text: root.memberNames()
-      color: root.hasActiveMember() ? root.theme.accent : root.theme.foreground
-      font.family: root.theme.font.family
-      font.pixelSize: root.theme.font.body
-      font.weight: Font.DemiBold
+    Row {
+      spacing: root.theme.spacing.xs
+
+      Repeater {
+        model: root.hangout.members || []
+
+        delegate: Row {
+          required property var modelData
+          required property int index
+          spacing: root.theme.spacing.xs
+
+          Text {
+            anchors.verticalCenter: parent.verticalCenter
+            text: (index > 0 ? " + " : "")
+              + (root.memberSpeaking(modelData.display_name) ? "● " : "")
+              + String(modelData.display_name || "")
+            color: root.memberSpeaking(modelData.display_name)
+              ? root.theme.accent : root.theme.foreground
+            font.family: root.theme.font.family
+            font.pixelSize: root.theme.font.body
+            font.weight: Font.DemiBold
+          }
+
+          Image {
+            visible: root.isSelf(modelData)
+              && (!!root.bridge.selfState.muted || !!root.bridge.selfState.deafened)
+            anchors.verticalCenter: parent.verticalCenter
+            width: visible ? root.theme.space(14) : 0
+            height: width
+            source: Qt.resolvedUrl("../assets/microphone-muted.svg")
+            fillMode: Image.PreserveAspectFit
+          }
+
+          Image {
+            visible: root.isSelf(modelData) && !!root.bridge.selfState.deafened
+            anchors.verticalCenter: parent.verticalCenter
+            width: visible ? root.theme.space(14) : 0
+            height: width
+            source: Qt.resolvedUrl("../assets/deafened.svg")
+            fillMode: Image.PreserveAspectFit
+          }
+        }
+      }
     }
     Text {
       text: root.hangout.label || "Hanging out"

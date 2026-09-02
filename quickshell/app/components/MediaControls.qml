@@ -12,46 +12,46 @@ Column {
     width: parent.width
     spacing: root.theme.spacing.sm
 
+    AudioStateIndicator {
+      id: audioControls
+      bridge: root.bridge
+      theme: root.theme
+      muted: !!root.bridge.selfState.muted || !!root.bridge.selfState.deafened
+      deafened: !!root.bridge.selfState.deafened
+    }
+
     Repeater {
+      id: controlRepeater
       model: [
-        { "label": root.bridge.selfState.muted || root.bridge.selfState.deafened ? "Unmute" : "Mute", "action": "mute", "active": !!root.bridge.selfState.muted || !!root.bridge.selfState.deafened, "enabled": true },
-        { "label": root.bridge.mediaState.surface_open ? "Close video" : "Open video", "action": "video", "active": false, "enabled": true },
-        { "label": root.bridge.selfState.sharing ? "Stop share" : "Share", "action": "share", "active": false, "enabled": true },
-        { "label": root.bridge.selfState.deafened ? "Undeafen" : "Deafen", "action": "deafen", "active": !!root.bridge.selfState.deafened, "enabled": true },
-        { "label": "Leave", "action": "leave", "active": false, "enabled": true }
+        { "label": root.bridge.mediaState.surface_open ? "Close video" : "Open video", "action": "video" },
+        { "label": root.bridge.selfState.sharing ? "Stop share" : "Share", "action": "share" },
+        { "label": "Leave", "action": "leave" }
       ]
       delegate: Rectangle {
         required property var modelData
-        width: (controls.width - controls.spacing * 4) / 5
+        width: (controls.width - audioControls.width
+          - controls.spacing * controlRepeater.count)
+          / Math.max(1, controlRepeater.count)
         height: root.theme.space(34)
         radius: root.theme.cornerRadius
-        color: modelData.active
-          ? root.theme.alpha(modelData.action === "mute" ? root.theme.warning : root.theme.danger, controlMouse.containsMouse ? 0.36 : 0.24)
-          : controlMouse.containsMouse
-            ? (modelData.action === "leave" ? root.theme.alpha(root.theme.danger, 0.28) : root.theme.alpha(root.theme.foreground, 0.12))
-            : root.theme.alpha(root.theme.foreground, 0.065)
+        color: controlMouse.containsMouse
+          ? (modelData.action === "leave" ? root.theme.alpha(root.theme.danger, 0.28) : root.theme.alpha(root.theme.foreground, 0.12))
+          : root.theme.alpha(root.theme.foreground, 0.065)
 
         Text {
           anchors.centerIn: parent
           text: modelData.label
-          color: modelData.action === "leave" || (modelData.action === "deafen" && modelData.active)
-            ? root.theme.danger
-            : modelData.action === "mute" && modelData.active
-              ? root.theme.warning
-              : root.theme.foreground
+          color: modelData.action === "leave" ? root.theme.danger : root.theme.foreground
           font.family: root.theme.font.family
           font.pixelSize: root.theme.font.caption
         }
         MouseArea {
           id: controlMouse
           anchors.fill: parent
-          enabled: modelData.enabled
           hoverEnabled: true
-          cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+          cursorShape: Qt.PointingHandCursor
           onClicked: {
-            if (modelData.action === "mute") root.bridge.toggleMuted()
-            else if (modelData.action === "video") root.bridge.toggleSurface()
-            else if (modelData.action === "deafen") root.bridge.toggleDeafened()
+            if (modelData.action === "video") root.bridge.toggleSurface()
             else if (modelData.action === "share") root.bridge.toggleShare()
             else { root.bridge.leave(); root.leaveRequested() }
           }

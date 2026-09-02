@@ -207,14 +207,6 @@ FocusScope {
         }
       }
 
-      AudioStateIndicator {
-        width: parent.width
-        bridge: root.bridge
-        theme: root.theme
-        muted: !!root.bridge.selfState.muted || !!root.bridge.selfState.deafened
-        deafened: !!root.bridge.selfState.deafened
-      }
-
       SettingsMenu {
         visible: root.settingsOpen
         width: parent.width

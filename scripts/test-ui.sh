@@ -15,6 +15,16 @@ mkdir -p "$config_dir"
 cp -a "$repo_dir/quickshell/app/". "$config_dir/"
 
 ui_pid=""
+primary_screen=""
+if command -v kscreen-doctor >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
+  primary_screen=$(kscreen-doctor -j 2>/dev/null | jq -r '
+    ([.outputs[] | select(.enabled == true and .connected == true and (.priority // 0) > 0)]
+      | min_by(.priority) | .name) // empty
+  ' 2>/dev/null || true)
+fi
+if [[ -z "$primary_screen" ]] && command -v xrandr >/dev/null 2>&1; then
+  primary_screen=$(xrandr --query 2>/dev/null | awk '/ connected primary / { print $1; exit }')
+fi
 cleanup() {
   trap - EXIT INT TERM
   qs --path "$config_dir" kill >/dev/null 2>&1 || true
@@ -25,7 +35,8 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-qs --path "$config_dir" --no-duplicate >"$log_file" 2>&1 &
+WISP_PRIMARY_SCREEN="$primary_screen" \
+  qs --path "$config_dir" --no-duplicate >"$log_file" 2>&1 &
 ui_pid=$!
 
 for _ in $(seq 1 80); do
@@ -54,6 +65,10 @@ printf '%s' "$desktop" | jq -e '
   (.resolved_anchor | IN("bottom-right", "bottom-left", "top-right", "top-left")) and
   (.screen | type == "string")
 ' >/dev/null
+if [[ -n "$primary_screen" ]]; then
+  printf '%s' "$desktop" | jq -e --arg primary "$primary_screen" \
+    '.screen == $primary' >/dev/null
+fi
 
 qs --path "$config_dir" ipc call dev.wisp anchor top-left
 desktop=$(qs --path "$config_dir" ipc call dev.wisp desktop)
