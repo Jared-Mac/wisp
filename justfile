@@ -29,8 +29,11 @@ dev-daemon profile="Jared":
 sim profile *args:
     cargo run -p wisp-sim -- --profile {{profile}} {{args}}
 
-friend host profile:
+friend host="" profile="":
     ./scripts/friend-tailscale.sh "{{host}}" "{{profile}}"
+
+friend-config host profile:
+    ./scripts/configure-friend.sh "{{host}}" "{{profile}}"
 
 friend-bootstrap:
     ./scripts/friend-bootstrap-cachyos.sh

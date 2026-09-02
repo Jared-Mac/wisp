@@ -40,7 +40,7 @@ use crate::tray::TrayAction;
 #[derive(Debug, Parser)]
 #[command(about = "Wisp's persistent desktop daemon")]
 struct Args {
-    #[arg(long, default_value = "Jared")]
+    #[arg(long, env = "WISP_PROFILE")]
     profile: String,
     #[arg(long, env = "WISP_SERVER_URL", default_value = "http://127.0.0.1:8787")]
     server_url: String,

@@ -61,13 +61,18 @@ The bootstrap uses CachyOS/Arch packages, builds only the client binaries,
 installs the standalone Quickshell UI, and starts `tailscaled`. Follow the
 Tailscale authentication URL if prompted.
 
-The host privately provides a host name and one unused profile. Start Wisp with:
+The host privately provides a host name and one unused profile. Save that
+machine-local assignment once, then start Wisp with:
 
 ```bash
-just friend <host>.ts.net Tyler
+just friend-config <host>.ts.net Tyler
+just friend
 ```
 
 Use `Jack` or `Charlie` only when that is the profile assigned by the host.
+The assignment is stored outside the Git checkout, so pulls and reinstalls do
+not overwrite it. The original explicit form, `just friend <host>.ts.net
+Tyler`, remains supported and saves the same assignment automatically.
 Keep the terminal open; `Ctrl+C` stops the local daemon and UI. The Wisp window
 opens automatically. Set presence to **Open**, then one person can join another
 by name.

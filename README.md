@@ -74,8 +74,17 @@ Friends on CachyOS clone this repository, run `just friend-bootstrap`, and then
 start their assigned development profile with:
 
 ```bash
-just friend <host>.ts.net Tyler
+just friend-config <host>.ts.net Tyler
+just friend
 ```
+
+`friend-config` stores the host and assigned identity in
+`~/.config/wisp/friend.env` with user-only permissions. The setting is local to
+that computer and is never committed to the repository. The panel header shows
+the active profile name so an incorrectly launched identity is immediately
+visible. Explicit arguments such as `just friend <host>.ts.net Tyler` override
+and update the saved values. `wispd` itself also requires a profile argument or
+`WISP_PROFILE`, so an unconfigured client can no longer silently become Jared.
 
 The Tailscale address and unique Tyler/Jack/Charlie assignments are private test
 information and must not be committed. See

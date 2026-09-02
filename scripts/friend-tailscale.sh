@@ -2,11 +2,22 @@
 set -euo pipefail
 
 repo_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
-host=${1:-}
-profile=${2:-}
+config_file=${XDG_CONFIG_HOME:-${HOME:?HOME is required}/.config}/wisp/friend.env
+
+saved_setting() {
+  local name=$1
+  [[ -f "$config_file" ]] || return 0
+  sed -n "s/^${name}=//p" "$config_file" | tail -n 1
+}
+
+explicit_host=${1:-}
+explicit_profile=${2:-}
+host=${explicit_host:-${WISP_FRIEND_HOST:-$(saved_setting WISP_FRIEND_HOST)}}
+profile=${explicit_profile:-${WISP_PROFILE:-$(saved_setting WISP_PROFILE)}}
 
 if [[ -z "$host" || -z "$profile" ]]; then
-  echo "usage: just friend <tailscale-host-or-ip> <Tyler|Jack|Charlie>" >&2
+  echo "No saved Wisp friend identity." >&2
+  echo "Configure one with: just friend-config <tailscale-host-or-ip> <Tyler|Jack|Charlie>" >&2
   exit 2
 fi
 case "$profile" in
@@ -17,6 +28,10 @@ case "$profile" in
     ;;
 esac
 
+if [[ -n "$explicit_host" && -n "$explicit_profile" ]]; then
+  "$repo_dir/scripts/configure-friend.sh" "$host" "$profile" >/dev/null
+fi
+
 for command_name in tailscale curl wispd wisp-ui; do
   if ! command -v "$command_name" >/dev/null 2>&1; then
     echo "$command_name is missing; run ./scripts/friend-bootstrap-cachyos.sh" >&2
@@ -25,7 +40,9 @@ for command_name in tailscale curl wispd wisp-ui; do
 done
 
 if ! tailscale ping --c 3 --until-direct=false "$host" >/dev/null; then
-  echo "Cannot reach $host through Tailscale" >&2
+  backend_state=$(tailscale status --json 2>/dev/null | jq -r '.BackendState // "unknown"')
+  echo "Cannot reach Wisp host $host through Tailscale (local state: $backend_state)." >&2
+  echo "If local state is Running, ask the host owner to start or re-share the Wisp machine." >&2
   exit 1
 fi
 
