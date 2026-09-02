@@ -355,7 +355,11 @@ impl Daemon {
         let (muted, deafened) = {
             let state = self.state.read().await;
             (
-                effective_muted(state.self_state.muted, &state.self_state.push_to_talk),
+                effective_muted(
+                    state.self_state.muted,
+                    state.self_state.deafened,
+                    &state.self_state.push_to_talk,
+                ),
                 state.self_state.deafened,
             )
         };
@@ -489,25 +493,62 @@ impl Daemon {
 
     async fn update_manual_mute(&self, requested: Option<bool>) -> Value {
         let _operation = self.ptt_operation.lock().await;
-        let (muted, push_to_talk, effective) = {
+        let (muted, undeafened, push_to_talk, effective) = {
             let mut state = self.state.write().await;
-            let muted = requested.unwrap_or(!state.self_state.muted);
+            let was_deafened = state.self_state.deafened;
+            let (muted, deafened) =
+                mute_transition(state.self_state.muted, state.self_state.deafened, requested);
             state.self_state.muted = muted;
+            state.self_state.deafened = deafened;
             if muted {
                 state.self_state.push_to_talk.active = false;
                 self.ptt_lease_tx.send_replace(None);
             }
             let push_to_talk = state.self_state.push_to_talk.clone();
-            let effective = effective_muted(muted, &push_to_talk);
+            let effective = effective_muted(muted, deafened, &push_to_talk);
             if effective {
                 clear_local_speaker(&mut state, &self.profile);
             }
-            (muted, push_to_talk, effective)
+            (muted, was_deafened && !deafened, push_to_talk, effective)
         };
+        if undeafened {
+            self.media.set_deafened(false).await;
+        }
         self.media.set_muted(effective).await;
         self.publish_current("self_state_changed").await;
         json!({
             "muted": muted,
+            "effective_muted": effective,
+            "undeafened": undeafened,
+            "push_to_talk": push_to_talk,
+        })
+    }
+
+    async fn update_deafened(&self, requested: Option<bool>) -> Value {
+        let _operation = self.ptt_operation.lock().await;
+        let (muted, deafened, push_to_talk, effective) = {
+            let mut state = self.state.write().await;
+            let deafened = requested.unwrap_or(!state.self_state.deafened);
+            let (muted, deafened) = deafen_transition(state.self_state.muted, deafened);
+            state.self_state.muted = muted;
+            state.self_state.deafened = deafened;
+            if deafened {
+                state.self_state.push_to_talk.active = false;
+                self.ptt_lease_tx.send_replace(None);
+            }
+            let push_to_talk = state.self_state.push_to_talk.clone();
+            let effective = effective_muted(muted, deafened, &push_to_talk);
+            if effective {
+                clear_local_speaker(&mut state, &self.profile);
+            }
+            (muted, deafened, push_to_talk, effective)
+        };
+        self.media.set_muted(effective).await;
+        self.media.set_deafened(deafened).await;
+        self.publish_current("self_state_changed").await;
+        json!({
+            "muted": muted,
+            "deafened": deafened,
             "effective_muted": effective,
             "push_to_talk": push_to_talk,
         })
@@ -524,7 +565,7 @@ impl Daemon {
             self.ptt_lease_tx.send_replace(None);
             let muted = state.self_state.muted;
             let push_to_talk = state.self_state.push_to_talk.clone();
-            let effective = effective_muted(muted, &push_to_talk);
+            let effective = effective_muted(muted, state.self_state.deafened, &push_to_talk);
             if effective {
                 clear_local_speaker(&mut state, &self.profile);
             }
@@ -583,7 +624,7 @@ impl Daemon {
                     .send_replace(Some(Instant::now() + self.ptt_lease_duration));
             }
             let push_to_talk = state.self_state.push_to_talk.clone();
-            let effective = effective_muted(muted, &push_to_talk);
+            let effective = effective_muted(muted, state.self_state.deafened, &push_to_talk);
             (muted, push_to_talk, effective, changed, blocked)
         };
         if changed {
@@ -602,7 +643,7 @@ impl Daemon {
             self.ptt_lease_tx.send_replace(None);
             let muted = state.self_state.muted;
             let push_to_talk = state.self_state.push_to_talk.clone();
-            let effective = effective_muted(muted, &push_to_talk);
+            let effective = effective_muted(muted, state.self_state.deafened, &push_to_talk);
             if effective {
                 clear_local_speaker(&mut state, &self.profile);
             }
@@ -625,7 +666,11 @@ impl Daemon {
             let mut state = self.state.write().await;
             let changed = state.self_state.push_to_talk.active;
             state.self_state.push_to_talk.active = false;
-            let effective = effective_muted(state.self_state.muted, &state.self_state.push_to_talk);
+            let effective = effective_muted(
+                state.self_state.muted,
+                state.self_state.deafened,
+                &state.self_state.push_to_talk,
+            );
             if effective {
                 clear_local_speaker(&mut state, &self.profile);
             }
@@ -698,26 +743,11 @@ impl Daemon {
             "push_to_talk_release" => Ok(Some(
                 self.release_push_to_talk("push_to_talk_released").await,
             )),
-            "set_deafened" => {
-                let deafened = boolean_arg(&command.args, "deafened")?;
-                self.media.set_deafened(deafened).await;
-                self.set_local_media(
-                    |state| state.self_state.deafened = deafened,
-                    "self_state_changed",
-                )
-                .await;
-                Ok(Some(json!({"deafened": deafened})))
-            }
-            "toggle_deafened" => {
-                let deafened = {
-                    let mut state = self.state.write().await;
-                    state.self_state.deafened = !state.self_state.deafened;
-                    state.self_state.deafened
-                };
-                self.media.set_deafened(deafened).await;
-                self.publish_current("self_state_changed").await;
-                Ok(Some(json!({"deafened": deafened})))
-            }
+            "set_deafened" => Ok(Some(
+                self.update_deafened(Some(boolean_arg(&command.args, "deafened")?))
+                    .await,
+            )),
+            "toggle_deafened" => Ok(Some(self.update_deafened(None).await)),
             "refresh_audio_devices"
             | "set_input_device"
             | "set_output_device"
@@ -896,8 +926,21 @@ fn opaque_string_arg(args: &Value, name: &str) -> anyhow::Result<String> {
         .with_context(|| format!("{name} must be a string"))
 }
 
-fn effective_muted(muted: bool, push_to_talk: &PushToTalkState) -> bool {
-    muted || (push_to_talk.enabled && !push_to_talk.active)
+fn mute_transition(current: bool, deafened: bool, requested: Option<bool>) -> (bool, bool) {
+    let muted = requested.unwrap_or(!current);
+    if deafened && !muted {
+        (false, false)
+    } else {
+        (muted, deafened)
+    }
+}
+
+fn deafen_transition(current_muted: bool, deafened: bool) -> (bool, bool) {
+    (current_muted || deafened, deafened)
+}
+
+fn effective_muted(muted: bool, deafened: bool, push_to_talk: &PushToTalkState) -> bool {
+    muted || deafened || (push_to_talk.enabled && !push_to_talk.active)
 }
 
 fn clear_local_speaker(snapshot: &mut Snapshot, profile: &str) {
@@ -1198,7 +1241,11 @@ async fn synchronize_track_event(daemon: &Daemon, event: MediaEvent) {
         MediaEvent::ActiveSpeakers { mut speakers, .. } => {
             let effective = {
                 let state = daemon.state.read().await;
-                effective_muted(state.self_state.muted, &state.self_state.push_to_talk)
+                effective_muted(
+                    state.self_state.muted,
+                    state.self_state.deafened,
+                    &state.self_state.push_to_talk,
+                )
             };
             if effective {
                 speakers.retain(|name| name != &daemon.profile);
@@ -1453,13 +1500,7 @@ async fn handle_tray_action(action: TrayAction, daemon: &Arc<Daemon>) -> bool {
             daemon.update_manual_mute(None).await;
         }
         TrayAction::ToggleDeafened => {
-            let deafened = {
-                let mut state = daemon.state.write().await;
-                state.self_state.deafened = !state.self_state.deafened;
-                state.self_state.deafened
-            };
-            daemon.media.set_deafened(deafened).await;
-            daemon.publish_current("self_state_changed").await;
+            daemon.update_deafened(None).await;
         }
         TrayAction::Exit => {
             info!("exit requested from system tray");
@@ -1498,6 +1539,9 @@ async fn main() -> anyhow::Result<()> {
     let (api, mut snapshot) = ServerApi::connect(args.server_url, &args.profile)
         .await
         .with_context(|| format!("connect profile {} to wisp-server", args.profile))?;
+    if snapshot.self_state.deafened {
+        snapshot.self_state.muted = true;
+    }
     snapshot.self_state.connection = if snapshot.connected() && !args.disable_media {
         ConnectionState::Joining
     } else if snapshot.connected() {
@@ -1585,7 +1629,7 @@ async fn main() -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{describe_media_failure, effective_muted};
+    use super::{deafen_transition, describe_media_failure, effective_muted, mute_transition};
     use wisp_protocol::PushToTalkState;
 
     #[test]
@@ -1615,9 +1659,24 @@ mod tests {
             ..PushToTalkState::default()
         };
 
-        assert!(!effective_muted(false, &disabled));
-        assert!(effective_muted(false, &waiting));
-        assert!(!effective_muted(false, &talking));
-        assert!(effective_muted(true, &talking));
+        assert!(!effective_muted(false, false, &disabled));
+        assert!(effective_muted(false, false, &waiting));
+        assert!(!effective_muted(false, false, &talking));
+        assert!(effective_muted(true, false, &talking));
+        assert!(effective_muted(false, true, &talking));
+    }
+
+    #[test]
+    fn unmuting_while_deafened_clears_both_states() {
+        assert_eq!(mute_transition(true, true, Some(false)), (false, false));
+        assert_eq!(mute_transition(true, true, None), (false, false));
+        assert_eq!(mute_transition(true, false, Some(false)), (false, false));
+        assert_eq!(mute_transition(false, true, Some(true)), (true, true));
+    }
+
+    #[test]
+    fn headset_toggle_keeps_microphone_muted_after_undeafen() {
+        assert_eq!(deafen_transition(false, true), (true, true));
+        assert_eq!(deafen_transition(true, false), (true, false));
     }
 }

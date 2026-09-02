@@ -14,11 +14,11 @@ Column {
 
     Repeater {
       model: [
-        { "label": root.bridge.selfState.muted ? "Unmute" : "Mute", "action": "mute", "active": !!root.bridge.selfState.muted },
-        { "label": root.bridge.mediaState.surface_open ? "Close video" : "Open video", "action": "video", "active": false },
-        { "label": root.bridge.selfState.sharing ? "Stop share" : "Share", "action": "share", "active": false },
-        { "label": root.bridge.selfState.deafened ? "Undeafen" : "Deafen", "action": "deafen", "active": !!root.bridge.selfState.deafened },
-        { "label": "Leave", "action": "leave", "active": false }
+        { "label": root.bridge.selfState.muted || root.bridge.selfState.deafened ? "Unmute" : "Mute", "action": "mute", "active": !!root.bridge.selfState.muted || !!root.bridge.selfState.deafened, "enabled": true },
+        { "label": root.bridge.mediaState.surface_open ? "Close video" : "Open video", "action": "video", "active": false, "enabled": true },
+        { "label": root.bridge.selfState.sharing ? "Stop share" : "Share", "action": "share", "active": false, "enabled": true },
+        { "label": root.bridge.selfState.deafened ? "Undeafen" : "Deafen", "action": "deafen", "active": !!root.bridge.selfState.deafened, "enabled": true },
+        { "label": "Leave", "action": "leave", "active": false, "enabled": true }
       ]
       delegate: Rectangle {
         required property var modelData
@@ -26,7 +26,7 @@ Column {
         height: root.theme.space(34)
         radius: root.theme.cornerRadius
         color: modelData.active
-          ? root.theme.alpha(modelData.action === "mute" ? root.theme.danger : root.theme.warning, controlMouse.containsMouse ? 0.36 : 0.24)
+          ? root.theme.alpha(modelData.action === "mute" ? root.theme.warning : root.theme.danger, controlMouse.containsMouse ? 0.36 : 0.24)
           : controlMouse.containsMouse
             ? (modelData.action === "leave" ? root.theme.alpha(root.theme.danger, 0.28) : root.theme.alpha(root.theme.foreground, 0.12))
             : root.theme.alpha(root.theme.foreground, 0.065)
@@ -34,9 +34,9 @@ Column {
         Text {
           anchors.centerIn: parent
           text: modelData.label
-          color: modelData.action === "leave" || (modelData.action === "mute" && modelData.active)
+          color: modelData.action === "leave" || (modelData.action === "deafen" && modelData.active)
             ? root.theme.danger
-            : modelData.action === "deafen" && modelData.active
+            : modelData.action === "mute" && modelData.active
               ? root.theme.warning
               : root.theme.foreground
           font.family: root.theme.font.family
@@ -45,8 +45,9 @@ Column {
         MouseArea {
           id: controlMouse
           anchors.fill: parent
+          enabled: modelData.enabled
           hoverEnabled: true
-          cursorShape: Qt.PointingHandCursor
+          cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
           onClicked: {
             if (modelData.action === "mute") root.bridge.toggleMuted()
             else if (modelData.action === "video") root.bridge.toggleSurface()
@@ -67,7 +68,7 @@ Column {
     color: root.bridge.pushToTalkState.active
       ? root.theme.alpha(root.theme.accent, 0.52)
       : root.bridge.selfState.muted
-        ? root.theme.alpha(root.theme.danger, 0.16)
+        ? root.theme.alpha(root.theme.warning, 0.16)
         : root.theme.alpha(root.theme.foreground, talkMouse.containsMouse ? 0.14 : 0.075)
 
     Text {
@@ -75,7 +76,7 @@ Column {
       text: root.bridge.selfState.muted
         ? "Unmute before talking"
         : root.bridge.pushToTalkState.active ? "Talking — release to stop" : "Hold to talk"
-      color: root.bridge.selfState.muted ? root.theme.danger : root.theme.foreground
+      color: root.bridge.selfState.muted ? root.theme.warning : root.theme.foreground
       font.family: root.theme.font.family
       font.pixelSize: root.theme.font.body
       font.weight: Font.DemiBold

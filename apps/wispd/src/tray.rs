@@ -37,17 +37,15 @@ impl WispTray {
 enum AudioState {
     Ready,
     Muted,
-    Deafened,
     MutedAndDeafened,
 }
 
 impl AudioState {
     fn from_flags(muted: bool, deafened: bool) -> Self {
         match (muted, deafened) {
-            (false, false) => Self::Ready,
+            (_, true) => Self::MutedAndDeafened,
             (true, false) => Self::Muted,
-            (false, true) => Self::Deafened,
-            (true, true) => Self::MutedAndDeafened,
+            (false, false) => Self::Ready,
         }
     }
 
@@ -55,7 +53,6 @@ impl AudioState {
         match self {
             Self::Ready => "Audio ready",
             Self::Muted => "Microphone muted",
-            Self::Deafened => "Deafened",
             Self::MutedAndDeafened => "Microphone muted and deafened",
         }
     }
@@ -120,7 +117,11 @@ impl ksni::Tray for WispTray {
         };
 
         let muted = CheckmarkItem {
-            label: "Microphone muted".into(),
+            label: if self.deafened {
+                "Unmute microphone and undeafen".into()
+            } else {
+                "Microphone muted".into()
+            },
             checked: self.muted,
             icon_name: "microphone-sensitivity-muted".into(),
             activate: Box::new(|tray: &mut Self| tray.send(TrayAction::ToggleMuted)),
@@ -217,7 +218,7 @@ fn draw_state_badge(data: &mut [u8], dimension: usize, size: i32, state: AudioSt
     }
     let center = (size - 7, size - 7);
     let radius = 7;
-    let color = if state == AudioState::Deafened {
+    let color = if state == AudioState::Muted {
         [255, 245, 185, 76]
     } else {
         [255, 255, 92, 108]
@@ -243,18 +244,6 @@ fn draw_state_badge(data: &mut [u8], dimension: usize, size: i32, state: AudioSt
                     center.1 - offset + 1,
                     ink,
                 );
-            }
-        }
-        AudioState::Deafened => {
-            for offset in -4..=4 {
-                set_pixel(data, dimension, center.0 - 3, center.1 + offset, ink);
-            }
-            for offset in -3..=3 {
-                set_pixel(data, dimension, center.0 + offset, center.1 - 4, ink);
-                set_pixel(data, dimension, center.0 + offset, center.1 + 4, ink);
-            }
-            for offset in -3..=3 {
-                set_pixel(data, dimension, center.0 + 3, center.1 + offset, ink);
             }
         }
         AudioState::MutedAndDeafened => {
@@ -285,7 +274,6 @@ mod tests {
         let states = [
             AudioState::Ready,
             AudioState::Muted,
-            AudioState::Deafened,
             AudioState::MutedAndDeafened,
         ];
         let icons = states.map(|state| waveform_icon(32, state).data);
@@ -294,5 +282,17 @@ mod tests {
                 assert_ne!(icons[left], icons[right]);
             }
         }
+    }
+
+    #[test]
+    fn deafened_state_always_uses_the_combined_indicator() {
+        assert_eq!(
+            AudioState::from_flags(false, true),
+            AudioState::MutedAndDeafened
+        );
+        assert_eq!(
+            AudioState::from_flags(true, true),
+            AudioState::MutedAndDeafened
+        );
     }
 }

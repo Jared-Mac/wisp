@@ -38,8 +38,10 @@ so reopening is immediate and voice state remains owned by the daemon.
 StatusNotifierItem. Left-click the icon to toggle the Wisp panel beside the
 tray. Right-click for Show/Hide, mute, deafen, panel-anchor, and **Exit Wisp**
 actions. Muted and deafened states update the tray icon, tooltip, checked menu
-items, and labeled badges in the panel; the combined state is distinct from
-either state alone. The panel remembers Auto, corner, and monitor choices from
+items, and compact icons in the panel. Microphone mute is orange; deafen is red
+and always forces microphone mute. Clicking the headset again leaves the
+microphone muted; clicking the microphone while deafened clears both states.
+The panel remembers Auto, corner, and monitor choices from
 **Settings → Desktop position**. Auto uses the tray click coordinates so the
 panel opens on the tray's monitor and clears the panel edge.
 

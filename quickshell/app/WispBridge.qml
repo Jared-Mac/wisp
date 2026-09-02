@@ -69,7 +69,7 @@ Item {
     "shortcut_backend": null,
     "shortcut_replaced": []
   })
-  readonly property bool effectiveMuted: !!selfState.muted
+  readonly property bool effectiveMuted: !!selfState.muted || !!selfState.deafened
     || (!!pushToTalkState.enabled && !pushToTalkState.active)
   readonly property var activeSpeakers: mediaState.active_speakers || []
   readonly property var audioState: mediaState.audio || ({
