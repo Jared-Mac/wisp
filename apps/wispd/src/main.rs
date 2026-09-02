@@ -1406,6 +1406,31 @@ async fn next_tray_action(
     }
 }
 
+async fn synchronize_tray_state(daemon: Arc<Daemon>, handle: ksni::Handle<tray::WispTray>) {
+    let mut events = daemon.events.subscribe();
+    let mut previous = None;
+    loop {
+        let current = {
+            let state = daemon.state.read().await;
+            (state.self_state.muted, state.self_state.deafened)
+        };
+        if previous != Some(current) {
+            if handle
+                .update(|tray| tray.set_audio_state(current.0, current.1))
+                .await
+                .is_none()
+            {
+                return;
+            }
+            previous = Some(current);
+        }
+        match events.recv().await {
+            Ok(_) | Err(broadcast::error::RecvError::Lagged(_)) => {}
+            Err(broadcast::error::RecvError::Closed) => return,
+        }
+    }
+}
+
 async fn handle_tray_action(action: TrayAction, daemon: &Arc<Daemon>) -> bool {
     match action {
         TrayAction::Activate { x, y } => {
@@ -1504,10 +1529,14 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
-    let (mut tray_actions, _tray_handle) = if std::env::var_os("WISP_DISABLE_TRAY").is_some() {
+    let initial_audio_state = {
+        let state = daemon.state.read().await;
+        (state.self_state.muted, state.self_state.deafened)
+    };
+    let (mut tray_actions, tray_handle) = if std::env::var_os("WISP_DISABLE_TRAY").is_some() {
         (None, None)
     } else {
-        match tray::spawn().await {
+        match tray::spawn(initial_audio_state.0, initial_audio_state.1).await {
             Ok((receiver, handle)) => (Some(receiver), Some(handle)),
             Err(error) => {
                 warn!(%error, "system tray is unavailable; continuing without a tray icon");
@@ -1515,6 +1544,9 @@ async fn main() -> anyhow::Result<()> {
             }
         }
     };
+    if let Some(handle) = tray_handle.clone() {
+        tokio::spawn(synchronize_tray_state(daemon.clone(), handle));
+    }
     info!(socket = %socket_path.display(), "wispd ready");
 
     let shutdown = tokio::signal::ctrl_c();

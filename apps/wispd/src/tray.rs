@@ -14,11 +14,50 @@ pub enum TrayAction {
 
 pub(super) struct WispTray {
     actions: mpsc::UnboundedSender<TrayAction>,
+    muted: bool,
+    deafened: bool,
 }
 
 impl WispTray {
     fn send(&self, action: TrayAction) {
         let _ = self.actions.send(action);
+    }
+
+    pub(super) fn set_audio_state(&mut self, muted: bool, deafened: bool) {
+        self.muted = muted;
+        self.deafened = deafened;
+    }
+
+    fn audio_state(&self) -> AudioState {
+        AudioState::from_flags(self.muted, self.deafened)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AudioState {
+    Ready,
+    Muted,
+    Deafened,
+    MutedAndDeafened,
+}
+
+impl AudioState {
+    fn from_flags(muted: bool, deafened: bool) -> Self {
+        match (muted, deafened) {
+            (false, false) => Self::Ready,
+            (true, false) => Self::Muted,
+            (false, true) => Self::Deafened,
+            (true, true) => Self::MutedAndDeafened,
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Ready => "Audio ready",
+            Self::Muted => "Microphone muted",
+            Self::Deafened => "Deafened",
+            Self::MutedAndDeafened => "Microphone muted and deafened",
+        }
     }
 }
 
@@ -32,7 +71,10 @@ impl ksni::Tray for WispTray {
     }
 
     fn title(&self) -> String {
-        "Wisp".into()
+        match self.audio_state() {
+            AudioState::Ready => "Wisp".into(),
+            state => format!("Wisp · {}", state.label()),
+        }
     }
 
     fn status(&self) -> Status {
@@ -40,19 +82,19 @@ impl ksni::Tray for WispTray {
     }
 
     fn icon_name(&self) -> String {
-        "dev.wisp".into()
+        String::new()
     }
 
     fn icon_pixmap(&self) -> Vec<ksni::Icon> {
-        vec![waveform_icon(32)]
+        vec![waveform_icon(32, self.audio_state())]
     }
 
     fn tool_tip(&self) -> ToolTip {
         ToolTip {
-            icon_name: "dev.wisp".into(),
+            icon_name: String::new(),
             icon_pixmap: self.icon_pixmap(),
             title: "Wisp".into(),
-            description: "Friends and hangouts".into(),
+            description: self.audio_state().label().into(),
         }
     }
 
@@ -65,7 +107,7 @@ impl ksni::Tray for WispTray {
     }
 
     fn menu(&self) -> Vec<MenuItem<Self>> {
-        use menu::{StandardItem, SubMenu};
+        use menu::{CheckmarkItem, StandardItem, SubMenu};
 
         let action = |label: &str, icon_name: &str, tray_action| {
             StandardItem {
@@ -77,20 +119,27 @@ impl ksni::Tray for WispTray {
             .into()
         };
 
+        let muted = CheckmarkItem {
+            label: "Microphone muted".into(),
+            checked: self.muted,
+            icon_name: "microphone-sensitivity-muted".into(),
+            activate: Box::new(|tray: &mut Self| tray.send(TrayAction::ToggleMuted)),
+            ..Default::default()
+        };
+        let deafened = CheckmarkItem {
+            label: "Deafened".into(),
+            checked: self.deafened,
+            icon_name: "audio-volume-muted".into(),
+            activate: Box::new(|tray: &mut Self| tray.send(TrayAction::ToggleDeafened)),
+            ..Default::default()
+        };
+
         vec![
             action("Show Wisp", "window-new", TrayAction::Show),
             action("Hide Wisp", "window-close", TrayAction::Hide),
             MenuItem::Separator,
-            action(
-                "Toggle microphone mute",
-                "microphone-sensitivity-muted",
-                TrayAction::ToggleMuted,
-            ),
-            action(
-                "Toggle deafen",
-                "audio-volume-muted",
-                TrayAction::ToggleDeafened,
-            ),
+            muted.into(),
+            deafened.into(),
             SubMenu {
                 label: "Panel anchor".into(),
                 icon_name: "transform-move".into(),
@@ -110,14 +159,22 @@ impl ksni::Tray for WispTray {
     }
 }
 
-pub(super) async fn spawn()
--> anyhow::Result<(mpsc::UnboundedReceiver<TrayAction>, ksni::Handle<WispTray>)> {
+pub(super) async fn spawn(
+    muted: bool,
+    deafened: bool,
+) -> anyhow::Result<(mpsc::UnboundedReceiver<TrayAction>, ksni::Handle<WispTray>)> {
     let (actions, receiver) = mpsc::unbounded_channel();
-    let handle = WispTray { actions }.spawn().await?;
+    let handle = WispTray {
+        actions,
+        muted,
+        deafened,
+    }
+    .spawn()
+    .await?;
     Ok((receiver, handle))
 }
 
-fn waveform_icon(size: i32) -> ksni::Icon {
+fn waveform_icon(size: i32, state: AudioState) -> ksni::Icon {
     let dimension = usize::try_from(size).expect("positive tray icon size");
     let mut data = vec![0_u8; dimension * dimension * 4];
     let center = size / 2;
@@ -131,16 +188,11 @@ fn waveform_icon(size: i32) -> ksni::Icon {
                 if px < 0 || py < 0 || px >= size || py >= size {
                     continue;
                 }
-                let offset = (usize::try_from(py).expect("nonnegative y") * dimension
-                    + usize::try_from(px).expect("nonnegative x"))
-                    * 4;
-                data[offset] = 255;
-                data[offset + 1] = 47;
-                data[offset + 2] = 140;
-                data[offset + 3] = 255;
+                set_pixel(&mut data, dimension, px, py, [255, 47, 140, 255]);
             }
         }
     }
+    draw_state_badge(&mut data, dimension, size, state);
     ksni::Icon {
         width: size,
         height: size,
@@ -148,16 +200,99 @@ fn waveform_icon(size: i32) -> ksni::Icon {
     }
 }
 
+fn set_pixel(data: &mut [u8], dimension: usize, x: i32, y: i32, color: [u8; 4]) {
+    let (Ok(x), Ok(y)) = (usize::try_from(x), usize::try_from(y)) else {
+        return;
+    };
+    if x >= dimension || y >= dimension {
+        return;
+    }
+    let offset = (y * dimension + x) * 4;
+    data[offset..offset + 4].copy_from_slice(&color);
+}
+
+fn draw_state_badge(data: &mut [u8], dimension: usize, size: i32, state: AudioState) {
+    if state == AudioState::Ready {
+        return;
+    }
+    let center = (size - 7, size - 7);
+    let radius = 7;
+    let color = if state == AudioState::Deafened {
+        [255, 245, 185, 76]
+    } else {
+        [255, 255, 92, 108]
+    };
+    for y in (center.1 - radius)..=(center.1 + radius) {
+        for x in (center.0 - radius)..=(center.0 + radius) {
+            let distance = (x - center.0).pow(2) + (y - center.1).pow(2);
+            if distance <= radius.pow(2) {
+                set_pixel(data, dimension, x, y, color);
+            }
+        }
+    }
+
+    let ink = [255, 21, 24, 33];
+    match state {
+        AudioState::Muted => {
+            for offset in -4..=4 {
+                set_pixel(data, dimension, center.0 + offset, center.1 - offset, ink);
+                set_pixel(
+                    data,
+                    dimension,
+                    center.0 + offset,
+                    center.1 - offset + 1,
+                    ink,
+                );
+            }
+        }
+        AudioState::Deafened => {
+            for offset in -4..=4 {
+                set_pixel(data, dimension, center.0 - 3, center.1 + offset, ink);
+            }
+            for offset in -3..=3 {
+                set_pixel(data, dimension, center.0 + offset, center.1 - 4, ink);
+                set_pixel(data, dimension, center.0 + offset, center.1 + 4, ink);
+            }
+            for offset in -3..=3 {
+                set_pixel(data, dimension, center.0 + 3, center.1 + offset, ink);
+            }
+        }
+        AudioState::MutedAndDeafened => {
+            for offset in -4..=4 {
+                set_pixel(data, dimension, center.0 + offset, center.1 + offset, ink);
+                set_pixel(data, dimension, center.0 + offset, center.1 - offset, ink);
+            }
+        }
+        AudioState::Ready => {}
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::waveform_icon;
+    use super::{AudioState, waveform_icon};
 
     #[test]
     fn tray_icon_is_argb32() {
-        let icon = waveform_icon(32);
+        let icon = waveform_icon(32, AudioState::Ready);
         assert_eq!(icon.width, 32);
         assert_eq!(icon.height, 32);
         assert_eq!(icon.data.len(), 32 * 32 * 4);
         assert!(icon.data.chunks_exact(4).any(|pixel| pixel[0] == 255));
+    }
+
+    #[test]
+    fn every_audio_state_has_a_distinct_tray_icon() {
+        let states = [
+            AudioState::Ready,
+            AudioState::Muted,
+            AudioState::Deafened,
+            AudioState::MutedAndDeafened,
+        ];
+        let icons = states.map(|state| waveform_icon(32, state).data);
+        for left in 0..icons.len() {
+            for right in (left + 1)..icons.len() {
+                assert_ne!(icons[left], icons[right]);
+            }
+        }
     }
 }

@@ -14,25 +14,31 @@ Column {
 
     Repeater {
       model: [
-        { "label": root.bridge.selfState.muted ? "Unmute" : "Mute", "action": "mute" },
-        { "label": root.bridge.mediaState.surface_open ? "Close video" : "Open video", "action": "video" },
-        { "label": root.bridge.selfState.sharing ? "Stop share" : "Share", "action": "share" },
-        { "label": root.bridge.selfState.deafened ? "Undeafen" : "Deafen", "action": "deafen" },
-        { "label": "Leave", "action": "leave" }
+        { "label": root.bridge.selfState.muted ? "Unmute" : "Mute", "action": "mute", "active": !!root.bridge.selfState.muted },
+        { "label": root.bridge.mediaState.surface_open ? "Close video" : "Open video", "action": "video", "active": false },
+        { "label": root.bridge.selfState.sharing ? "Stop share" : "Share", "action": "share", "active": false },
+        { "label": root.bridge.selfState.deafened ? "Undeafen" : "Deafen", "action": "deafen", "active": !!root.bridge.selfState.deafened },
+        { "label": "Leave", "action": "leave", "active": false }
       ]
       delegate: Rectangle {
         required property var modelData
         width: (controls.width - controls.spacing * 4) / 5
         height: root.theme.space(34)
         radius: root.theme.cornerRadius
-        color: controlMouse.containsMouse
-          ? (modelData.action === "leave" ? root.theme.alpha(root.theme.danger, 0.28) : root.theme.alpha(root.theme.foreground, 0.12))
-          : root.theme.alpha(root.theme.foreground, 0.065)
+        color: modelData.active
+          ? root.theme.alpha(modelData.action === "mute" ? root.theme.danger : root.theme.warning, controlMouse.containsMouse ? 0.36 : 0.24)
+          : controlMouse.containsMouse
+            ? (modelData.action === "leave" ? root.theme.alpha(root.theme.danger, 0.28) : root.theme.alpha(root.theme.foreground, 0.12))
+            : root.theme.alpha(root.theme.foreground, 0.065)
 
         Text {
           anchors.centerIn: parent
           text: modelData.label
-          color: modelData.action === "leave" ? root.theme.danger : root.theme.foreground
+          color: modelData.action === "leave" || (modelData.action === "mute" && modelData.active)
+            ? root.theme.danger
+            : modelData.action === "deafen" && modelData.active
+              ? root.theme.warning
+              : root.theme.foreground
           font.family: root.theme.font.family
           font.pixelSize: root.theme.font.caption
         }

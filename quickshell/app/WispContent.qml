@@ -106,7 +106,8 @@ FocusScope {
 
             Text {
               text: root.bridge.daemonConnected
-                ? String(root.bridge.selfState.connection || "available")
+                ? String(root.bridge.selfState.display_name || "Unknown profile")
+                  + " · " + String(root.bridge.selfState.connection || "available")
                 : "wispd disconnected"
               color: root.bridge.hasError ? root.theme.danger : root.theme.muted
               font.family: root.theme.font.family
@@ -192,6 +193,13 @@ FocusScope {
           font.family: root.theme.font.family
           font.pixelSize: root.theme.font.caption
         }
+      }
+
+      AudioStateIndicator {
+        width: parent.width
+        theme: root.theme
+        muted: !!root.bridge.selfState.muted
+        deafened: !!root.bridge.selfState.deafened
       }
 
       SettingsMenu {
