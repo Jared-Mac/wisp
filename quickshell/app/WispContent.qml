@@ -131,10 +131,10 @@ FocusScope {
               }
 
               Text {
-                text: root.bridge.daemonConnected
-                  ? String(root.bridge.selfState.display_name || "Unknown profile")
-                    + " · " + root.bridge.selfStatusLabel
-                  : "wispd disconnected"
+                text: String(root.bridge.selfState.display_name
+                    || root.bridge.configuredProfile
+                    || "Unknown profile")
+                  + " · " + root.bridge.selfStatusLabel
                 color: root.bridge.hasError ? root.theme.danger : root.theme.muted
                 font.family: root.theme.font.family
                 font.pixelSize: root.theme.font.caption

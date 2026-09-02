@@ -1,0 +1,8 @@
+[Unit]
+Description=Wisp voice client
+After=graphical-session.target network-online.target
+
+[Service]
+Type=simple
+ExecStart="@WISP_LAUNCH_EXEC@"
+KillMode=control-group

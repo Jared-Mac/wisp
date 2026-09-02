@@ -28,6 +28,7 @@ launcher, and `wisp-ui` command:
 
 ```bash
 just app-sync
+wisp
 wisp-ui app open
 wisp-ui app toggle
 wisp-ui panel toggle
@@ -39,6 +40,21 @@ both surfaces are hidden, so reopening is immediate and voice state remains
 owned by the daemon. The legacy `wisp-ui open` and `wisp-ui toggle` forms remain
 aliases for the full app.
 
+Use `wisp` for a normal terminal launch. It starts the complete saved client or
+reveals the already-running Wisp app. The searchable **Wisp** application menu
+entry calls the same launcher, so both routes enforce one daemon, one tray icon,
+and one UI process. The client runs as the per-user `wisp.service`, so the
+terminal command returns after opening the app; `systemctl --user status
+wisp.service` shows its state.
+
+Launching **Wisp** from the desktop application menu starts the saved friend
+client when necessary, or reopens the existing app when the daemon is already
+running. After **Exit Wisp**, the same launcher starts the complete client again
+rather than opening a disconnected UI. If the remote host is temporarily
+offline, the daemon and tray remain available and retry until the host returns.
+Diagnostic output is stored in
+`~/.local/state/wisp/launcher.log`.
+
 `wispd` also publishes a Wisp system-tray icon on desktops that support
 StatusNotifierItem. Left-click the icon to toggle the Wisp panel beside the
 tray. Right-click for panel Show/Hide, **Open Wisp app**, mute, deafen,
@@ -49,10 +65,10 @@ and always forces microphone mute. Clicking the headset again leaves the
 microphone muted; clicking the microphone while deafened clears both states.
 The lower in-call controls contain only video, sharing, and leave actions;
 small mute/deafen icons appear beside the local member name in a hangout.
-The panel remembers its corner choice under **Settings → Desktop position**.
-Auto uses the tray icon's display and edge when the desktop supplies its click
-position; otherwise it falls back to the current system display and its
-bottom-right corner.
+The panel always opens on the operating system's primary display and remembers
+its corner choice under **Settings → Desktop position**. Auto uses the tray
+click's edge when the tray is on the primary display and otherwise falls back
+to the primary display's bottom-right corner.
 
 **Exit Wisp** closes the Quickshell UI and the tray-owning daemon. When Wisp
 was started with `just dev`, that daemon exit also makes the development

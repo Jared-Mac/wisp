@@ -7,6 +7,9 @@ Item {
 
   property string clientName: "quickshell"
   readonly property string runtimeDir: Quickshell.env("XDG_RUNTIME_DIR")
+  readonly property string configHome: String(Quickshell.env("XDG_CONFIG_HOME")
+    || (Quickshell.env("HOME") + "/.config"))
+  readonly property string configuredProfile: readConfiguredProfile()
   readonly property string socketPath: runtimeDir + "/wisp/wispd.sock"
   readonly property var activeSocket: socketLoader.item
   readonly property bool daemonConnected: !!(activeSocket && activeSocket.connected)
@@ -16,9 +19,9 @@ Item {
   property var snapshot: ({
     "seq": 0,
     "self": {
-      "display_name": "",
+      "display_name": root.configuredProfile,
       "presence": "away",
-      "connection": "offline",
+      "connection": "connecting_to_server",
       "muted": false,
       "deafened": false,
       "sharing": false,
@@ -89,6 +92,20 @@ Item {
   readonly property string barText: buildBarText()
 
   signal commandFailed(string message)
+
+  function readConfiguredProfile() {
+    var match = localConfig.text().match(/(?:^|\n)WISP_PROFILE=(Tyler|Jack|Charlie)(?:\n|$)/)
+    return match ? String(match[1]) : ""
+  }
+
+  FileView {
+    id: localConfig
+    path: root.configHome + "/wisp/friend.env"
+    blockLoading: true
+    printErrors: false
+    watchChanges: true
+    onFileChanged: reload()
+  }
 
   function buildSelfStatusLabel() {
     if (!daemonConnected) return "Disconnected"

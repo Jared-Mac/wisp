@@ -53,7 +53,7 @@ ShellRoot {
     openPanel()
   }
   function activateFromTray(globalX, globalY) {
-    var target = screenAt(globalX, globalY) || primaryScreen()
+    var target = primaryScreen()
     if (target) activePanelScreenName = target.name
     var localX = target ? globalX - target.x : globalX
     var localY = target ? globalY - target.y : globalY
