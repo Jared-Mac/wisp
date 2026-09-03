@@ -75,7 +75,8 @@ Panel {
     labelVisible: false
     hasVisualContent: true
     fixedWidth: barVisual.implicitWidth + Style.space(14)
-    active: bridge.hasError
+    active: bridge.hasError || bridge.knocks.length > 0
+      || bridge.unreadMessages > 0 || bridge.sharing || bridge.cameraActive
     tooltipText: bridge.barTooltip
     onPressed: function(buttonCode) {
       if (buttonCode === Qt.RightButton) bridge.toggleMuted()
@@ -88,7 +89,7 @@ Panel {
       spacing: Style.space(5)
 
       Item {
-        width: Style.space(22)
+        width: Style.space(26)
         height: width
 
         Image {
@@ -101,13 +102,14 @@ Panel {
         }
 
         Rectangle {
-          visible: bridge.sharing || bridge.cameraActive || bridge.remoteVideoAvailable
-          anchors.right: parent.right
+          id: screenBadge
+          visible: bridge.sharing
+          anchors.left: parent.left
           anchors.top: parent.top
           width: Style.space(9)
           height: width
           radius: width / 2
-          color: bridge.sharing || bridge.cameraActive ? "#32e6f4" : Color.accent
+          color: "#32e6f4"
           border.width: 1
           border.color: Color.background
 
@@ -119,6 +121,83 @@ Panel {
             color: "transparent"
             border.width: 1
             border.color: "#151821"
+          }
+        }
+
+        Rectangle {
+          id: cameraBadge
+          visible: bridge.cameraActive
+          anchors.right: parent.right
+          anchors.top: parent.top
+          width: Style.space(9)
+          height: width
+          radius: width / 2
+          color: "#48dc96"
+          border.width: 1
+          border.color: Color.background
+
+          Rectangle {
+            anchors.centerIn: parent
+            anchors.horizontalCenterOffset: -parent.width * 0.07
+            width: parent.width * 0.52
+            height: parent.height * 0.4
+            radius: 1
+            color: "#151821"
+          }
+
+          Rectangle {
+            anchors.left: parent.horizontalCenter
+            anchors.leftMargin: parent.width * 0.18
+            anchors.verticalCenter: parent.verticalCenter
+            width: parent.width * 0.2
+            height: parent.height * 0.28
+            radius: 1
+            color: "#151821"
+          }
+        }
+
+        Rectangle {
+          visible: bridge.remoteVideoAvailable && !bridge.sharing && !bridge.cameraActive
+          anchors.right: parent.right
+          anchors.top: parent.top
+          width: Style.space(9)
+          height: width
+          radius: width / 2
+          color: Color.accent
+          border.width: 1
+          border.color: Color.background
+
+          Rectangle {
+            anchors.centerIn: parent
+            width: parent.width * 0.55
+            height: parent.height * 0.38
+            radius: 1
+            color: "transparent"
+            border.width: 1
+            border.color: "#151821"
+          }
+        }
+
+        Rectangle {
+          visible: bridge.unreadMessages > 0
+          anchors.left: parent.left
+          anchors.bottom: parent.bottom
+          width: Math.max(Style.space(9), unreadText.implicitWidth + Style.space(4))
+          height: Style.space(9)
+          radius: height / 2
+          color: Color.accent
+          border.width: 1
+          border.color: Color.background
+
+          Text {
+            id: unreadText
+            anchors.centerIn: parent
+            text: bridge.unreadMessages > 99 ? "99+" : String(bridge.unreadMessages)
+            color: "white"
+            font.family: barButton.fontFamily
+            font.pixelSize: Math.max(6, parent.height * 0.58)
+            font.bold: true
+            renderType: Text.NativeRendering
           }
         }
 
