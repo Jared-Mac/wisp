@@ -29,7 +29,7 @@ FocusScope {
     ? theme.space(960) : theme.space(390) + contentPadding * 2
   implicitHeight: presentation === "app"
     ? theme.space(840)
-    : Math.min(theme.space(800), panelColumn.implicitHeight + contentPadding * 2)
+    : Math.min(theme.space(800), fixedHeader.height + panelColumn.implicitHeight + contentPadding * 2 + theme.spacing.lg)
   focus: true
 
   function maybeDismiss() {
@@ -85,9 +85,176 @@ FocusScope {
     }
   }
 
+  Column {
+    id: fixedHeader
+    z: 20
+    x: Math.max(root.contentPadding, Math.round((root.width - width) / 2))
+    y: root.contentPadding
+    width: root.contentWidthLimit > 0 ? Math.min(root.width - root.contentPadding * 2, root.contentWidthLimit) : root.width - root.contentPadding * 2
+    spacing: root.theme.spacing.lg
+
+    Item {
+      width: parent.width
+      height: root.theme.space(36)
+
+      Row {
+        id: identityRow
+        anchors.left: parent.left
+        anchors.verticalCenter: parent.verticalCenter
+        spacing: root.theme.spacing.md
+
+        Image {
+          width: root.theme.space(30)
+          height: width
+          anchors.verticalCenter: parent.verticalCenter
+          source: root.logoSource
+          fillMode: Image.PreserveAspectFit
+        }
+
+        Column {
+          anchors.verticalCenter: parent.verticalCenter
+
+          Text {
+            text: "Wisp"
+            color: root.theme.foreground
+            font.family: root.theme.font.family
+            font.pixelSize: root.theme.font.title
+            font.weight: Font.DemiBold
+          }
+
+          Row {
+            id: identityStatus
+            spacing: root.theme.spacing.xs
+
+            PresenceDot {
+              anchors.verticalCenter: parent.verticalCenter
+              presence: root.bridge.daemonConnected
+                ? String(root.bridge.selfState.presence || "away")
+                : "closed"
+              theme: root.theme
+            }
+
+            Text {
+              text: String(root.bridge.selfState.display_name
+                  || root.bridge.configuredProfile
+                  || "Unknown profile")
+                + " · " + root.bridge.selfStatusLabel
+              color: root.bridge.hasError ? root.theme.danger : root.theme.muted
+              font.family: root.theme.font.family
+              font.pixelSize: root.theme.font.caption
+              Binding on width { when: root.theme.terminal; value: Math.max(0, headerActions.x - identityRow.x - root.theme.space(30) - root.theme.spacing.md - root.theme.space(20)); restoreMode: Binding.RestoreBindingOrValue }
+              elide: root.theme.terminal ? Text.ElideRight : Text.ElideNone
+            }
+          }
+        }
+      }
+
+      Row {
+        id: headerActions
+        anchors.right: parent.right
+        anchors.verticalCenter: parent.verticalCenter
+        spacing: root.theme.spacing.sm
+
+        Rectangle {
+          id: settingsButton
+          width: settingsText.implicitWidth + root.theme.spacing.lg * 2
+          height: root.theme.space(30)
+          radius: root.theme.cornerRadius
+          color: settingsMouse.containsMouse
+            ? root.theme.alpha(root.theme.foreground, 0.12)
+            : root.theme.alpha(root.theme.foreground, 0.055)
+
+          Text {
+            id: settingsText
+            anchors.centerIn: parent
+            text: root.settingsOpen ? "Back" : "Settings"
+            color: root.theme.foreground
+            font.family: root.theme.font.family
+            font.pixelSize: root.theme.font.caption
+          }
+
+          MouseArea {
+            id: settingsMouse
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: root.toggleSettings()
+          }
+        }
+
+        Rectangle {
+          visible: root.showAppButton
+          width: visible ? appButtonText.implicitWidth + root.theme.spacing.lg * 2 : 0
+          height: root.theme.space(30)
+          radius: root.theme.cornerRadius
+          color: appButtonMouse.containsMouse
+            ? root.theme.alpha(root.theme.accent, 0.24)
+            : root.theme.alpha(root.theme.foreground, 0.055)
+
+          Text {
+            id: appButtonText
+            anchors.centerIn: parent
+            text: "Open app"
+            color: root.theme.foreground
+            font.family: root.theme.font.family
+            font.pixelSize: root.theme.font.caption
+          }
+
+          MouseArea {
+            id: appButtonMouse
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: root.appRequested()
+          }
+        }
+
+        Rectangle {
+          id: closeButton
+          visible: root.showCloseButton
+          width: visible ? root.theme.space(30) : 0
+          height: root.theme.space(30)
+          radius: root.theme.cornerRadius
+          color: closeMouse.containsMouse
+            ? root.theme.alpha(root.theme.foreground, 0.12)
+            : root.theme.alpha(root.theme.foreground, 0.055)
+
+          Text {
+            anchors.centerIn: parent
+            text: "×"
+            color: root.theme.foreground
+            font.family: root.theme.font.family
+            font.pixelSize: root.theme.font.title
+          }
+
+          MouseArea {
+            id: closeMouse
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: root.requestClose()
+          }
+        }
+      }
+    }
+
+
+    SettingsView {
+      objectName: "alwaysVisibleControls"
+      width: parent.width
+      bridge: root.bridge
+      theme: root.theme
+    }
+    Rectangle {
+      width: parent.width; height: root.theme.terminal ? 1 : 0
+      color: root.theme.separator
+    }
+  }
+
   Flickable {
     id: scrollView
-    anchors.fill: parent
+    objectName: "dashboardScroll"
+    anchors { left: parent.left; right: parent.right; bottom: parent.bottom; top: fixedHeader.bottom; topMargin: root.theme.spacing.lg }
     contentWidth: width
     contentHeight: panelColumn.implicitHeight + root.contentPadding * 2
     clip: true
@@ -98,7 +265,7 @@ FocusScope {
       id: panelColumn
       x: Math.max(root.contentPadding,
         Math.round((scrollView.width - width) / 2))
-      y: root.contentPadding
+      y: 0
       width: {
         var available = Math.max(1, scrollView.width - root.contentPadding * 2)
         return root.contentWidthLimit > 0
@@ -106,150 +273,6 @@ FocusScope {
       }
       spacing: root.theme.spacing.lg
 
-      Item {
-        width: parent.width
-        height: root.theme.space(36)
-
-        Row {
-          id: identityRow
-          anchors.left: parent.left
-          anchors.verticalCenter: parent.verticalCenter
-          spacing: root.theme.spacing.md
-
-          Image {
-            width: root.theme.space(30)
-            height: width
-            anchors.verticalCenter: parent.verticalCenter
-            source: root.logoSource
-            fillMode: Image.PreserveAspectFit
-          }
-
-          Column {
-            anchors.verticalCenter: parent.verticalCenter
-
-            Text {
-              text: "Wisp"
-              color: root.theme.foreground
-              font.family: root.theme.font.family
-              font.pixelSize: root.theme.font.title
-              font.weight: Font.DemiBold
-            }
-
-            Row {
-              id: identityStatus
-              spacing: root.theme.spacing.xs
-
-              PresenceDot {
-                anchors.verticalCenter: parent.verticalCenter
-                presence: root.bridge.daemonConnected
-                  ? String(root.bridge.selfState.presence || "away")
-                  : "closed"
-                theme: root.theme
-              }
-
-              Text {
-                text: String(root.bridge.selfState.display_name
-                    || root.bridge.configuredProfile
-                    || "Unknown profile")
-                  + " · " + root.bridge.selfStatusLabel
-                color: root.bridge.hasError ? root.theme.danger : root.theme.muted
-                font.family: root.theme.font.family
-                font.pixelSize: root.theme.font.caption
-                width: root.theme.terminal ? Math.max(0, headerActions.x - identityRow.x - root.theme.space(30) - root.theme.spacing.md - root.theme.space(20)) : implicitWidth
-                elide: root.theme.terminal ? Text.ElideRight : Text.ElideNone
-              }
-            }
-          }
-        }
-
-        Row {
-          id: headerActions
-          anchors.right: parent.right
-          anchors.verticalCenter: parent.verticalCenter
-          spacing: root.theme.spacing.sm
-
-          Rectangle {
-            id: settingsButton
-            width: settingsText.implicitWidth + root.theme.spacing.lg * 2
-            height: root.theme.space(30)
-            radius: root.theme.cornerRadius
-            color: settingsMouse.containsMouse
-              ? root.theme.alpha(root.theme.foreground, 0.12)
-              : root.theme.alpha(root.theme.foreground, 0.055)
-
-            Text {
-              id: settingsText
-              anchors.centerIn: parent
-              text: root.settingsOpen ? "Back" : "Settings"
-              color: root.theme.foreground
-              font.family: root.theme.font.family
-              font.pixelSize: root.theme.font.caption
-            }
-
-            MouseArea {
-              id: settingsMouse
-              anchors.fill: parent
-              hoverEnabled: true
-              cursorShape: Qt.PointingHandCursor
-              onClicked: root.toggleSettings()
-            }
-          }
-
-          Rectangle {
-            visible: root.showAppButton
-            width: visible ? appButtonText.implicitWidth + root.theme.spacing.lg * 2 : 0
-            height: root.theme.space(30)
-            radius: root.theme.cornerRadius
-            color: appButtonMouse.containsMouse
-              ? root.theme.alpha(root.theme.accent, 0.24)
-              : root.theme.alpha(root.theme.foreground, 0.055)
-
-            Text {
-              id: appButtonText
-              anchors.centerIn: parent
-              text: "Open app"
-              color: root.theme.foreground
-              font.family: root.theme.font.family
-              font.pixelSize: root.theme.font.caption
-            }
-
-            MouseArea {
-              id: appButtonMouse
-              anchors.fill: parent
-              hoverEnabled: true
-              cursorShape: Qt.PointingHandCursor
-              onClicked: root.appRequested()
-            }
-          }
-
-          Rectangle {
-            id: closeButton
-            visible: root.showCloseButton
-            width: visible ? root.theme.space(30) : 0
-            height: root.theme.space(30)
-            radius: root.theme.cornerRadius
-            color: closeMouse.containsMouse
-              ? root.theme.alpha(root.theme.foreground, 0.12)
-              : root.theme.alpha(root.theme.foreground, 0.055)
-
-            Text {
-              anchors.centerIn: parent
-              text: "×"
-              color: root.theme.foreground
-              font.family: root.theme.font.family
-              font.pixelSize: root.theme.font.title
-            }
-
-            MouseArea {
-              id: closeMouse
-              anchors.fill: parent
-              hoverEnabled: true
-              cursorShape: Qt.PointingHandCursor
-              onClicked: root.requestClose()
-            }
-          }
-        }
-      }
 
       Rectangle {
         visible: root.bridge.lastError !== ""
@@ -283,7 +306,7 @@ FocusScope {
         visible: !root.settingsOpen
         width: parent.width
         height: root.presentation === "app" && !root.settingsOpen
-          ? Math.max(root.theme.space(550), root.height - y - root.contentPadding * 2)
+          ? Math.max(root.theme.space(550), scrollView.height - y - root.contentPadding)
           : implicitHeight
         sourceComponent: root.presentation === "app"
           ? wideDashboardComponent : compactDashboardComponent
@@ -306,12 +329,6 @@ FocusScope {
     Column {
       id: compactDashboard
       spacing: root.theme.spacing.lg
-
-      SettingsView {
-        width: parent.width
-        bridge: root.bridge
-        theme: root.theme
-      }
 
       Repeater {
         model: root.bridge.knocks
@@ -342,6 +359,7 @@ FocusScope {
       }
 
       FriendsView {
+        collapsible: true
         width: parent.width
         bridge: root.bridge
         theme: root.theme
@@ -375,12 +393,6 @@ FocusScope {
           id: activityColumn
           width: parent.width
           spacing: root.theme.spacing.lg
-
-        SettingsView {
-          width: parent.width
-          bridge: root.bridge
-          theme: root.theme
-        }
 
         Repeater {
           model: root.bridge.knocks

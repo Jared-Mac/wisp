@@ -29,15 +29,18 @@ Column {
       height: root.theme.space(52)
       radius: root.theme.cornerRadius
       color: root.theme.alpha(root.theme.foreground, 0.05)
+      border.width: root.theme.terminal ? 1 : 0
+      border.color: root.theme.separator
 
       Column {
+        id: spotInfo
         anchors.left: parent.left
         anchors.leftMargin: root.theme.spacing.lg
         anchors.verticalCenter: parent.verticalCenter
-        width: root.theme.terminal ? Math.max(0, joinButton.x - x - root.theme.spacing.lg) : implicitWidth
+        Binding on width { when: root.theme.terminal; value: Math.max(0, joinButton.x - spotInfo.x - root.theme.spacing.lg); restoreMode: Binding.RestoreBindingOrValue }
 
         Text {
-          width: root.theme.terminal ? parent.width : implicitWidth
+          Binding on width { when: root.theme.terminal; value: spotInfo.width; restoreMode: Binding.RestoreBindingOrValue }
           elide: root.theme.terminal ? Text.ElideRight : Text.ElideNone
           text: String(modelData.name || "Spot")
           color: root.theme.foreground
@@ -47,7 +50,7 @@ Column {
         }
 
         Text {
-          width: root.theme.terminal ? parent.width : implicitWidth
+          Binding on width { when: root.theme.terminal; value: spotInfo.width; restoreMode: Binding.RestoreBindingOrValue }
           elide: root.theme.terminal ? Text.ElideRight : Text.ElideNone
           text: (modelData.members || []).length
             ? modelData.members.map(function(member) { return member.display_name }).join(" · ")
@@ -73,7 +76,7 @@ Column {
           id: joinText
           anchors.centerIn: parent
           text: "Join"
-          color: "white"
+          color: root.theme.accentText
           font.family: root.theme.font.family
           font.pixelSize: root.theme.font.caption
           font.weight: Font.DemiBold

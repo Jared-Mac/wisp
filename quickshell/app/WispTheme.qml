@@ -6,9 +6,10 @@ import QtQuick
 QtObject {
   id: root
 
-  // Legacy is deliberately the default, including direct/unknown launches.
+  // Hosts select the default through WispAppearance; adapters keep their styling.
   property string profile: "legacy"
-  readonly property bool terminal: profile === "terminal-experimental"
+  property var appearanceController: null
+  readonly property bool terminal: profile === "terminal" || profile === "terminal-experimental"
   readonly property string monospaceFamily: {
     var available = Qt.fontFamilies()
     var candidates = ["Hack", "DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", "Adwaita Mono"]
@@ -17,15 +18,26 @@ QtObject {
     return "monospace" // Qt/fontconfig's generic fixed-width family, not a CSS list.
   }
 
+  readonly property string paletteName: appearanceController ? appearanceController.palette : "wisp"
+  readonly property bool customPalette: paletteName !== "wisp"
+  readonly property var colors: {
+    switch (paletteName) {
+    case "graphite": return {background:"#191b20", surface:"#23262d", accent:"#9bb9df", muted:"#a1a8b4"}
+    case "violet": return {background:"#191722", surface:"#24202f", accent:"#b79aff", muted:"#a49bb6"}
+    case "ember": return {background:"#211a18", surface:"#2c2421", accent:"#eeb17b", muted:"#b2a299"}
+    default: return {background:"#151821", surface:"#1c202b", accent:"#2f8cff", muted:"#8d96a8"}
+    }
+  }
   property color foreground: "#e8ecf3"
-  property color background: "#151821"
-  property color surface: "#1c202b"
-  property color accent: "#2f8cff"
-  property color muted: "#8d96a8"
+  property color background: colors.background
+  property color surface: colors.surface
+  property color accent: colors.accent
+  property color muted: colors.muted
+  readonly property color accentText: customPalette ? background : "white"
   property color danger: "#ff7777"
   property color warning: "#f5b94c"
 
-  property int cornerRadius: terminal ? 4 : 9
+  property int cornerRadius: terminal ? 2 : 9
   property real spacingScale: 1.0
   property string fontFamily: terminal ? monospaceFamily : "sans-serif"
   property int captionSize: 12

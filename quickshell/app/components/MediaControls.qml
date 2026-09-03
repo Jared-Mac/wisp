@@ -14,14 +14,6 @@ Column {
     width: parent.width + (root.theme.terminal ? 0 : root.theme.space(4))
     spacing: root.theme.spacing.sm
 
-    AudioStateIndicator {
-      id: audioControls
-      bridge: root.bridge
-      theme: root.theme
-      muted: !!root.bridge.selfState.muted || !!root.bridge.selfState.deafened
-      deafened: !!root.bridge.selfState.deafened
-    }
-
     Repeater {
       id: controlRepeater
       model: [
@@ -34,8 +26,8 @@ Column {
         readonly property bool controlEnabled: (modelData.action !== "share" || !root.bridge.shareStarting)
           && (modelData.action !== "camera" || (!root.bridge.cameraStarting
             && root.bridge.cameraState.devices.length > 0))
-        width: Math.max(root.theme.terminal ? controlLabel.implicitWidth + root.theme.space(20) : 0, (root.width - audioControls.width
-          - controls.spacing * controlRepeater.count)
+        width: Math.max(root.theme.terminal ? controlLabel.implicitWidth + root.theme.space(20) : 0, (root.width
+          - controls.spacing * (controlRepeater.count - 1))
           / Math.max(1, controlRepeater.count))
         height: root.theme.space(34)
         radius: root.theme.cornerRadius
@@ -82,6 +74,7 @@ Column {
       border.color: root.theme.alpha(root.theme.accent, watching ? 0.55 : 0.24)
 
       Text {
+        id: remoteVideoLabel
         anchors.left: parent.left
         anchors.leftMargin: root.theme.spacing.lg
         anchors.verticalCenter: parent.verticalCenter
@@ -92,7 +85,7 @@ Column {
         font.family: root.theme.font.family
         font.pixelSize: root.theme.font.caption
         font.weight: Font.DemiBold
-        width: root.theme.terminal ? Math.max(0, watchButton.x - x - root.theme.spacing.md) : implicitWidth
+        Binding on width { when: root.theme.terminal; value: Math.max(0, watchButton.x - remoteVideoLabel.x - root.theme.spacing.md); restoreMode: Binding.RestoreBindingOrValue }
         elide: root.theme.terminal ? Text.ElideRight : Text.ElideNone
       }
 
@@ -111,7 +104,7 @@ Column {
           id: watchLabel
           anchors.centerIn: parent
           text: parent.parent.watching ? "Close" : "Watch"
-          color: "white"
+          color: root.theme.accentText
           font.family: root.theme.font.family
           font.pixelSize: root.theme.font.caption
           font.weight: Font.Bold

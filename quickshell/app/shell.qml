@@ -86,6 +86,7 @@ ShellRoot {
       "height": appWindow.height,
       "wide_layout": appWindow.width >= appTheme.space(760),
       "appearance": appTheme.profile,
+      "palette": appTheme.paletteName,
       "appearance_environment": appearance.environment,
       "font_family": appTheme.font.family
     })
@@ -100,6 +101,7 @@ ShellRoot {
       "screen": app.selectedPanelScreen ? app.selectedPanelScreen.name : null,
       "vertical_inset": panelWindow.verticalInset,
       "appearance": appTheme.profile,
+      "palette": appTheme.paletteName,
       "appearance_environment": appearance.environment,
       "font_family": appTheme.font.family
     })
@@ -122,7 +124,7 @@ ShellRoot {
   })
 
   WispAppearance { id: appearance }
-  WispTheme { id: appTheme; profile: appearance.profile }
+  WispTheme { id: appTheme; profile: appearance.profile; appearanceController: appearance }
 
   FileView {
     id: settingsFile

@@ -14,14 +14,15 @@ Rectangle {
   border.color: root.theme.alpha(root.theme.warning, 0.30)
 
   Column {
+    id: knockInfo
     anchors.left: parent.left
     anchors.leftMargin: root.theme.spacing.lg
     anchors.verticalCenter: parent.verticalCenter
     spacing: root.theme.spacing.xs
-    width: root.theme.terminal ? Math.max(0, knockActions.x - x - root.theme.spacing.lg) : implicitWidth
+    Binding on width { when: root.theme.terminal; value: Math.max(0, knockActions.x - knockInfo.x - root.theme.spacing.lg); restoreMode: Binding.RestoreBindingOrValue }
 
     Text {
-      width: root.theme.terminal ? parent.width : implicitWidth
+      Binding on width { when: root.theme.terminal; value: knockInfo.width; restoreMode: Binding.RestoreBindingOrValue }
       elide: root.theme.terminal ? Text.ElideRight : Text.ElideNone
       text: String(root.knock.from.display_name || "A friend") + " wants to hang out"
       color: root.theme.foreground
@@ -62,7 +63,7 @@ Rectangle {
           id: actionText
           anchors.centerIn: parent
           text: modelData.label
-          color: modelData.primary ? "white" : root.theme.foreground
+          color: modelData.primary ? root.theme.accentText : root.theme.foreground
           font.family: root.theme.font.family
           font.pixelSize: root.theme.font.caption
           font.weight: Font.Bold

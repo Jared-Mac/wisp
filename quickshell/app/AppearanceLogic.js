@@ -1,7 +1,9 @@
 .pragma library
 
-// A saved opt-in alone is insufficient. Unknown and Omarchy launches stay legacy.
+// Themes select presentation only; no permissions, features, or data depend on them.
 function selectProfile(requested, environment) {
-  return requested === "terminal-experimental" && environment === "cachyos"
-    ? "terminal-experimental" : "legacy"
+  if (environment === "omarchy") return "legacy"
+  if (requested === "legacy" || requested === "classic") return "legacy"
+  if (requested === "terminal" || requested === "terminal-experimental") return "terminal"
+  return environment === "cachyos" || environment === "desktop" ? "terminal" : "legacy"
 }

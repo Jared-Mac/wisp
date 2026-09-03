@@ -21,6 +21,7 @@ Column {
     font.family: root.theme.font.family
     font.pixelSize: root.theme.font.caption
     font.weight: Font.Bold
+    font.letterSpacing: root.theme.terminal ? 1 : 0
     }
     ChatButton { anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; theme: root.theme; text: "New room"; onClicked: roomManager.createRoom() }
   }

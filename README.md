@@ -186,6 +186,31 @@ for everyone, with an irreversible-action warning, red **Yes, clear**, and norma
 saved per user on the host. Clearing overrides file Keep flags; it does not erase
 existing backups or copies already saved outside Wisp.
 
+**Settings → Appearance** selects **Terminal** (the default desktop theme) or
+**Classic** (the original appearance). Both themes have exactly the same features,
+chats, permissions, controls, and shortcuts. The choice applies immediately to
+both the tray popup and full app, is saved locally in
+`~/.config/wisp/appearance.json`, and survives restarts. Switching themes does
+not reset drafts, change rooms, or activate media. Omarchy retains its existing
+host-controlled appearance in its adapter and standalone windows. Direct
+launches with unknown integration metadata conservatively retain Classic unless
+a theme has been explicitly chosen. Old `terminal-experimental` preferences
+continue to work as Terminal.
+
+Choose **Wisp blue**, **Graphite**, **Violet**, or **Ember** independently of the
+Terminal/Classic style. Wisp blue keeps the original palette; status and warning
+colors retain their meaning across palettes. Terminal uses monospace typography,
+square-edged controls, fine keylines, and outlined selections.
+
+Presence choices, microphone mute, and deafen stay pinned below your identity in
+both windows, including outside a room and while scrolling. Room-specific camera,
+screen-share, and Leave controls remain with the room. Click the **Friends** header
+to collapse/expand the tray list. Use the star beside a friend to favorite them.
+Order is online favorites, offline favorites, online non-favorites, then offline
+non-favorites, alphabetically within each group. Favorites apply in both windows;
+favorites and tray collapse state are saved per account on this device in
+`~/.config/wisp/friends.json` and are independent of the theme.
+
 Use **Rooms → New room** to create a private room you own. **Chat options → Room
 settings…** lets owners/admins invite friends, and lets owners grant or revoke
 admin access. Membership and permissions survive restarts. Jared owns Porch;

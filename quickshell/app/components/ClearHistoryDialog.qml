@@ -2,7 +2,7 @@ import QtQuick
 import QtQuick.Controls
 
 Dialog {
-  TrialControlStyle { theme: root.theme; control: root }
+  ThemeControlStyle { theme: root.theme; control: root }
   Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
   Binding on font.pixelSize { when: root.theme.terminal; value: root.theme.font.caption; restoreMode: Binding.RestoreBindingOrValue }
   id: root

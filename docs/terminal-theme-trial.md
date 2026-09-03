@@ -1,4 +1,12 @@
-# Local terminal-theme trial — not adopted
+# Terminal-theme trial — historical record
+
+**Adopted after user review.** Terminal is now the default for non-Omarchy desktop
+launches, with the original **Classic** theme available in **Settings → Appearance**.
+Both themes expose the same features and preserve chat/media state. The record
+below describes the earlier, isolated trial; its no-merge/no-push status and
+experimental naming are historical, not the current release policy. For the old
+appearance, use Settings rather than the historical full-UI rollback script,
+which would also remove subsequently added UI features such as the selector.
 
 ## Starting point and scope
 

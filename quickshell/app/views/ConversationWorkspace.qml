@@ -42,7 +42,7 @@ Rectangle {
     ChatButton { id: allButton; theme: root.theme; text: "All conversations ▾"; onClicked: allMenu.open() }
   }
   Menu {
-    TrialControlStyle { theme: root.theme; control: allMenu }
+    ThemeControlStyle { theme: root.theme; control: allMenu }
     Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
     Binding on font.pixelSize { when: root.theme.terminal; value: root.theme.font.caption; restoreMode: Binding.RestoreBindingOrValue }
     id: allMenu
@@ -53,7 +53,7 @@ Rectangle {
       model: root.bridge.conversations
       MenuItem {
         id: trialControl0
-        TrialControlStyle { theme: root.theme; control: trialControl0 }
+        ThemeControlStyle { theme: root.theme; control: trialControl0 }
         Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
         Binding on font.pixelSize { when: root.theme.terminal; value: root.theme.font.caption; restoreMode: Binding.RestoreBindingOrValue }
         required property var modelData
@@ -104,7 +104,7 @@ Rectangle {
     ChatButton { id: optionsButton; theme: root.theme; text: "Chat options ▾"; onClicked: optionsMenu.open() }
   }
   Menu {
-    TrialControlStyle { theme: root.theme; control: optionsMenu }
+    ThemeControlStyle { theme: root.theme; control: optionsMenu }
     Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
     Binding on font.pixelSize { when: root.theme.terminal; value: root.theme.font.caption; restoreMode: Binding.RestoreBindingOrValue }
     id: optionsMenu
@@ -114,20 +114,20 @@ Rectangle {
     x: root.width - width - root.theme.space(18); y: chatHeading.y + chatHeading.height
     MenuItem {
       id: trialControl1
-      TrialControlStyle { theme: root.theme; control: trialControl1 }
+      ThemeControlStyle { theme: root.theme; control: trialControl1 }
       Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
       Binding on font.pixelSize { when: root.theme.terminal; value: root.theme.font.caption; restoreMode: Binding.RestoreBindingOrValue }
        text: "Close conversation"; onTriggered: root.bridge.exitConversation(root.currentId) }
     MenuItem {
       id: trialControl2
-      TrialControlStyle { theme: root.theme; control: trialControl2 }
+      ThemeControlStyle { theme: root.theme; control: trialControl2 }
       Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
       Binding on font.pixelSize { when: root.theme.terminal; value: root.theme.font.caption; restoreMode: Binding.RestoreBindingOrValue }
        text: "Room settings…"; visible: !!(root.current && root.current.spot_id); height: visible ? implicitHeight : 0; onTriggered: roomManager.manage(root.currentId) }
     MenuSeparator {}
     MenuItem {
       id: trialControl3
-      TrialControlStyle { theme: root.theme; control: trialControl3 }
+      ThemeControlStyle { theme: root.theme; control: trialControl3 }
       Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
       Binding on font.pixelSize { when: root.theme.terminal; value: root.theme.font.caption; restoreMode: Binding.RestoreBindingOrValue }
        text: "Clear Chat History…"; onTriggered: confirmClear.confirm(root.currentId) }

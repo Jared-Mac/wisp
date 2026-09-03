@@ -13,13 +13,18 @@ Row {
 
   Rectangle {
     id: mutedIcon
+    activeFocusOnTab: true
+    Accessible.role: Accessible.Button
+    Accessible.name: root.muted ? "Unmute microphone" : "Mute microphone"
+    Keys.onSpacePressed: root.bridge.toggleMuted()
+    Keys.onReturnPressed: root.bridge.toggleMuted()
     width: root.theme.space(32)
     height: width
     radius: root.theme.cornerRadius
     color: root.muted
       ? root.theme.alpha(root.theme.warning, mutedMouse.containsMouse ? 0.3 : 0.18)
       : root.theme.alpha(root.theme.foreground, mutedMouse.containsMouse ? 0.12 : 0.055)
-    border.color: root.muted ? root.theme.alpha(root.theme.warning, 0.72) : "transparent"
+    border.color: activeFocus ? root.theme.focusBorder : root.muted ? root.theme.alpha(root.theme.warning, 0.72) : "transparent"
     border.width: 1
 
     Image {
@@ -68,13 +73,18 @@ Row {
 
   Rectangle {
     id: deafenedIcon
+    activeFocusOnTab: true
+    Accessible.role: Accessible.Button
+    Accessible.name: root.deafened ? "Undeafen" : "Deafen"
+    Keys.onSpacePressed: root.bridge.toggleDeafened()
+    Keys.onReturnPressed: root.bridge.toggleDeafened()
     width: root.theme.space(32)
     height: width
     radius: root.theme.cornerRadius
     color: root.deafened
       ? root.theme.alpha(root.theme.danger, deafenedMouse.containsMouse ? 0.32 : 0.2)
       : root.theme.alpha(root.theme.foreground, deafenedMouse.containsMouse ? 0.12 : 0.055)
-    border.color: root.deafened ? root.theme.alpha(root.theme.danger, 0.72) : "transparent"
+    border.color: activeFocus ? root.theme.focusBorder : root.deafened ? root.theme.alpha(root.theme.danger, 0.72) : "transparent"
     border.width: 1
 
     Image {

@@ -71,7 +71,7 @@ Rectangle {
           implicitWidth: root.theme.space(26); implicitHeight: root.theme.space(20)
           onClicked: messageMenu.open()
           Menu {
-            TrialControlStyle { theme: root.theme; control: messageMenu }
+            ThemeControlStyle { theme: root.theme; control: messageMenu }
             Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
             Binding on font.pixelSize { when: root.theme.terminal; value: root.theme.font.caption; restoreMode: Binding.RestoreBindingOrValue }
             id: messageMenu
@@ -79,13 +79,13 @@ Rectangle {
             palette.text: root.theme.foreground
             MenuItem {
               id: trialControl0
-              TrialControlStyle { theme: root.theme; control: trialControl0 }
+              ThemeControlStyle { theme: root.theme; control: trialControl0 }
               Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
               Binding on font.pixelSize { when: root.theme.terminal; value: root.theme.font.caption; restoreMode: Binding.RestoreBindingOrValue }
                text: message.isImage || message.isFile ? "Edit caption…" : "Edit message…"; onTriggered: root.beginEdit(message.modelData) }
             MenuItem {
               id: trialControl1
-              TrialControlStyle { theme: root.theme; control: trialControl1 }
+              ThemeControlStyle { theme: root.theme; control: trialControl1 }
               Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
               Binding on font.pixelSize { when: root.theme.terminal; value: root.theme.font.caption; restoreMode: Binding.RestoreBindingOrValue }
                text: "Delete message…"; onTriggered: { root.deletingId = String(message.modelData.id); deleteDialog.open() } }
@@ -191,7 +191,7 @@ Rectangle {
     color: root.theme.muted; font.pixelSize: root.theme.font.body
   }
   Dialog {
-    TrialControlStyle { theme: root.theme; control: editDialog }
+    ThemeControlStyle { theme: root.theme; control: editDialog }
     Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
     Binding on font.pixelSize { when: root.theme.terminal; value: root.theme.font.caption; restoreMode: Binding.RestoreBindingOrValue }
     id: editDialog
@@ -207,7 +207,7 @@ Rectangle {
       ScrollView {
         width: parent.width; height: root.theme.space(150)
         TextArea {
-          TrialControlStyle { theme: root.theme; control: editField }
+          ThemeControlStyle { theme: root.theme; control: editField }
           Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
           Binding on font.pixelSize { when: root.theme.terminal; value: root.theme.font.body; restoreMode: Binding.RestoreBindingOrValue }
           id: editField
@@ -236,7 +236,7 @@ Rectangle {
     }
   }
   Dialog {
-    TrialControlStyle { theme: root.theme; control: deleteDialog }
+    ThemeControlStyle { theme: root.theme; control: deleteDialog }
     Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
     Binding on font.pixelSize { when: root.theme.terminal; value: root.theme.font.caption; restoreMode: Binding.RestoreBindingOrValue }
     id: deleteDialog

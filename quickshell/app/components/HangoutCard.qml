@@ -22,6 +22,13 @@ Rectangle {
     return false
   }
 
+  Rectangle {
+    visible: root.theme.terminal && root.bridge.selfState.hangout_id === root.hangout.id
+    anchors { left: parent.left; top: parent.top; bottom: parent.bottom; margins: 1 }
+    width: root.theme.space(2)
+    color: root.theme.accent
+  }
+
   function hasActiveMember() {
     var members = hangout.members || []
     for (var i = 0; i < members.length; i++)
@@ -47,7 +54,7 @@ Rectangle {
     anchors.leftMargin: root.theme.spacing.lg
     anchors.verticalCenter: parent.verticalCenter
     spacing: root.theme.spacing.xs
-    width: root.theme.terminal ? Math.max(0, joinButton.x - x - root.theme.spacing.lg) : implicitWidth
+    Binding on width { when: root.theme.terminal; value: Math.max(0, joinButton.x - hangoutInfo.x - root.theme.spacing.lg); restoreMode: Binding.RestoreBindingOrValue }
 
     Row {
       spacing: root.theme.spacing.xs
@@ -56,13 +63,14 @@ Rectangle {
         model: root.hangout.members || []
 
         delegate: Row {
+          id: memberRow
           required property var modelData
           required property int index
           spacing: root.theme.spacing.xs
-          width: root.theme.terminal ? Math.max(0, (hangoutInfo.width - Math.max(0, (root.hangout.members || []).length - 1) * spacing) / Math.max(1, (root.hangout.members || []).length)) : implicitWidth
+          Binding on width { when: root.theme.terminal; value: Math.max(0, (hangoutInfo.width - Math.max(0, (root.hangout.members || []).length - 1) * memberRow.spacing) / Math.max(1, (root.hangout.members || []).length)); restoreMode: Binding.RestoreBindingOrValue }
 
           Text {
-            width: root.theme.terminal ? Math.max(0, parent.width - mutedIcon.width - deafenedIcon.width - parent.spacing * 2) : implicitWidth
+            Binding on width { when: root.theme.terminal; value: Math.max(0, memberRow.width - mutedIcon.width - deafenedIcon.width - memberRow.spacing * 2); restoreMode: Binding.RestoreBindingOrValue }
             elide: root.theme.terminal ? Text.ElideRight : Text.ElideNone
             anchors.verticalCenter: parent.verticalCenter
             text: (index > 0 ? " + " : "")
@@ -98,7 +106,7 @@ Rectangle {
       }
     }
     Text {
-      width: root.theme.terminal ? parent.width : implicitWidth
+      Binding on width { when: root.theme.terminal; value: hangoutInfo.width; restoreMode: Binding.RestoreBindingOrValue }
       elide: root.theme.terminal ? Text.ElideRight : Text.ElideNone
       text: root.hangout.label || "Room"
       color: root.theme.muted
@@ -121,7 +129,7 @@ Rectangle {
       id: joinText
       anchors.centerIn: parent
       text: root.bridge.selfState.hangout_id === root.hangout.id ? "HERE" : "JOIN"
-      color: "white"
+      color: root.theme.accentText
       font.family: root.theme.font.family
       font.pixelSize: root.theme.font.caption
       font.weight: Font.Bold

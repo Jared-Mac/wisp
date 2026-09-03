@@ -7,7 +7,7 @@ ShellRoot {
   id: test
   property bool failed: false
   readonly property string mode: Quickshell.env("WISP_CHAT_FIXTURE_MODE")
-  readonly property bool compactMode: mode === "panel" || mode === "panelmedia" || mode === "panelsettings"
+  readonly property bool compactMode: mode === "panel" || mode === "panelmedia" || mode === "panelsettings" || mode === "friends"
   property var popupTarget: null
   function check(condition, message) { if (!condition) { failed = true; console.error("CHAT_TEST_FAILED: " + message) } }
   function findFeed(item) { return findItem(item, "messageFeed") }
@@ -40,8 +40,14 @@ ShellRoot {
     }
     return null
   }
+  Wisp.WispAppearance {
+    id: themeAppearance; environment: Quickshell.env("WISP_TEST_ADAPTER") === "omarchy" ? "omarchy" : "desktop"
+    Component.onCompleted: if (Quickshell.env("WISP_TEST_PALETTE")) setPalette(Quickshell.env("WISP_TEST_PALETTE"))
+  }
+  Binding { target: theme; property: "profile"; value: themeAppearance.profile; when: test.mode === "themes" }
   Wisp.WispTheme {
     id: theme
+    appearanceController: themeAppearance
     Component.onCompleted: {
       if ("profile" in theme) theme.profile = Quickshell.env("WISP_TEST_ADAPTER") === "omarchy" ? "legacy" : Quickshell.env("WISP_TEST_THEME") || "legacy"
       if (Quickshell.env("WISP_TEST_ADAPTER") === "omarchy") {
@@ -188,8 +194,30 @@ ShellRoot {
     bridge.notificationMuted = true
     bridge.notificationVolume = 35
     bridge.notificationSoundPath = "file:///tmp/test-custom-sound.wav"
-    if (test.mode === "settings") window.contentItem.children[0].children[0].settingsOpen = true
+    if (test.mode === "settings" || test.mode === "themes") window.contentItem.children[0].children[0].settingsOpen = true
     if (test.mode === "panelsettings") compactContent.settingsOpen = true
+  }
+  Timer {
+    interval: 600; running: test.mode === "themes"
+    onTriggered: {
+      var classic = test.findItem(window.contentItem, "theme-legacy")
+      test.check(!!classic && classic.enabled, "Classic theme is available in Settings")
+      var before = bridge.sent.length
+      var draft = bridge.draftFor("porch")
+      if (classic) classic.clicked()
+      test.check(theme.profile === "legacy", "Settings selects Classic live")
+      test.check(bridge.sent.length === before && bridge.draftFor("porch") === draft, "theme switching does not send commands or alter drafts")
+    }
+  }
+  Timer {
+    interval: 900; running: test.mode === "themes"
+    onTriggered: {
+      var terminal = test.findItem(window.contentItem, "theme-terminal")
+      test.check(!!terminal && terminal.enabled, "Terminal remains available in Classic")
+      if (terminal) terminal.clicked()
+      test.check(theme.profile === "terminal", "Settings restores Terminal live")
+      test.check(bridge.draftFor("dm") === "", "chat state remains unchanged")
+    }
   }
   Timer {
     interval: 700; running: test.mode === "focus"
@@ -217,7 +245,7 @@ ShellRoot {
     }
   }
   Timer {
-    interval: 400; running: ["settings","panelsettings","preview","empty","transfer"].indexOf(test.mode) < 0
+    interval: 400; running: ["settings","themes","panelsettings","preview","empty","transfer"].indexOf(test.mode) < 0
     onTriggered: {
       var target = test.compactMode ? compactSurface : window.contentItem
       var area = test.findItem(target, "chatDropArea")
@@ -260,8 +288,41 @@ ShellRoot {
     }
   }
   Timer {
+    interval: 600; running: test.mode === "friends"
+    onTriggered: {
+      var star = test.findItem(compactSurface, "favorite-charlie")
+      var before = bridge.sent.length
+      test.check(!!star, "favorite action available in tray")
+      if (star) star.clicked()
+      test.check(bridge.sortedFriends[0].id === "charlie", "offline favorite precedes online non-favorite")
+      var collapse = test.findItem(compactSurface, "friends-collapse")
+      if (collapse) collapse.clicked()
+      test.check(bridge.friendPreferences.collapsed && !test.findItem(compactSurface, "favorite-jared"), "collapse hides rows")
+      if (collapse) collapse.clicked()
+      test.check(!!test.findItem(compactSurface, "favorite-jared"), "expand restores rows")
+      test.check(bridge.sent.length === before, "favorite and collapse do not join rooms or send commands")
+      var scroll = test.findItem(compactSurface, "dashboardScroll")
+      var audio = test.findItem(compactSurface, "globalAudioControls")
+      if (scroll && audio) {
+        var y = audio.mapToItem(compactSurface, 0, 0).y
+        scroll.contentY = scroll.contentHeight
+        test.check(audio.mapToItem(compactSurface, 0, 0).y === y, "audio controls stay pinned while scrolling")
+        scroll.contentY = 0
+      } else test.check(false, "scroll and global audio exist")
+    }
+  }
+  Timer {
     interval: 1200; running: true
     onTriggered: {
+      var surface = test.compactMode ? compactSurface : window.contentItem
+      if (test.mode !== "preview") {
+        var audio = test.findItem(surface, "globalAudioControls")
+        test.check(!!audio && audio.width > 0, "mute/deafen available with or without a room and in settings")
+        if (audio) {
+          var position = audio.mapToItem(surface, 0, 0)
+          test.check(position.y >= 0 && position.y + audio.height < surface.height, "audio controls inside window")
+        }
+      }
       test.check(window.width === theme.space(Quickshell.env("WISP_TEST_CONSTRAINED") === "1" ? 840 : 1180), "app width")
       test.check(window.height === theme.space(Quickshell.env("WISP_TEST_CONSTRAINED") === "1" ? 700 : 900), "app height")
       var path = Quickshell.env("WISP_CHAT_SCREENSHOT")

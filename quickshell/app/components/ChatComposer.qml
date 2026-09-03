@@ -53,7 +53,7 @@ Column {
             elide: Text.ElideMiddle; color: root.theme.foreground; font.pixelSize: root.theme.font.caption
           }
           CheckBox {
-            TrialControlStyle { theme: root.theme; control: keepBox }
+            ThemeControlStyle { theme: root.theme; control: keepBox }
             Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
             Binding on font.pixelSize { when: root.theme.terminal; value: root.theme.font.caption; restoreMode: Binding.RestoreBindingOrValue }
             id: keepBox
@@ -79,7 +79,7 @@ Column {
       anchors.fill: parent
       anchors.margins: root.theme.spacing.lg
       TextArea {
-        TrialControlStyle { theme: root.theme; control: editor }
+        ThemeControlStyle { theme: root.theme; control: editor }
         id: editor
         property bool wispTextEditor: true
         text: root.bridge.draftFor(root.conversationId)

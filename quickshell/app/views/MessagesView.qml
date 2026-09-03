@@ -19,6 +19,7 @@ Column {
       text: root.bridge.activeConversation ? "MESSAGES · " + root.conversationLabel(root.bridge.activeConversation) : "MESSAGES"
       color: root.theme.muted; font.family: root.theme.font.family
       font.pixelSize: root.theme.font.caption; font.bold: true
+      font.letterSpacing: root.theme.terminal ? 1 : 0
     }
     ChatButton {
       id: chatOptions
@@ -28,20 +29,20 @@ Column {
       theme: root.theme; text: "···"; implicitWidth: root.theme.space(28)
       onClicked: optionsMenu.open()
       Menu {
-        TrialControlStyle { theme: root.theme; control: optionsMenu }
+        ThemeControlStyle { theme: root.theme; control: optionsMenu }
         Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
         Binding on font.pixelSize { when: root.theme.terminal; value: root.theme.font.caption; restoreMode: Binding.RestoreBindingOrValue }
         id: optionsMenu
         palette.window: root.theme.surface; palette.text: root.theme.foreground
         MenuItem {
           id: trialControl0
-          TrialControlStyle { theme: root.theme; control: trialControl0 }
+          ThemeControlStyle { theme: root.theme; control: trialControl0 }
           Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
           Binding on font.pixelSize { when: root.theme.terminal; value: root.theme.font.caption; restoreMode: Binding.RestoreBindingOrValue }
            text: "Clear Chat History…"; onTriggered: clearDialog.confirm(root.bridge.activeConversationId) }
         MenuItem {
           id: trialControl1
-          TrialControlStyle { theme: root.theme; control: trialControl1 }
+          ThemeControlStyle { theme: root.theme; control: trialControl1 }
           Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
           Binding on font.pixelSize { when: root.theme.terminal; value: root.theme.font.caption; restoreMode: Binding.RestoreBindingOrValue }
            text: "Room settings…"; visible: !!(root.bridge.activeConversation && root.bridge.activeConversation.spot_id); height: visible ? implicitHeight : 0; onTriggered: roomManager.manage(root.bridge.activeConversationId) }

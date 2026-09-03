@@ -35,7 +35,7 @@ Column {
        text: "Volume"; color: root.theme.foreground; anchors.verticalCenter: parent.verticalCenter }
     Slider {
       id: trialControl0
-      TrialControlStyle { theme: root.theme; control: trialControl0 }
+      ThemeControlStyle { theme: root.theme; control: trialControl0 }
       width: Math.min(root.width - 120, root.theme.space(300))
       from: 0; to: 100; stepSize: 1
       value: root.bridge.notificationVolume

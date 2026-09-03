@@ -2,11 +2,17 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 import "ChatLogic.js" as ChatLogic
+import "FriendLogic.js" as FriendLogic
 
 Item {
   id: root
 
   property string clientName: "quickshell"
+  readonly property alias friendPreferences: friendPreferences
+  WispFriendPreferences {
+    id: friendPreferences
+    account: String(root.selfState.id || root.configuredProfile || root.selfState.display_name || "")
+  }
   // Only the standalone desktop host plays sounds, never its tray adapter.
   property bool notificationSoundsEnabled: false
   property bool appFocused: false
@@ -136,6 +142,7 @@ Item {
 
   readonly property var selfState: snapshot["self"] || ({})
   readonly property var friends: snapshot.friends || []
+  readonly property var sortedFriends: FriendLogic.sorted(friends, friendPreferences.favorites)
   readonly property var hangouts: snapshot.hangouts || []
   readonly property var knocks: snapshot.knocks || []
   readonly property var conversations: snapshot.conversations || []

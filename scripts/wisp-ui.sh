@@ -2,8 +2,9 @@
 set -euo pipefail
 
 # Appearance launch metadata only. Never infer an integration from a user name
-# or from "standalone". Omarchy takes precedence over the experimental opt-in.
-export WISP_APPEARANCE_ENVIRONMENT=unknown
+# or from user accounts. Omarchy keeps its host appearance; other desktop
+# launches default to Terminal, with Classic available in Settings.
+export WISP_APPEARANCE_ENVIRONMENT=desktop
 if [[ ${WISP_INTEGRATION:-} == omarchy || -n ${OMARCHY_PATH:-} \
     || -d ${XDG_CONFIG_HOME:-$HOME/.config}/omarchy \
     || -d $HOME/.local/share/omarchy ]] \

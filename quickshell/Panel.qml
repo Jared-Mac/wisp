@@ -20,9 +20,12 @@ Panel {
     Qt.callLater(function() { content.forceActiveFocus() })
   } else content.resetNavigation()
 
+  WispAppearance { id: appearance; environment: "omarchy" }
+
   WispTheme {
     id: pluginTheme
     profile: "legacy"
+    appearanceController: appearance
     foreground: Color.foreground
     background: Color.popups.background
     surface: Color.popups.background

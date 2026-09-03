@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls
 
 Item {
   id: root
@@ -6,6 +7,7 @@ Item {
   required property var bridge
   required property var theme
   signal selected()
+  readonly property bool favorite: root.bridge.friendPreferences.isFavorite(root.friend)
 
   readonly property bool canRequest: root.friend.online &&
     (root.friend.presence === "open" || root.friend.presence === "knock")
@@ -20,7 +22,7 @@ Item {
 
   PresenceDot {
     id: dot
-    anchors.left: parent.left
+    anchors.left: favoriteButton.right
     anchors.leftMargin: root.theme.spacing.sm
     anchors.verticalCenter: parent.verticalCenter
     presence: root.friend.online ? String(root.friend.presence) : "closed"
@@ -31,20 +33,21 @@ Item {
     id: friendName
     anchors.left: dot.right
     anchors.leftMargin: root.theme.spacing.md
-    anchors.verticalCenter: parent.verticalCenter
+    y: root.theme.space(5)
     text: String(root.friend.display_name || "")
     color: root.friend.online ? root.theme.foreground : root.theme.muted
     font.family: root.theme.font.family
     font.pixelSize: root.theme.font.body
-    width: root.theme.terminal ? Math.max(0, statusText.x - x - root.theme.spacing.md) : implicitWidth
-    elide: root.theme.terminal ? Text.ElideRight : Text.ElideNone
+    width: Math.max(0, messageButton.x - x - root.theme.spacing.md)
+    elide: Text.ElideRight
   }
 
   Text {
     id: statusText
-    anchors.right: parent.right
-    anchors.rightMargin: root.theme.terminal ? messageButton.width + root.theme.spacing.lg * 2 : root.theme.space(76)
-    anchors.verticalCenter: parent.verticalCenter
+    anchors.left: friendName.left
+    anchors.top: friendName.bottom
+    width: friendName.width
+    elide: Text.ElideRight
     text: root.friend.online ? String(root.friend.presence) : "offline"
     color: root.theme.muted
     font.family: root.theme.font.family
@@ -59,6 +62,28 @@ Item {
     onClicked: if (root.canRequest) {
       root.bridge.joinFriend(root.friend.display_name)
       root.selected()
+    }
+  }
+
+  Button {
+    id: favoriteButton
+    objectName: "favorite-" + String(root.friend.id || root.friend.display_name)
+    anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
+    width: root.theme.space(28); height: root.theme.space(34)
+    Accessible.name: (root.favorite ? "Unfavorite " : "Favorite ") + root.friend.display_name
+    ToolTip.visible: hovered
+    ToolTip.text: Accessible.name
+    onClicked: root.bridge.friendPreferences.toggleFavorite(root.friend)
+    background: Rectangle {
+      radius: root.theme.cornerRadius
+      color: favoriteButton.hovered ? root.theme.alpha(root.theme.accent, 0.12) : "transparent"
+      border.width: favoriteButton.visualFocus ? 1 : 0; border.color: root.theme.focusBorder
+    }
+    contentItem: Text {
+      text: root.favorite ? "★" : "☆"
+      color: root.favorite ? root.theme.warning : root.theme.muted
+      font.pixelSize: root.theme.space(17)
+      horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
     }
   }
 
