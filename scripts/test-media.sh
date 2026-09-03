@@ -108,6 +108,22 @@ for _ in $(seq 1 200); do
 done
 [[ -S "$test_dir/wispd.sock" ]]
 
+tyler_ready_json=""
+for _ in $(seq 1 200); do
+  tyler_ready_json=$(target/debug/wispctl --socket "$test_dir/wispd.sock" status)
+  if jq -e 'any(.friends[]; .display_name == "Tyler" and .online == true)' \
+    <<<"$tyler_ready_json" >/dev/null; then
+    break
+  fi
+  sleep 0.1
+done
+jq -e 'any(.friends[]; .display_name == "Tyler" and .online == true)' \
+  <<<"$tyler_ready_json" >/dev/null || {
+  echo "Tyler simulator did not become ready" >&2
+  jq '.friends' <<<"$tyler_ready_json" >&2
+  exit 1
+}
+
 target/debug/wispctl --socket "$test_dir/wispd.sock" join Tyler
 status_json=""
 for _ in $(seq 1 200); do
