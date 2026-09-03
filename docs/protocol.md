@@ -72,8 +72,10 @@ seconds unless renewed and is also released on room changes or media reconnect.
 Snapshots also contain authorized `conversations`, recent `messages`, saved
 `spots`, the current user's `devices`, and an optional newly created
 `last_invite`. Conversation summaries include type, members, latest message,
-and unread count. Presentation clients still receive complete snapshots rather
-than maintaining a second local message database.
+unread count, and an optional `spot_id`. A Spot-backed conversation is durable
+even though each associated media room is ephemeral. Presentation clients
+still receive complete snapshots rather than maintaining a second local
+message database.
 
 The server control API uses invite-enrolled device credentials to mint 12-hour
 sessions. Every authenticated HTTP and WebSocket request carries its session as

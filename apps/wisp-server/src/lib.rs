@@ -975,6 +975,9 @@ async fn join_spot(
     let spot_id: String = spot.get("id");
     let spot_name: String = spot.get("name");
     let mut tx = state.pool.begin().await.map_err(ApiError::internal)?;
+    ensure_spot_conversation(&mut tx, &spot_id, &spot_name)
+        .await
+        .map_err(ApiError::internal)?;
     let previous_hangout = active_hangout_for_tx(&mut tx, self_id).await?;
     leave_active_in_transaction(&mut tx, self_id).await?;
     let active = sqlx::query_scalar::<_, String>(
@@ -999,7 +1002,6 @@ async fn join_spot(
         .execute(&mut *tx)
         .await
         .map_err(ApiError::internal)?;
-        create_hangout_conversation(&mut tx, id, Some(&spot_name)).await?;
         id
     };
     add_member(&mut tx, hangout_id, self_id).await?;
@@ -1267,6 +1269,7 @@ async fn seed_development_users(pool: &SqlitePool) -> anyhow::Result<()> {
         .bind(Utc::now().to_rfc3339())
         .execute(&mut *tx)
         .await?;
+    ensure_spot_conversation(&mut tx, PORCH_ID, "Porch").await?;
     tx.commit().await?;
     info!("development profiles ready");
     Ok(())
@@ -1275,7 +1278,7 @@ async fn seed_development_users(pool: &SqlitePool) -> anyhow::Result<()> {
 async fn cleanup_expired_messages(pool: &SqlitePool) -> anyhow::Result<()> {
     let cutoff = (Utc::now() - ChronoDuration::hours(HANGOUT_MESSAGE_RETENTION_HOURS)).to_rfc3339();
     sqlx::query(
-        "DELETE FROM messages WHERE created_at < ? AND conversation_id IN (SELECT id FROM conversations WHERE kind = 'hangout')",
+        "DELETE FROM messages WHERE created_at < ? AND conversation_id IN (SELECT id FROM conversations WHERE kind = 'hangout' AND spot_id IS NULL)",
     )
     .bind(cutoff)
     .execute(pool)
@@ -1577,7 +1580,7 @@ async fn load_conversation(
     id: &str,
 ) -> Result<ConversationView, ApiError> {
     ensure_conversation_member(pool, id, user_id).await?;
-    let row = sqlx::query("SELECT kind, label FROM conversations WHERE id = ?")
+    let row = sqlx::query("SELECT kind, label, spot_id FROM conversations WHERE id = ?")
         .bind(id)
         .fetch_optional(pool)
         .await
@@ -1629,6 +1632,7 @@ async fn load_conversation(
     .await
     .map_err(ApiError::internal)?;
     let stored_label: String = row.get("label");
+    let spot_id: Option<String> = row.get("spot_id");
     let label = if kind == ConversationKind::Direct {
         members
             .iter()
@@ -1641,6 +1645,7 @@ async fn load_conversation(
         id: id.into(),
         kind,
         label,
+        spot_id,
         members,
         last_message,
         unread_count: u64::try_from(unread_count).unwrap_or(0),
@@ -1825,6 +1830,32 @@ async fn create_hangout_conversation(
     Ok(())
 }
 
+async fn ensure_spot_conversation(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    spot_id: &str,
+    label: &str,
+) -> anyhow::Result<String> {
+    let conversation_id = format!("spot:{spot_id}");
+    let now = Utc::now().to_rfc3339();
+    sqlx::query(
+        "INSERT OR IGNORE INTO conversations(id, kind, label, spot_id, created_at) VALUES (?, 'hangout', ?, ?, ?)",
+    )
+    .bind(&conversation_id)
+    .bind(label)
+    .bind(spot_id)
+    .bind(&now)
+    .execute(&mut **tx)
+    .await?;
+    sqlx::query(
+        "INSERT OR IGNORE INTO conversation_members(conversation_id, user_id, joined_at) SELECT ?, user_id, ? FROM circle_members",
+    )
+    .bind(&conversation_id)
+    .bind(&now)
+    .execute(&mut **tx)
+    .await?;
+    Ok(conversation_id)
+}
+
 async fn end_if_empty(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     hangout_id: HangoutId,
@@ -1925,6 +1956,13 @@ mod tests {
         assert!(conversations.iter().any(|conversation| {
             conversation.kind == ConversationKind::Circle && conversation.label == "Friends"
         }));
+        let porch = conversations
+            .iter()
+            .find(|conversation| conversation.label == "Porch")
+            .expect("Porch conversation");
+        assert_eq!(porch.id, format!("spot:{PORCH_ID}"));
+        assert_eq!(porch.spot_id.as_deref(), Some(PORCH_ID));
+        assert_eq!(porch.members.len(), 4);
         let spots = load_spots(&state.pool).await.unwrap();
         assert_eq!(spots.len(), 1);
         assert_eq!(spots[0].name, "Porch");
@@ -1991,6 +2029,72 @@ mod tests {
                 .unwrap(),
             id
         );
+    }
+
+    #[tokio::test]
+    async fn spot_messages_survive_transient_hangout_retention() {
+        let state = AppState::new(test_config()).await.unwrap();
+        let old = "2000-01-01T00:00:00Z";
+        let jared = find_user(&state.pool, "Jared").await.unwrap();
+        let transient_hangout = Uuid::new_v4();
+        let transient_conversation = format!("hangout:{transient_hangout}");
+
+        sqlx::query(
+            "INSERT INTO hangouts(id, livekit_room, created_at, ended_at) VALUES (?, ?, ?, ?)",
+        )
+        .bind(transient_hangout.to_string())
+        .bind(format!("wisp-{transient_hangout}"))
+        .bind(old)
+        .bind(old)
+        .execute(&state.pool)
+        .await
+        .unwrap();
+        sqlx::query("INSERT INTO conversations(id, kind, label, hangout_id, created_at) VALUES (?, 'hangout', 'Old room', ?, ?)")
+            .bind(&transient_conversation)
+            .bind(transient_hangout.to_string())
+            .bind(old)
+            .execute(&state.pool)
+            .await
+            .unwrap();
+        for (id, conversation_id, payload) in [
+            (
+                Uuid::new_v4().to_string(),
+                format!("spot:{PORCH_ID}"),
+                "persistent",
+            ),
+            (
+                Uuid::new_v4().to_string(),
+                transient_conversation.clone(),
+                "temporary",
+            ),
+        ] {
+            sqlx::query("INSERT INTO messages(id, conversation_id, sender_id, created_at, content_type, payload, encryption_version) VALUES (?, ?, ?, ?, 'text/plain', ?, 0)")
+                .bind(id)
+                .bind(conversation_id)
+                .bind(jared.id.to_string())
+                .bind(old)
+                .bind(payload)
+                .execute(&state.pool)
+                .await
+                .unwrap();
+        }
+
+        cleanup_expired_messages(&state.pool).await.unwrap();
+
+        let porch_messages: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM messages WHERE conversation_id = ?")
+                .bind(format!("spot:{PORCH_ID}"))
+                .fetch_one(&state.pool)
+                .await
+                .unwrap();
+        let transient_messages: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM messages WHERE conversation_id = ?")
+                .bind(transient_conversation)
+                .fetch_one(&state.pool)
+                .await
+                .unwrap();
+        assert_eq!(porch_messages, 1);
+        assert_eq!(transient_messages, 0);
     }
 
     #[tokio::test]

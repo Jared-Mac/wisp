@@ -170,14 +170,56 @@ jq -e --arg id "$porch_hangout" '
   (.spots[] | select(.name == "Porch") | .active_hangout_id == $id) and
   (.hangouts[] | select(.id == $id) | .label == "Porch")
 ' <<<"$jared_snapshot" >/dev/null
-hangout_conversation=$(jq -er --arg id "$porch_hangout" \
-  '.conversations[] | select(.kind == "hangout" and (.id | contains($id))) | .id' \
+porch_conversation=$(jq -er \
+  '.conversations[] | select(.label == "Porch" and .spot_id != null) | .id' \
   <<<"$jared_snapshot")
-post_json /v1/messages "$(jq -cn --arg id "$hangout_conversation" \
-  '{conversation_id:$id,content_type:"text/plain",payload:"temporary porch message",encryption_version:0}')" \
+jq -e --arg id "$porch_conversation" '
+  ([.conversations[] | select(.label == "Porch")] | length) == 1 and
+  (.conversations[] | select(.id == $id) | .kind == "hangout")
+' <<<"$jared_snapshot" >/dev/null
+post_json /v1/messages "$(jq -cn --arg id "$porch_conversation" \
+  '{conversation_id:$id,content_type:"text/plain",payload:"persistent porch message",encryption_version:0}')" \
   "$jared_token" >/dev/null
 
-sqlite3 "$database" "UPDATE messages SET created_at='2000-01-01T00:00:00Z' WHERE payload LIKE '%temporary porch message%';"
+sqlite3 "$database" <<'SQL'
+UPDATE messages
+SET created_at = '2000-01-01T00:00:00Z'
+WHERE payload = 'persistent porch message';
+INSERT INTO hangouts(id, livekit_room, created_at, ended_at)
+VALUES (
+  '00000000-0000-4000-8000-000000000099',
+  'wisp-retention-test',
+  '2000-01-01T00:00:00Z',
+  '2000-01-01T00:01:00Z'
+);
+INSERT INTO conversations(id, kind, label, hangout_id, created_at)
+VALUES (
+  'hangout:00000000-0000-4000-8000-000000000099',
+  'hangout',
+  'Old room',
+  '00000000-0000-4000-8000-000000000099',
+  '2000-01-01T00:00:00Z'
+);
+INSERT INTO conversation_members(conversation_id, user_id, joined_at)
+VALUES (
+  'hangout:00000000-0000-4000-8000-000000000099',
+  '00000000-0000-4000-8000-000000000001',
+  '2000-01-01T00:00:00Z'
+);
+INSERT INTO messages(
+  id, conversation_id, sender_id, created_at, content_type, payload,
+  encryption_version
+)
+VALUES (
+  '00000000-0000-4000-8000-000000000098',
+  'hangout:00000000-0000-4000-8000-000000000099',
+  '00000000-0000-4000-8000-000000000001',
+  '2000-01-01T00:00:00Z',
+  'text/plain',
+  'temporary room message',
+  0
+);
+SQL
 circle_conversation=$(jq -er '.conversations[] | select(.kind == "circle") | .id' \
   <<<"$jared_snapshot")
 (
@@ -212,10 +254,27 @@ curl --silent --fail -H "authorization: Bearer $tyler_token" \
   --get --data-urlencode "conversation_id=$conversation_id" "$server_url/v1/messages" \
   | jq -e 'length == 1 and .[0].payload == "offline hello"' >/dev/null
 curl --silent --fail -H "authorization: Bearer $jared_token" \
-  --get --data-urlencode "conversation_id=$hangout_conversation" "$server_url/v1/messages" \
-  | jq -e 'length == 0' >/dev/null
+  --get --data-urlencode "conversation_id=$porch_conversation" "$server_url/v1/messages" \
+  | jq -e 'length == 1 and .[0].payload == "persistent porch message"' >/dev/null
+curl --silent --fail -H "authorization: Bearer $jared_token" \
+  --get --data-urlencode "conversation_id=hangout:00000000-0000-4000-8000-000000000099" \
+  "$server_url/v1/messages" | jq -e 'length == 0' >/dev/null
 curl --silent --fail -H "authorization: Bearer $jared_token" "$server_url/v1/snapshot" \
-  | jq -e '(.spots[] | select(.name == "Porch") | .active_hangout_id == null) and ([.hangouts[].label] | index("Porch") == null)' >/dev/null
+  | jq -e --arg conversation "$porch_conversation" '
+      (.spots[] | select(.name == "Porch") | .active_hangout_id == null) and
+      ([.hangouts[].label] | index("Porch") == null) and
+      ([.conversations[] | select(.label == "Porch")] | length) == 1 and
+      (.conversations[] | select(.id == $conversation) | .spot_id != null)
+    ' >/dev/null
+
+porch_rejoin=$(post_json /v1/spots/join '{"spot_id":"Porch"}' "$jared_token")
+jq -e --arg previous "$porch_hangout" '.hangout_id != $previous' <<<"$porch_rejoin" >/dev/null
+curl --silent --fail -H "authorization: Bearer $jared_token" "$server_url/v1/snapshot" \
+  | jq -e --arg conversation "$porch_conversation" '
+      ([.conversations[] | select(.label == "Porch")] | length) == 1 and
+      (.conversations[] | select(.id == $conversation) |
+        .last_message.payload == "persistent porch message")
+    ' >/dev/null
 
 curl --silent --fail -X DELETE -H "authorization: Bearer $tyler_token" \
   "$server_url/v1/devices/$tyler_device_id" >/dev/null
@@ -224,7 +283,7 @@ if new_session "$tyler_device_id" "$tyler_device_token" >/dev/null 2>&1; then
   exit 1
 fi
 
-if rg 'offline hello|temporary porch message' "$test_dir/server.log" >/dev/null; then
+if rg 'offline hello|persistent porch message|temporary room message' "$test_dir/server.log" >/dev/null; then
   echo "message content appeared in normal server logs" >&2
   exit 1
 fi

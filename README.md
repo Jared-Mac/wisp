@@ -156,11 +156,12 @@ host setup, CachyOS instructions, ports, test steps, and security limitations.
 
 ## Messages, Porch, and devices
 
-The app includes direct messages, the small-circle timeline, and the current
-hangout timeline. Messages are committed to SQLite before acknowledgement,
-missed messages synchronize after reconnect, unread cursors are per user, and
-hangout messages expire after 24 hours. **Porch** is a saved meeting spot: it
-appears in NOW only while occupied and reuses no permanent media room.
+The app includes direct messages, the small-circle timeline, persistent Spot
+chats, and the current ad-hoc room timeline. Messages are committed to SQLite
+before acknowledgement, missed messages synchronize after reconnect, and
+unread cursors are per user. Ad-hoc room messages expire after 24 hours.
+**Porch** keeps one durable chat while its voice/video room exists only when
+occupied and is recreated for a later visit.
 
 Friends can open a direct conversation from a friend row. Equivalent CLI
 operations are useful for diagnostics:

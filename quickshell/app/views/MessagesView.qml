@@ -12,8 +12,9 @@ Column {
     return label === "Hangout" ? "Room" : label
   }
 
-  function conversationKindLabel(kind) {
-    var value = String(kind || "").replace("_", " ")
+  function conversationKindLabel(conversation) {
+    if (conversation && conversation.spot_id) return "persistent spot"
+    var value = String((conversation && conversation.kind) || "").replace("_", " ")
     return value === "hangout" ? "room" : value
   }
 
@@ -79,7 +80,7 @@ Column {
           text: modelData.last_message
             ? String(modelData.last_message.sender.display_name) + ": "
               + String(modelData.last_message.payload || "")
-            : root.conversationKindLabel(modelData.kind)
+            : root.conversationKindLabel(modelData)
           color: root.theme.muted
           font.family: root.theme.font.family
           font.pixelSize: root.theme.font.caption

@@ -65,9 +65,10 @@ Conversations are deliberately flat: direct, circle, and current hangout. The
 server verifies membership on every read/write, inserts a message and advances
 the sender's read cursor in one transaction, and acknowledges only after that
 transaction commits. Per-user cursors produce unread counts, while a full
-snapshot supplies missed messages after reconnect. Direct and circle history
-is durable; hangout history is deleted after 24 hours. Porch is a durable Spot
-record whose ephemeral hangout exists only while occupied.
+snapshot supplies missed messages after reconnect. Direct, circle, and Spot
+history is durable; ad-hoc hangout history is deleted after 24 hours. Porch is
+a durable Spot record with one persistent conversation, while each media room
+exists only for the duration of an occupied visit.
 
 Device-authenticated LiveKit connections require a shared private-alpha media
 key. The key configures LiveKit's built-in AES-GCM E2EE manager in each client

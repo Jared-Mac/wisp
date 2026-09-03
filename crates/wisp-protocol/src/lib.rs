@@ -397,6 +397,8 @@ pub struct ConversationView {
     pub id: String,
     pub kind: ConversationKind,
     pub label: String,
+    #[serde(default)]
+    pub spot_id: Option<String>,
     pub members: Vec<UserSummary>,
     #[serde(default)]
     pub last_message: Option<Box<Message>>,
