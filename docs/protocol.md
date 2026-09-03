@@ -21,14 +21,17 @@ Snapshots are complete and events are ordered by `seq`:
 
 Supported commands are `hello`, `status`, `set_presence`, `join_friend`,
 `join_hangout`, `leave`, `set_muted`, `toggle_muted`, `set_deafened`,
-`toggle_deafened`, `respond_knock`, `open_surface`, `close_surface`, `share`,
-`refresh_audio_devices`, `set_input_device`, `set_output_device`, and
-`set_audio_preset`, `set_push_to_talk`, `set_push_to_talk_shortcut`,
-`push_to_talk_press`, and `push_to_talk_release`. Device commands take a stable device `id`; the preset is
-`natural`, `clear`, or `studio`. Repeating `push_to_talk_press` renews the
-daemon-owned lease without emitting another state event. Invalid versions,
-JSON, or commands return a structured error and do not terminate the IPC
-connection.
+`toggle_deafened`, `respond_knock`, `share`, `camera`, `watch_video`,
+`refresh_audio_devices`, `set_input_device`, `set_output_device`,
+`set_audio_preset`, `refresh_video_devices`, `set_camera_device`,
+`set_video_quality`, `set_video_codec`, `set_push_to_talk`,
+`set_push_to_talk_shortcut`, `push_to_talk_press`, and
+`push_to_talk_release`. The legacy `open_surface` and `close_surface` commands
+target the first available video publication. Device commands take a stable
+device `id`; audio presets are `natural`, `clear`, or `studio`. Repeating
+`push_to_talk_press` renews the daemon-owned lease without emitting another
+state event. Invalid versions, JSON, or commands return a structured error and
+do not terminate the IPC connection.
 
 `respond_knock` takes a `knock_id` and a response of `accept` or `later`.
 Pending incoming knocks are included in the snapshot's `knocks` array with the
@@ -36,14 +39,20 @@ sender and expiration time. Joining a friend in Knock presence returns a
 `knock_sent` result instead of treating the request as an error.
 
 The snapshot's media state includes `remote_audio_participants`,
-`remote_video_participants`, receive/render counters, native-surface state, and
-optional `error_code`/`error` fields. A remote video subscription makes Watch
-available but does not open the native surface. Error
-codes are stable machine-readable categories; `error` remains suitable for
-direct display. Its nested `audio` object contains input/output inventories,
-selected device IDs, the processing preset, and an integer `input_level` from
-0–100. While a call is active, `wispd` detects device changes, switches to an
-available fallback, and restores the preferred device if it returns.
+`remote_video_participants`, per-track `remote_videos`, receive/render counters,
+native-surface state, and optional `error_code`/`error` fields. A remote video
+publication makes Watch available but remains unsubscribed until requested.
+Each remote screen/camera entry reports its target, MIME type, simulcast
+capability, subscription, requested layer, dimensions, and frame counters. The
+nested `camera` object contains capture devices, selection, publication state,
+dimensions, and recoverable errors. The nested `video` object contains the
+publishing quality, codec, discovered encoder backends, and whether hardware
+acceleration is actually active. Error codes are stable machine-readable
+categories; `error` remains suitable for direct display. The nested `audio`
+object contains input/output inventories, selected device IDs, the processing
+preset, and an integer `input_level` from 0–100. While a call is active, `wispd`
+detects device changes, switches to an available fallback, and restores the
+preferred device if it returns.
 
 The self state contains `push_to_talk.enabled`, `push_to_talk.active`, the
 optional global `shortcut`, its `shortcut_backend`, and any descriptions in

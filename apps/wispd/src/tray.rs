@@ -10,15 +10,31 @@ pub enum TrayAction {
     ToggleMuted,
     ToggleDeafened,
     ToggleShare,
+    ToggleCamera,
     SetAnchor(&'static str),
     Exit,
 }
 
 pub(super) struct WispTray {
     actions: mpsc::UnboundedSender<TrayAction>,
-    muted: bool,
-    deafened: bool,
+    state: TrayState,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(super) struct TrayState {
+    audio: AudioState,
     sharing: bool,
+    camera: bool,
+}
+
+impl TrayState {
+    pub(super) fn new(audio: (bool, bool), video: (bool, bool)) -> Self {
+        Self {
+            audio: AudioState::from_flags(audio.0, audio.1),
+            sharing: video.0,
+            camera: video.1,
+        }
+    }
 }
 
 impl WispTray {
@@ -26,19 +42,18 @@ impl WispTray {
         let _ = self.actions.send(action);
     }
 
-    pub(super) fn set_state(&mut self, muted: bool, deafened: bool, sharing: bool) {
-        self.muted = muted;
-        self.deafened = deafened;
-        self.sharing = sharing;
+    pub(super) fn set_state(&mut self, state: TrayState) {
+        self.state = state;
     }
 
     fn audio_state(&self) -> AudioState {
-        AudioState::from_flags(self.muted, self.deafened)
+        self.state.audio
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 enum AudioState {
+    #[default]
     Ready,
     Muted,
     MutedAndDeafened,
@@ -60,6 +75,14 @@ impl AudioState {
             Self::MutedAndDeafened => "Microphone muted and deafened",
         }
     }
+
+    fn muted(self) -> bool {
+        self != Self::Ready
+    }
+
+    fn deafened(self) -> bool {
+        self == Self::MutedAndDeafened
+    }
 }
 
 impl ksni::Tray for WispTray {
@@ -72,11 +95,20 @@ impl ksni::Tray for WispTray {
     }
 
     fn title(&self) -> String {
-        match (self.sharing, self.audio_state()) {
-            (false, AudioState::Ready) => "Wisp".into(),
-            (true, AudioState::Ready) => "Wisp · Sharing screen".into(),
-            (false, state) => format!("Wisp · {}", state.label()),
-            (true, state) => format!("Wisp · Sharing screen · {}", state.label()),
+        let mut states = Vec::new();
+        if self.state.sharing {
+            states.push("Sharing screen");
+        }
+        if self.state.camera {
+            states.push("Camera on");
+        }
+        if self.audio_state() != AudioState::Ready {
+            states.push(self.audio_state().label());
+        }
+        if states.is_empty() {
+            "Wisp".into()
+        } else {
+            format!("Wisp · {}", states.join(" · "))
         }
     }
 
@@ -89,7 +121,11 @@ impl ksni::Tray for WispTray {
     }
 
     fn icon_pixmap(&self) -> Vec<ksni::Icon> {
-        vec![waveform_icon(32, self.audio_state(), self.sharing)]
+        vec![waveform_icon(
+            32,
+            self.audio_state(),
+            self.state.sharing || self.state.camera,
+        )]
     }
 
     fn tool_tip(&self) -> ToolTip {
@@ -97,11 +133,7 @@ impl ksni::Tray for WispTray {
             icon_name: String::new(),
             icon_pixmap: self.icon_pixmap(),
             title: "Wisp".into(),
-            description: if self.sharing {
-                format!("Sharing screen · {}", self.audio_state().label())
-            } else {
-                self.audio_state().label().into()
-            },
+            description: self.title().trim_start_matches("Wisp · ").into(),
         }
     }
 
@@ -127,19 +159,19 @@ impl ksni::Tray for WispTray {
         };
 
         let muted = CheckmarkItem {
-            label: if self.deafened {
+            label: if self.audio_state().deafened() {
                 "Unmute microphone and undeafen".into()
             } else {
                 "Microphone muted".into()
             },
-            checked: self.muted,
+            checked: self.audio_state().muted(),
             icon_name: "microphone-sensitivity-muted".into(),
             activate: Box::new(|tray: &mut Self| tray.send(TrayAction::ToggleMuted)),
             ..Default::default()
         };
         let deafened = CheckmarkItem {
             label: "Deafened".into(),
-            checked: self.deafened,
+            checked: self.audio_state().deafened(),
             icon_name: "audio-volume-muted".into(),
             activate: Box::new(|tray: &mut Self| tray.send(TrayAction::ToggleDeafened)),
             ..Default::default()
@@ -153,13 +185,22 @@ impl ksni::Tray for WispTray {
             muted.into(),
             deafened.into(),
             action(
-                if self.sharing {
+                if self.state.sharing {
                     "Stop screen sharing"
                 } else {
                     "Share a screen or window"
                 },
                 "video-display",
                 TrayAction::ToggleShare,
+            ),
+            action(
+                if self.state.camera {
+                    "Turn camera off"
+                } else {
+                    "Turn camera on"
+                },
+                "camera-web",
+                TrayAction::ToggleCamera,
             ),
             SubMenu {
                 label: "Panel anchor".into(),
@@ -181,19 +222,10 @@ impl ksni::Tray for WispTray {
 }
 
 pub(super) async fn spawn(
-    muted: bool,
-    deafened: bool,
-    sharing: bool,
+    state: TrayState,
 ) -> anyhow::Result<(mpsc::UnboundedReceiver<TrayAction>, ksni::Handle<WispTray>)> {
     let (actions, receiver) = mpsc::unbounded_channel();
-    let handle = WispTray {
-        actions,
-        muted,
-        deafened,
-        sharing,
-    }
-    .spawn()
-    .await?;
+    let handle = WispTray { actions, state }.spawn().await?;
     Ok((receiver, handle))
 }
 
@@ -308,7 +340,7 @@ fn draw_state_badge(data: &mut [u8], dimension: usize, size: i32, state: AudioSt
 
 #[cfg(test)]
 mod tests {
-    use super::{AudioState, waveform_icon};
+    use super::{AudioState, TrayState, WispTray, waveform_icon};
 
     #[test]
     fn tray_icon_is_argb32() {
@@ -339,6 +371,19 @@ mod tests {
         assert_ne!(
             waveform_icon(32, AudioState::Ready, false).data,
             waveform_icon(32, AudioState::Ready, true).data
+        );
+    }
+
+    #[test]
+    fn tray_title_reports_camera_and_screen_independently() {
+        let (actions, _receiver) = tokio::sync::mpsc::unbounded_channel();
+        let tray = WispTray {
+            actions,
+            state: TrayState::new((false, false), (true, true)),
+        };
+        assert_eq!(
+            ksni::Tray::title(&tray),
+            "Wisp · Sharing screen · Camera on"
         );
     }
 

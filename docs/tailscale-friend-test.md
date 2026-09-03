@@ -89,7 +89,10 @@ use click-and-hold **Talk** for this first test.
 Use **Clear** for the default DeepFilterNet neural denoiser. While connected, **Share screen**
 opens the desktop's trusted portal picker; select one monitor or window. The
 cyan badge on both the tray and Wisp UI means the LiveKit share track is
-actually active, not merely requested.
+actually active, not merely requested. Select a camera and publishing
+quality/codec under **Settings → Video**. Camera and screen sharing can be on at
+the same time; friends receive separate Watch buttons and neither surface opens
+automatically.
 
 ## Test checklist
 
@@ -100,13 +103,19 @@ actually active, not merely requested.
 5. Select **Clear**, compare keyboard/fan/air-conditioner noise with **Studio**,
    and confirm the settings page reports `deepfilternet` active (or `rnnoise`
    only if the fallback was needed).
-6. Share one monitor, then one window; confirm video reaches every friend and
-   no viewer window opens automatically. Each friend clicks **Watch &lt;name&gt;**,
-   confirms the colors are correct, and verifies the cyan tray/bar badge clears
-   after **Stop share**.
-7. Leave and rejoin once.
-8. Unplug/reconnect one USB or Bluetooth audio device if convenient.
-9. Record subjective notes about echo, keyboard noise, clipping, latency, and
+6. Share one monitor, then one window; confirm both friends see a Watch control
+   while no video window opens and no video is decoded automatically.
+7. Turn the camera on while sharing. Each friend opens both Watch controls and
+   confirms independent, correctly colored screen and camera windows. Tile,
+   fullscreen, pin, hide, reopen, and close them while confirming voice stays
+   connected.
+8. Compare Balanced/H.264 with High/H.264. Try AV1 only when Settings reports a
+   suitable hardware encoder, and record whether every participant negotiates
+   it successfully.
+9. Stop both publishers and verify the tray/bar badges and Watch controls clear.
+10. Leave and rejoin once.
+11. Unplug/reconnect one USB or Bluetooth audio device if convenient.
+12. Record subjective notes about echo, keyboard noise, clipping, latency, and
    dropouts.
 
 Do not forward these ports on the router, enable Tailscale Funnel, or expose

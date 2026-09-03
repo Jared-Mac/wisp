@@ -2,8 +2,10 @@
 
 Wisp is a Quickshell-native social layer for a small group of friends. This
 repository implements presence, ephemeral hangouts, SQLite persistence, pushed
-events, persistent desktop state, a LiveKit voice path, a CLI/simulator, a
-standalone desktop window, and an optional Omarchy bar integration.
+events, persistent desktop state, LiveKit voice/screen/camera media, a
+CLI/simulator, detachable native video surfaces, a standalone desktop window,
+and an optional Omarchy bar integration. Milestones M0–M3 are implemented; M4
+is the next development phase.
 
 ## Run it
 
@@ -78,12 +80,20 @@ back to RNNoise and reports that backend under **Settings → Audio** and in
 `wispctl status`.
 
 During a hangout, **Share screen** opens the standard XDG desktop portal picker
-for a monitor or individual window. Wisp captures the authorized PipeWire
-stream at up to 1080p/30 fps and publishes VP8 with a 6 Mbps bitrate ceiling as
-a LiveKit screen-share track. Viewers get a **Watch &lt;name&gt;** control; receiving
-a share never opens a window until they click it.
-The tray and Omarchy center-bar icon show the same cyan sharing badge; stopping
-from either UI revokes the portal session and unpublishes the track.
+for a monitor or individual window, while **Camera on** publishes the selected
+camera as an independent track. Screen and camera can run together, and each
+remote track gets its own **Watch** control and detachable native Wayland
+surface. Receiving video never opens a window or starts decoding until the
+viewer asks to watch it. Closing or hiding a surface pauses that track without
+interrupting voice; resizing the surface selects an appropriate simulcast
+layer.
+
+Publishing defaults to H.264 at the High profile (screen up to 1080p60 at
+8 Mbps; camera up to 720p30 at 2.5 Mbps). Settings also expose Balanced and
+Ultra profiles plus VP8 and AV1. Wisp asks LiveKit for a detected hardware
+encoder when one exists and reports the selected backend instead of assuming
+GPU support. The tray and Omarchy center-bar icon show matching screen/camera
+badges; stopping a share revokes its portal session and unpublishes the track.
 
 **Exit Wisp** closes the Quickshell UI and the tray-owning daemon. When Wisp
 was started with `just dev`, that daemon exit also makes the development
@@ -142,17 +152,30 @@ To test voice and remote video without microphone feedback, start Tyler with
 generated media:
 
 ```bash
-just sim Tyler --publish-tone --publish-video
+just sim Tyler --publish-tone --publish-video --publish-camera
 cargo run -p wispctl -- join Tyler
 cargo run -p wispctl -- status
 ```
 
 The status output reports the selected microphone/speaker and a growing
-`received_audio_frames` counter. Synthetic video appears as an available share;
-the UI's **Watch Tyler** button or `wispctl surface open` opens a GPU-rendered
-native Wayland window with app ID `dev.wisp.surface`. `wispctl surface close`
-destroys that window without leaving the LiveKit room. `wispctl mute`, `unmute`,
-`deafen`, `undeafen`, and `leave` operate on the LiveKit session.
+`received_audio_frames` counter. Synthetic screen and camera tracks appear as
+separate available media. The UI's per-track **Watch** button, or
+`wispctl watch Tyler screen_share` / `wispctl watch Tyler camera`, opens a
+GPU-rendered native Wayland window with app ID `dev.wisp.surface`. Unwatching
+either track hides its window and unsubscribes without leaving the LiveKit
+room. `wispctl mute`, `unmute`, `deafen`, `undeafen`, and `leave` operate on the
+LiveKit session.
+
+Camera, codec, and publishing quality can also be controlled from the CLI:
+
+```bash
+cargo run -p wispctl -- video devices
+cargo run -p wispctl -- video camera <device-id>
+cargo run -p wispctl -- video quality high
+cargo run -p wispctl -- video codec h264
+cargo run -p wispctl -- camera on
+cargo run -p wispctl -- camera off
+```
 
 Audio devices and processing are available in both Quickshell frontends and
 from the CLI:
@@ -219,8 +242,10 @@ the full app and compact panel lifecycles, daemon status, anchoring, and clean
 shutdown. `just bootstrap` installs
 the pinned, checksum-verified LiveKit development
 binary into `.tools/`, and `just dev` starts it on loopback. `just test-media`
-tests real local LiveKit audio/video, explicit Watch behavior, surface
-close/reopen independence, and SFU reconnection. `just test-reliability` runs
+tests one publisher with synthetic screen and camera tracks plus two viewers,
+on-demand subscriptions, two simultaneous native surfaces, audio continuity,
+surface close/reopen independence, missing-camera recovery, and SFU
+reconnection. The same media gate runs headlessly in CI. `just test-reliability` runs
 the shorter Voice MVP gate: four
 users, repeated leave/rejoin, real Quickshell IPC process restarts, SFU failure
 and recovery, clear connection errors, and bounded RSS growth. The cycle count

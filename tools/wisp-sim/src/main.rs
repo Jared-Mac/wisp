@@ -32,6 +32,7 @@ use wisp_protocol::{
     Presence, RespondKnockRequest, ServerEvent, SetPresenceRequest,
 };
 
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Parser)]
 #[command(about = "Simulate a Wisp friend from one development machine")]
 struct Args {
@@ -51,6 +52,8 @@ struct Args {
     silent: bool,
     #[arg(long)]
     publish_video: bool,
+    #[arg(long)]
+    publish_camera: bool,
     #[arg(long, value_enum)]
     auto_respond_knocks: Option<SimKnockResponse>,
 }
@@ -81,6 +84,7 @@ enum AudioSource {
 struct MediaConfig {
     audio: Option<AudioSource>,
     publish_video: bool,
+    publish_camera: bool,
 }
 
 impl Args {
@@ -94,9 +98,10 @@ impl Args {
         } else {
             None
         };
-        (audio.is_some() || self.publish_video).then_some(MediaConfig {
+        (audio.is_some() || self.publish_video || self.publish_camera).then_some(MediaConfig {
             audio,
             publish_video: self.publish_video,
+            publish_camera: self.publish_camera,
         })
     }
 }
@@ -150,8 +155,21 @@ impl SimMedia {
                 },
                 false,
             );
-            publish_video_track(&room, &source).await?;
+            publish_video_track(&room, &source, "synthetic-screen", TrackSource::Screenshare)
+                .await?;
             info!(room = %credentials.room, width = 640, height = 360, fps = 15, "publishing synthetic video");
+            source_tasks.push(tokio::spawn(publish_test_video(source)));
+        }
+        if media_config.publish_camera {
+            let source = NativeVideoSource::new(
+                VideoResolution {
+                    width: 640,
+                    height: 360,
+                },
+                false,
+            );
+            publish_video_track(&room, &source, "synthetic-camera", TrackSource::Camera).await?;
+            info!(room = %credentials.room, width = 640, height = 360, fps = 15, "publishing synthetic camera");
             source_tasks.push(tokio::spawn(publish_test_video(source)));
         }
         let event_task = tokio::spawn(log_room_events(events));
@@ -175,18 +193,20 @@ impl SimMedia {
     }
 }
 
-async fn publish_video_track(room: &Room, source: &NativeVideoSource) -> anyhow::Result<()> {
-    let track = LocalVideoTrack::create_video_track(
-        "synthetic-video",
-        RtcVideoSource::Native(source.clone()),
-    );
+async fn publish_video_track(
+    room: &Room,
+    source: &NativeVideoSource,
+    name: &str,
+    track_source: TrackSource,
+) -> anyhow::Result<()> {
+    let track = LocalVideoTrack::create_video_track(name, RtcVideoSource::Native(source.clone()));
     room.local_participant()
         .publish_track(
             LocalTrack::Video(track),
             TrackPublishOptions {
-                source: TrackSource::Screenshare,
+                source: track_source,
                 video_codec: VideoCodec::VP8,
-                simulcast: false,
+                simulcast: true,
                 ..Default::default()
             },
         )
@@ -354,14 +374,20 @@ async fn log_room_events(mut events: tokio::sync::mpsc::UnboundedReceiver<RoomEv
                 tokio::spawn(async move {
                     let mut stream = NativeAudioStream::new(track.rtc_track(), 48_000, 1);
                     let mut received_frame = false;
+                    let mut received_nonzero = false;
+                    let mut received_frames = 0_u64;
                     while let Some(frame) = stream.next().await {
+                        received_frames = received_frames.saturating_add(1);
                         if !received_frame {
                             info!(%participant, "simulator received remote audio frames");
                             received_frame = true;
                         }
-                        if frame.data.iter().any(|sample| *sample != 0) {
+                        if !received_nonzero && frame.data.iter().any(|sample| *sample != 0) {
                             info!(%participant, "simulator received nonzero remote audio");
-                            break;
+                            received_nonzero = true;
+                        }
+                        if received_frames.is_multiple_of(100) {
+                            info!(%participant, received_frames, "simulator audio still flowing");
                         }
                     }
                 });

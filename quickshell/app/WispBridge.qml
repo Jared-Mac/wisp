@@ -66,7 +66,27 @@ Item {
           "fps": null,
           "published_frames": 0,
           "error": null
-        }
+        },
+        "camera": {
+          "devices": [],
+          "selected_device_id": null,
+          "starting": false,
+          "active": false,
+          "width": null,
+          "height": null,
+          "fps": null,
+          "published_frames": 0,
+          "error": null
+        },
+        "video": {
+          "quality": "high",
+          "codec": "h264",
+          "available_codecs": ["h264", "vp8", "av1"],
+          "encoder_backend": "software",
+          "available_encoder_backends": ["software"],
+          "hardware_acceleration": false
+        },
+        "remote_videos": []
       }
     },
     "friends": [],
@@ -89,9 +109,11 @@ Item {
   readonly property bool effectiveMuted: !!selfState.muted || !!selfState.deafened
     || (!!pushToTalkState.enabled && !pushToTalkState.active)
   readonly property var activeSpeakers: mediaState.active_speakers || []
+  readonly property var remoteVideos: mediaState.remote_videos || []
   readonly property var remoteVideoParticipants: mediaState.remote_video_participants || []
-  readonly property bool remoteVideoAvailable: remoteVideoParticipants.length > 0
-  readonly property string remoteVideoLabel: remoteVideoParticipants.join(" + ")
+  readonly property bool remoteVideoAvailable: remoteVideos.length > 0
+    || remoteVideoParticipants.length > 0
+  readonly property string remoteVideoLabel: remoteVideoNames().join(" + ")
   readonly property var audioState: mediaState.audio || ({
     "input_devices": [],
     "output_devices": [],
@@ -115,13 +137,32 @@ Item {
   })
   readonly property bool sharing: !!screenShareState.active
   readonly property bool shareStarting: !!screenShareState.starting
+  readonly property var cameraState: mediaState.camera || ({
+    "devices": [],
+    "selected_device_id": null,
+    "starting": false,
+    "active": false,
+    "error": null
+  })
+  readonly property var videoSettings: mediaState.video || ({
+    "quality": "high",
+    "codec": "h264",
+    "available_codecs": ["h264", "vp8", "av1"],
+    "encoder_backend": "software",
+    "available_encoder_backends": ["software"],
+    "hardware_acceleration": false
+  })
+  readonly property bool cameraActive: !!cameraState.active
+  readonly property bool cameraStarting: !!cameraState.starting
   readonly property bool inHangout: selfState.hangout_id !== null && selfState.hangout_id !== undefined
   readonly property bool hasError: !daemonConnected || selfState.connection === "failed"
     || !!mediaState.error || !!mediaState.surface_error || !!screenShareState.error
+    || !!cameraState.error
   readonly property string selfStatusLabel: buildSelfStatusLabel()
   readonly property string errorMessage: !daemonConnected
     ? "wispd is not running"
-    : String(lastError || mediaState.error || mediaState.surface_error || screenShareState.error || "")
+    : String(lastError || mediaState.error || mediaState.surface_error
+      || screenShareState.error || cameraState.error || "")
   readonly property string barText: buildBarText()
   readonly property string barLabel: buildBarLabel()
   readonly property string barTooltip: buildBarTooltip()
@@ -181,10 +222,22 @@ Item {
     return "󰍬" + (names.length ? "  " + names.join(" ") : "")
   }
 
+  function remoteVideoNames() {
+    var names = []
+    for (var i = 0; i < remoteVideos.length; i++) {
+      var name = String(remoteVideos[i].participant || "")
+      if (name && names.indexOf(name) < 0) names.push(name)
+    }
+    if (!names.length) names = remoteVideoParticipants.slice()
+    return names
+  }
+
   function buildBarLabel() {
     if (!daemonConnected) return "disconnected"
     if (knocks.length > 0) return String(knocks[0].from.display_name || "Friend") + " knocked"
+    if (sharing && cameraActive) return "screen + camera"
     if (sharing) return "sharing"
+    if (cameraActive) return "camera"
     var names = []
     if (inHangout) {
       for (var h = 0; h < hangouts.length; h++) {
@@ -205,6 +258,7 @@ Item {
     if (hasError) return errorMessage
     var parts = ["Wisp"]
     if (sharing) parts.push("Sharing " + String(screenShareState.source || "screen"))
+    if (cameraActive) parts.push("Camera on")
     if (remoteVideoAvailable) parts.push(remoteVideoLabel + " is sharing")
     if (selfState.deafened) parts.push("Deafened")
     else if (effectiveMuted) parts.push("Microphone muted")
@@ -222,7 +276,9 @@ Item {
     var nextSelf = next["self"] || ({})
     var nextMedia = nextSelf.media || ({})
     var nextShare = nextMedia.screen_share || ({})
-    lastError = String(nextMedia.error || nextMedia.surface_error || nextShare.error || "")
+    var nextCamera = nextMedia.camera || ({})
+    lastError = String(nextMedia.error || nextMedia.surface_error
+      || nextShare.error || nextCamera.error || "")
   }
 
   function handleLine(line) {
@@ -284,13 +340,29 @@ Item {
   function setInputDevice(id) { send("set_input_device", { "id": id }) }
   function setOutputDevice(id) { send("set_output_device", { "id": id }) }
   function setAudioPreset(preset) { send("set_audio_preset", { "preset": preset }) }
+  function refreshVideoDevices() { send("refresh_video_devices", {}) }
+  function setCameraDevice(id) { send("set_camera_device", { "id": id }) }
+  function setVideoQuality(quality) { send("set_video_quality", { "quality": quality }) }
+  function setVideoCodec(codec) { send("set_video_codec", { "codec": codec }) }
   function openSurface() { send("open_surface", {}) }
   function closeSurface() { send("close_surface", {}) }
   function toggleSurface() { mediaState.surface_open ? closeSurface() : openSurface() }
+  function watchVideo(video, open) {
+    if (!video) return
+    send("watch_video", {
+      "participant": String(video.participant || ""),
+      "source": String(video.source || "screen_share"),
+      "open": open
+    })
+  }
   function leave() { send("leave", {}) }
   function toggleShare() {
     if (shareStarting) return
     send("share", { "enabled": !sharing, "source": "portal" })
+  }
+  function toggleCamera() {
+    if (cameraStarting) return
+    send("camera", { "enabled": !cameraActive })
   }
 
   Component {
@@ -311,6 +383,7 @@ Item {
           // instance so the initial snapshot request cannot be dropped.
           root.sendThrough(connection, "hello", { "client": root.clientName })
           root.sendThrough(connection, "refresh_audio_devices", {})
+          root.sendThrough(connection, "refresh_video_devices", {})
         }
       }
     }

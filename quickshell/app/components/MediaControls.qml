@@ -22,22 +22,16 @@ Column {
 
     Repeater {
       id: controlRepeater
-      model: root.bridge.remoteVideoAvailable || root.bridge.mediaState.surface_open ? [
-          {
-            "label": root.bridge.mediaState.surface_open
-              ? "Close video"
-              : "Watch " + root.bridge.remoteVideoLabel,
-            "action": "video"
-          },
-          { "label": root.bridge.shareStarting ? "Choosing…" : root.bridge.sharing ? "Stop share" : "Share screen", "action": "share" },
-          { "label": "Leave", "action": "leave" }
-        ] : [
-          { "label": root.bridge.shareStarting ? "Choosing…" : root.bridge.sharing ? "Stop share" : "Share screen", "action": "share" },
-          { "label": "Leave", "action": "leave" }
-        ]
+      model: [
+        { "label": root.bridge.shareStarting ? "Choosing…" : root.bridge.sharing ? "Stop share" : "Share screen", "action": "share" },
+        { "label": root.bridge.cameraStarting ? "Starting…" : root.bridge.cameraActive ? "Camera off" : "Camera on", "action": "camera" },
+        { "label": "Leave", "action": "leave" }
+      ]
       delegate: Rectangle {
         required property var modelData
-        readonly property bool controlEnabled: modelData.action !== "share" || !root.bridge.shareStarting
+        readonly property bool controlEnabled: (modelData.action !== "share" || !root.bridge.shareStarting)
+          && (modelData.action !== "camera" || (!root.bridge.cameraStarting
+            && root.bridge.cameraState.devices.length > 0))
         width: (controls.width - audioControls.width
           - controls.spacing * controlRepeater.count)
           / Math.max(1, controlRepeater.count)
@@ -62,10 +56,67 @@ Column {
           hoverEnabled: true
           cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
           onClicked: {
-            if (modelData.action === "video") root.bridge.toggleSurface()
-            else if (modelData.action === "share") root.bridge.toggleShare()
+            if (modelData.action === "share") root.bridge.toggleShare()
+            else if (modelData.action === "camera") root.bridge.toggleCamera()
             else { root.bridge.leave(); root.leaveRequested() }
           }
+        }
+      }
+    }
+  }
+
+  Repeater {
+    model: root.bridge.remoteVideos
+
+    delegate: Rectangle {
+      required property var modelData
+      readonly property bool watching: !!modelData.surface_open || !!modelData.subscribed
+      width: root.width
+      height: root.theme.space(42)
+      radius: root.theme.cornerRadius
+      color: root.theme.alpha(root.theme.accent, watching ? 0.15 : 0.08)
+      border.width: 1
+      border.color: root.theme.alpha(root.theme.accent, watching ? 0.55 : 0.24)
+
+      Text {
+        anchors.left: parent.left
+        anchors.leftMargin: root.theme.spacing.lg
+        anchors.verticalCenter: parent.verticalCenter
+        text: String(modelData.participant || "Friend")
+          + (modelData.source === "camera" ? " camera" : " screen")
+          + (modelData.requested_quality ? " · " + modelData.requested_quality : "")
+        color: root.theme.foreground
+        font.family: root.theme.font.family
+        font.pixelSize: root.theme.font.caption
+        font.weight: Font.DemiBold
+      }
+
+      Rectangle {
+        anchors.right: parent.right
+        anchors.rightMargin: root.theme.spacing.sm
+        anchors.verticalCenter: parent.verticalCenter
+        width: watchLabel.implicitWidth + root.theme.spacing.lg * 2
+        height: root.theme.space(30)
+        radius: root.theme.cornerRadius
+        color: watchMouse.containsMouse
+          ? Qt.lighter(root.theme.accent, 1.12) : root.theme.accent
+
+        Text {
+          id: watchLabel
+          anchors.centerIn: parent
+          text: parent.parent.watching ? "Close" : "Watch"
+          color: "white"
+          font.family: root.theme.font.family
+          font.pixelSize: root.theme.font.caption
+          font.weight: Font.Bold
+        }
+
+        MouseArea {
+          id: watchMouse
+          anchors.fill: parent
+          hoverEnabled: true
+          cursorShape: Qt.PointingHandCursor
+          onClicked: root.bridge.watchVideo(modelData, !parent.parent.watching)
         }
       }
     }
@@ -90,6 +141,32 @@ Column {
           + " · " + String(root.bridge.screenShareState.width || "?")
           + "×" + String(root.bridge.screenShareState.height || "?")
           + " @ " + String(root.bridge.screenShareState.fps || 30) + " fps"
+      elide: Text.ElideRight
+      color: root.theme.accent
+      font.family: root.theme.font.family
+      font.pixelSize: root.theme.font.caption
+      font.weight: Font.DemiBold
+    }
+  }
+
+  Rectangle {
+    visible: root.bridge.cameraStarting || root.bridge.cameraActive
+    width: parent.width
+    height: root.theme.space(34)
+    radius: root.theme.cornerRadius
+    color: root.theme.alpha(root.theme.accent, 0.12)
+
+    Text {
+      anchors.left: parent.left
+      anchors.right: parent.right
+      anchors.leftMargin: root.theme.spacing.lg
+      anchors.rightMargin: root.theme.spacing.lg
+      anchors.verticalCenter: parent.verticalCenter
+      text: root.bridge.cameraStarting
+        ? "Starting camera…"
+        : "Camera on · " + String(root.bridge.cameraState.width || "?")
+          + "×" + String(root.bridge.cameraState.height || "?")
+          + " @ " + String(root.bridge.cameraState.fps || 30) + " fps"
       elide: Text.ElideRight
       color: root.theme.accent
       font.family: root.theme.font.family

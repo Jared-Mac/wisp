@@ -46,23 +46,35 @@ rolls both files back if config validation fails.
 presence events, and short-lived LiveKit grants. It binds to loopback by default.
 The four development users have stable UUIDs and are seeded by the first migration.
 
-The initial code is a complete control-plane vertical slice plus the Phase 0
-LiveKit media path. `wispd` publishes a processed platform microphone, plays
-remote tracks through the platform speaker, subscribes to remote video, and
-uploads the newest decoded RGBA frame to a `wgpu` texture. A persistent winit
-event-loop thread owns the Wayland connection while the `dev.wisp.surface`
-window and GPU renderer can be destroyed and recreated independently. Closing
-the surface does not close the LiveKit room or interrupt audio.
+The media path publishes a DeepFilterNet-processed platform microphone, plays
+remote audio through the selected platform speaker, and independently publishes
+screen and camera video. Portal-authorized PipeWire screen capture and
+GStreamer camera capture are converted to I420 and sent as separate LiveKit
+tracks. Quality profiles choose capture dimensions, frame rate, and bitrate;
+the selected H.264, VP8, or AV1 codec is passed explicitly to LiveKit. Encoder
+backend discovery prefers hardware only when the installed LiveKit/WebRTC build
+reports it as available.
 
-Remote video subscription only marks a share as available. The Quickshell
-frontends expose **Watch &lt;name&gt;**, and only that explicit action creates the
-native surface; subscription and SFU reconnection never auto-open it.
+Remote screen and camera publications are availability metadata until the user
+clicks the track's **Watch** control. `wispd` then subscribes to that publication
+and uploads the newest decoded RGBA frame to a `wgpu` texture. Each track has a
+separate `dev.wisp.surface` window on a persistent winit Wayland event-loop
+thread, so Hyprland can float, tile, fullscreen, or pin it normally. Closing a
+surface unsubscribes only that video track; voice and other video tracks remain
+active. Occlusion pauses delivery and resize events request low, medium, or high
+simulcast layers. Desired subscriptions survive an SFU reconnect without
+opening any window the user did not request.
+
+Closed native surfaces are cached for fast reopening during the daemon's
+lifetime. This also avoids a confirmed proprietary NVIDIA Vulkan driver fault
+when one of several live Wayland swapchains is destroyed; the operating system
+reclaims those GPU resources when `wispd` exits.
 
 Video frames use bounded/latest-frame queues on both sides of the RGBA handoff,
 so rendering delay does not create an unbounded backlog. Surface state and
 receive/render counters are exposed through the existing IPC snapshot. The
-simulator can publish a deterministic 640×360 VP8 test source with
-`--publish-video`.
+simulator can publish deterministic 640×360 VP8 screen and camera sources with
+`--publish-video --publish-camera`.
 
 Remote audio and video subscription names are also part of the media snapshot.
 This makes multi-user reliability and Watch availability observable without
@@ -85,6 +97,12 @@ than a one-hour soak. It connects Jared plus Tyler, Jack, and Charlie; cycles th
 real media session through leave/rejoin; starts two independent Quickshell IPC
 probe processes; restarts LiveKit; verifies an offline-LiveKit join produces a
 clear error and then recovers; and enforces a configurable RSS-growth ceiling.
+
+The M3 media gate adds one publisher and two viewers. It verifies simultaneous
+screen and camera tracks, explicit per-track watching, no decoded frames while
+hidden, two native surfaces on a graphical host, headless receiving for the
+second viewer, uninterrupted outgoing voice across video close/reopen, camera
+failure as recoverable state, and resubscription after a LiveKit restart.
 
 Knocks are ephemeral in-memory control events rather than messages. A request is
 deduplicated by sender/recipient pair and expires after 30 seconds by default.

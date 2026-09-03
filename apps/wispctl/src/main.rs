@@ -6,7 +6,10 @@ use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     net::UnixStream,
 };
-use wisp_protocol::{AudioPreset, CommandEnvelope, DaemonEnvelope, Presence};
+use wisp_protocol::{
+    AudioPreset, CommandEnvelope, DaemonEnvelope, Presence, VideoCodecPreference,
+    VideoQualityPreset, VideoSource,
+};
 
 #[derive(Debug, Parser)]
 #[command(about = "Control the local Wisp daemon")]
@@ -45,6 +48,24 @@ enum Command {
         #[command(subcommand)]
         command: AudioCommand,
     },
+    Video {
+        #[command(subcommand)]
+        command: VideoCommand,
+    },
+    Camera {
+        #[command(subcommand)]
+        command: CameraCommand,
+    },
+    Watch {
+        participant: String,
+        #[arg(default_value = "screen_share")]
+        source: VideoSource,
+    },
+    Unwatch {
+        participant: String,
+        #[arg(default_value = "screen_share")]
+        source: VideoSource,
+    },
     Ptt {
         #[command(subcommand)]
         command: PushToTalkCommand,
@@ -71,6 +92,21 @@ enum AudioCommand {
     Input { id: String },
     Output { id: String },
     Preset { preset: AudioPreset },
+}
+
+#[derive(Debug, Subcommand)]
+enum VideoCommand {
+    Devices,
+    Refresh,
+    Camera { id: String },
+    Quality { quality: VideoQualityPreset },
+    Codec { codec: VideoCodecPreference },
+}
+
+#[derive(Debug, Subcommand)]
+enum CameraCommand {
+    On,
+    Off,
 }
 
 #[derive(Debug, Subcommand)]
@@ -128,6 +164,38 @@ impl Command {
             Self::Audio {
                 command: AudioCommand::Preset { preset },
             } => ("set_audio_preset", json!({"preset": preset})),
+            Self::Video {
+                command: VideoCommand::Devices | VideoCommand::Refresh,
+            } => ("refresh_video_devices", json!({})),
+            Self::Video {
+                command: VideoCommand::Camera { id },
+            } => ("set_camera_device", json!({"id": id})),
+            Self::Video {
+                command: VideoCommand::Quality { quality },
+            } => ("set_video_quality", json!({"quality": quality})),
+            Self::Video {
+                command: VideoCommand::Codec { codec },
+            } => ("set_video_codec", json!({"codec": codec})),
+            Self::Camera {
+                command: CameraCommand::On,
+            } => ("camera", json!({"enabled": true})),
+            Self::Camera {
+                command: CameraCommand::Off,
+            } => ("camera", json!({"enabled": false})),
+            Self::Watch {
+                participant,
+                source,
+            } => (
+                "watch_video",
+                json!({"participant": participant, "source": source, "open": true}),
+            ),
+            Self::Unwatch {
+                participant,
+                source,
+            } => (
+                "watch_video",
+                json!({"participant": participant, "source": source, "open": false}),
+            ),
             Self::Ptt {
                 command: PushToTalkCommand::Enable,
             } => ("set_push_to_talk", json!({"enabled": true})),

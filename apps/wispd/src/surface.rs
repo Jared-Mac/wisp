@@ -1,11 +1,8 @@
 use anyhow::{Context, anyhow};
 use std::{
     borrow::Cow,
-    sync::{
-        Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
-        mpsc,
-    },
+    collections::{HashMap, HashSet},
+    sync::{Arc, Mutex, mpsc},
     thread,
     time::Duration,
 };
@@ -19,6 +16,7 @@ use winit::{
     platform::wayland::{EventLoopBuilderExtWayland, WindowAttributesExtWayland},
     window::{Window, WindowId},
 };
+use wisp_protocol::{RemoteVideoTarget, VideoSource};
 
 use crate::media::MediaEvent;
 
@@ -59,17 +57,17 @@ pub(crate) struct RgbaFrame {
 }
 
 enum SurfaceCommand {
-    Open,
-    Close,
-    FrameReady,
+    Open(RemoteVideoTarget),
+    Close(RemoteVideoTarget),
+    FrameReady(RemoteVideoTarget),
     Shutdown,
 }
 
 struct SurfaceShared {
     proxy: EventLoopProxy<SurfaceCommand>,
-    latest_frame: Mutex<Option<RgbaFrame>>,
-    frame_event_queued: AtomicBool,
-    open: AtomicBool,
+    latest_frames: Mutex<HashMap<RemoteVideoTarget, RgbaFrame>>,
+    frame_events_queued: Mutex<HashSet<RemoteVideoTarget>>,
+    open_targets: Mutex<HashSet<RemoteVideoTarget>>,
 }
 
 #[derive(Clone)]
@@ -91,39 +89,57 @@ impl SurfaceController {
         Ok(Self { shared })
     }
 
-    pub(crate) fn open(&self) -> anyhow::Result<()> {
+    pub(crate) fn open(&self, target: RemoteVideoTarget) -> anyhow::Result<()> {
         self.shared
             .proxy
-            .send_event(SurfaceCommand::Open)
+            .send_event(SurfaceCommand::Open(target))
             .map_err(|_| anyhow!("Wayland surface event loop is unavailable"))
     }
 
-    pub(crate) fn close(&self) -> anyhow::Result<()> {
+    pub(crate) fn close(&self, target: RemoteVideoTarget) -> anyhow::Result<()> {
         self.shared
             .proxy
-            .send_event(SurfaceCommand::Close)
+            .send_event(SurfaceCommand::Close(target))
             .map_err(|_| anyhow!("Wayland surface event loop is unavailable"))
     }
 
-    pub(crate) fn send_frame(&self, frame: RgbaFrame) -> anyhow::Result<()> {
-        *self
-            .shared
-            .latest_frame
+    pub(crate) fn send_frame(
+        &self,
+        target: &RemoteVideoTarget,
+        frame: RgbaFrame,
+    ) -> anyhow::Result<()> {
+        self.shared
+            .latest_frames
             .lock()
-            .expect("surface frame lock poisoned") = Some(frame);
-        if !self.shared.open.load(Ordering::Acquire) {
+            .expect("surface frame lock poisoned")
+            .insert(target.clone(), frame);
+        if !self
+            .shared
+            .open_targets
+            .lock()
+            .expect("surface open-target lock poisoned")
+            .contains(target)
+        {
             return Ok(());
         }
-        if !self.shared.frame_event_queued.swap(true, Ordering::AcqRel)
+        let queued = self
+            .shared
+            .frame_events_queued
+            .lock()
+            .expect("surface queued-frame lock poisoned")
+            .insert(target.clone());
+        if queued
             && self
                 .shared
                 .proxy
-                .send_event(SurfaceCommand::FrameReady)
+                .send_event(SurfaceCommand::FrameReady(target.clone()))
                 .is_err()
         {
             self.shared
-                .frame_event_queued
-                .store(false, Ordering::Release);
+                .frame_events_queued
+                .lock()
+                .expect("surface queued-frame lock poisoned")
+                .remove(target);
             return Err(anyhow!("Wayland surface event loop is unavailable"));
         }
         Ok(())
@@ -149,9 +165,9 @@ fn run_surface_thread(
     };
     let shared = Arc::new(SurfaceShared {
         proxy: event_loop.create_proxy(),
-        latest_frame: Mutex::new(None),
-        frame_event_queued: AtomicBool::new(false),
-        open: AtomicBool::new(false),
+        latest_frames: Mutex::new(HashMap::new()),
+        frame_events_queued: Mutex::new(HashSet::new()),
+        open_targets: Mutex::new(HashSet::new()),
     });
     if ready_tx.send(Ok(shared.clone())).is_err() {
         return;
@@ -159,100 +175,168 @@ fn run_surface_thread(
     let mut app = SurfaceApp {
         shared,
         event_tx: event_tx.clone(),
-        window: None,
-        renderer: None,
-        rendered_frames: 0,
+        windows: HashMap::new(),
+        targets: HashMap::new(),
     };
-    if let Err(error) = event_loop.run_app(&mut app) {
+    let run_result = event_loop.run_app(&mut app);
+    if let Err(error) = run_result {
         let _ = event_tx.send(MediaEvent::SurfaceError {
+            target: None,
             message: format!("Wayland event loop stopped: {error}"),
         });
     }
+    // NVIDIA's proprietary Vulkan driver can jump through a null function
+    // pointer while wgpu destroys a Wayland swapchain. The process is already
+    // shutting down here, so leave the cached GPU resources to the OS instead
+    // of risking a daemon coredump during normal exit.
+    std::mem::forget(app);
+}
+
+struct SurfaceWindow {
+    target: RemoteVideoTarget,
+    window: Arc<Window>,
+    renderer: Renderer,
+    rendered_frames: u64,
 }
 
 struct SurfaceApp {
     shared: Arc<SurfaceShared>,
     event_tx: UnboundedSender<MediaEvent>,
-    window: Option<Arc<Window>>,
-    renderer: Option<Renderer>,
-    rendered_frames: u64,
+    windows: HashMap<WindowId, SurfaceWindow>,
+    targets: HashMap<RemoteVideoTarget, WindowId>,
 }
 
 impl SurfaceApp {
-    fn open(&mut self, event_loop: &ActiveEventLoop) {
-        if self.window.is_some() {
+    fn open(&mut self, event_loop: &ActiveEventLoop, target: RemoteVideoTarget) {
+        if self.targets.contains_key(&target) {
             return;
         }
+        if let Some((window_id, surface)) = self
+            .windows
+            .iter_mut()
+            .find(|(_, surface)| surface.target == target)
+        {
+            let window_id = *window_id;
+            surface.window.set_visible(true);
+            surface.window.request_redraw();
+            self.shared
+                .open_targets
+                .lock()
+                .expect("surface open-target lock poisoned")
+                .insert(target.clone());
+            self.targets.insert(target.clone(), window_id);
+            let _ = self.event_tx.send(MediaEvent::SurfaceOpened { target });
+            return;
+        }
+        let source = match target.source {
+            VideoSource::ScreenShare => "screen",
+            VideoSource::Camera => "camera",
+        };
         let attributes = Window::default_attributes()
-            .with_title("Wisp Video")
+            .with_title(format!("Wisp — {} {source}", target.participant))
             .with_inner_size(LogicalSize::new(960.0, 540.0))
             .with_name("dev.wisp.surface", "dev.wisp.surface");
         let window = match event_loop.create_window(attributes) {
             Ok(window) => Arc::new(window),
             Err(error) => {
-                self.report_error(format!("create Wisp video window: {error}"));
+                self.report_error(Some(target), format!("create Wisp video window: {error}"));
                 return;
             }
         };
         let mut renderer = match pollster::block_on(Renderer::new(window.clone())) {
             Ok(renderer) => renderer,
             Err(error) => {
-                self.report_error(format!("initialize Wisp video renderer: {error:#}"));
+                self.report_error(
+                    Some(target),
+                    format!("initialize Wisp video renderer: {error:#}"),
+                );
                 return;
             }
         };
         if let Some(frame) = self
             .shared
-            .latest_frame
+            .latest_frames
             .lock()
             .expect("surface frame lock poisoned")
-            .take()
+            .remove(&target)
         {
             renderer.upload(&frame);
         }
-        self.shared.open.store(true, Ordering::Release);
-        self.renderer = Some(renderer);
-        self.window = Some(window.clone());
-        self.rendered_frames = 0;
+        let window_id = window.id();
+        self.shared
+            .open_targets
+            .lock()
+            .expect("surface open-target lock poisoned")
+            .insert(target.clone());
+        self.targets.insert(target.clone(), window_id);
+        self.windows.insert(
+            window_id,
+            SurfaceWindow {
+                target: target.clone(),
+                window: window.clone(),
+                renderer,
+                rendered_frames: 0,
+            },
+        );
         window.request_redraw();
-        let _ = self.event_tx.send(MediaEvent::SurfaceOpened);
+        let _ = self.event_tx.send(MediaEvent::SurfaceOpened { target });
     }
 
-    fn close(&mut self) {
-        if self.window.is_none() {
+    fn close(&mut self, target: &RemoteVideoTarget) {
+        let Some(window_id) = self.targets.remove(target) else {
             return;
-        }
-        self.shared.open.store(false, Ordering::Release);
+        };
         self.shared
-            .frame_event_queued
-            .store(false, Ordering::Release);
-        self.renderer = None;
-        self.window = None;
-        let _ = self.event_tx.send(MediaEvent::SurfaceClosed);
+            .open_targets
+            .lock()
+            .expect("surface open-target lock poisoned")
+            .remove(target);
+        self.shared
+            .frame_events_queued
+            .lock()
+            .expect("surface queued-frame lock poisoned")
+            .remove(target);
+        if let Some(surface) = self.windows.get(&window_id) {
+            // Cache the native surface for this participant/source pair. Apart
+            // from making reopen instant, this avoids an NVIDIA Vulkan driver
+            // crash observed when destroying one of several live swapchains.
+            surface.window.set_visible(false);
+        }
+        let _ = self.event_tx.send(MediaEvent::SurfaceClosed {
+            target: target.clone(),
+        });
     }
 
-    fn take_latest_frame(&mut self) {
+    fn close_all(&mut self) {
+        for target in self.targets.keys().cloned().collect::<Vec<_>>() {
+            self.close(&target);
+        }
+    }
+
+    fn take_latest_frame(&mut self, target: &RemoteVideoTarget) {
         self.shared
-            .frame_event_queued
-            .store(false, Ordering::Release);
+            .frame_events_queued
+            .lock()
+            .expect("surface queued-frame lock poisoned")
+            .remove(target);
         if let Some(frame) = self
             .shared
-            .latest_frame
+            .latest_frames
             .lock()
             .expect("surface frame lock poisoned")
-            .take()
-            && let Some(renderer) = &mut self.renderer
+            .remove(target)
+            && let Some(window_id) = self.targets.get(target)
+            && let Some(surface) = self.windows.get_mut(window_id)
         {
-            renderer.upload(&frame);
-            if let Some(window) = &self.window {
-                window.request_redraw();
-            }
+            surface.renderer.upload(&frame);
+            surface.window.request_redraw();
         }
     }
 
-    fn report_error(&self, message: String) {
-        self.shared.open.store(false, Ordering::Release);
-        let _ = self.event_tx.send(MediaEvent::SurfaceError { message });
+    fn report_error(&self, target: Option<RemoteVideoTarget>, message: String) {
+        let _ = self
+            .event_tx
+            .send(MediaEvent::SurfaceError { target, message });
     }
 }
 
@@ -261,11 +345,11 @@ impl ApplicationHandler<SurfaceCommand> for SurfaceApp {
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: SurfaceCommand) {
         match event {
-            SurfaceCommand::Open => self.open(event_loop),
-            SurfaceCommand::Close => self.close(),
-            SurfaceCommand::FrameReady => self.take_latest_frame(),
+            SurfaceCommand::Open(target) => self.open(event_loop, target),
+            SurfaceCommand::Close(target) => self.close(&target),
+            SurfaceCommand::FrameReady(target) => self.take_latest_frame(&target),
             SurfaceCommand::Shutdown => {
-                self.close();
+                self.close_all();
                 event_loop.exit();
             }
         }
@@ -274,37 +358,63 @@ impl ApplicationHandler<SurfaceCommand> for SurfaceApp {
     fn window_event(
         &mut self,
         _event_loop: &ActiveEventLoop,
-        _window_id: WindowId,
+        window_id: WindowId,
         event: WindowEvent,
     ) {
+        let Some(target) = self
+            .windows
+            .get(&window_id)
+            .map(|surface| surface.target.clone())
+        else {
+            return;
+        };
         match event {
-            WindowEvent::CloseRequested => self.close(),
+            WindowEvent::CloseRequested => self.close(&target),
             WindowEvent::Resized(size) => {
-                if let Some(renderer) = &mut self.renderer {
-                    renderer.resize(size.width, size.height);
+                if let Some(surface) = self.windows.get_mut(&window_id) {
+                    surface.renderer.resize(size.width, size.height);
                 }
+                let _ = self.event_tx.send(MediaEvent::SurfaceResized {
+                    target,
+                    width: size.width,
+                    height: size.height,
+                });
             }
             WindowEvent::RedrawRequested => {
-                let render_result = self.renderer.as_mut().map(Renderer::render);
+                let render_result = self
+                    .windows
+                    .get_mut(&window_id)
+                    .map(|surface| surface.renderer.render());
                 match render_result {
                     Some(Ok(true)) => {
-                        self.rendered_frames = self.rendered_frames.saturating_add(1);
-                        if self.rendered_frames == 1 || self.rendered_frames.is_multiple_of(60) {
+                        let surface = self
+                            .windows
+                            .get_mut(&window_id)
+                            .expect("surface disappeared during redraw");
+                        surface.rendered_frames = surface.rendered_frames.saturating_add(1);
+                        if surface.rendered_frames == 1
+                            || surface.rendered_frames.is_multiple_of(60)
+                        {
                             let _ = self.event_tx.send(MediaEvent::SurfaceRendered {
-                                total: self.rendered_frames,
+                                target,
+                                total: surface.rendered_frames,
                             });
                         }
                     }
                     Some(Ok(false)) | None => {}
                     Some(Err(error)) => {
-                        self.close();
-                        self.report_error(error.to_string());
+                        self.close(&target);
+                        self.report_error(Some(target), error.to_string());
                     }
                 }
             }
-            WindowEvent::Occluded(false) => {
-                if let Some(window) = &self.window {
-                    window.request_redraw();
+            WindowEvent::Occluded(occluded) => {
+                let _ = self.event_tx.send(MediaEvent::SurfaceVisibilityChanged {
+                    target: target.clone(),
+                    visible: !occluded,
+                });
+                if !occluded && let Some(surface) = self.windows.get(&window_id) {
+                    surface.window.request_redraw();
                 }
             }
             _ => {}
@@ -320,16 +430,24 @@ struct FrameTexture {
 }
 
 struct Renderer {
-    instance: wgpu::Instance,
-    window: Arc<Window>,
-    device: wgpu::Device,
-    queue: wgpu::Queue,
-    surface: wgpu::Surface<'static>,
-    config: wgpu::SurfaceConfiguration,
-    pipeline: wgpu::RenderPipeline,
-    texture_layout: wgpu::BindGroupLayout,
-    sampler: wgpu::Sampler,
+    // Fields are dropped in declaration order. GPU resources and the surface
+    // must be released before their device, window, and instance owners.
     frame: FrameTexture,
+    sampler: wgpu::Sampler,
+    texture_layout: wgpu::BindGroupLayout,
+    pipeline: wgpu::RenderPipeline,
+    config: wgpu::SurfaceConfiguration,
+    surface: wgpu::Surface<'static>,
+    queue: wgpu::Queue,
+    device: wgpu::Device,
+    window: Arc<Window>,
+    instance: wgpu::Instance,
+}
+
+impl Drop for Renderer {
+    fn drop(&mut self) {
+        let _ = self.device.poll(wgpu::PollType::wait_indefinitely());
+    }
 }
 
 impl Renderer {
@@ -406,16 +524,16 @@ impl Renderer {
         });
         let frame = create_frame_texture(&device, &texture_layout, &sampler, 2, 2);
         Ok(Self {
-            instance,
-            window,
-            device,
-            queue,
-            surface,
-            config,
-            pipeline,
-            texture_layout,
-            sampler,
             frame,
+            sampler,
+            texture_layout,
+            pipeline,
+            config,
+            surface,
+            queue,
+            device,
+            window,
+            instance,
         })
     }
 

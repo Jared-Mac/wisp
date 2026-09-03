@@ -145,6 +145,191 @@ pub struct ScreenShareState {
     pub error: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VideoSource {
+    #[default]
+    ScreenShare,
+    Camera,
+}
+
+impl fmt::Display for VideoSource {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::ScreenShare => "screen_share",
+            Self::Camera => "camera",
+        })
+    }
+}
+
+impl FromStr for VideoSource {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.to_ascii_lowercase().as_str() {
+            "screen" | "screen_share" | "screenshare" => Ok(Self::ScreenShare),
+            "camera" => Ok(Self::Camera),
+            _ => Err(format!("unknown video source: {value}")),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VideoQualityPreset {
+    Balanced,
+    #[default]
+    High,
+    Ultra,
+}
+
+impl fmt::Display for VideoQualityPreset {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Balanced => "balanced",
+            Self::High => "high",
+            Self::Ultra => "ultra",
+        })
+    }
+}
+
+impl FromStr for VideoQualityPreset {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.to_ascii_lowercase().as_str() {
+            "balanced" => Ok(Self::Balanced),
+            "high" => Ok(Self::High),
+            "ultra" => Ok(Self::Ultra),
+            _ => Err(format!("unknown video quality preset: {value}")),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VideoCodecPreference {
+    #[default]
+    H264,
+    Vp8,
+    Av1,
+}
+
+impl fmt::Display for VideoCodecPreference {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::H264 => "h264",
+            Self::Vp8 => "vp8",
+            Self::Av1 => "av1",
+        })
+    }
+}
+
+impl FromStr for VideoCodecPreference {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.to_ascii_lowercase().as_str() {
+            "h264" => Ok(Self::H264),
+            "vp8" => Ok(Self::Vp8),
+            "av1" => Ok(Self::Av1),
+            _ => Err(format!("unknown video codec: {value}")),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct RemoteVideoTarget {
+    pub participant: String,
+    pub source: VideoSource,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VideoDevice {
+    pub id: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CameraState {
+    #[serde(default)]
+    pub devices: Vec<VideoDevice>,
+    #[serde(default)]
+    pub selected_device_id: Option<String>,
+    #[serde(default)]
+    pub starting: bool,
+    #[serde(default)]
+    pub active: bool,
+    #[serde(default)]
+    pub width: Option<u32>,
+    #[serde(default)]
+    pub height: Option<u32>,
+    #[serde(default)]
+    pub fps: Option<u32>,
+    #[serde(default)]
+    pub published_frames: u64,
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VideoSettings {
+    pub quality: VideoQualityPreset,
+    pub codec: VideoCodecPreference,
+    #[serde(default)]
+    pub available_codecs: Vec<VideoCodecPreference>,
+    #[serde(default)]
+    pub encoder_backend: String,
+    #[serde(default)]
+    pub available_encoder_backends: Vec<String>,
+    #[serde(default)]
+    pub hardware_acceleration: bool,
+}
+
+impl Default for VideoSettings {
+    fn default() -> Self {
+        Self {
+            quality: VideoQualityPreset::default(),
+            codec: VideoCodecPreference::default(),
+            available_codecs: vec![
+                VideoCodecPreference::H264,
+                VideoCodecPreference::Vp8,
+                VideoCodecPreference::Av1,
+            ],
+            encoder_backend: "software".into(),
+            available_encoder_backends: vec!["software".into()],
+            hardware_acceleration: false,
+        }
+    }
+}
+
+#[allow(clippy::struct_excessive_bools)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RemoteVideoState {
+    #[serde(flatten)]
+    pub target: RemoteVideoTarget,
+    pub mime_type: String,
+    pub simulcasted: bool,
+    #[serde(default)]
+    pub subscribed: bool,
+    #[serde(default)]
+    pub surface_open: bool,
+    #[serde(default)]
+    pub surface_visible: bool,
+    #[serde(default)]
+    pub requested_quality: Option<String>,
+    #[serde(default)]
+    pub received_frames: u64,
+    #[serde(default)]
+    pub rendered_frames: u64,
+    #[serde(default)]
+    pub width: Option<u32>,
+    #[serde(default)]
+    pub height: Option<u32>,
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PushToTalkState {
     #[serde(default)]
@@ -210,6 +395,12 @@ pub struct MediaState {
     pub audio: AudioState,
     #[serde(default)]
     pub screen_share: ScreenShareState,
+    #[serde(default)]
+    pub camera: CameraState,
+    #[serde(default)]
+    pub video: VideoSettings,
+    #[serde(default)]
+    pub remote_videos: Vec<RemoteVideoState>,
     #[serde(default)]
     pub last_audio_from: Option<String>,
     #[serde(default)]

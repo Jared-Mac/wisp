@@ -101,13 +101,13 @@ Panel {
         }
 
         Rectangle {
-          visible: bridge.sharing || bridge.remoteVideoAvailable
+          visible: bridge.sharing || bridge.cameraActive || bridge.remoteVideoAvailable
           anchors.right: parent.right
           anchors.top: parent.top
           width: Style.space(9)
           height: width
           radius: width / 2
-          color: bridge.sharing ? "#32e6f4" : Color.accent
+          color: bridge.sharing || bridge.cameraActive ? "#32e6f4" : Color.accent
           border.width: 1
           border.color: Color.background
 

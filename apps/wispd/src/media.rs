@@ -12,12 +12,14 @@ use gstreamer as gst;
 use gstreamer::prelude::*;
 use gstreamer_app as gst_app;
 use gstreamer_video as gst_video;
+use livekit::track::VideoQuality;
 use livekit::{
-    options::{TrackPublishOptions, VideoCodec, VideoEncoding},
+    options::{TrackPublishOptions, VideoCodec, VideoEncoderBackend, VideoEncoding},
     prelude::{
         AudioProcessingOptions, LocalAudioTrack, LocalTrack, LocalVideoTrack, Participant,
         PlatformAudio, PlayoutDeviceInfo, RecordingDeviceInfo, RemoteAudioTrack, RemoteTrack,
-        RemoteVideoTrack, Room, RoomEvent, RoomOptions, RtcAudioSource, TrackSid, TrackSource,
+        RemoteTrackPublication, RemoteVideoTrack, Room, RoomEvent, RoomOptions, RtcAudioSource,
+        TrackKind, TrackSid, TrackSource,
     },
     rtc_engine::lk_runtime::LkRuntime,
     webrtc::{
@@ -35,7 +37,7 @@ use ndarray::{ArrayView2, ArrayViewMut2};
 use nnnoiseless::DenoiseState;
 use std::{
     borrow::Cow,
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     os::fd::{AsRawFd, OwnedFd},
     sync::{
         Arc, Mutex,
@@ -48,7 +50,9 @@ use tokio::{
 };
 use tracing::{debug, info, warn};
 use wisp_protocol::{
-    AudioDevice, AudioPreset, AudioState, HangoutId, LiveKitTokenResponse, ScreenShareState,
+    AudioDevice, AudioPreset, AudioState, CameraState, HangoutId, LiveKitTokenResponse,
+    RemoteVideoState, RemoteVideoTarget, ScreenShareState, VideoCodecPreference, VideoDevice,
+    VideoQualityPreset, VideoSettings, VideoSource,
 };
 
 use crate::surface::{RgbaFrame, SurfaceController};
@@ -57,8 +61,6 @@ const AUDIO_SAMPLE_RATE: u32 = 48_000;
 const AUDIO_FRAME_SAMPLES: usize = 480;
 const DEEPFILTER_LATENCY_MS: u16 = 30;
 const RNNOISE_LATENCY_MS: u16 = 10;
-const SCREEN_SHARE_FPS: u32 = 30;
-const SCREEN_SHARE_MAX_BITRATE: u64 = 6_000_000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
@@ -264,16 +266,27 @@ pub(crate) enum MediaEvent {
     },
     VideoSubscribed {
         generation: u64,
-        participant: String,
+        target: RemoteVideoTarget,
+    },
+    VideoAvailable {
+        generation: u64,
+        target: RemoteVideoTarget,
+        mime_type: String,
+        simulcasted: bool,
+    },
+    VideoUnavailable {
+        generation: u64,
+        target: RemoteVideoTarget,
     },
     VideoUnsubscribed {
         generation: u64,
-        participant: String,
+        target: RemoteVideoTarget,
     },
     VideoFrames {
         generation: u64,
-        participant: String,
+        target: RemoteVideoTarget,
         total: u64,
+        track_total: u64,
         width: u32,
         height: u32,
     },
@@ -285,12 +298,35 @@ pub(crate) enum MediaEvent {
         generation: u64,
         error: Option<String>,
     },
-    SurfaceOpened,
-    SurfaceClosed,
+    CameraFrames {
+        generation: u64,
+        total: u64,
+    },
+    CameraStopped {
+        generation: u64,
+        error: Option<String>,
+    },
+    SurfaceOpened {
+        target: RemoteVideoTarget,
+    },
+    SurfaceClosed {
+        target: RemoteVideoTarget,
+    },
+    SurfaceVisibilityChanged {
+        target: RemoteVideoTarget,
+        visible: bool,
+    },
+    SurfaceResized {
+        target: RemoteVideoTarget,
+        width: u32,
+        height: u32,
+    },
     SurfaceRendered {
+        target: RemoteVideoTarget,
         total: u64,
     },
     SurfaceError {
+        target: Option<RemoteVideoTarget>,
         message: String,
     },
 }
@@ -299,6 +335,8 @@ pub(crate) struct ConnectedMedia {
     pub microphone: String,
     pub speaker: String,
     pub audio: AudioState,
+    pub remote_audio_participants: Vec<String>,
+    pub remote_videos: Vec<RemoteVideoState>,
 }
 
 pub(crate) struct AudioInventory {
@@ -312,6 +350,10 @@ pub(crate) struct ScreenShareInfo {
     pub state: ScreenShareState,
 }
 
+pub(crate) struct CameraInfo {
+    pub state: CameraState,
+}
+
 #[derive(Debug, Default)]
 struct AudioPreferences {
     preferred_input_id: Option<String>,
@@ -319,6 +361,13 @@ struct AudioPreferences {
     selected_input_id: Option<String>,
     selected_output_id: Option<String>,
     preset: AudioPreset,
+}
+
+#[derive(Debug, Default)]
+struct VideoPreferences {
+    selected_camera_id: Option<String>,
+    quality: VideoQualityPreset,
+    codec: VideoCodecPreference,
 }
 
 struct MediaSession {
@@ -329,8 +378,11 @@ struct MediaSession {
     microphone_frames: mpsc::UnboundedSender<Vec<i16>>,
     microphone_task: JoinHandle<()>,
     screen_share: Option<ScreenShareSession>,
+    camera: Option<CameraSession>,
     _platform_audio: PlatformAudio,
     remote_audio: Arc<Mutex<HashMap<String, RemoteAudioTrack>>>,
+    remote_video: Arc<Mutex<HashMap<RemoteVideoTarget, RemoteTrackPublication>>>,
+    desired_video: Arc<Mutex<HashSet<RemoteVideoTarget>>>,
     event_task: JoinHandle<()>,
 }
 
@@ -339,6 +391,13 @@ struct ScreenShareSession {
     pipeline: gst::Pipeline,
     portal_session: Session<Screencast>,
     _pipewire_remote: OwnedFd,
+    monitor_running: Arc<AtomicBool>,
+    monitor_task: JoinHandle<()>,
+}
+
+struct CameraSession {
+    publication_sid: TrackSid,
+    pipeline: gst::Pipeline,
     monitor_running: Arc<AtomicBool>,
     monitor_task: JoinHandle<()>,
 }
@@ -354,6 +413,7 @@ pub(crate) struct MediaManager {
     input_level: Arc<AtomicU8>,
     platform_audio: Mutex<Option<PlatformAudio>>,
     audio_preferences: Mutex<AudioPreferences>,
+    video_preferences: Mutex<VideoPreferences>,
     neural_denoiser_enabled: Arc<AtomicBool>,
     denoiser_backend: Arc<AtomicU8>,
     denoiser: Arc<DenoiserService>,
@@ -374,6 +434,7 @@ impl MediaManager {
                 Ok(surface) => Some(surface),
                 Err(error) => {
                     let _ = event_tx.send(MediaEvent::SurfaceError {
+                        target: None,
                         message: error.to_string(),
                     });
                     None
@@ -394,6 +455,7 @@ impl MediaManager {
                 input_level: Arc::new(AtomicU8::new(0)),
                 platform_audio: Mutex::new(None),
                 audio_preferences: Mutex::new(AudioPreferences::default()),
+                video_preferences: Mutex::new(VideoPreferences::default()),
                 neural_denoiser_enabled: Arc::new(AtomicBool::new(true)),
                 denoiser_backend,
                 denoiser,
@@ -516,6 +578,109 @@ impl MediaManager {
         self.neural_denoiser_enabled
             .store(preset == AudioPreset::Clear, Ordering::Release);
         Ok(self.reconcile_audio_devices(&audio, self.is_active().await, false))
+    }
+
+    pub(crate) fn video_settings(&self) -> VideoSettings {
+        let preferences = self
+            .video_preferences
+            .lock()
+            .expect("video preferences lock poisoned");
+        detected_video_settings(preferences.quality, preferences.codec)
+    }
+
+    pub(crate) async fn refresh_camera_devices(&self) -> anyhow::Result<CameraState> {
+        let _operation = self.operation.lock().await;
+        let devices = enumerate_camera_devices()?;
+        let mut preferences = self
+            .video_preferences
+            .lock()
+            .expect("video preferences lock poisoned");
+        let selected_device_id = preferences
+            .selected_camera_id
+            .as_ref()
+            .filter(|selected| devices.iter().any(|(device, _)| &device.id == *selected))
+            .cloned()
+            .or_else(|| devices.first().map(|(device, _)| device.id.clone()));
+        preferences
+            .selected_camera_id
+            .clone_from(&selected_device_id);
+        Ok(CameraState {
+            devices: devices.into_iter().map(|(device, _)| device).collect(),
+            selected_device_id,
+            ..CameraState::default()
+        })
+    }
+
+    pub(crate) async fn select_camera_device(&self, id: &str) -> anyhow::Result<CameraState> {
+        let _operation = self.operation.lock().await;
+        let camera_active = self
+            .session
+            .lock()
+            .await
+            .as_ref()
+            .is_some_and(|session| session.camera.is_some());
+        if camera_active {
+            bail!("stop the camera before changing devices");
+        }
+        let devices = enumerate_camera_devices()?;
+        if !devices.iter().any(|(device, _)| device.id == id) {
+            bail!("camera is no longer available: {id}");
+        }
+        self.video_preferences
+            .lock()
+            .expect("video preferences lock poisoned")
+            .selected_camera_id = Some(id.to_owned());
+        Ok(CameraState {
+            devices: devices.into_iter().map(|(device, _)| device).collect(),
+            selected_device_id: Some(id.to_owned()),
+            ..CameraState::default()
+        })
+    }
+
+    pub(crate) async fn set_video_quality(
+        &self,
+        quality: VideoQualityPreset,
+    ) -> anyhow::Result<VideoSettings> {
+        let _operation = self.operation.lock().await;
+        if self.local_video_active().await {
+            bail!("stop screen sharing and the camera before changing video quality");
+        }
+        let mut preferences = self
+            .video_preferences
+            .lock()
+            .expect("video preferences lock poisoned");
+        preferences.quality = quality;
+        Ok(detected_video_settings(
+            preferences.quality,
+            preferences.codec,
+        ))
+    }
+
+    pub(crate) async fn set_video_codec(
+        &self,
+        codec: VideoCodecPreference,
+    ) -> anyhow::Result<VideoSettings> {
+        let _operation = self.operation.lock().await;
+        if self.local_video_active().await {
+            bail!("stop screen sharing and the camera before changing video codec");
+        }
+        let mut preferences = self
+            .video_preferences
+            .lock()
+            .expect("video preferences lock poisoned");
+        preferences.codec = codec;
+        Ok(detected_video_settings(
+            preferences.quality,
+            preferences.codec,
+        ))
+    }
+
+    async fn local_video_active(&self) -> bool {
+        self.session
+            .lock()
+            .await
+            .as_ref()
+            .is_some_and(|session| session.screen_share.is_some() || session.camera.is_some())
     }
 
     fn unavailable_audio_inventory(&self, error: String) -> AudioInventory {
@@ -685,10 +850,12 @@ impl MediaManager {
             .configure_audio_processing(processing_options(inventory.state.preset))
             .context("configure audio processing")?;
 
-        let (room, events) =
-            Room::connect(&credentials.url, &credentials.token, RoomOptions::default())
-                .await
-                .with_context(|| format!("connect to LiveKit room {}", credentials.room))?;
+        let mut room_options = RoomOptions::default();
+        room_options.auto_subscribe = true;
+        room_options.dynacast = true;
+        let (room, events) = Room::connect(&credentials.url, &credentials.token, room_options)
+            .await
+            .with_context(|| format!("connect to LiveKit room {}", credentials.room))?;
         let room = Arc::new(room);
         let microphone_source = NativeAudioSource::new(AudioSourceOptions::default(), 48_000, 1, 0);
         let microphone_track = LocalAudioTrack::create_audio_track(
@@ -738,19 +905,66 @@ impl MediaManager {
         self.connected.store(true, Ordering::Release);
         self.deafened.store(deafened, Ordering::Release);
         let remote_audio = Arc::new(Mutex::new(HashMap::new()));
-        let event_task = tokio::spawn(run_room_events(
-            events,
-            RoomEventContext {
-                generation,
-                event_tx: self.event_tx.clone(),
-                remote_audio: remote_audio.clone(),
-                received_frames: self.received_frames.clone(),
-                received_video_frames: self.received_video_frames.clone(),
-                connected: self.connected.clone(),
-                deafened: self.deafened.clone(),
-                surface: self.surface.clone(),
-            },
-        ));
+        let remote_video = Arc::new(Mutex::new(HashMap::new()));
+        let desired_video = Arc::new(Mutex::new(HashSet::new()));
+        let event_context = RoomEventContext {
+            generation,
+            event_tx: self.event_tx.clone(),
+            remote_audio: remote_audio.clone(),
+            remote_video: remote_video.clone(),
+            desired_video: desired_video.clone(),
+            received_frames: self.received_frames.clone(),
+            received_video_frames: self.received_video_frames.clone(),
+            connected: self.connected.clone(),
+            deafened: self.deafened.clone(),
+            surface: self.surface.clone(),
+        };
+        let mut remote_audio_participants = Vec::new();
+        let mut initial_remote_videos = Vec::new();
+        for participant in room.remote_participants().into_values() {
+            let name = participant.name();
+            for publication in participant.track_publications().into_values() {
+                match publication.kind() {
+                    TrackKind::Audio => remote_audio_participants.push(name.clone()),
+                    TrackKind::Video => {
+                        if let Some(source) = protocol_video_source(publication.source()) {
+                            initial_remote_videos.push(RemoteVideoState {
+                                target: RemoteVideoTarget {
+                                    participant: name.clone(),
+                                    source,
+                                },
+                                mime_type: publication.mime_type(),
+                                simulcasted: publication.simulcasted(),
+                                subscribed: false,
+                                surface_open: false,
+                                surface_visible: false,
+                                requested_quality: None,
+                                received_frames: 0,
+                                rendered_frames: 0,
+                                width: None,
+                                height: None,
+                                error: None,
+                            });
+                        }
+                    }
+                }
+                event_context.register_publication(name.clone(), &publication);
+            }
+        }
+        remote_audio_participants.sort();
+        remote_audio_participants.dedup();
+        initial_remote_videos.sort_by(|left, right| {
+            left.target
+                .participant
+                .cmp(&right.target.participant)
+                .then_with(|| {
+                    left.target
+                        .source
+                        .to_string()
+                        .cmp(&right.target.source.to_string())
+                })
+        });
+        let event_task = tokio::spawn(run_room_events(events, event_context));
         *self.session.lock().await = Some(MediaSession {
             hangout_id,
             room,
@@ -759,8 +973,11 @@ impl MediaManager {
             microphone_frames,
             microphone_task,
             screen_share: None,
+            camera: None,
             _platform_audio: platform_audio,
             remote_audio,
+            remote_video,
+            desired_video,
             event_task,
         });
 
@@ -774,6 +991,8 @@ impl MediaManager {
             microphone,
             speaker,
             audio: inventory.state,
+            remote_audio_participants,
+            remote_videos: initial_remote_videos,
         })
     }
 
@@ -786,17 +1005,29 @@ impl MediaManager {
         self.connected.store(false, Ordering::Release);
         self.input_level.store(0, Ordering::Release);
         self.generation.fetch_add(1, Ordering::AcqRel);
-        if let Some(surface) = &self.surface {
-            let _ = surface.close();
-        }
         let Some(session) = self.session.lock().await.take() else {
             return;
         };
+        if let Some(surface) = &self.surface {
+            let targets = session
+                .remote_video
+                .lock()
+                .expect("remote video lock poisoned")
+                .keys()
+                .cloned()
+                .collect::<Vec<_>>();
+            for target in targets {
+                let _ = surface.close(target);
+            }
+        }
         let _ = session.microphone_capture.set_state(gst::State::Null);
         session.microphone_task.abort();
         let _ = session.microphone_task.await;
         if let Some(screen_share) = session.screen_share {
             stop_screen_share_session(&session.room, screen_share).await;
+        }
+        if let Some(camera) = session.camera {
+            stop_camera_session(&session.room, camera).await;
         }
         if let Err(error) = session.room.close().await {
             warn!(%error, "LiveKit room did not close cleanly");
@@ -855,8 +1086,15 @@ impl MediaManager {
             (session.room.clone(), self.generation())
         };
 
+        let (quality, codec) = {
+            let preferences = self
+                .video_preferences
+                .lock()
+                .expect("video preferences lock poisoned");
+            (preferences.quality, preferences.codec)
+        };
         let (screen_share, state) =
-            create_screen_share(&room, generation, self.event_tx.clone()).await?;
+            create_screen_share(&room, generation, quality, codec, self.event_tx.clone()).await?;
         let mut session = self.session.lock().await;
         let Some(session) = session.as_mut() else {
             stop_screen_share_session(&room, screen_share).await;
@@ -880,18 +1118,168 @@ impl MediaManager {
         }
     }
 
-    pub(crate) fn open_surface(&self) -> anyhow::Result<()> {
-        self.surface
-            .as_ref()
-            .context("the video surface is unavailable")?
-            .open()
+    pub(crate) async fn start_camera(&self) -> anyhow::Result<CameraInfo> {
+        let _operation = self.operation.lock().await;
+        let (room, generation) = {
+            let session = self.session.lock().await;
+            let session = session
+                .as_ref()
+                .context("join a hangout before starting the camera")?;
+            if session.camera.is_some() {
+                bail!("the camera is already active");
+            }
+            (session.room.clone(), self.generation())
+        };
+        let (selected_camera_id, quality, codec) = {
+            let preferences = self
+                .video_preferences
+                .lock()
+                .expect("video preferences lock poisoned");
+            (
+                preferences.selected_camera_id.clone(),
+                preferences.quality,
+                preferences.codec,
+            )
+        };
+        let (camera, state) = create_camera(
+            &room,
+            generation,
+            selected_camera_id.as_deref(),
+            quality,
+            codec,
+            self.event_tx.clone(),
+        )
+        .await?;
+        let mut session = self.session.lock().await;
+        let Some(session) = session.as_mut() else {
+            stop_camera_session(&room, camera).await;
+            bail!("the hangout ended while the camera started");
+        };
+        session.camera = Some(camera);
+        Ok(CameraInfo { state })
     }
 
-    pub(crate) fn close_surface(&self) -> anyhow::Result<()> {
-        self.surface
+    pub(crate) async fn stop_camera(&self) {
+        let _operation = self.operation.lock().await;
+        let (room, camera) = {
+            let mut session = self.session.lock().await;
+            let Some(session) = session.as_mut() else {
+                return;
+            };
+            (session.room.clone(), session.camera.take())
+        };
+        if let Some(camera) = camera {
+            stop_camera_session(&room, camera).await;
+        }
+    }
+
+    pub(crate) async fn open_surface(&self, target: RemoteVideoTarget) -> anyhow::Result<()> {
+        let (publication, desired_video) = self.remote_video_entry(&target).await?;
+        desired_video
+            .lock()
+            .expect("desired video lock poisoned")
+            .insert(target.clone());
+        // The initial detached window is medium-sized. Its resize event will
+        // request High when it is tiled or fullscreen at a larger size.
+        publication.set_video_quality(VideoQuality::Medium);
+        publication.set_subscribed(true);
+        if let Some(surface) = &self.surface
+            && let Err(error) = surface.open(target.clone())
+        {
+            desired_video
+                .lock()
+                .expect("desired video lock poisoned")
+                .remove(&target);
+            publication.set_subscribed(false);
+            return Err(error);
+        }
+        Ok(())
+    }
+
+    pub(crate) async fn close_surface(&self, target: RemoteVideoTarget) -> anyhow::Result<()> {
+        let (publication, desired_video) = self.remote_video_entry(&target).await?;
+        desired_video
+            .lock()
+            .expect("desired video lock poisoned")
+            .remove(&target);
+        publication.set_subscribed(false);
+        if let Some(surface) = &self.surface {
+            surface.close(target)?;
+        }
+        Ok(())
+    }
+
+    pub(crate) async fn first_video_target(&self) -> Option<RemoteVideoTarget> {
+        self.session.lock().await.as_ref().and_then(|session| {
+            session
+                .remote_video
+                .lock()
+                .expect("remote video lock poisoned")
+                .keys()
+                .next()
+                .cloned()
+        })
+    }
+
+    async fn remote_video_publication(
+        &self,
+        target: &RemoteVideoTarget,
+    ) -> anyhow::Result<RemoteTrackPublication> {
+        self.remote_video_entry(target)
+            .await
+            .map(|(publication, _)| publication)
+    }
+
+    async fn remote_video_entry(
+        &self,
+        target: &RemoteVideoTarget,
+    ) -> anyhow::Result<(
+        RemoteTrackPublication,
+        Arc<Mutex<HashSet<RemoteVideoTarget>>>,
+    )> {
+        self.session
+            .lock()
+            .await
             .as_ref()
-            .context("the video surface is unavailable")?
-            .close()
+            .and_then(|session| {
+                session
+                    .remote_video
+                    .lock()
+                    .expect("remote video lock poisoned")
+                    .get(target)
+                    .cloned()
+                    .map(|publication| (publication, session.desired_video.clone()))
+            })
+            .with_context(|| {
+                format!(
+                    "{} {} is no longer available",
+                    target.participant, target.source
+                )
+            })
+    }
+
+    pub(crate) async fn set_surface_visible(&self, target: &RemoteVideoTarget, visible: bool) {
+        if let Ok(publication) = self.remote_video_publication(target).await {
+            publication.set_enabled(visible);
+            if visible {
+                publication.set_video_quality(VideoQuality::High);
+            }
+        }
+    }
+
+    pub(crate) async fn set_surface_dimensions(
+        &self,
+        target: &RemoteVideoTarget,
+        width: u32,
+        height: u32,
+    ) -> &'static str {
+        let quality = surface_quality(width, height);
+        if let Ok(publication) = self.remote_video_publication(target).await {
+            publication.set_enabled(true);
+            publication.set_video_quality(quality);
+            publication.update_video_dimensions(livekit::prelude::TrackDimension(width, height));
+        }
+        video_quality_name(quality)
     }
 
     pub(crate) fn shutdown_surface(&self) {
@@ -905,6 +1293,8 @@ struct RoomEventContext {
     generation: u64,
     event_tx: mpsc::UnboundedSender<MediaEvent>,
     remote_audio: Arc<Mutex<HashMap<String, RemoteAudioTrack>>>,
+    remote_video: Arc<Mutex<HashMap<RemoteVideoTarget, RemoteTrackPublication>>>,
+    desired_video: Arc<Mutex<HashSet<RemoteVideoTarget>>>,
     received_frames: Arc<AtomicU64>,
     received_video_frames: Arc<AtomicU64>,
     connected: Arc<AtomicBool>,
@@ -913,6 +1303,43 @@ struct RoomEventContext {
 }
 
 impl RoomEventContext {
+    fn register_publication(&self, participant: String, publication: &RemoteTrackPublication) {
+        match publication.kind() {
+            TrackKind::Audio => publication.set_subscribed(true),
+            TrackKind::Video => {
+                let Some(source) = protocol_video_source(publication.source()) else {
+                    return;
+                };
+                let target = RemoteVideoTarget {
+                    participant,
+                    source,
+                };
+                if !self
+                    .desired_video
+                    .lock()
+                    .expect("desired video lock poisoned")
+                    .contains(&target)
+                {
+                    publication.set_subscribed(false);
+                }
+                let is_new = self
+                    .remote_video
+                    .lock()
+                    .expect("remote video lock poisoned")
+                    .insert(target.clone(), publication.clone())
+                    .is_none();
+                if is_new {
+                    let _ = self.event_tx.send(MediaEvent::VideoAvailable {
+                        generation: self.generation,
+                        target,
+                        mime_type: publication.mime_type(),
+                        simulcasted: publication.simulcasted(),
+                    });
+                }
+            }
+        }
+    }
+
     fn active_speakers_changed(&self, speakers: &[Participant], active_speakers: &mut Vec<String>) {
         let mut next_speakers = speakers
             .iter()
@@ -965,27 +1392,48 @@ impl RoomEventContext {
         track: RemoteVideoTrack,
         track_tasks: &mut JoinSet<()>,
     ) {
+        let Some(source) = protocol_video_source(track.source()) else {
+            return;
+        };
+        let target = RemoteVideoTarget {
+            participant,
+            source,
+        };
         let _ = self.event_tx.send(MediaEvent::VideoSubscribed {
             generation: self.generation,
-            participant: participant.clone(),
+            target: target.clone(),
         });
         track_tasks.spawn(receive_video_frames(
             self.generation,
-            participant,
+            target,
             track,
             self.received_video_frames.clone(),
             self.surface.clone(),
             self.event_tx.clone(),
         ));
     }
+
+    fn video_is_desired(&self, participant: &str, track: &RemoteVideoTrack) -> bool {
+        protocol_video_source(track.source()).is_some_and(|source| {
+            self.desired_video
+                .lock()
+                .expect("desired video lock poisoned")
+                .contains(&RemoteVideoTarget {
+                    participant: participant.into(),
+                    source,
+                })
+        })
+    }
 }
 
+#[allow(clippy::too_many_lines)]
 async fn run_room_events(
     mut events: tokio::sync::mpsc::UnboundedReceiver<RoomEvent>,
     context: RoomEventContext,
 ) {
     let mut track_tasks = JoinSet::new();
     let mut active_speakers = Vec::new();
+    let mut reconnecting = false;
     while let Some(event) = events.recv().await {
         match event {
             RoomEvent::TrackSubscribed {
@@ -1000,7 +1448,57 @@ async fn run_room_events(
                 participant,
                 ..
             } => {
-                context.subscribe_video(participant.name(), track, &mut track_tasks);
+                let participant = participant.name();
+                if context.video_is_desired(&participant, &track) {
+                    context.subscribe_video(participant, track, &mut track_tasks);
+                } else if let Some(source) = protocol_video_source(track.source()) {
+                    let target = RemoteVideoTarget {
+                        participant,
+                        source,
+                    };
+                    if let Some(publication) = context
+                        .remote_video
+                        .lock()
+                        .expect("remote video lock poisoned")
+                        .get(&target)
+                    {
+                        publication.set_subscribed(false);
+                    }
+                }
+            }
+            RoomEvent::TrackPublished {
+                publication,
+                participant,
+            } => context.register_publication(participant.name(), &publication),
+            RoomEvent::TrackUnpublished {
+                publication,
+                participant,
+            } => {
+                if let Some(source) = protocol_video_source(publication.source()) {
+                    let target = RemoteVideoTarget {
+                        participant: participant.name(),
+                        source,
+                    };
+                    if !reconnecting {
+                        context
+                            .remote_video
+                            .lock()
+                            .expect("remote video lock poisoned")
+                            .remove(&target);
+                        context
+                            .desired_video
+                            .lock()
+                            .expect("desired video lock poisoned")
+                            .remove(&target);
+                        if let Some(surface) = &context.surface {
+                            let _ = surface.close(target.clone());
+                        }
+                        let _ = context.event_tx.send(MediaEvent::VideoUnavailable {
+                            generation: context.generation,
+                            target,
+                        });
+                    }
+                }
             }
             RoomEvent::TrackUnsubscribed {
                 track: RemoteTrack::Audio(track),
@@ -1018,27 +1516,31 @@ async fn run_room_events(
                 });
             }
             RoomEvent::TrackUnsubscribed {
-                track: RemoteTrack::Video(_),
+                track: RemoteTrack::Video(track),
                 participant,
                 ..
             } => {
-                if let Some(surface) = &context.surface {
-                    let _ = surface.close();
+                if let Some(source) = protocol_video_source(track.source()) {
+                    let _ = context.event_tx.send(MediaEvent::VideoUnsubscribed {
+                        generation: context.generation,
+                        target: RemoteVideoTarget {
+                            participant: participant.name(),
+                            source,
+                        },
+                    });
                 }
-                let _ = context.event_tx.send(MediaEvent::VideoUnsubscribed {
-                    generation: context.generation,
-                    participant: participant.name(),
-                });
             }
             RoomEvent::ActiveSpeakersChanged { speakers } => {
                 context.active_speakers_changed(&speakers, &mut active_speakers);
             }
             RoomEvent::Reconnecting => {
+                reconnecting = true;
                 let _ = context.event_tx.send(MediaEvent::Reconnecting {
                     generation: context.generation,
                 });
             }
             RoomEvent::Reconnected => {
+                reconnecting = false;
                 context.connected.store(true, Ordering::Release);
                 let _ = context.event_tx.send(MediaEvent::Reconnected {
                     generation: context.generation,
@@ -1056,7 +1558,16 @@ async fn run_room_events(
         }
     }
     if let Some(surface) = &context.surface {
-        let _ = surface.close();
+        for target in context
+            .remote_video
+            .lock()
+            .expect("remote video lock poisoned")
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>()
+        {
+            let _ = surface.close(target);
+        }
     }
     track_tasks.abort_all();
     while track_tasks.join_next().await.is_some() {}
@@ -1064,6 +1575,198 @@ async fn run_room_events(
 
 fn recording_device_id(device: &RecordingDeviceInfo) -> String {
     public_device_id(device.id.as_str(), device.index, &device.name)
+}
+
+fn protocol_video_source(source: TrackSource) -> Option<VideoSource> {
+    match source {
+        TrackSource::Screenshare => Some(VideoSource::ScreenShare),
+        TrackSource::Camera => Some(VideoSource::Camera),
+        _ => None,
+    }
+}
+
+fn livekit_video_source(source: VideoSource) -> TrackSource {
+    match source {
+        VideoSource::ScreenShare => TrackSource::Screenshare,
+        VideoSource::Camera => TrackSource::Camera,
+    }
+}
+
+fn livekit_video_codec(codec: VideoCodecPreference) -> VideoCodec {
+    match codec {
+        VideoCodecPreference::H264 => VideoCodec::H264,
+        VideoCodecPreference::Vp8 => VideoCodec::VP8,
+        VideoCodecPreference::Av1 => VideoCodec::AV1,
+    }
+}
+
+fn encoder_backend_name(backend: VideoEncoderBackend) -> &'static str {
+    match backend {
+        VideoEncoderBackend::Auto => "auto",
+        VideoEncoderBackend::Software => "software",
+        VideoEncoderBackend::Hardware => "hardware",
+        VideoEncoderBackend::Nvenc => "nvenc",
+        VideoEncoderBackend::Vaapi => "vaapi",
+        VideoEncoderBackend::VideoToolbox => "videotoolbox",
+        VideoEncoderBackend::PreEncoded => "pre_encoded",
+        _ => "unknown",
+    }
+}
+
+fn available_video_encoder_backends() -> Vec<VideoEncoderBackend> {
+    VideoEncoderBackend::list_available().into_iter().collect()
+}
+
+fn selected_video_encoder(backends: &[VideoEncoderBackend]) -> VideoEncoderBackend {
+    [
+        VideoEncoderBackend::Nvenc,
+        VideoEncoderBackend::Vaapi,
+        VideoEncoderBackend::Hardware,
+        VideoEncoderBackend::VideoToolbox,
+    ]
+    .into_iter()
+    .find(|candidate| backends.contains(candidate))
+    .unwrap_or(VideoEncoderBackend::Software)
+}
+
+fn detected_video_settings(
+    quality: VideoQualityPreset,
+    codec: VideoCodecPreference,
+) -> VideoSettings {
+    let backends = available_video_encoder_backends();
+    let selected = selected_video_encoder(&backends);
+    VideoSettings {
+        quality,
+        codec,
+        available_codecs: vec![
+            VideoCodecPreference::H264,
+            VideoCodecPreference::Vp8,
+            VideoCodecPreference::Av1,
+        ],
+        encoder_backend: encoder_backend_name(selected).into(),
+        available_encoder_backends: backends
+            .iter()
+            .copied()
+            .map(encoder_backend_name)
+            .map(str::to_owned)
+            .collect(),
+        hardware_acceleration: selected != VideoEncoderBackend::Software,
+    }
+}
+
+#[derive(Clone, Copy)]
+struct VideoProfile {
+    width: u32,
+    height: u32,
+    fps: u32,
+    max_bitrate: u64,
+}
+
+fn video_profile(quality: VideoQualityPreset, source: VideoSource) -> VideoProfile {
+    match (quality, source) {
+        (VideoQualityPreset::Balanced, VideoSource::ScreenShare) => VideoProfile {
+            width: 1280,
+            height: 720,
+            fps: 30,
+            max_bitrate: 3_000_000,
+        },
+        (VideoQualityPreset::High, VideoSource::ScreenShare) => VideoProfile {
+            width: 1920,
+            height: 1080,
+            fps: 60,
+            max_bitrate: 8_000_000,
+        },
+        (VideoQualityPreset::Ultra, VideoSource::ScreenShare) => VideoProfile {
+            width: 2560,
+            height: 1440,
+            fps: 60,
+            max_bitrate: 14_000_000,
+        },
+        (VideoQualityPreset::Balanced, VideoSource::Camera) => VideoProfile {
+            width: 960,
+            height: 540,
+            fps: 30,
+            max_bitrate: 1_500_000,
+        },
+        (VideoQualityPreset::High, VideoSource::Camera) => VideoProfile {
+            width: 1280,
+            height: 720,
+            fps: 30,
+            max_bitrate: 2_500_000,
+        },
+        (VideoQualityPreset::Ultra, VideoSource::Camera) => VideoProfile {
+            width: 1920,
+            height: 1080,
+            fps: 60,
+            max_bitrate: 6_000_000,
+        },
+    }
+}
+
+fn video_publish_options(
+    source: VideoSource,
+    quality: VideoQualityPreset,
+    codec: VideoCodecPreference,
+) -> TrackPublishOptions {
+    let profile = video_profile(quality, source);
+    let backends = available_video_encoder_backends();
+    TrackPublishOptions {
+        source: livekit_video_source(source),
+        video_codec: livekit_video_codec(codec),
+        video_encoding: Some(VideoEncoding {
+            max_bitrate: profile.max_bitrate,
+            max_framerate: f64::from(profile.fps),
+        }),
+        video_encoder: selected_video_encoder(&backends),
+        simulcast: true,
+        ..Default::default()
+    }
+}
+
+fn surface_quality(width: u32, height: u32) -> VideoQuality {
+    match width.saturating_mul(height) {
+        0..=230_400 => VideoQuality::Low,
+        230_401..=921_600 => VideoQuality::Medium,
+        _ => VideoQuality::High,
+    }
+}
+
+const fn video_quality_name(quality: VideoQuality) -> &'static str {
+    match quality {
+        VideoQuality::Low => "low",
+        VideoQuality::Medium => "medium",
+        VideoQuality::High => "high",
+    }
+}
+
+fn enumerate_camera_devices() -> anyhow::Result<Vec<(VideoDevice, gst::Device)>> {
+    gst::init().context("initialize GStreamer for camera discovery")?;
+    let monitor = gst::DeviceMonitor::new();
+    monitor
+        .add_filter(Some("Video/Source"), None)
+        .context("configure camera device discovery")?;
+    monitor.start().context("start camera device discovery")?;
+    let devices = monitor
+        .devices()
+        .into_iter()
+        .enumerate()
+        .map(|(index, device)| {
+            let name = device.display_name().to_string();
+            let id = camera_device_id(&device, index, &name);
+            (VideoDevice { id, name }, device)
+        })
+        .collect();
+    monitor.stop();
+    Ok(devices)
+}
+
+fn camera_device_id(device: &gst::Device, index: usize, name: &str) -> String {
+    let property_id = device.properties().and_then(|properties| {
+        ["device.path", "api.v4l2.path", "object.path", "node.name"]
+            .into_iter()
+            .find_map(|key| properties.get::<String>(key).ok())
+    });
+    property_id.unwrap_or_else(|| format!("camera:{index}:{name}"))
 }
 
 fn playout_device_id(device: &PlayoutDeviceInfo) -> String {
@@ -1424,9 +2127,199 @@ fn apply_denoiser_state(state: &mut AudioState, backend: DenoiserBackend) {
 }
 
 #[allow(clippy::too_many_lines)]
+async fn create_camera(
+    room: &Room,
+    generation: u64,
+    selected_camera_id: Option<&str>,
+    quality: VideoQualityPreset,
+    codec: VideoCodecPreference,
+    event_tx: mpsc::UnboundedSender<MediaEvent>,
+) -> anyhow::Result<(CameraSession, CameraState)> {
+    gst::init().context("initialize GStreamer for camera capture")?;
+    let devices = enumerate_camera_devices()?;
+    let (protocol_device, device) = selected_camera_id
+        .and_then(|id| devices.iter().find(|(candidate, _)| candidate.id == id))
+        .or_else(|| devices.first())
+        .cloned()
+        .context("no camera is available")?;
+    let source = device
+        .create_element(Some("wisp-camera-source"))
+        .with_context(|| format!("open camera {}", protocol_device.name))?;
+    let profile = video_profile(quality, VideoSource::Camera);
+    let video_source = NativeVideoSource::new(
+        VideoResolution {
+            width: profile.width,
+            height: profile.height,
+        },
+        true,
+    );
+    let caps = gst::Caps::builder("video/x-raw")
+        .field("format", "I420")
+        .field("width", i32::try_from(profile.width)?)
+        .field("height", i32::try_from(profile.height)?)
+        .field(
+            "framerate",
+            gst::Fraction::new(i32::try_from(profile.fps)?, 1),
+        )
+        .build();
+    let published_frames = Arc::new(AtomicU64::new(0));
+    let callback_failed = Arc::new(AtomicBool::new(false));
+    let callback_source = video_source.clone();
+    let callback_frames = published_frames.clone();
+    let callback_events = event_tx.clone();
+    let callback_failure = callback_failed.clone();
+    let app_sink = gst_app::AppSink::builder()
+        .caps(&caps)
+        .max_buffers(2)
+        .drop(true)
+        .sync(false)
+        .enable_last_sample(false)
+        .callbacks(
+            gst_app::AppSinkCallbacks::builder()
+                .new_sample(move |sink| {
+                    let result = capture_screen_sample(sink, &callback_source);
+                    match result {
+                        Ok(()) => {
+                            let total = callback_frames.fetch_add(1, Ordering::AcqRel) + 1;
+                            if total == 1 || total.is_multiple_of(30) {
+                                let _ = callback_events
+                                    .send(MediaEvent::CameraFrames { generation, total });
+                            }
+                            Ok(gst::FlowSuccess::Ok)
+                        }
+                        Err(error) => {
+                            if !callback_failure.swap(true, Ordering::AcqRel) {
+                                let _ = callback_events.send(MediaEvent::CameraStopped {
+                                    generation,
+                                    error: Some(error.to_string()),
+                                });
+                            }
+                            Err(gst::FlowError::Error)
+                        }
+                    }
+                })
+                .build(),
+        )
+        .build();
+    let convert = gst::ElementFactory::make("videoconvert")
+        .build()
+        .context("the GStreamer video converter is not installed")?;
+    let scale = gst::ElementFactory::make("videoscale")
+        .property("add-borders", true)
+        .build()
+        .context("the GStreamer video scaler is not installed")?;
+    let rate = gst::ElementFactory::make("videorate")
+        .build()
+        .context("the GStreamer frame-rate converter is not installed")?;
+    let pipeline = gst::Pipeline::default();
+    pipeline
+        .add_many([&source, &convert, &scale, &rate, app_sink.upcast_ref()])
+        .context("build the camera capture pipeline")?;
+    gst::Element::link_many([&source, &convert, &scale, &rate, app_sink.upcast_ref()])
+        .context("link the camera capture pipeline")?;
+
+    let video_track =
+        LocalVideoTrack::create_video_track("camera", RtcVideoSource::Native(video_source));
+    let publication = room
+        .local_participant()
+        .publish_track(
+            LocalTrack::Video(video_track),
+            video_publish_options(VideoSource::Camera, quality, codec),
+        )
+        .await
+        .context("publish camera to LiveKit")?;
+    if let Err(error) = pipeline.set_state(gst::State::Playing) {
+        let _ = room
+            .local_participant()
+            .unpublish_track(&publication.sid())
+            .await;
+        return Err(error).context("start camera capture");
+    }
+    let monitor_running = Arc::new(AtomicBool::new(true));
+    let monitor_task = monitor_camera(
+        pipeline
+            .bus()
+            .context("camera pipeline has no message bus")?,
+        generation,
+        monitor_running.clone(),
+        event_tx,
+    );
+    info!(
+        camera = %protocol_device.name,
+        width = profile.width,
+        height = profile.height,
+        fps = profile.fps,
+        codec = %codec,
+        quality = %quality,
+        "camera published"
+    );
+    let state = CameraState {
+        devices: devices.into_iter().map(|(device, _)| device).collect(),
+        selected_device_id: Some(protocol_device.id),
+        active: true,
+        width: Some(profile.width),
+        height: Some(profile.height),
+        fps: Some(profile.fps),
+        ..CameraState::default()
+    };
+    Ok((
+        CameraSession {
+            publication_sid: publication.sid(),
+            pipeline,
+            monitor_running,
+            monitor_task,
+        },
+        state,
+    ))
+}
+
+fn monitor_camera(
+    bus: gst::Bus,
+    generation: u64,
+    running: Arc<AtomicBool>,
+    event_tx: mpsc::UnboundedSender<MediaEvent>,
+) -> JoinHandle<()> {
+    tokio::task::spawn_blocking(move || {
+        while running.load(Ordering::Acquire) {
+            let Some(message) = bus.timed_pop(gst::ClockTime::from_mseconds(250)) else {
+                continue;
+            };
+            let error = match message.view() {
+                gst::MessageView::Eos(..) => None,
+                gst::MessageView::Error(error) => Some(format!(
+                    "camera capture failed: {} ({})",
+                    error.error(),
+                    error.debug().unwrap_or_default()
+                )),
+                _ => continue,
+            };
+            let _ = event_tx.send(MediaEvent::CameraStopped { generation, error });
+            break;
+        }
+    })
+}
+
+async fn stop_camera_session(room: &Room, camera: CameraSession) {
+    camera.monitor_running.store(false, Ordering::Release);
+    if let Err(error) = camera.pipeline.set_state(gst::State::Null) {
+        warn!(%error, "camera pipeline did not stop cleanly");
+    }
+    if let Err(error) = room
+        .local_participant()
+        .unpublish_track(&camera.publication_sid)
+        .await
+    {
+        warn!(%error, "camera track did not unpublish cleanly");
+    }
+    let _ = camera.monitor_task.await;
+}
+
+#[allow(clippy::too_many_lines)]
 async fn create_screen_share(
     room: &Room,
     generation: u64,
+    quality: VideoQualityPreset,
+    codec: VideoCodecPreference,
     event_tx: mpsc::UnboundedSender<MediaEvent>,
 ) -> anyhow::Result<(ScreenShareSession, ScreenShareState)> {
     gst::init().context("initialize GStreamer for screen sharing")?;
@@ -1464,7 +2357,8 @@ async fn create_screen_share(
         .await
         .context("open the portal PipeWire stream")?;
 
-    let (width, height) = screen_share_resolution(stream.size());
+    let profile = video_profile(quality, VideoSource::ScreenShare);
+    let (width, height) = screen_share_resolution(stream.size(), profile.width, profile.height);
     let source_name = match stream.source_type() {
         Some(SourceType::Monitor) => "monitor",
         Some(SourceType::Window) => "window",
@@ -1484,7 +2378,7 @@ async fn create_screen_share(
         )
         .field(
             "framerate",
-            gst::Fraction::new(i32::try_from(SCREEN_SHARE_FPS)?, 1),
+            gst::Fraction::new(i32::try_from(profile.fps)?, 1),
         )
         .build();
     let published_frames = Arc::new(AtomicU64::new(0));
@@ -1555,16 +2449,7 @@ async fn create_screen_share(
         .local_participant()
         .publish_track(
             LocalTrack::Video(video_track),
-            TrackPublishOptions {
-                source: TrackSource::Screenshare,
-                video_codec: VideoCodec::VP8,
-                video_encoding: Some(VideoEncoding {
-                    max_bitrate: SCREEN_SHARE_MAX_BITRATE,
-                    max_framerate: f64::from(SCREEN_SHARE_FPS),
-                }),
-                simulcast: false,
-                ..Default::default()
-            },
+            video_publish_options(VideoSource::ScreenShare, quality, codec),
         )
         .await
         .context("publish the screen share to LiveKit")?;
@@ -1591,15 +2476,17 @@ async fn create_screen_share(
         source: Some(source_name.into()),
         width: Some(width),
         height: Some(height),
-        fps: Some(SCREEN_SHARE_FPS),
+        fps: Some(profile.fps),
         ..ScreenShareState::default()
     };
     info!(
         source = source_name,
         width,
         height,
-        fps = SCREEN_SHARE_FPS,
-        max_bitrate = SCREEN_SHARE_MAX_BITRATE,
+        fps = profile.fps,
+        max_bitrate = profile.max_bitrate,
+        codec = %codec,
+        quality = %quality,
         "screen share published"
     );
     Ok((
@@ -1660,12 +2547,16 @@ fn copy_video_plane(destination: &mut [u8], source: &[u8]) -> anyhow::Result<()>
 }
 
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-fn screen_share_resolution(size: Option<(i32, i32)>) -> (u32, u32) {
+fn screen_share_resolution(
+    size: Option<(i32, i32)>,
+    max_width: u32,
+    max_height: u32,
+) -> (u32, u32) {
     let (source_width, source_height) = size
         .filter(|(width, height)| *width > 0 && *height > 0)
         .unwrap_or((1280, 720));
-    let scale = (1920.0_f64 / f64::from(source_width))
-        .min(1080.0_f64 / f64::from(source_height))
+    let scale = (f64::from(max_width) / f64::from(source_width))
+        .min(f64::from(max_height) / f64::from(source_height))
         .min(1.0);
     let even = |value: i32| {
         let scaled = (f64::from(value) * scale).round() as u32;
@@ -1763,13 +2654,14 @@ fn pcm_level_percent(samples: &[i16]) -> u8 {
 
 async fn receive_video_frames(
     generation: u64,
-    participant: String,
+    target: RemoteVideoTarget,
     track: RemoteVideoTrack,
     received_frames: Arc<AtomicU64>,
     surface: Option<SurfaceController>,
     event_tx: mpsc::UnboundedSender<MediaEvent>,
 ) {
     let mut stream = NativeVideoStream::new(track.rtc_track());
+    let mut track_total = 0_u64;
     while let Some(frame) = stream.next().await {
         let width = frame.buffer.width();
         let height = frame.buffer.height();
@@ -1798,22 +2690,28 @@ async fn receive_video_frames(
             dst_height,
         );
         if let Some(surface) = &surface
-            && let Err(error) = surface.send_frame(RgbaFrame {
-                width,
-                height,
-                data: rgba,
-            })
+            && let Err(error) = surface.send_frame(
+                &target,
+                RgbaFrame {
+                    width,
+                    height,
+                    data: rgba,
+                },
+            )
         {
             let _ = event_tx.send(MediaEvent::SurfaceError {
+                target: Some(target.clone()),
                 message: error.to_string(),
             });
         }
         let total = received_frames.fetch_add(1, Ordering::AcqRel) + 1;
-        if total == 1 || total.is_multiple_of(30) {
+        track_total = track_total.saturating_add(1);
+        if track_total == 1 || track_total.is_multiple_of(30) {
             let _ = event_tx.send(MediaEvent::VideoFrames {
                 generation,
-                participant: participant.clone(),
+                target: target.clone(),
                 total,
+                track_total,
                 width,
                 height,
             });
@@ -1858,10 +2756,11 @@ mod tests {
     use super::{
         AUDIO_FRAME_SAMPLES, create_deepfilter_model, deepfilter_frame, i420_to_rgba_texture,
         pcm_level_percent, preferred_or_first, processing_options, public_device_id,
-        same_logical_device, screen_share_resolution,
+        same_logical_device, screen_share_resolution, surface_quality, video_profile,
     };
+    use livekit::track::VideoQuality;
     use livekit::webrtc::video_frame::I420Buffer;
-    use wisp_protocol::{AudioDevice, AudioPreset};
+    use wisp_protocol::{AudioDevice, AudioPreset, VideoQualityPreset, VideoSource};
 
     fn device(id: &str) -> AudioDevice {
         AudioDevice {
@@ -1932,11 +2831,39 @@ mod tests {
 
     #[test]
     fn screen_share_resolution_is_even_and_bounded() {
-        assert_eq!(screen_share_resolution(None), (1280, 720));
-        assert_eq!(screen_share_resolution(Some((1920, 1080))), (1920, 1080));
-        let (width, height) = screen_share_resolution(Some((5120, 1440)));
+        assert_eq!(screen_share_resolution(None, 1920, 1080), (1280, 720));
+        assert_eq!(
+            screen_share_resolution(Some((1920, 1080)), 1920, 1080),
+            (1920, 1080)
+        );
+        let (width, height) = screen_share_resolution(Some((5120, 1440)), 1920, 1080);
         assert!(width <= 1920 && height <= 1080);
         assert!(width.is_multiple_of(2) && height.is_multiple_of(2));
+    }
+
+    #[test]
+    fn publishing_profiles_match_the_m3_quality_ladder() {
+        let balanced = video_profile(VideoQualityPreset::Balanced, VideoSource::ScreenShare);
+        assert_eq!(
+            (balanced.width, balanced.height, balanced.fps),
+            (1280, 720, 30)
+        );
+
+        let high = video_profile(VideoQualityPreset::High, VideoSource::ScreenShare);
+        assert_eq!((high.width, high.height, high.fps), (1920, 1080, 60));
+
+        let ultra = video_profile(VideoQualityPreset::Ultra, VideoSource::ScreenShare);
+        assert_eq!((ultra.width, ultra.height, ultra.fps), (2560, 1440, 60));
+
+        let camera = video_profile(VideoQualityPreset::High, VideoSource::Camera);
+        assert_eq!((camera.width, camera.height, camera.fps), (1280, 720, 30));
+    }
+
+    #[test]
+    fn surface_dimensions_select_only_the_useful_simulcast_layer() {
+        assert_eq!(surface_quality(320, 180), VideoQuality::Low);
+        assert_eq!(surface_quality(960, 540), VideoQuality::Medium);
+        assert_eq!(surface_quality(1920, 1080), VideoQuality::High);
     }
 
     #[test]

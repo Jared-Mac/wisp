@@ -27,10 +27,12 @@ use tracing::{debug, error, info, warn};
 use tracing_subscriber::EnvFilter;
 use url::Url;
 use wisp_protocol::{
-    AudioPreset, CommandEnvelope, ConnectionState, DaemonEnvelope, DevSession, DevSessionRequest,
-    JoinFriendRequest, JoinFriendResult, JoinHangoutRequest, KnockResponse, LiveKitTokenResponse,
-    MediaState, PROTOCOL_VERSION, Presence, PushToTalkState, RespondKnockRequest,
-    RespondKnockResult, ScreenShareState, ServerEvent, SetPresenceRequest, Snapshot,
+    AudioPreset, CameraState, CommandEnvelope, ConnectionState, DaemonEnvelope, DevSession,
+    DevSessionRequest, JoinFriendRequest, JoinFriendResult, JoinHangoutRequest, KnockResponse,
+    LiveKitTokenResponse, MediaState, PROTOCOL_VERSION, Presence, PushToTalkState,
+    RemoteVideoState, RemoteVideoTarget, RespondKnockRequest, RespondKnockResult, ScreenShareState,
+    ServerEvent, SetPresenceRequest, Snapshot, VideoCodecPreference, VideoQualityPreset,
+    VideoSource,
 };
 
 use crate::media::{AudioInventory, MediaEvent, MediaManager};
@@ -48,6 +50,8 @@ struct Args {
     socket: Option<PathBuf>,
     #[arg(long, env = "WISP_DISABLE_MEDIA")]
     disable_media: bool,
+    #[arg(long, env = "WISP_DISABLE_SURFACES")]
+    disable_surfaces: bool,
     #[arg(long, env = "WISP_PTT_LEASE_MS", default_value_t = 30_000)]
     ptt_lease_ms: u64,
 }
@@ -319,6 +323,7 @@ impl Daemon {
         Ok(())
     }
 
+    #[allow(clippy::too_many_lines)]
     async fn reconcile_media(&self) -> anyhow::Result<()> {
         let _reconcile = self.media_reconcile.lock().await;
         let hangout_id = self.state.read().await.self_state.hangout_id;
@@ -334,11 +339,29 @@ impl Daemon {
         }
         let Some(hangout_id) = hangout_id else {
             self.release_push_to_talk("push_to_talk_released").await;
-            let audio = self.state.read().await.self_state.media.audio.clone();
+            let (audio, camera, video) = {
+                let state = self.state.read().await;
+                (
+                    state.self_state.media.audio.clone(),
+                    CameraState {
+                        devices: state.self_state.media.camera.devices.clone(),
+                        selected_device_id: state
+                            .self_state
+                            .media
+                            .camera
+                            .selected_device_id
+                            .clone(),
+                        ..CameraState::default()
+                    },
+                    state.self_state.media.video.clone(),
+                )
+            };
             self.media.disconnect().await;
             self.set_media_state(
                 MediaState {
                     audio,
+                    camera,
+                    video,
                     ..MediaState::default()
                 },
                 ConnectionState::Available,
@@ -373,19 +396,28 @@ impl Daemon {
         .await;
         match result {
             Ok(connected) => {
-                self.set_media_state(
-                    MediaState {
-                        livekit_connected: true,
-                        microphone_published: true,
-                        microphone: Some(connected.microphone),
-                        speaker: Some(connected.speaker),
-                        audio: connected.audio,
-                        ..MediaState::default()
-                    },
-                    ConnectionState::Connected,
-                    None,
-                )
-                .await;
+                let (camera, video) = {
+                    let state = self.state.read().await;
+                    (
+                        state.self_state.media.camera.clone(),
+                        state.self_state.media.video.clone(),
+                    )
+                };
+                let mut media = MediaState {
+                    livekit_connected: true,
+                    microphone_published: true,
+                    microphone: Some(connected.microphone),
+                    speaker: Some(connected.speaker),
+                    audio: connected.audio,
+                    remote_audio_participants: connected.remote_audio_participants,
+                    remote_videos: connected.remote_videos,
+                    camera,
+                    video,
+                    ..MediaState::default()
+                };
+                refresh_legacy_video_state(&mut media);
+                self.set_media_state(media, ConnectionState::Connected, None)
+                    .await;
                 Ok(())
             }
             Err(error) => {
@@ -755,6 +787,10 @@ impl Daemon {
             | "set_input_device"
             | "set_output_device"
             | "set_audio_preset" => self.audio_command(command).await,
+            "refresh_video_devices"
+            | "set_camera_device"
+            | "set_video_quality"
+            | "set_video_codec" => self.video_command(command).await,
             "set_presence" => {
                 let presence = command
                     .args
@@ -783,9 +819,11 @@ impl Daemon {
                 self.reconcile_media().await?;
                 Ok(None)
             }
-            "open_surface" => self.surface_command(true),
-            "close_surface" => self.surface_command(false),
+            "open_surface" => self.surface_command(true).await,
+            "close_surface" => self.surface_command(false).await,
+            "watch_video" => self.watch_video_command(&command.args).await,
             "share" => self.screen_share_command(&command.args).await,
+            "camera" => self.camera_command(&command.args).await,
             _ => bail!("unknown command: {}", command.name),
         }
     }
@@ -826,6 +864,62 @@ impl Daemon {
         };
         let audio = self.apply_audio_inventory(inventory, event_name).await;
         Ok(Some(serde_json::to_value(audio)?))
+    }
+
+    async fn video_command(&self, command: &CommandEnvelope) -> anyhow::Result<Option<Value>> {
+        if !self.media_enabled {
+            bail!("media is disabled");
+        }
+        match command.name.as_str() {
+            "refresh_video_devices" => {
+                let refreshed = self.media.refresh_camera_devices().await?;
+                self.set_local_media(
+                    |state| merge_camera_inventory(&mut state.self_state.media.camera, refreshed),
+                    "camera_devices_changed",
+                )
+                .await;
+                Ok(Some(serde_json::to_value(
+                    &self.state.read().await.self_state.media.camera,
+                )?))
+            }
+            "set_camera_device" => {
+                let id = opaque_string_arg(&command.args, "id")?;
+                let refreshed = self.media.select_camera_device(&id).await?;
+                self.set_local_media(
+                    |state| merge_camera_inventory(&mut state.self_state.media.camera, refreshed),
+                    "camera_device_changed",
+                )
+                .await;
+                Ok(Some(serde_json::to_value(
+                    &self.state.read().await.self_state.media.camera,
+                )?))
+            }
+            "set_video_quality" => {
+                let quality = string_arg(&command.args, "quality")?
+                    .parse::<VideoQualityPreset>()
+                    .map_err(anyhow::Error::msg)?;
+                let settings = self.media.set_video_quality(quality).await?;
+                self.set_local_media(
+                    |state| state.self_state.media.video = settings.clone(),
+                    "video_quality_changed",
+                )
+                .await;
+                Ok(Some(serde_json::to_value(settings)?))
+            }
+            "set_video_codec" => {
+                let codec = string_arg(&command.args, "codec")?
+                    .parse::<VideoCodecPreference>()
+                    .map_err(anyhow::Error::msg)?;
+                let settings = self.media.set_video_codec(codec).await?;
+                self.set_local_media(
+                    |state| state.self_state.media.video = settings.clone(),
+                    "video_codec_changed",
+                )
+                .await;
+                Ok(Some(serde_json::to_value(settings)?))
+            }
+            _ => unreachable!("only video settings commands are dispatched here"),
+        }
     }
 
     async fn screen_share_command(&self, args: &Value) -> anyhow::Result<Option<Value>> {
@@ -885,6 +979,63 @@ impl Daemon {
         }
     }
 
+    async fn camera_command(&self, args: &Value) -> anyhow::Result<Option<Value>> {
+        if !self.media_enabled {
+            bail!("media is disabled");
+        }
+        let enabled = args.get("enabled").and_then(Value::as_bool).unwrap_or(true);
+        if !enabled {
+            self.media.stop_camera().await;
+            self.set_local_media(
+                |state| {
+                    let devices = state.self_state.media.camera.devices.clone();
+                    let selected_device_id =
+                        state.self_state.media.camera.selected_device_id.clone();
+                    state.self_state.media.camera = CameraState {
+                        devices,
+                        selected_device_id,
+                        ..CameraState::default()
+                    };
+                },
+                "camera_stopped",
+            )
+            .await;
+            return Ok(Some(json!({"camera": false})));
+        }
+        self.set_local_media(
+            |state| {
+                state.self_state.media.camera.starting = true;
+                state.self_state.media.camera.error = None;
+            },
+            "camera_starting",
+        )
+        .await;
+        match self.media.start_camera().await {
+            Ok(info) => {
+                let result = serde_json::to_value(&info.state)?;
+                self.set_local_media(
+                    |state| state.self_state.media.camera = info.state,
+                    "camera_started",
+                )
+                .await;
+                Ok(Some(result))
+            }
+            Err(error) => {
+                let message = error.to_string();
+                self.set_local_media(
+                    |state| {
+                        state.self_state.media.camera.starting = false;
+                        state.self_state.media.camera.active = false;
+                        state.self_state.media.camera.error = Some(message.clone());
+                    },
+                    "camera_failed",
+                )
+                .await;
+                Err(error)
+            }
+        }
+    }
+
     async fn join_friend_command(&self, args: &Value) -> anyhow::Result<Option<Value>> {
         let friend = string_arg(args, "friend")?;
         self.set_connection(ConnectionState::Joining, None).await;
@@ -921,15 +1072,80 @@ impl Daemon {
         Ok(Some(serde_json::to_value(result)?))
     }
 
-    fn surface_command(&self, open: bool) -> anyhow::Result<Option<Value>> {
-        if open {
-            self.media.open_surface()?;
+    async fn surface_command(&self, open: bool) -> anyhow::Result<Option<Value>> {
+        let target = if open {
+            self.media
+                .first_video_target()
+                .await
+                .context("no remote video is available")?
         } else {
-            self.media.close_surface()?;
+            let active = self
+                .state
+                .read()
+                .await
+                .self_state
+                .media
+                .remote_videos
+                .iter()
+                .find(|video| video.surface_open || video.subscribed)
+                .map(|video| video.target.clone());
+            match active {
+                Some(target) => target,
+                None => self
+                    .media
+                    .first_video_target()
+                    .await
+                    .context("no remote video is available")?,
+            }
+        };
+        self.set_video_watched(target.clone(), open).await?;
+        Ok(Some(json!({
+            "surface": if open { "opening" } else { "closing" },
+            "participant": target.participant,
+            "source": target.source,
+        })))
+    }
+
+    async fn watch_video_command(&self, args: &Value) -> anyhow::Result<Option<Value>> {
+        let participant = opaque_string_arg(args, "participant")?;
+        let source = string_arg(args, "source")?
+            .parse::<VideoSource>()
+            .map_err(anyhow::Error::msg)?;
+        let open = args.get("open").and_then(Value::as_bool).unwrap_or(true);
+        let target = RemoteVideoTarget {
+            participant,
+            source,
+        };
+        self.set_video_watched(target.clone(), open).await?;
+        Ok(Some(json!({
+            "participant": target.participant,
+            "source": target.source,
+            "watched": open,
+        })))
+    }
+
+    async fn set_video_watched(&self, target: RemoteVideoTarget, open: bool) -> anyhow::Result<()> {
+        if !self.media_enabled {
+            bail!("media is disabled");
         }
-        Ok(Some(
-            json!({"surface": if open { "opening" } else { "closing" }}),
-        ))
+        if open {
+            self.media.open_surface(target.clone()).await?;
+        } else {
+            self.media.close_surface(target.clone()).await?;
+        }
+        self.update_media_state(None, "video_watch_changed", |media| {
+            if let Some(video) = find_remote_video_mut(media, &target) {
+                video.subscribed = open;
+                if !open {
+                    video.surface_open = false;
+                    video.surface_visible = false;
+                    video.requested_quality = None;
+                }
+            }
+            refresh_legacy_video_state(media);
+        })
+        .await;
+        Ok(())
     }
 
     async fn set_local_media(&self, update: impl FnOnce(&mut Snapshot), event_name: &str) {
@@ -1164,13 +1380,19 @@ async fn synchronize_media_events(
             | MediaEvent::AudioFrames { generation, .. }
             | MediaEvent::InputLevel { generation, .. }
             | MediaEvent::ActiveSpeakers { generation, .. }
+            | MediaEvent::VideoAvailable { generation, .. }
+            | MediaEvent::VideoUnavailable { generation, .. }
             | MediaEvent::VideoSubscribed { generation, .. }
             | MediaEvent::VideoUnsubscribed { generation, .. }
             | MediaEvent::VideoFrames { generation, .. }
             | MediaEvent::ScreenShareFrames { generation, .. }
-            | MediaEvent::ScreenShareStopped { generation, .. } => Some(*generation),
-            MediaEvent::SurfaceOpened
-            | MediaEvent::SurfaceClosed
+            | MediaEvent::ScreenShareStopped { generation, .. }
+            | MediaEvent::CameraFrames { generation, .. }
+            | MediaEvent::CameraStopped { generation, .. } => Some(*generation),
+            MediaEvent::SurfaceOpened { .. }
+            | MediaEvent::SurfaceClosed { .. }
+            | MediaEvent::SurfaceVisibilityChanged { .. }
+            | MediaEvent::SurfaceResized { .. }
             | MediaEvent::SurfaceRendered { .. }
             | MediaEvent::SurfaceError { .. } => None,
         };
@@ -1211,10 +1433,13 @@ async fn synchronize_media_events(
             | MediaEvent::AudioFrames { .. }
             | MediaEvent::InputLevel { .. }
             | MediaEvent::ActiveSpeakers { .. }
+            | MediaEvent::VideoAvailable { .. }
+            | MediaEvent::VideoUnavailable { .. }
             | MediaEvent::VideoSubscribed { .. }
             | MediaEvent::VideoUnsubscribed { .. }
             | MediaEvent::VideoFrames { .. }
-            | MediaEvent::ScreenShareFrames { .. }) => {
+            | MediaEvent::ScreenShareFrames { .. }
+            | MediaEvent::CameraFrames { .. }) => {
                 synchronize_track_event(&daemon, track_event).await;
             }
             MediaEvent::ScreenShareStopped { error, .. } => {
@@ -1233,8 +1458,32 @@ async fn synchronize_media_events(
                     )
                     .await;
             }
-            surface_event @ (MediaEvent::SurfaceOpened
-            | MediaEvent::SurfaceClosed
+            MediaEvent::CameraStopped { error, .. } => {
+                daemon.media.stop_camera().await;
+                if let Some(message) = &error {
+                    warn!(%message, "camera stopped unexpectedly");
+                }
+                daemon
+                    .set_local_media(
+                        |state| {
+                            let devices = state.self_state.media.camera.devices.clone();
+                            let selected_device_id =
+                                state.self_state.media.camera.selected_device_id.clone();
+                            state.self_state.media.camera = CameraState {
+                                devices,
+                                selected_device_id,
+                                error,
+                                ..CameraState::default()
+                            };
+                        },
+                        "camera_stopped",
+                    )
+                    .await;
+            }
+            surface_event @ (MediaEvent::SurfaceOpened { .. }
+            | MediaEvent::SurfaceClosed { .. }
+            | MediaEvent::SurfaceVisibilityChanged { .. }
+            | MediaEvent::SurfaceResized { .. }
             | MediaEvent::SurfaceRendered { .. }
             | MediaEvent::SurfaceError { .. }) => {
                 synchronize_surface_event(&daemon, surface_event).await;
@@ -1249,6 +1498,7 @@ async fn synchronize_media_events(
                             media.livekit_connected = false;
                             media.remote_audio_participants.clear();
                             media.remote_video_participants.clear();
+                            media.remote_videos.clear();
                             media.active_speakers.clear();
                             media.audio.input_level = 0;
                             media.error_code = Some("livekit_disconnected".into());
@@ -1325,7 +1575,9 @@ async fn synchronize_track_event(daemon: &Daemon, event: MediaEvent) {
                 })
                 .await;
         }
-        video_event @ (MediaEvent::VideoSubscribed { .. }
+        video_event @ (MediaEvent::VideoAvailable { .. }
+        | MediaEvent::VideoUnavailable { .. }
+        | MediaEvent::VideoSubscribed { .. }
         | MediaEvent::VideoUnsubscribed { .. }
         | MediaEvent::VideoFrames { .. }) => {
             synchronize_video_track_event(daemon, video_event).await;
@@ -1337,52 +1589,99 @@ async fn synchronize_track_event(daemon: &Daemon, event: MediaEvent) {
                 })
                 .await;
         }
+        MediaEvent::CameraFrames { total, .. } => {
+            daemon
+                .update_media_state(None, "camera_frame_published", |media| {
+                    media.camera.published_frames = total;
+                })
+                .await;
+        }
         _ => unreachable!("only remote track events are dispatched here"),
     }
 }
 
 async fn synchronize_video_track_event(daemon: &Daemon, event: MediaEvent) {
     match event {
-        MediaEvent::VideoSubscribed { participant, .. } => {
-            info!(%participant, "subscribed to remote video");
+        MediaEvent::VideoAvailable {
+            target,
+            mime_type,
+            simulcasted,
+            ..
+        } => {
+            info!(participant = %target.participant, source = %target.source, "remote video available");
             daemon
-                .update_media_state(None, "remote_video_subscribed", |media| {
-                    media.last_video_from = Some(participant.clone());
-                    if !media.remote_video_participants.contains(&participant) {
-                        media.remote_video_participants.push(participant);
-                        media.remote_video_participants.sort();
+                .update_media_state(None, "remote_video_available", |media| {
+                    if find_remote_video_mut(media, &target).is_none() {
+                        media.remote_videos.push(RemoteVideoState {
+                            target,
+                            mime_type,
+                            simulcasted,
+                            subscribed: false,
+                            surface_open: false,
+                            surface_visible: false,
+                            requested_quality: None,
+                            received_frames: 0,
+                            rendered_frames: 0,
+                            width: None,
+                            height: None,
+                            error: None,
+                        });
+                        sort_remote_videos(media);
                     }
+                    refresh_legacy_video_state(media);
                 })
                 .await;
         }
-        MediaEvent::VideoUnsubscribed { participant, .. } => {
-            info!(%participant, "unsubscribed from remote video");
+        MediaEvent::VideoUnavailable { target, .. } => {
+            info!(participant = %target.participant, source = %target.source, "remote video unavailable");
+            daemon
+                .update_media_state(None, "remote_video_unavailable", |media| {
+                    media.remote_videos.retain(|video| video.target != target);
+                    refresh_legacy_video_state(media);
+                })
+                .await;
+        }
+        MediaEvent::VideoSubscribed { target, .. } => {
+            info!(participant = %target.participant, source = %target.source, "subscribed to remote video");
+            daemon
+                .update_media_state(None, "remote_video_subscribed", |media| {
+                    if let Some(video) = find_remote_video_mut(media, &target) {
+                        video.subscribed = true;
+                        video.requested_quality = Some("high".into());
+                    }
+                    refresh_legacy_video_state(media);
+                })
+                .await;
+        }
+        MediaEvent::VideoUnsubscribed { target, .. } => {
+            info!(participant = %target.participant, source = %target.source, "unsubscribed from remote video");
             daemon
                 .update_media_state(None, "remote_video_unsubscribed", |media| {
-                    media
-                        .remote_video_participants
-                        .retain(|name| name != &participant);
-                    if media.remote_video_participants.is_empty() {
-                        media.last_video_from = None;
-                        media.video_width = None;
-                        media.video_height = None;
+                    if let Some(video) = find_remote_video_mut(media, &target) {
+                        video.subscribed = false;
+                        video.requested_quality = None;
                     }
+                    refresh_legacy_video_state(media);
                 })
                 .await;
         }
         MediaEvent::VideoFrames {
-            participant,
+            target,
             total,
+            track_total,
             width,
             height,
             ..
         } => {
             daemon
                 .update_media_state(None, "remote_video_received", |media| {
+                    if let Some(video) = find_remote_video_mut(media, &target) {
+                        video.received_frames = track_total;
+                        video.width = Some(width);
+                        video.height = Some(height);
+                    }
                     media.received_video_frames = total;
-                    media.last_video_from = Some(participant);
-                    media.video_width = Some(width);
-                    media.video_height = Some(height);
+                    refresh_legacy_video_state(media);
                 })
                 .await;
         }
@@ -1413,6 +1712,93 @@ async fn synchronize_audio_devices(daemon: Arc<Daemon>) {
     }
 }
 
+async fn synchronize_video_devices(daemon: Arc<Daemon>) {
+    if !daemon.media_enabled {
+        return;
+    }
+    let mut interval = tokio::time::interval(Duration::from_secs(3));
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    loop {
+        interval.tick().await;
+        let Ok(refreshed) = daemon.media.refresh_camera_devices().await else {
+            continue;
+        };
+        let changed = {
+            let state = daemon.state.read().await;
+            state.self_state.media.camera.devices != refreshed.devices
+                || state.self_state.media.camera.selected_device_id != refreshed.selected_device_id
+        };
+        if changed {
+            daemon
+                .set_local_media(
+                    |state| merge_camera_inventory(&mut state.self_state.media.camera, refreshed),
+                    "camera_devices_changed",
+                )
+                .await;
+        }
+    }
+}
+
+fn merge_camera_inventory(current: &mut CameraState, refreshed: CameraState) {
+    current.devices = refreshed.devices;
+    current.selected_device_id = refreshed.selected_device_id;
+}
+
+fn find_remote_video_mut<'a>(
+    media: &'a mut MediaState,
+    target: &RemoteVideoTarget,
+) -> Option<&'a mut RemoteVideoState> {
+    media
+        .remote_videos
+        .iter_mut()
+        .find(|video| &video.target == target)
+}
+
+fn sort_remote_videos(media: &mut MediaState) {
+    media.remote_videos.sort_by(|left, right| {
+        left.target
+            .participant
+            .cmp(&right.target.participant)
+            .then_with(|| {
+                left.target
+                    .source
+                    .to_string()
+                    .cmp(&right.target.source.to_string())
+            })
+    });
+}
+
+fn refresh_legacy_video_state(media: &mut MediaState) {
+    let mut participants = media
+        .remote_videos
+        .iter()
+        .map(|video| video.target.participant.clone())
+        .collect::<Vec<_>>();
+    participants.sort();
+    participants.dedup();
+    media.remote_video_participants = participants;
+    media.surface_open = media.remote_videos.iter().any(|video| video.surface_open);
+    media.rendered_video_frames = media
+        .remote_videos
+        .iter()
+        .map(|video| video.rendered_frames)
+        .sum();
+    if let Some(video) = media
+        .remote_videos
+        .iter()
+        .filter(|video| video.received_frames > 0)
+        .max_by_key(|video| video.received_frames)
+    {
+        media.last_video_from = Some(video.target.participant.clone());
+        media.video_width = video.width;
+        media.video_height = video.height;
+    } else {
+        media.last_video_from = None;
+        media.video_width = None;
+        media.video_height = None;
+    }
+}
+
 async fn synchronize_push_to_talk_lease(daemon: Arc<Daemon>) {
     let mut leases = daemon.ptt_lease_tx.subscribe();
     loop {
@@ -1438,35 +1824,87 @@ async fn synchronize_push_to_talk_lease(daemon: Arc<Daemon>) {
 
 async fn synchronize_surface_event(daemon: &Daemon, event: MediaEvent) {
     match event {
-        MediaEvent::SurfaceOpened => {
+        MediaEvent::SurfaceOpened { target } => {
             daemon
                 .update_media_state(None, "video_surface_opened", |media| {
-                    media.surface_open = true;
+                    if let Some(video) = find_remote_video_mut(media, &target) {
+                        video.surface_open = true;
+                        video.surface_visible = true;
+                        video.requested_quality = Some("high".into());
+                        video.error = None;
+                    }
                     media.surface_error = None;
-                    media.rendered_video_frames = 0;
+                    refresh_legacy_video_state(media);
                 })
                 .await;
         }
-        MediaEvent::SurfaceClosed => {
+        MediaEvent::SurfaceClosed { target } => {
+            let _ = daemon.media.close_surface(target.clone()).await;
             daemon
                 .update_media_state(None, "video_surface_closed", |media| {
-                    media.surface_open = false;
+                    if let Some(video) = find_remote_video_mut(media, &target) {
+                        video.surface_open = false;
+                        video.surface_visible = false;
+                        video.subscribed = false;
+                        video.requested_quality = None;
+                    }
+                    refresh_legacy_video_state(media);
                 })
                 .await;
         }
-        MediaEvent::SurfaceRendered { total } => {
+        MediaEvent::SurfaceVisibilityChanged { target, visible } => {
+            daemon.media.set_surface_visible(&target, visible).await;
+            daemon
+                .update_media_state(None, "video_surface_visibility_changed", |media| {
+                    if let Some(video) = find_remote_video_mut(media, &target) {
+                        video.surface_visible = visible;
+                        video.requested_quality =
+                            Some(if visible { "high" } else { "paused" }.into());
+                    }
+                    refresh_legacy_video_state(media);
+                })
+                .await;
+        }
+        MediaEvent::SurfaceResized {
+            target,
+            width,
+            height,
+        } => {
+            let quality = daemon
+                .media
+                .set_surface_dimensions(&target, width, height)
+                .await;
+            daemon
+                .update_media_state(None, "video_surface_quality_changed", |media| {
+                    if let Some(video) = find_remote_video_mut(media, &target) {
+                        video.requested_quality = Some(quality.into());
+                    }
+                })
+                .await;
+        }
+        MediaEvent::SurfaceRendered { target, total } => {
             daemon
                 .update_media_state(None, "video_surface_rendered", |media| {
-                    media.rendered_video_frames = total;
+                    if let Some(video) = find_remote_video_mut(media, &target) {
+                        video.rendered_frames = total;
+                    }
+                    refresh_legacy_video_state(media);
                 })
                 .await;
         }
-        MediaEvent::SurfaceError { message } => {
+        MediaEvent::SurfaceError { target, message } => {
             warn!(%message, "video surface unavailable");
             daemon
                 .update_media_state(None, "video_surface_error", |media| {
-                    media.surface_open = false;
+                    if let Some(target) = target
+                        && let Some(video) = find_remote_video_mut(media, &target)
+                    {
+                        video.surface_open = false;
+                        video.surface_visible = false;
+                        video.error = Some(message.clone());
+                    }
                     media.surface_error = Some(message);
+                    refresh_legacy_video_state(media);
                 })
                 .await;
         }
@@ -1565,15 +2003,17 @@ async fn synchronize_tray_state(daemon: Arc<Daemon>, handle: ksni::Handle<tray::
     loop {
         let current = {
             let state = daemon.state.read().await;
-            (
-                state.self_state.muted,
-                state.self_state.deafened,
-                state.self_state.media.screen_share.active,
+            tray::TrayState::new(
+                (state.self_state.muted, state.self_state.deafened),
+                (
+                    state.self_state.media.screen_share.active,
+                    state.self_state.media.camera.active,
+                ),
             )
         };
         if previous != Some(current) {
             if handle
-                .update(|tray| tray.set_state(current.0, current.1, current.2))
+                .update(|tray| tray.set_state(current))
                 .await
                 .is_none()
             {
@@ -1636,6 +2076,12 @@ async fn handle_tray_action(action: TrayAction, daemon: &Arc<Daemon>) -> bool {
                 warn!(%error, "tray screen sharing action failed");
             }
         }
+        TrayAction::ToggleCamera => {
+            let enabled = !daemon.state.read().await.self_state.media.camera.active;
+            if let Err(error) = daemon.camera_command(&json!({"enabled": enabled})).await {
+                warn!(%error, "tray camera action failed");
+            }
+        }
         TrayAction::Exit => {
             info!("exit requested from system tray");
             quit_all_ui_instances().await;
@@ -1684,8 +2130,8 @@ async fn handle_connecting_tray_action(
             *audio_state = deafen_transition(audio_state.0, !audio_state.1);
             *audio_changed = true;
         }
-        TrayAction::ToggleShare => {
-            debug!("screen sharing is unavailable while connecting to the server");
+        TrayAction::ToggleShare | TrayAction::ToggleCamera => {
+            debug!("video publishing is unavailable while connecting to the server");
         }
         TrayAction::Exit => {
             info!("exit requested from system tray while connecting");
@@ -1696,7 +2142,9 @@ async fn handle_connecting_tray_action(
     if let Some(handle) = tray_handle {
         let (muted, deafened) = *audio_state;
         let _ = handle
-            .update(|tray| tray.set_state(muted, deafened, false))
+            .update(|tray_service| {
+                tray_service.set_state(tray::TrayState::new((muted, deafened), (false, false)));
+            })
             .await;
     }
     true
@@ -1796,7 +2244,8 @@ async fn start_connected_daemon(
     let shortcut = ShortcutManager::from_environment();
     snapshot.self_state.push_to_talk.shortcut = shortcut.load_shortcut().await;
     snapshot.self_state.push_to_talk.shortcut_backend = shortcut.backend().map(str::to_owned);
-    let (media, media_events) = MediaManager::new(!args.disable_media);
+    let (media, media_events) = MediaManager::new(!args.disable_media && !args.disable_surfaces);
+    snapshot.self_state.media.video = media.video_settings();
     let daemon = Arc::new(Daemon::new(
         args.profile,
         api,
@@ -1809,6 +2258,7 @@ async fn start_connected_daemon(
     tokio::spawn(synchronize_server(daemon.clone()));
     tokio::spawn(synchronize_media_events(daemon.clone(), media_events));
     tokio::spawn(synchronize_audio_devices(daemon.clone()));
+    tokio::spawn(synchronize_video_devices(daemon.clone()));
     tokio::spawn(synchronize_push_to_talk_lease(daemon.clone()));
     let initial_media = daemon.clone();
     tokio::spawn(async move {
@@ -1850,7 +2300,7 @@ async fn main() -> anyhow::Result<()> {
     let (mut tray_actions, tray_handle) = if std::env::var_os("WISP_DISABLE_TRAY").is_some() {
         (None, None)
     } else {
-        match tray::spawn(false, false, false).await {
+        match tray::spawn(tray::TrayState::default()).await {
             Ok((receiver, handle)) => (Some(receiver), Some(handle)),
             Err(error) => {
                 warn!(%error, "system tray is unavailable; continuing without a tray icon");
@@ -1886,16 +2336,17 @@ async fn main() -> anyhow::Result<()> {
 
     let initial_tray_state = {
         let state = daemon.state.read().await;
-        (
-            state.self_state.muted,
-            state.self_state.deafened,
-            state.self_state.media.screen_share.active,
+        tray::TrayState::new(
+            (state.self_state.muted, state.self_state.deafened),
+            (
+                state.self_state.media.screen_share.active,
+                state.self_state.media.camera.active,
+            ),
         )
     };
     if let Some(handle) = tray_handle.as_ref() {
-        let (muted, deafened, sharing) = initial_tray_state;
         let _ = handle
-            .update(|tray| tray.set_state(muted, deafened, sharing))
+            .update(|tray| tray.set_state(initial_tray_state))
             .await;
     }
     if let Some(handle) = tray_handle {

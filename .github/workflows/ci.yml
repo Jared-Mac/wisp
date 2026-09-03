@@ -54,12 +54,15 @@ jobs:
             libdbus-1-dev \
             libgstreamer-plugins-base1.0-dev \
             libgstreamer1.0-dev \
+            gstreamer1.0-plugins-good \
             libpipewire-0.3-dev \
             libpulse-dev \
             libssl-dev \
             libwayland-dev \
             libxkbcommon-dev \
             ninja-build \
+            pulseaudio \
+            pulseaudio-utils \
             pkg-config \
             ripgrep
 
@@ -90,8 +93,15 @@ jobs:
 
       - name: Run headless integration tests
         run: |
+          pulseaudio --check || pulseaudio --start --exit-idle-time=-1
+          pactl load-module module-null-sink \
+            sink_name=wisp_test \
+            sink_properties=device.description=Wisp_Test >/dev/null
+          pactl set-default-sink wisp_test
+          pactl set-default-source wisp_test.monitor
           ./scripts/test-integration.sh
           ./scripts/test-knock.sh
+          ./scripts/test-media.sh
 
       - name: Scan tracked source for secrets
         run: ./scripts/scan-secrets.sh

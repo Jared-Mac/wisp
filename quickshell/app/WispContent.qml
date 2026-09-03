@@ -47,7 +47,10 @@ FocusScope {
   function toggleSettings() {
     settingsOpen = !settingsOpen
     scrollView.contentY = 0
-    if (settingsOpen) bridge.refreshAudioDevices()
+    if (settingsOpen) {
+      bridge.refreshAudioDevices()
+      bridge.refreshVideoDevices()
+    }
   }
 
   Keys.priority: Keys.BeforeItem
@@ -67,6 +70,9 @@ FocusScope {
       event.accepted = true
     } else if (event.text === "s" || event.text === "S") {
       root.bridge.toggleShare()
+      event.accepted = true
+    } else if (event.text === "c" || event.text === "C") {
+      root.bridge.toggleCamera()
       event.accepted = true
     } else if (event.text === "l" || event.text === "L") {
       root.bridge.leave()
