@@ -15,6 +15,7 @@ FocusScope {
   property bool showAppButton: false
   property bool showCloseButton: false
   property bool settingsOpen: false
+  property bool localPreviewsPoppedOut: false
   readonly property bool wideLayout: presentation === "app"
     && width >= theme.space(760)
   readonly property int contentWidthLimit: presentation === "app"
@@ -22,6 +23,7 @@ FocusScope {
 
   signal closeRequested()
   signal appRequested()
+  signal popOutLocalPreviewsRequested()
 
   implicitWidth: presentation === "app"
     ? theme.space(960) : theme.space(390) + contentPadding * 2
@@ -277,6 +279,15 @@ FocusScope {
           ? wideDashboardComponent : compactDashboardComponent
       }
     }
+  }
+
+  LocalBroadcastPreviews {
+    anchors.fill: parent
+    z: 100
+    bridge: root.bridge
+    theme: root.theme
+    poppedOut: root.localPreviewsPoppedOut
+    onPopOutRequested: root.popOutLocalPreviewsRequested()
   }
 
   Component {

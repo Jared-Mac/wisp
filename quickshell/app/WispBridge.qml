@@ -69,6 +69,7 @@ Item {
           "fps": null,
           "published_frames": 0,
           "encoder_backend": null,
+          "viewers": [],
           "error": null
         },
         "camera": {
@@ -80,6 +81,8 @@ Item {
           "height": null,
           "fps": null,
           "published_frames": 0,
+          "encoder_backend": null,
+          "viewers": [],
           "error": null
         },
         "video": {
@@ -156,8 +159,11 @@ Item {
     "fps": null,
     "published_frames": 0,
     "encoder_backend": null,
+    "viewers": [],
     "error": null
   })
+  readonly property string screenSharePreviewUrl: localPreviewUrl(
+    "screen-share-preview.bmp", Number(screenShareState.published_frames || 0))
   readonly property bool sharing: !!screenShareState.active
   readonly property bool shareStarting: !!screenShareState.starting
   readonly property var cameraState: mediaState.camera || ({
@@ -165,8 +171,13 @@ Item {
     "selected_device_id": null,
     "starting": false,
     "active": false,
+    "published_frames": 0,
+    "encoder_backend": null,
+    "viewers": [],
     "error": null
   })
+  readonly property string cameraPreviewUrl: localPreviewUrl(
+    "camera-preview.bmp", Number(cameraState.published_frames || 0))
   readonly property var videoSettings: mediaState.video || ({
     "quality": "high",
     "codec": "h264",
@@ -195,6 +206,11 @@ Item {
   function readConfiguredProfile() {
     var match = localConfig.text().match(/(?:^|\n)WISP_PROFILE=(Tyler|Jack|Charlie)(?:\n|$)/)
     return match ? String(match[1]) : ""
+  }
+
+  function localPreviewUrl(fileName, revision) {
+    if (!runtimeDir || revision < 1) return ""
+    return "file://" + runtimeDir + "/wisp/" + fileName + "?frame=" + String(revision)
   }
 
   FileView {

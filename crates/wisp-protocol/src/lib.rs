@@ -150,6 +150,8 @@ pub struct ScreenShareState {
     #[serde(default)]
     pub encoder_backend: Option<String>,
     #[serde(default)]
+    pub viewers: Vec<String>,
+    #[serde(default)]
     pub error: Option<String>,
 }
 
@@ -276,6 +278,10 @@ pub struct CameraState {
     pub fps: Option<u32>,
     #[serde(default)]
     pub published_frames: u64,
+    #[serde(default)]
+    pub encoder_backend: Option<String>,
+    #[serde(default)]
+    pub viewers: Vec<String>,
     #[serde(default)]
     pub error: Option<String>,
 }

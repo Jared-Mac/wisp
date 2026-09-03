@@ -17,6 +17,14 @@ ShellRoot {
   function openPanel() { panelWindow.reveal() }
   function closePanel() { panelWindow.visible = false }
   function togglePanel() { panelWindow.visible ? closePanel() : openPanel() }
+  function popOutLocalPreviews() {
+    localPreviewsPoppedOut = true
+    previewWindow.reveal()
+  }
+  function dockLocalPreviews() {
+    previewWindow.visible = false
+    localPreviewsPoppedOut = false
+  }
 
   function validAnchor(value) {
     return value === "auto"
@@ -95,6 +103,7 @@ ShellRoot {
   property bool trayRight: true
   property bool trayBottom: true
   property int trayVerticalInset: appTheme.space(52)
+  property bool localPreviewsPoppedOut: false
   readonly property string resolvedAnchor: appSettings.anchor === "auto"
     ? autoAnchor : appSettings.anchor
   readonly property var selectedPanelScreen: panelScreen()
@@ -184,7 +193,9 @@ ShellRoot {
       return sameEdge ? app.trayVerticalInset : appTheme.space(12)
     }
     anchorController: app.anchorController
+    localPreviewsPoppedOut: app.localPreviewsPoppedOut
     onAppRequested: app.openApp()
+    onPopOutLocalPreviewsRequested: app.popOutLocalPreviews()
     onHideRequested: app.closePanel()
   }
 
@@ -193,6 +204,16 @@ ShellRoot {
     visible: false
     bridge: bridge
     theme: appTheme
+    localPreviewsPoppedOut: app.localPreviewsPoppedOut
+    onPopOutLocalPreviewsRequested: app.popOutLocalPreviews()
     onHideRequested: app.closeApp()
+  }
+
+  WispPreviewWindow {
+    id: previewWindow
+    visible: false
+    bridge: bridge
+    theme: appTheme
+    onDockRequested: app.dockLocalPreviews()
   }
 }

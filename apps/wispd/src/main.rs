@@ -1655,7 +1655,9 @@ async fn synchronize_media_events(
             | MediaEvent::ScreenShareFrames { generation, .. }
             | MediaEvent::ScreenShareStopped { generation, .. }
             | MediaEvent::CameraFrames { generation, .. }
-            | MediaEvent::CameraStopped { generation, .. } => Some(*generation),
+            | MediaEvent::CameraStopped { generation, .. }
+            | MediaEvent::VideoViewerChanged { generation, .. }
+            | MediaEvent::VideoViewerDisconnected { generation, .. } => Some(*generation),
             MediaEvent::SurfaceOpened { .. }
             | MediaEvent::SurfaceClosed { .. }
             | MediaEvent::SurfaceVisibilityChanged { .. }
@@ -1707,7 +1709,9 @@ async fn synchronize_media_events(
             | MediaEvent::VideoUnsubscribed { .. }
             | MediaEvent::VideoFrames { .. }
             | MediaEvent::ScreenShareFrames { .. }
-            | MediaEvent::CameraFrames { .. }) => {
+            | MediaEvent::CameraFrames { .. }
+            | MediaEvent::VideoViewerChanged { .. }
+            | MediaEvent::VideoViewerDisconnected { .. }) => {
                 synchronize_track_event(&daemon, track_event).await;
             }
             MediaEvent::ScreenShareStopped { error, .. } => {
@@ -1784,6 +1788,7 @@ async fn synchronize_media_events(
     }
 }
 
+#[allow(clippy::too_many_lines)]
 async fn synchronize_track_event(daemon: &Daemon, event: MediaEvent) {
     match event {
         MediaEvent::AudioSubscribed { participant, .. } => {
@@ -1878,7 +1883,50 @@ async fn synchronize_track_event(daemon: &Daemon, event: MediaEvent) {
                 })
                 .await;
         }
+        viewer_event @ (MediaEvent::VideoViewerChanged { .. }
+        | MediaEvent::VideoViewerDisconnected { .. }) => {
+            synchronize_local_video_viewers(daemon, viewer_event).await;
+        }
         _ => unreachable!("only remote track events are dispatched here"),
+    }
+}
+
+async fn synchronize_local_video_viewers(daemon: &Daemon, event: MediaEvent) {
+    match event {
+        MediaEvent::VideoViewerChanged {
+            source,
+            participant,
+            watching,
+            ..
+        } => {
+            info!(%participant, %source, watching, "local video viewer changed");
+            daemon
+                .update_media_state(None, "video_viewers_changed", |media| {
+                    let viewers = match source {
+                        VideoSource::Camera => &mut media.camera.viewers,
+                        VideoSource::ScreenShare => &mut media.screen_share.viewers,
+                    };
+                    viewers.retain(|viewer| viewer != &participant);
+                    if watching {
+                        viewers.push(participant);
+                        viewers.sort();
+                        viewers.dedup();
+                    }
+                })
+                .await;
+        }
+        MediaEvent::VideoViewerDisconnected { participant, .. } => {
+            daemon
+                .update_media_state(None, "video_viewers_changed", |media| {
+                    media.camera.viewers.retain(|viewer| viewer != &participant);
+                    media
+                        .screen_share
+                        .viewers
+                        .retain(|viewer| viewer != &participant);
+                })
+                .await;
+        }
+        _ => unreachable!("only local video viewer events are dispatched here"),
     }
 }
 

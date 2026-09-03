@@ -8,7 +8,9 @@ FloatingWindow {
 
   required property var bridge
   required property var theme
+  property bool localPreviewsPoppedOut: false
   signal hideRequested()
+  signal popOutLocalPreviewsRequested()
 
   title: "Wisp"
   implicitWidth: theme.space(960)
@@ -45,6 +47,8 @@ FloatingWindow {
       presentation: "app"
       showCloseButton: true
       dismissOnNavigate: false
+      localPreviewsPoppedOut: root.localPreviewsPoppedOut
+      onPopOutLocalPreviewsRequested: root.popOutLocalPreviewsRequested()
       onCloseRequested: root.hideRequested()
     }
   }

@@ -11,8 +11,10 @@ PanelWindow {
   required property string anchorMode
   required property var anchorController
   property int verticalInset: theme.space(12)
+  property bool localPreviewsPoppedOut: false
   signal hideRequested()
   signal appRequested()
+  signal popOutLocalPreviewsRequested()
 
   implicitWidth: theme.space(460)
   implicitHeight: theme.space(700)
@@ -65,6 +67,8 @@ PanelWindow {
       showAppButton: true
       showCloseButton: true
       dismissOnNavigate: false
+      localPreviewsPoppedOut: root.localPreviewsPoppedOut
+      onPopOutLocalPreviewsRequested: root.popOutLocalPreviewsRequested()
       onAppRequested: root.appRequested()
       onCloseRequested: root.hideRequested()
     }

@@ -21,10 +21,10 @@ use livekit::{
     },
     options::{TrackPublishOptions, VideoCodec, VideoEncoderBackend, VideoEncoding},
     prelude::{
-        AudioProcessingOptions, LocalAudioTrack, LocalTrack, LocalVideoTrack, Participant,
-        PlatformAudio, PlayoutDeviceInfo, RecordingDeviceInfo, RemoteAudioTrack, RemoteTrack,
-        RemoteTrackPublication, RemoteVideoTrack, Room, RoomEvent, RoomOptions, RtcAudioSource,
-        TrackKind, TrackSid, TrackSource,
+        AudioProcessingOptions, DataPacket, LocalAudioTrack, LocalTrack, LocalVideoTrack,
+        Participant, PlatformAudio, PlayoutDeviceInfo, RecordingDeviceInfo, RemoteAudioTrack,
+        RemoteTrack, RemoteTrackPublication, RemoteVideoTrack, Room, RoomEvent, RoomOptions,
+        RtcAudioSource, TrackKind, TrackSid, TrackSource,
     },
     rtc_engine::lk_runtime::LkRuntime,
     webrtc::{
@@ -40,10 +40,13 @@ use livekit::{
 };
 use ndarray::{ArrayView2, ArrayViewMut2};
 use nnnoiseless::DenoiseState;
+use serde::{Deserialize, Serialize};
 use std::{
     borrow::Cow,
     collections::{HashMap, HashSet},
+    fs,
     os::fd::{AsRawFd, OwnedFd},
+    path::PathBuf,
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering},
@@ -66,6 +69,16 @@ const AUDIO_SAMPLE_RATE: u32 = 48_000;
 const AUDIO_FRAME_SAMPLES: usize = 480;
 const DEEPFILTER_LATENCY_MS: u16 = 30;
 const RNNOISE_LATENCY_MS: u16 = 10;
+const VIDEO_WATCH_TOPIC: &str = "wisp.video-watch.v1";
+const PREVIEW_MAX_WIDTH: u32 = 480;
+const PREVIEW_MAX_HEIGHT: u32 = 270;
+
+#[derive(Debug, Serialize, Deserialize)]
+struct VideoWatchSignal {
+    participant: String,
+    source: VideoSource,
+    watching: bool,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
@@ -316,6 +329,16 @@ pub(crate) enum MediaEvent {
         generation: u64,
         error: Option<String>,
     },
+    VideoViewerChanged {
+        generation: u64,
+        source: VideoSource,
+        participant: String,
+        watching: bool,
+    },
+    VideoViewerDisconnected {
+        generation: u64,
+        participant: String,
+    },
     SurfaceOpened {
         target: RemoteVideoTarget,
     },
@@ -439,6 +462,8 @@ impl MediaManager {
         surface_enabled: bool,
         e2ee_key: Option<String>,
     ) -> (Self, mpsc::UnboundedReceiver<MediaEvent>) {
+        remove_local_preview(VideoSource::Camera);
+        remove_local_preview(VideoSource::ScreenShare);
         let (event_tx, event_rx) = mpsc::unbounded_channel();
         let denoiser_backend = Arc::new(AtomicU8::new(DenoiserBackend::DeepFilterNet as u8));
         let denoiser = Arc::new(
@@ -942,6 +967,8 @@ impl MediaManager {
         let event_context = RoomEventContext {
             generation,
             event_tx: self.event_tx.clone(),
+            room: room.clone(),
+            local_name: room.local_participant().name(),
             remote_audio: remote_audio.clone(),
             remote_video: remote_video.clone(),
             desired_video: desired_video.clone(),
@@ -1245,10 +1272,22 @@ impl MediaManager {
             .expect("desired video lock poisoned")
             .remove(&target);
         publication.set_subscribed(false);
-        if let Some(surface) = &self.surface {
-            surface.close(target)?;
+        let close_result = self
+            .surface
+            .as_ref()
+            .map_or(Ok(()), |surface| surface.close(target.clone()));
+        if let Some(room) = self.connected_room().await {
+            spawn_video_watch_signal(room, target, false);
         }
-        Ok(())
+        close_result
+    }
+
+    async fn connected_room(&self) -> Option<Arc<Room>> {
+        self.session
+            .lock()
+            .await
+            .as_ref()
+            .map(|session| session.room.clone())
     }
 
     pub(crate) async fn first_video_target(&self) -> Option<RemoteVideoTarget> {
@@ -1331,9 +1370,40 @@ impl MediaManager {
     }
 }
 
+async fn publish_video_watch_signal(
+    room: &Room,
+    target: &RemoteVideoTarget,
+    watching: bool,
+) -> anyhow::Result<()> {
+    let payload = serde_json::to_vec(&VideoWatchSignal {
+        participant: target.participant.clone(),
+        source: target.source,
+        watching,
+    })?;
+    room.local_participant()
+        .publish_data(DataPacket {
+            payload,
+            topic: Some(VIDEO_WATCH_TOPIC.into()),
+            reliable: true,
+            destination_identities: Vec::new(),
+        })
+        .await
+        .context("publish the video viewer update")
+}
+
+fn spawn_video_watch_signal(room: Arc<Room>, target: RemoteVideoTarget, watching: bool) {
+    tokio::spawn(async move {
+        if let Err(error) = publish_video_watch_signal(&room, &target, watching).await {
+            warn!(%error, watching, "could not notify the video publisher about viewing state");
+        }
+    });
+}
+
 struct RoomEventContext {
     generation: u64,
     event_tx: mpsc::UnboundedSender<MediaEvent>,
+    room: Arc<Room>,
+    local_name: String,
     remote_audio: Arc<Mutex<HashMap<String, RemoteAudioTrack>>>,
     remote_video: Arc<Mutex<HashMap<RemoteVideoTarget, RemoteTrackPublication>>>,
     desired_video: Arc<Mutex<HashSet<RemoteVideoTarget>>>,
@@ -1440,10 +1510,8 @@ impl RoomEventContext {
         participant: String,
         track: RemoteVideoTrack,
         track_tasks: &mut JoinSet<()>,
-    ) {
-        let Some(source) = protocol_video_source(track.source()) else {
-            return;
-        };
+    ) -> Option<RemoteVideoTarget> {
+        let source = protocol_video_source(track.source())?;
         let target = RemoteVideoTarget {
             participant,
             source,
@@ -1454,12 +1522,13 @@ impl RoomEventContext {
         });
         track_tasks.spawn(receive_video_frames(
             self.generation,
-            target,
+            target.clone(),
             track,
             self.received_video_frames.clone(),
             self.surface.clone(),
             self.event_tx.clone(),
         ));
+        Some(target)
     }
 
     fn video_is_desired(&self, participant: &str, track: &RemoteVideoTrack) -> bool {
@@ -1499,7 +1568,11 @@ async fn run_room_events(
             } => {
                 let participant = participant.name();
                 if context.video_is_desired(&participant, &track) {
-                    context.subscribe_video(participant, track, &mut track_tasks);
+                    if let Some(target) =
+                        context.subscribe_video(participant, track, &mut track_tasks)
+                    {
+                        spawn_video_watch_signal(context.room.clone(), target, true);
+                    }
                 } else if let Some(source) = protocol_video_source(track.source()) {
                     let target = RemoteVideoTarget {
                         participant,
@@ -1570,13 +1643,15 @@ async fn run_room_events(
                 ..
             } => {
                 if let Some(source) = protocol_video_source(track.source()) {
+                    let target = RemoteVideoTarget {
+                        participant: participant.name(),
+                        source,
+                    };
                     let _ = context.event_tx.send(MediaEvent::VideoUnsubscribed {
                         generation: context.generation,
-                        target: RemoteVideoTarget {
-                            participant: participant.name(),
-                            source,
-                        },
+                        target: target.clone(),
                     });
+                    spawn_video_watch_signal(context.room.clone(), target, false);
                 }
             }
             RoomEvent::TrackMuted {
@@ -1595,6 +1670,43 @@ async fn run_room_events(
             }
             RoomEvent::ActiveSpeakersChanged { speakers } => {
                 context.active_speakers_changed(&speakers, &mut active_speakers);
+            }
+            RoomEvent::DataReceived {
+                payload,
+                topic: Some(topic),
+                participant: Some(participant),
+                ..
+            } if topic == VIDEO_WATCH_TOPIC => {
+                match serde_json::from_slice::<VideoWatchSignal>(&payload) {
+                    Ok(signal) if signal.participant == context.local_name => {
+                        let viewer = participant.name();
+                        let participant = if viewer.is_empty() {
+                            participant.identity().to_string()
+                        } else {
+                            viewer
+                        };
+                        let _ = context.event_tx.send(MediaEvent::VideoViewerChanged {
+                            generation: context.generation,
+                            source: signal.source,
+                            participant,
+                            watching: signal.watching,
+                        });
+                    }
+                    Ok(_) => {}
+                    Err(error) => debug!(%error, "ignored an invalid video viewer update"),
+                }
+            }
+            RoomEvent::ParticipantDisconnected(participant) => {
+                let viewer = participant.name();
+                let participant = if viewer.is_empty() {
+                    participant.identity().to_string()
+                } else {
+                    viewer
+                };
+                let _ = context.event_tx.send(MediaEvent::VideoViewerDisconnected {
+                    generation: context.generation,
+                    participant,
+                });
             }
             RoomEvent::Reconnecting => {
                 reconnecting = true;
@@ -1694,13 +1806,13 @@ fn selected_video_encoder(backends: &[VideoEncoderBackend]) -> VideoEncoderBacke
 
 fn publishing_video_encoder(
     backends: &[VideoEncoderBackend],
-    source: VideoSource,
+    _source: VideoSource,
 ) -> VideoEncoderBackend {
     let selected = selected_video_encoder(backends);
-    if source == VideoSource::ScreenShare && selected == VideoEncoderBackend::Vaapi {
-        // Intel's VA-API driver can crash the process while encoding non-standard
-        // ultrawide frame sizes. Screen sharing must remain reliable, so keep
-        // VA-API available for camera video but use the software encoder here.
+    if selected == VideoEncoderBackend::Vaapi {
+        // Intel's iHD VA-API driver has crashed in both the webcam and ultrawide
+        // screen-share paths. A driver SIGBUS takes down the entire daemon, so
+        // prefer the stable software encoder whenever VA-API is selected.
         VideoEncoderBackend::Software
     } else {
         selected
@@ -1712,7 +1824,7 @@ fn detected_video_settings(
     codec: VideoCodecPreference,
 ) -> VideoSettings {
     let backends = available_video_encoder_backends();
-    let selected = selected_video_encoder(&backends);
+    let selected = publishing_video_encoder(&backends, VideoSource::Camera);
     VideoSettings {
         quality,
         codec,
@@ -1738,6 +1850,12 @@ struct VideoProfile {
     height: u32,
     fps: u32,
     max_bitrate: u64,
+}
+
+struct CameraCapturePath {
+    caps: gst::Caps,
+    decoder: Option<gst::Element>,
+    description: &'static str,
 }
 
 fn video_profile(quality: VideoQualityPreset, source: VideoSource) -> VideoProfile {
@@ -1778,6 +1896,52 @@ fn video_profile(quality: VideoQualityPreset, source: VideoSource) -> VideoProfi
             fps: 60,
             max_bitrate: 6_000_000,
         },
+    }
+}
+
+fn camera_capture_path(device: &gst::Device, profile: VideoProfile) -> CameraCapturePath {
+    let jpeg_caps = gst::Caps::builder("image/jpeg")
+        .field("width", i32::try_from(profile.width).unwrap_or(i32::MAX))
+        .field("height", i32::try_from(profile.height).unwrap_or(i32::MAX))
+        .field(
+            "framerate",
+            gst::Fraction::new(i32::try_from(profile.fps).unwrap_or(i32::MAX), 1),
+        )
+        .build();
+    let decoder = ["jpegdec", "avdec_mjpeg"].into_iter().find_map(|factory| {
+        gst::ElementFactory::make(factory)
+            .name("wisp-camera-decoder")
+            .build()
+            .ok()
+    });
+    if decoder.is_some()
+        && device
+            .caps()
+            .is_some_and(|caps| caps.can_intersect(&jpeg_caps))
+    {
+        return CameraCapturePath {
+            caps: jpeg_caps,
+            decoder,
+            description: "mjpeg",
+        };
+    }
+
+    let exact_raw_caps = gst::Caps::builder("video/x-raw")
+        .field("width", i32::try_from(profile.width).unwrap_or(i32::MAX))
+        .field("height", i32::try_from(profile.height).unwrap_or(i32::MAX))
+        .build();
+    let caps = if device
+        .caps()
+        .is_some_and(|caps| caps.can_intersect(&exact_raw_caps))
+    {
+        exact_raw_caps
+    } else {
+        gst::Caps::builder("video/x-raw").build()
+    };
+    CameraCapturePath {
+        caps,
+        decoder: None,
+        description: "raw",
     }
 }
 
@@ -2224,6 +2388,13 @@ async fn create_camera(
         .create_element(Some("wisp-camera-source"))
         .with_context(|| format!("open camera {}", protocol_device.name))?;
     let profile = video_profile(quality, VideoSource::Camera);
+    let capture_path = camera_capture_path(&device, profile);
+    let capture_format = capture_path.description;
+    let capture_filter = gst::ElementFactory::make("capsfilter")
+        .name("wisp-camera-input-format")
+        .property("caps", &capture_path.caps)
+        .build()
+        .context("create the camera input format filter")?;
     let encoder =
         publishing_video_encoder(&available_video_encoder_backends(), VideoSource::Camera);
     let video_source = NativeVideoSource::new(
@@ -2248,6 +2419,7 @@ async fn create_camera(
     let callback_frames = published_frames.clone();
     let callback_events = event_tx.clone();
     let callback_failure = callback_failed.clone();
+    let preview_every = u64::from((profile.fps / 2).max(1));
     let app_sink = gst_app::AppSink::builder()
         .caps(&caps)
         .max_buffers(2)
@@ -2257,7 +2429,10 @@ async fn create_camera(
         .callbacks(
             gst_app::AppSinkCallbacks::builder()
                 .new_sample(move |sink| {
-                    let result = capture_screen_sample(sink, &callback_source);
+                    let next_frame = callback_frames.load(Ordering::Acquire) + 1;
+                    let preview = (next_frame == 1 || next_frame.is_multiple_of(preview_every))
+                        .then_some(VideoSource::Camera);
+                    let result = capture_screen_sample(sink, &callback_source, preview);
                     match result {
                         Ok(()) => {
                             let total = callback_frames.fetch_add(1, Ordering::AcqRel) + 1;
@@ -2292,11 +2467,49 @@ async fn create_camera(
         .build()
         .context("the GStreamer frame-rate converter is not installed")?;
     let pipeline = gst::Pipeline::default();
-    pipeline
-        .add_many([&source, &convert, &scale, &rate, app_sink.upcast_ref()])
-        .context("build the camera capture pipeline")?;
-    gst::Element::link_many([&source, &convert, &scale, &rate, app_sink.upcast_ref()])
-        .context("link the camera capture pipeline")?;
+    if let Some(decoder) = &capture_path.decoder {
+        pipeline
+            .add_many([
+                &source,
+                &capture_filter,
+                decoder,
+                &convert,
+                &scale,
+                &rate,
+                app_sink.upcast_ref(),
+            ])
+            .context("build the decoded camera capture pipeline")?;
+        gst::Element::link_many([
+            &source,
+            &capture_filter,
+            decoder,
+            &convert,
+            &scale,
+            &rate,
+            app_sink.upcast_ref(),
+        ])
+        .context("link the decoded camera capture pipeline")?;
+    } else {
+        pipeline
+            .add_many([
+                &source,
+                &capture_filter,
+                &convert,
+                &scale,
+                &rate,
+                app_sink.upcast_ref(),
+            ])
+            .context("build the raw camera capture pipeline")?;
+        gst::Element::link_many([
+            &source,
+            &capture_filter,
+            &convert,
+            &scale,
+            &rate,
+            app_sink.upcast_ref(),
+        ])
+        .context("link the raw camera capture pipeline")?;
+    }
 
     let video_track =
         LocalVideoTrack::create_video_track("camera", RtcVideoSource::Native(video_source));
@@ -2329,6 +2542,7 @@ async fn create_camera(
         width = profile.width,
         height = profile.height,
         fps = profile.fps,
+        capture_format,
         encoder = encoder_backend_name(encoder),
         codec = %codec,
         quality = %quality,
@@ -2341,6 +2555,7 @@ async fn create_camera(
         width: Some(profile.width),
         height: Some(profile.height),
         fps: Some(profile.fps),
+        encoder_backend: Some(encoder_backend_name(encoder).into()),
         ..CameraState::default()
     };
     Ok((
@@ -2393,6 +2608,7 @@ async fn stop_camera_session(room: &Room, camera: CameraSession) {
         warn!(%error, "camera track did not unpublish cleanly");
     }
     let _ = camera.monitor_task.await;
+    remove_local_preview(VideoSource::Camera);
 }
 
 #[allow(clippy::too_many_lines)]
@@ -2478,6 +2694,7 @@ async fn create_screen_share(
     let callback_frames = published_frames.clone();
     let callback_events = event_tx.clone();
     let callback_failure = callback_failed.clone();
+    let preview_every = u64::from((profile.fps / 2).max(1));
     let app_sink = gst_app::AppSink::builder()
         .caps(&caps)
         .max_buffers(2)
@@ -2487,7 +2704,10 @@ async fn create_screen_share(
         .callbacks(
             gst_app::AppSinkCallbacks::builder()
                 .new_sample(move |sink| {
-                    let result = capture_screen_sample(sink, &callback_source);
+                    let next_frame = callback_frames.load(Ordering::Acquire) + 1;
+                    let preview = (next_frame == 1 || next_frame.is_multiple_of(preview_every))
+                        .then_some(VideoSource::ScreenShare);
+                    let result = capture_screen_sample(sink, &callback_source, preview);
                     match result {
                         Ok(()) => {
                             let total = callback_frames.fetch_add(1, Ordering::AcqRel) + 1;
@@ -2600,6 +2820,7 @@ async fn create_screen_share(
 fn capture_screen_sample(
     sink: &gst_app::AppSink,
     video_source: &NativeVideoSource,
+    preview_source: Option<VideoSource>,
 ) -> anyhow::Result<()> {
     use gst_video::VideoFrameExt;
 
@@ -2629,7 +2850,96 @@ fn capture_screen_sample(
     copy_video_plane(luma, source_planes[0])?;
     copy_video_plane(chroma_u, source_planes[1])?;
     copy_video_plane(chroma_v, source_planes[2])?;
+    if let Some(source) = preview_source
+        && let Err(error) = write_local_preview(&mut i420, source, info.width(), info.height())
+    {
+        debug!(%error, %source, "could not refresh the local video preview");
+    }
     video_source.capture_frame(&VideoFrame::new(VideoRotation::VideoRotation0, i420));
+    Ok(())
+}
+
+fn local_preview_path(source: VideoSource) -> Option<PathBuf> {
+    let file_name = match source {
+        VideoSource::Camera => "camera-preview.bmp",
+        VideoSource::ScreenShare => "screen-share-preview.bmp",
+    };
+    std::env::var_os("WISP_PREVIEW_DIR")
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("XDG_RUNTIME_DIR")
+                .map(PathBuf::from)
+                .map(|runtime| runtime.join("wisp"))
+        })
+        .map(|directory| directory.join(file_name))
+}
+
+fn remove_local_preview(source: VideoSource) {
+    if let Some(path) = local_preview_path(source)
+        && let Err(error) = fs::remove_file(&path)
+        && error.kind() != std::io::ErrorKind::NotFound
+    {
+        debug!(%error, path = %path.display(), "could not remove a local video preview");
+    }
+}
+
+fn write_local_preview(
+    frame: &mut I420Buffer,
+    source: VideoSource,
+    width: u32,
+    height: u32,
+) -> anyhow::Result<()> {
+    let Some(path) = local_preview_path(source) else {
+        return Ok(());
+    };
+    let source_width = i32::try_from(width).context("preview width is too large")?;
+    let source_height = i32::try_from(height).context("preview height is too large")?;
+    let (width, height) = screen_share_resolution(
+        Some((source_width, source_height)),
+        PREVIEW_MAX_WIDTH,
+        PREVIEW_MAX_HEIGHT,
+    );
+    let width_i32 = i32::try_from(width).context("preview width is too large")?;
+    let height_i32 = i32::try_from(height).context("preview height is too large")?;
+    let stride = width.checked_mul(4).context("preview stride overflow")?;
+    let pixel_bytes = stride
+        .checked_mul(height)
+        .context("preview image size overflow")?;
+    let scaled = frame.scale(width_i32, height_i32);
+    let mut pixels = vec![0_u8; usize::try_from(pixel_bytes)?];
+    // libyuv format names describe register order. ARGB conversion produces
+    // BGRA bytes on little-endian Linux, matching a 32-bit BMP pixel.
+    scaled.to_argb(
+        VideoFormatType::ARGB,
+        &mut pixels,
+        stride,
+        width_i32,
+        height_i32,
+    );
+
+    let file_size = 54_u32
+        .checked_add(pixel_bytes)
+        .context("preview file size overflow")?;
+    let mut bmp = Vec::with_capacity(usize::try_from(file_size)?);
+    bmp.extend_from_slice(b"BM");
+    bmp.extend_from_slice(&file_size.to_le_bytes());
+    bmp.extend_from_slice(&[0; 4]);
+    bmp.extend_from_slice(&54_u32.to_le_bytes());
+    bmp.extend_from_slice(&40_u32.to_le_bytes());
+    bmp.extend_from_slice(&width_i32.to_le_bytes());
+    bmp.extend_from_slice(&(-height_i32).to_le_bytes());
+    bmp.extend_from_slice(&1_u16.to_le_bytes());
+    bmp.extend_from_slice(&32_u16.to_le_bytes());
+    bmp.extend_from_slice(&0_u32.to_le_bytes());
+    bmp.extend_from_slice(&pixel_bytes.to_le_bytes());
+    bmp.extend_from_slice(&[0; 16]);
+    bmp.extend_from_slice(&pixels);
+
+    let directory = path.parent().context("preview path has no parent")?;
+    fs::create_dir_all(directory).context("create the preview directory")?;
+    let temporary = path.with_extension("bmp.part");
+    fs::write(&temporary, bmp).context("write the local video preview")?;
+    fs::rename(&temporary, &path).context("publish the local video preview")?;
     Ok(())
 }
 
@@ -2702,6 +3012,7 @@ async fn stop_screen_share_session(room: &Room, screen_share: ScreenShareSession
         debug!(%error, "screen cast portal session was already closed");
     }
     let _ = screen_share.monitor_task.await;
+    remove_local_preview(VideoSource::ScreenShare);
     info!("screen share stopped");
 }
 
@@ -2939,7 +3250,7 @@ mod tests {
     }
 
     #[test]
-    fn screen_sharing_avoids_the_unstable_vaapi_encoder() {
+    fn publishing_avoids_the_unstable_vaapi_encoder() {
         let backends = [VideoEncoderBackend::Software, VideoEncoderBackend::Vaapi];
         assert_eq!(
             publishing_video_encoder(&backends, VideoSource::ScreenShare),
@@ -2947,7 +3258,7 @@ mod tests {
         );
         assert_eq!(
             publishing_video_encoder(&backends, VideoSource::Camera),
-            VideoEncoderBackend::Vaapi
+            VideoEncoderBackend::Software
         );
     }
 

@@ -7,14 +7,6 @@ Column {
   signal leaveRequested()
   spacing: root.theme.spacing.sm
 
-  function shareResolutionLabel() {
-    var share = root.bridge.screenShareState
-    var output = String(share.width || "?") + "×" + String(share.height || "?")
-    if (!share.source_width || !share.source_height) return output
-    var source = String(share.source_width) + "×" + String(share.source_height)
-    return source === output ? source : source + " source → " + output + " stream"
-  }
-
   Row {
     id: controls
     width: parent.width
@@ -127,58 +119,6 @@ Column {
           onClicked: root.bridge.watchVideo(modelData, !parent.parent.watching)
         }
       }
-    }
-  }
-
-  Rectangle {
-    visible: root.bridge.shareStarting || root.bridge.sharing
-    width: parent.width
-    height: root.theme.space(34)
-    radius: root.theme.cornerRadius
-    color: root.theme.alpha(root.theme.accent, 0.12)
-
-    Text {
-      anchors.left: parent.left
-      anchors.right: parent.right
-      anchors.leftMargin: root.theme.spacing.lg
-      anchors.rightMargin: root.theme.spacing.lg
-      anchors.verticalCenter: parent.verticalCenter
-      text: root.bridge.shareStarting
-        ? "Choose a monitor or window in the system picker"
-        : "Sharing " + String(root.bridge.screenShareState.source || "screen")
-          + " · " + root.shareResolutionLabel()
-          + " @ " + String(root.bridge.screenShareState.fps || 30) + " fps"
-      elide: Text.ElideRight
-      color: root.theme.accent
-      font.family: root.theme.font.family
-      font.pixelSize: root.theme.font.caption
-      font.weight: Font.DemiBold
-    }
-  }
-
-  Rectangle {
-    visible: root.bridge.cameraStarting || root.bridge.cameraActive
-    width: parent.width
-    height: root.theme.space(34)
-    radius: root.theme.cornerRadius
-    color: root.theme.alpha(root.theme.accent, 0.12)
-
-    Text {
-      anchors.left: parent.left
-      anchors.right: parent.right
-      anchors.leftMargin: root.theme.spacing.lg
-      anchors.rightMargin: root.theme.spacing.lg
-      anchors.verticalCenter: parent.verticalCenter
-      text: root.bridge.cameraStarting
-        ? "Starting camera…"
-        : "Camera on · " + String(root.bridge.cameraState.width || "?")
-          + "×" + String(root.bridge.cameraState.height || "?")
-          + " @ " + String(root.bridge.cameraState.fps || 30) + " fps"
-      elide: Text.ElideRight
-      color: root.theme.accent
-      font.family: root.theme.font.family
-      font.pixelSize: root.theme.font.caption
-      font.weight: Font.DemiBold
     }
   }
 

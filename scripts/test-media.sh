@@ -13,10 +13,16 @@ daemon_pid=""
 viewer_pid=""
 sim_pid=""
 expect_surface=true
+expect_input_level=true
 surface_args=()
 if [[ -z "${WAYLAND_DISPLAY:-}" || -z "${XDG_RUNTIME_DIR:-}" ]]; then
   expect_surface=false
   surface_args=(--disable-surfaces)
+fi
+if [[ "${WISP_TEST_REAL_CAMERA:-0}" == "1" ]]; then
+  # The real-camera stability run is intentionally long. DeepFilterNet may
+  # classify the synthetic meter tone as noise before that run reaches video.
+  expect_input_level=false
 fi
 
 stop_process() {
@@ -98,7 +104,7 @@ WISP_SERVER_URL="http://127.0.0.1:$server_port" RUST_LOG=info \
   target/debug/wisp-sim --profile Tyler --publish-tone --publish-video --publish-camera >"$test_dir/sim.log" 2>&1 &
 sim_pid=$!
 WISP_SERVER_URL="http://127.0.0.1:$server_port" WISP_PTT_LEASE_MS=400 \
-  WISP_TEST_MICROPHONE_TONE=1 RUST_LOG=info \
+  WISP_TEST_MICROPHONE_TONE=1 WISP_PREVIEW_DIR="$test_dir/preview-jared" RUST_LOG=info \
   target/debug/wispd --profile Jared --socket "$test_dir/wispd.sock" \
   "${surface_args[@]}" \
   >"$test_dir/daemon.log" 2>&1 &
@@ -130,7 +136,7 @@ target/debug/wispctl --socket "$test_dir/wispd.sock" join Tyler
 status_json=""
 for _ in $(seq 1 200); do
   status_json=$(target/debug/wispctl --socket "$test_dir/wispd.sock" status)
-  if jq -e '
+  if jq -e --argjson expect_input_level "$expect_input_level" '
     .self.connection == "connected" and
     .self.media.livekit_connected == true and
     .self.media.microphone_published == true and
@@ -158,14 +164,14 @@ for _ in $(seq 1 200); do
     .self.media.audio.denoiser_active == true and
     .self.media.audio.denoiser == "deepfilternet" and
     .self.media.audio.processing_latency_ms == 30 and
-    .self.media.audio.input_level > 0 and
+    (if $expect_input_level then .self.media.audio.input_level > 0 else true end) and
     .self.media.audio.input_level <= 100
   ' <<<"$status_json" >/dev/null; then
     break
   fi
   sleep 0.1
 done
-jq -e '
+jq -e --argjson expect_input_level "$expect_input_level" '
   .self.connection == "connected" and
   .self.media.livekit_connected == true and
   .self.media.microphone_published == true and
@@ -193,7 +199,7 @@ jq -e '
   .self.media.audio.denoiser_active == true and
   .self.media.audio.denoiser == "deepfilternet" and
   .self.media.audio.processing_latency_ms == 30 and
-  .self.media.audio.input_level > 0 and
+  (if $expect_input_level then .self.media.audio.input_level > 0 else true end) and
   .self.media.audio.input_level <= 100
 ' <<<"$status_json" >/dev/null || {
   echo "initial M3 media state did not settle" >&2
@@ -229,7 +235,8 @@ target/debug/wispctl --socket "$test_dir/wispd.sock" video codec h264 \
   | jq -e '.codec == "h264"' >/dev/null
 
 WISP_SERVER_URL="http://127.0.0.1:$server_port" WISP_DISABLE_SURFACES=true \
-  WISP_TEST_MICROPHONE_TONE=1 WISP_DISABLE_TRAY=1 RUST_LOG=info \
+  WISP_TEST_MICROPHONE_TONE=1 WISP_DISABLE_TRAY=1 \
+  WISP_PREVIEW_DIR="$test_dir/preview-jack" RUST_LOG=info \
   target/debug/wispd --profile Jack --socket "$test_dir/viewer.sock" \
   >"$test_dir/viewer.log" 2>&1 &
 viewer_pid=$!
@@ -540,6 +547,66 @@ if command -v hyprctl >/dev/null && [[ -n "${WAYLAND_DISPLAY:-}" ]]; then
     '[.[] | select(.class == "dev.wisp.surface" and .pid == $daemon_pid)] | length')
   (( reopened_surface_count == 1 ))
 fi
+
+if [[ "${WISP_TEST_REAL_CAMERA:-0}" == "1" ]] \
+  && jq -e '(.devices | length) > 0' <<<"$video_devices_json" >/dev/null; then
+  target/debug/wispctl --socket "$test_dir/wispd.sock" camera on \
+    | jq -e '.active == true and .encoder_backend == "software" and .viewers == []' >/dev/null
+  for _ in $(seq 1 100); do
+    camera_json=$(target/debug/wispctl --socket "$test_dir/wispd.sock" status)
+    if jq -e '.self.media.camera.active and .self.media.camera.published_frames > 0' \
+      <<<"$camera_json" >/dev/null \
+      && [[ -s "$test_dir/preview-jared/camera-preview.bmp" ]]; then
+      break
+    fi
+    sleep 0.1
+  done
+  jq -e '
+    .self.media.camera.active and
+    .self.media.camera.encoder_backend == "software" and
+    .self.media.camera.published_frames > 0
+  ' <<<"$camera_json" >/dev/null
+  file "$test_dir/preview-jared/camera-preview.bmp" | rg -q 'PC bitmap'
+
+  for _ in $(seq 1 200); do
+    kill -0 "$daemon_pid"
+    camera_json=$(target/debug/wispctl --socket "$test_dir/wispd.sock" status)
+    jq -e '.self.media.camera.active' <<<"$camera_json" >/dev/null
+    sleep 0.1
+  done
+
+  for _ in $(seq 1 100); do
+    viewer_camera_json=$(target/debug/wispctl --socket "$test_dir/viewer.sock" status)
+    if jq -e 'any(.self.media.remote_videos[];
+      .participant == "Jared" and .source == "camera")' \
+      <<<"$viewer_camera_json" >/dev/null; then
+      break
+    fi
+    sleep 0.1
+  done
+  target/debug/wispctl --socket "$test_dir/viewer.sock" watch Jared camera \
+    | jq -e '.watched == true and .source == "camera"' >/dev/null
+  for _ in $(seq 1 100); do
+    camera_json=$(target/debug/wispctl --socket "$test_dir/wispd.sock" status)
+    if jq -e '.self.media.camera.viewers == ["Jack"]' <<<"$camera_json" >/dev/null; then
+      break
+    fi
+    sleep 0.1
+  done
+  jq -e '.self.media.camera.viewers == ["Jack"]' <<<"$camera_json" >/dev/null
+  target/debug/wispctl --socket "$test_dir/viewer.sock" unwatch Jared camera >/dev/null
+  for _ in $(seq 1 100); do
+    camera_json=$(target/debug/wispctl --socket "$test_dir/wispd.sock" status)
+    if jq -e '.self.media.camera.viewers == []' <<<"$camera_json" >/dev/null; then
+      break
+    fi
+    sleep 0.1
+  done
+  jq -e '.self.media.camera.viewers == []' <<<"$camera_json" >/dev/null
+  target/debug/wispctl --socket "$test_dir/wispd.sock" camera off >/dev/null
+  [[ ! -e "$test_dir/preview-jared/camera-preview.bmp" ]]
+fi
+
 target/debug/wispctl --socket "$test_dir/wispd.sock" mute \
   | jq -e '.muted == true' >/dev/null
 target/debug/wispctl --socket "$test_dir/wispd.sock" deafen \

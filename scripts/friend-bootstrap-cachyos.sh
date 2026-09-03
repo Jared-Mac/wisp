@@ -19,7 +19,7 @@ esac
 
 sudo pacman -S --needed \
   base-devel rustup clang cmake pkgconf openssl alsa-lib libpulse pipewire \
-  gst-plugin-pipewire gst-plugins-base gst-plugins-good \
+  gst-plugin-pipewire gst-plugins-base gst-plugins-good gst-libav \
   xdg-desktop-portal "$portal_backend" \
   quickshell tailscale just jq curl git
 
