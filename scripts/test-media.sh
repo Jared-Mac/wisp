@@ -573,7 +573,8 @@ if [[ "${WISP_TEST_REAL_CAMERA:-0}" == "1" ]] \
     camera_json=$(target/debug/wispctl --socket "$test_dir/wispd.sock" status)
     if jq -e '.self.media.camera.active and .self.media.camera.published_frames > 0' \
       <<<"$camera_json" >/dev/null \
-      && [[ -s "$test_dir/preview-jared/camera-preview.bmp" ]]; then
+      && find "$test_dir/preview-jared" -maxdepth 1 -name 'camera-preview-*.bmp' \
+        -type f -size +0c | rg -q .; then
       break
     fi
     sleep 0.1
@@ -583,7 +584,7 @@ if [[ "${WISP_TEST_REAL_CAMERA:-0}" == "1" ]] \
     .self.media.camera.encoder_backend == "software" and
     .self.media.camera.published_frames > 0
   ' <<<"$camera_json" >/dev/null
-  file "$test_dir/preview-jared/camera-preview.bmp" | rg -q 'PC bitmap'
+  file "$test_dir"/preview-jared/camera-preview-*.bmp | rg -q 'PC bitmap'
 
   for _ in $(seq 1 200); do
     kill -0 "$daemon_pid"
@@ -621,7 +622,7 @@ if [[ "${WISP_TEST_REAL_CAMERA:-0}" == "1" ]] \
   done
   jq -e '.self.media.camera.viewers == []' <<<"$camera_json" >/dev/null
   target/debug/wispctl --socket "$test_dir/wispd.sock" camera off >/dev/null
-  [[ ! -e "$test_dir/preview-jared/camera-preview.bmp" ]]
+  ! find "$test_dir/preview-jared" -maxdepth 1 -name 'camera-preview*.bmp' -type f | rg -q .
 fi
 
 target/debug/wispctl --socket "$test_dir/wispd.sock" mute \

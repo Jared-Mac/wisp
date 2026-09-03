@@ -16,8 +16,13 @@ Rectangle {
   property real dragMinimumY: 0
   property real dragMaximumY: 0
   property string actionMode: "popout"
+  property bool hasReadyPreview: false
 
   signal actionRequested()
+
+  onActiveChanged: {
+    if (!active) hasReadyPreview = false
+  }
 
   readonly property string viewerNames: {
     if (!active || viewers.length === 0) return "No one is watching"
@@ -188,13 +193,17 @@ Rectangle {
       source: root.previewUrl
       cache: false
       asynchronous: true
+      retainWhileLoading: true
       fillMode: Image.PreserveAspectFit
       mirror: root.mirrored
+      onStatusChanged: {
+        if (status === Image.Ready) root.hasReadyPreview = true
+      }
     }
 
     Text {
       anchors.centerIn: parent
-      visible: previewImage.status !== Image.Ready
+      visible: !root.hasReadyPreview
       text: "Preparing preview…"
       color: root.theme.muted
       font.family: root.theme.font.family

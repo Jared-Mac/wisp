@@ -163,7 +163,7 @@ Item {
     "error": null
   })
   readonly property string screenSharePreviewUrl: localPreviewUrl(
-    "screen-share-preview.bmp", Number(screenShareState.published_frames || 0))
+    "screen-share-preview", Number(screenShareState.published_frames || 0))
   readonly property bool sharing: !!screenShareState.active
   readonly property bool shareStarting: !!screenShareState.starting
   readonly property var cameraState: mediaState.camera || ({
@@ -177,7 +177,7 @@ Item {
     "error": null
   })
   readonly property string cameraPreviewUrl: localPreviewUrl(
-    "camera-preview.bmp", Number(cameraState.published_frames || 0))
+    "camera-preview", Number(cameraState.published_frames || 0))
   readonly property var videoSettings: mediaState.video || ({
     "quality": "high",
     "codec": "h264",
@@ -208,9 +208,10 @@ Item {
     return match ? String(match[1]) : ""
   }
 
-  function localPreviewUrl(fileName, revision) {
+  function localPreviewUrl(fileStem, revision) {
     if (!runtimeDir || revision < 1) return ""
-    return "file://" + runtimeDir + "/wisp/" + fileName + "?frame=" + String(revision)
+    return "file://" + runtimeDir + "/wisp/" + fileStem + "-"
+      + String(revision % 2) + ".bmp"
   }
 
   FileView {

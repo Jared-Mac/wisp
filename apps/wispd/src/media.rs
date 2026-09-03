@@ -2484,12 +2484,12 @@ async fn create_camera(
                 .new_sample(move |sink| {
                     let next_frame = callback_frames.load(Ordering::Acquire) + 1;
                     let preview = (next_frame == 1 || next_frame.is_multiple_of(preview_every))
-                        .then_some(VideoSource::Camera);
+                        .then_some((VideoSource::Camera, next_frame));
                     let result = capture_screen_sample(sink, &callback_source, preview);
                     match result {
                         Ok(()) => {
                             let total = callback_frames.fetch_add(1, Ordering::AcqRel) + 1;
-                            if total == 1 || total.is_multiple_of(30) {
+                            if total == 1 || total.is_multiple_of(preview_every) {
                                 let _ = callback_events
                                     .send(MediaEvent::CameraFrames { generation, total });
                             }
@@ -2759,12 +2759,12 @@ async fn create_screen_share(
                 .new_sample(move |sink| {
                     let next_frame = callback_frames.load(Ordering::Acquire) + 1;
                     let preview = (next_frame == 1 || next_frame.is_multiple_of(preview_every))
-                        .then_some(VideoSource::ScreenShare);
+                        .then_some((VideoSource::ScreenShare, next_frame));
                     let result = capture_screen_sample(sink, &callback_source, preview);
                     match result {
                         Ok(()) => {
                             let total = callback_frames.fetch_add(1, Ordering::AcqRel) + 1;
-                            if total == 1 || total.is_multiple_of(30) {
+                            if total == 1 || total.is_multiple_of(preview_every) {
                                 let _ = callback_events
                                     .send(MediaEvent::ScreenShareFrames { generation, total });
                             }
@@ -2873,7 +2873,7 @@ async fn create_screen_share(
 fn capture_screen_sample(
     sink: &gst_app::AppSink,
     video_source: &NativeVideoSource,
-    preview_source: Option<VideoSource>,
+    preview_source: Option<(VideoSource, u64)>,
 ) -> anyhow::Result<()> {
     use gst_video::VideoFrameExt;
 
@@ -2903,8 +2903,9 @@ fn capture_screen_sample(
     copy_video_plane(luma, source_planes[0])?;
     copy_video_plane(chroma_u, source_planes[1])?;
     copy_video_plane(chroma_v, source_planes[2])?;
-    if let Some(source) = preview_source
-        && let Err(error) = write_local_preview(&mut i420, source, info.width(), info.height())
+    if let Some((source, revision)) = preview_source
+        && let Err(error) =
+            write_local_preview(&mut i420, source, revision, info.width(), info.height())
     {
         debug!(%error, %source, "could not refresh the local video preview");
     }
@@ -2912,11 +2913,15 @@ fn capture_screen_sample(
     Ok(())
 }
 
-fn local_preview_path(source: VideoSource) -> Option<PathBuf> {
-    let file_name = match source {
-        VideoSource::Camera => "camera-preview.bmp",
-        VideoSource::ScreenShare => "screen-share-preview.bmp",
+fn local_preview_path(source: VideoSource, revision: Option<u64>) -> Option<PathBuf> {
+    let stem = match source {
+        VideoSource::Camera => "camera-preview",
+        VideoSource::ScreenShare => "screen-share-preview",
     };
+    let file_name = revision.map_or_else(
+        || format!("{stem}.bmp"),
+        |revision| format!("{stem}-{}.bmp", revision % 2),
+    );
     std::env::var_os("WISP_PREVIEW_DIR")
         .map(PathBuf::from)
         .or_else(|| {
@@ -2928,21 +2933,24 @@ fn local_preview_path(source: VideoSource) -> Option<PathBuf> {
 }
 
 fn remove_local_preview(source: VideoSource) {
-    if let Some(path) = local_preview_path(source)
-        && let Err(error) = fs::remove_file(&path)
-        && error.kind() != std::io::ErrorKind::NotFound
-    {
-        debug!(%error, path = %path.display(), "could not remove a local video preview");
+    for revision in [None, Some(0), Some(1)] {
+        if let Some(path) = local_preview_path(source, revision)
+            && let Err(error) = fs::remove_file(&path)
+            && error.kind() != std::io::ErrorKind::NotFound
+        {
+            debug!(%error, path = %path.display(), "could not remove a local video preview");
+        }
     }
 }
 
 fn write_local_preview(
     frame: &mut I420Buffer,
     source: VideoSource,
+    revision: u64,
     width: u32,
     height: u32,
 ) -> anyhow::Result<()> {
-    let Some(path) = local_preview_path(source) else {
+    let Some(path) = local_preview_path(source, Some(revision)) else {
         return Ok(());
     };
     let source_width = i32::try_from(width).context("preview width is too large")?;
