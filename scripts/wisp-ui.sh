@@ -37,6 +37,14 @@ if [[ -n "$primary_screen" ]]; then
   export WISP_PRIMARY_SCREEN="$primary_screen"
 fi
 
+runtime_dir=${XDG_RUNTIME_DIR:?XDG_RUNTIME_DIR is required}/wisp
+mkdir -p "$runtime_dir"
+
+lock_ui_start() {
+  exec 8>"$runtime_dir/ui-start.lock"
+  flock 8
+}
+
 if ! command -v qs >/dev/null 2>&1; then
   echo "Quickshell is required to run the Wisp UI" >&2
   exit 1
@@ -67,6 +75,10 @@ call_or_start() {
 
   case "$action" in
     open|show|toggle|activate|anchor)
+      lock_ui_start
+      if call_ui "$endpoint" "$action" "$@" >/dev/null 2>&1; then
+        return
+      fi
       start_ui
       for _ in $(seq 1 40); do
         if call_ui "$endpoint" "$action" "$@" 2>/dev/null; then

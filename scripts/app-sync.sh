@@ -9,13 +9,16 @@ bin_root="${XDG_BIN_HOME:-$HOME/.local/bin}"
 data_root="${XDG_DATA_HOME:-$HOME/.local/share}"
 desktop_root="$data_root/applications"
 icon_root="$data_root/icons/hicolor/scalable/apps"
+desktop_template="$repo_dir/infra/local/dev.wisp.desktop"
+service_root="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+service_template="$repo_dir/infra/local/dev.wisp.service"
 
 if [[ ! -f "$source_dir/shell.qml" ]]; then
   echo "Standalone Wisp shell is missing from $source_dir" >&2
   exit 1
 fi
 
-mkdir -p "$destination" "$bin_root" "$desktop_root" "$icon_root"
+mkdir -p "$destination" "$bin_root" "$desktop_root" "$icon_root" "$service_root"
 
 if command -v rsync >/dev/null 2>&1; then
   rsync --archive --delete "$source_dir" "$destination/"
@@ -24,8 +27,40 @@ else
 fi
 
 install -m 0755 "$repo_dir/scripts/wisp-ui.sh" "$bin_root/wisp-ui"
-install -m 0644 "$repo_dir/infra/local/dev.wisp.desktop" "$desktop_root/dev.wisp.desktop"
+install -m 0755 "$repo_dir/scripts/configure-friend.sh" "$bin_root/wisp-friend-config"
+install -m 0755 "$repo_dir/scripts/friend-tailscale.sh" "$bin_root/wisp-friend"
+install -m 0755 "$repo_dir/scripts/wisp-launch.sh" "$bin_root/wisp-launch"
+install -m 0755 "$repo_dir/scripts/wisp.sh" "$bin_root/wisp"
+desktop_contents=$(<"$desktop_template")
+app_exec="$bin_root/wisp"
+desktop_contents=${desktop_contents//@WISP_LAUNCH_EXEC@/$app_exec}
+desktop_file=$(mktemp "$desktop_root/dev.wisp.desktop.XXXXXX")
+trap 'rm -f -- "$desktop_file"' EXIT
+printf '%s\n' "$desktop_contents" >"$desktop_file"
+install -m 0644 "$desktop_file" "$desktop_root/dev.wisp.desktop"
+rm -f -- "$desktop_file"
+trap - EXIT
+service_contents=$(<"$service_template")
+launch_exec="$bin_root/wisp-launch"
+service_contents=${service_contents//@WISP_LAUNCH_EXEC@/$launch_exec}
+service_file=$(mktemp "$service_root/wisp.service.XXXXXX")
+trap 'rm -f -- "$service_file"' EXIT
+printf '%s\n' "$service_contents" >"$service_file"
+install -m 0644 "$service_file" "$service_root/wisp.service"
+rm -f -- "$service_file"
+trap - EXIT
 install -m 0644 "$source_dir/assets/waveform.svg" "$icon_root/dev.wisp.svg"
 
+if command -v systemctl >/dev/null 2>&1; then
+  systemctl --user daemon-reload
+fi
+
+if command -v kbuildsycoca6 >/dev/null 2>&1; then
+  kbuildsycoca6 >/dev/null 2>&1 || true
+elif command -v update-desktop-database >/dev/null 2>&1; then
+  update-desktop-database "$desktop_root" >/dev/null 2>&1 || true
+fi
+
 echo "Synced standalone Wisp UI to $destination"
-echo "Installed launcher at $bin_root/wisp-ui"
+echo "Installed application launcher at $bin_root/wisp"
+echo "Installed UI control helper at $bin_root/wisp-ui"

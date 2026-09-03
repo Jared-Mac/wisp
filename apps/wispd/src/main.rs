@@ -1612,35 +1612,144 @@ async fn handle_tray_action(action: TrayAction, daemon: &Arc<Daemon>) -> bool {
     true
 }
 
-fn describe_media_failure(error: &anyhow::Error) -> (String, String) {
-    let detail = error.to_string();
-    let (code, label) = if detail.contains("publish microphone") {
-        ("microphone_publication", "Microphone publication failed")
-    } else if detail.contains("LiveKit") {
-        ("livekit_connection", "LiveKit connection failed")
-    } else if detail.contains("microphone")
-        || detail.contains("speaker")
-        || detail.contains("audio processing")
-    {
-        ("audio_device", "Audio device error")
-    } else {
-        ("media_connection", "Media connection failed")
-    };
-    (code.into(), format!("{label}: {detail}"))
+async fn handle_connecting_tray_action(
+    action: TrayAction,
+    audio_state: &mut (bool, bool),
+    audio_changed: &mut bool,
+    tray_handle: Option<&ksni::Handle<tray::WispTray>>,
+) -> bool {
+    match action {
+        TrayAction::Activate { x, y } => {
+            tokio::spawn(control_ui(vec![
+                "panel".into(),
+                "activate".into(),
+                x.to_string(),
+                y.to_string(),
+            ]));
+        }
+        TrayAction::Show => {
+            tokio::spawn(control_ui(vec!["panel".into(), "open".into()]));
+        }
+        TrayAction::Hide => {
+            tokio::spawn(control_ui(vec!["panel".into(), "hide".into()]));
+        }
+        TrayAction::OpenApp => {
+            tokio::spawn(control_ui(vec!["app".into(), "open".into()]));
+        }
+        TrayAction::SetAnchor(anchor) => {
+            tokio::spawn(control_ui(vec![
+                "panel".into(),
+                "anchor".into(),
+                anchor.into(),
+            ]));
+        }
+        TrayAction::ToggleMuted => {
+            *audio_state = mute_transition(audio_state.0, audio_state.1, None);
+            *audio_changed = true;
+        }
+        TrayAction::ToggleDeafened => {
+            *audio_state = deafen_transition(audio_state.0, !audio_state.1);
+            *audio_changed = true;
+        }
+        TrayAction::ToggleShare => {
+            debug!("screen sharing is unavailable while connecting to the server");
+        }
+        TrayAction::Exit => {
+            info!("exit requested from system tray while connecting");
+            quit_all_ui_instances().await;
+            return false;
+        }
+    }
+    if let Some(handle) = tray_handle {
+        let (muted, deafened) = *audio_state;
+        let _ = handle
+            .update(|tray| tray.set_state(muted, deafened, false))
+            .await;
+    }
+    true
 }
 
-#[tokio::main]
-#[allow(clippy::too_many_lines)]
-async fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| "wispd=info".into()))
-        .init();
-    let args = Args::parse();
-    let socket_path = args.socket.unwrap_or_else(runtime_socket_path);
-    let listener = bind_socket(&socket_path).await?;
-    let (api, mut snapshot) = ServerApi::connect(args.server_url, &args.profile)
-        .await
-        .with_context(|| format!("connect profile {} to wisp-server", args.profile))?;
+async fn connect_with_tray(
+    server_url: String,
+    profile: &str,
+    tray_actions: &mut Option<tokio::sync::mpsc::UnboundedReceiver<TrayAction>>,
+    tray_handle: Option<&ksni::Handle<tray::WispTray>>,
+    audio_state: &mut (bool, bool),
+    audio_changed: &mut bool,
+) -> anyhow::Result<Option<(ServerApi, Snapshot)>> {
+    let mut attempt = 0_u32;
+    loop {
+        let connection = ServerApi::connect(server_url.clone(), profile);
+        tokio::pin!(connection);
+        let result = loop {
+            tokio::select! {
+                result = &mut connection => break result,
+                result = tokio::signal::ctrl_c() => {
+                    result?;
+                    info!("shutting down while connecting");
+                    return Ok(None);
+                }
+                action = next_tray_action(tray_actions) => {
+                    let Some(action) = action else {
+                        *tray_actions = None;
+                        continue;
+                    };
+                    if !handle_connecting_tray_action(
+                        action,
+                        audio_state,
+                        audio_changed,
+                        tray_handle,
+                    ).await {
+                        return Ok(None);
+                    }
+                }
+            }
+        };
+        match result {
+            Ok(connected) => return Ok(Some(connected)),
+            Err(error) => warn!(%error, %server_url, "cannot establish initial server session"),
+        }
+
+        attempt = attempt.saturating_add(1).min(6);
+        let delay = tokio::time::sleep(Duration::from_millis(250 * 2_u64.pow(attempt)));
+        tokio::pin!(delay);
+        loop {
+            tokio::select! {
+                () = &mut delay => break,
+                result = tokio::signal::ctrl_c() => {
+                    result?;
+                    info!("shutting down while waiting to reconnect");
+                    return Ok(None);
+                }
+                action = next_tray_action(tray_actions) => {
+                    let Some(action) = action else {
+                        *tray_actions = None;
+                        continue;
+                    };
+                    if !handle_connecting_tray_action(
+                        action,
+                        audio_state,
+                        audio_changed,
+                        tray_handle,
+                    ).await {
+                        return Ok(None);
+                    }
+                }
+            }
+        }
+    }
+}
+
+async fn start_connected_daemon(
+    args: Args,
+    api: ServerApi,
+    mut snapshot: Snapshot,
+    connecting_audio: Option<(bool, bool)>,
+) -> Arc<Daemon> {
+    if let Some((muted, deafened)) = connecting_audio {
+        snapshot.self_state.muted = muted;
+        snapshot.self_state.deafened = deafened;
+    }
     if snapshot.self_state.deafened {
         snapshot.self_state.muted = true;
     }
@@ -1674,6 +1783,73 @@ async fn main() -> anyhow::Result<()> {
             warn!(%error, "initial media connection failed");
         }
     });
+    daemon
+}
+
+fn describe_media_failure(error: &anyhow::Error) -> (String, String) {
+    let detail = error.to_string();
+    let (code, label) = if detail.contains("publish microphone") {
+        ("microphone_publication", "Microphone publication failed")
+    } else if detail.contains("LiveKit") {
+        ("livekit_connection", "LiveKit connection failed")
+    } else if detail.contains("microphone")
+        || detail.contains("speaker")
+        || detail.contains("audio processing")
+    {
+        ("audio_device", "Audio device error")
+    } else {
+        ("media_connection", "Media connection failed")
+    };
+    (code.into(), format!("{label}: {detail}"))
+}
+
+#[tokio::main]
+#[allow(clippy::too_many_lines)]
+async fn main() -> anyhow::Result<()> {
+    tracing_subscriber::fmt()
+        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| "wispd=info".into()))
+        .init();
+    let args = Args::parse();
+    let socket_path = args.socket.clone().unwrap_or_else(runtime_socket_path);
+    let listener = bind_socket(&socket_path).await?;
+    let mut connecting_audio_state = (false, false);
+    let mut connecting_audio_changed = false;
+    let (mut tray_actions, tray_handle) = if std::env::var_os("WISP_DISABLE_TRAY").is_some() {
+        (None, None)
+    } else {
+        match tray::spawn(false, false, false).await {
+            Ok((receiver, handle)) => (Some(receiver), Some(handle)),
+            Err(error) => {
+                warn!(%error, "system tray is unavailable; continuing without a tray icon");
+                (None, None)
+            }
+        }
+    };
+    info!(socket = %socket_path.display(), "wispd ready; connecting to server");
+    let Some((api, snapshot)) = connect_with_tray(
+        args.server_url.clone(),
+        &args.profile,
+        &mut tray_actions,
+        tray_handle.as_ref(),
+        &mut connecting_audio_state,
+        &mut connecting_audio_changed,
+    )
+    .await
+    .with_context(|| format!("connect profile {} to wisp-server", args.profile))?
+    else {
+        drop(listener);
+        if let Err(error) = tokio::fs::remove_file(&socket_path).await {
+            warn!(%error, "could not remove IPC socket");
+        }
+        return Ok(());
+    };
+    let daemon = start_connected_daemon(
+        args,
+        api,
+        snapshot,
+        connecting_audio_changed.then_some(connecting_audio_state),
+    )
+    .await;
 
     let initial_tray_state = {
         let state = daemon.state.read().await;
@@ -1683,24 +1859,13 @@ async fn main() -> anyhow::Result<()> {
             state.self_state.media.screen_share.active,
         )
     };
-    let (mut tray_actions, tray_handle) = if std::env::var_os("WISP_DISABLE_TRAY").is_some() {
-        (None, None)
-    } else {
-        match tray::spawn(
-            initial_tray_state.0,
-            initial_tray_state.1,
-            initial_tray_state.2,
-        )
-        .await
-        {
-            Ok((receiver, handle)) => (Some(receiver), Some(handle)),
-            Err(error) => {
-                warn!(%error, "system tray is unavailable; continuing without a tray icon");
-                (None, None)
-            }
-        }
-    };
-    if let Some(handle) = tray_handle.clone() {
+    if let Some(handle) = tray_handle.as_ref() {
+        let (muted, deafened, sharing) = initial_tray_state;
+        let _ = handle
+            .update(|tray| tray.set_state(muted, deafened, sharing))
+            .await;
+    }
+    if let Some(handle) = tray_handle {
         tokio::spawn(synchronize_tray_state(daemon.clone(), handle));
     }
     info!(socket = %socket_path.display(), "wispd ready");

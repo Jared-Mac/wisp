@@ -1,8 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+export PATH="$script_dir:$PATH"
 repo_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 config_file=${XDG_CONFIG_HOME:-${HOME:?HOME is required}/.config}/wisp/friend.env
+socket_path=${XDG_RUNTIME_DIR:?XDG_RUNTIME_DIR is required}/wisp/wispd.sock
+
+if command -v wisp-ui >/dev/null 2>&1 \
+  && [[ -S "$socket_path" ]] \
+  && pgrep -u "$(id -u)" -x wispd >/dev/null 2>&1; then
+  wisp-ui open
+  exit 0
+fi
 
 saved_setting() {
   local name=$1
@@ -27,31 +37,27 @@ case "$profile" in
     exit 2
     ;;
 esac
+export WISP_PROFILE="$profile"
 
 if [[ -n "$explicit_host" && -n "$explicit_profile" ]]; then
-  "$repo_dir/scripts/configure-friend.sh" "$host" "$profile" >/dev/null
+  if [[ -x "$repo_dir/scripts/configure-friend.sh" ]]; then
+    "$repo_dir/scripts/configure-friend.sh" "$host" "$profile" >/dev/null
+  elif command -v wisp-friend-config >/dev/null 2>&1; then
+    wisp-friend-config "$host" "$profile" >/dev/null
+  else
+    echo "wisp-friend-config is missing; reinstall the Wisp application files" >&2
+    exit 1
+  fi
 fi
 
-for command_name in tailscale curl wispd wisp-ui; do
+for command_name in wispd wisp-ui; do
   if ! command -v "$command_name" >/dev/null 2>&1; then
     echo "$command_name is missing; run ./scripts/friend-bootstrap-cachyos.sh" >&2
     exit 1
   fi
 done
 
-if ! tailscale ping --c 3 --until-direct=false "$host" >/dev/null; then
-  backend_state=$(tailscale status --json 2>/dev/null | jq -r '.BackendState // "unknown"')
-  echo "Cannot reach Wisp host $host through Tailscale (local state: $backend_state)." >&2
-  echo "If local state is Running, ask the host owner to start or re-share the Wisp machine." >&2
-  exit 1
-fi
-
 server_url="http://$host:8787"
-if ! curl --fail --silent --show-error --max-time 5 "$server_url/healthz" >/dev/null; then
-  echo "Wisp is not reachable at $server_url; ask the host to run 'just dev-tailscale'" >&2
-  exit 1
-fi
-
 daemon_pid=""
 cleanup() {
   trap - EXIT INT TERM
@@ -64,7 +70,6 @@ trap cleanup EXIT INT TERM
 WISP_SERVER_URL="$server_url" wispd --profile "$profile" &
 daemon_pid=$!
 
-socket_path="${XDG_RUNTIME_DIR:?XDG_RUNTIME_DIR is required}/wisp/wispd.sock"
 for _ in $(seq 1 100); do
   [[ -S "$socket_path" ]] && break
   if ! kill -0 "$daemon_pid" 2>/dev/null; then
@@ -78,5 +83,6 @@ if [[ ! -S "$socket_path" ]]; then
 fi
 
 wisp-ui app open
-echo "Wisp is connected as $profile through $host. Keep this terminal open; Ctrl+C exits."
+echo "Wisp is running as $profile and will connect through $host when available."
+echo "Keep this terminal open; Ctrl+C exits."
 wait "$daemon_pid"
