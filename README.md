@@ -4,8 +4,7 @@ Wisp is a Quickshell-native social layer for a small group of friends. This
 repository implements presence, ephemeral hangouts, SQLite persistence, pushed
 events, persistent desktop state, LiveKit voice/screen/camera media, a
 CLI/simulator, detachable native video surfaces, a standalone desktop window,
-and an optional Omarchy bar integration. Milestones M0–M3 are implemented; M4
-is the next development phase.
+and an optional Omarchy bar integration. Milestones M0–M4 are implemented.
 
 ## Run it
 
@@ -54,8 +53,8 @@ client when necessary, or reopens the existing app when the daemon is already
 running. After **Exit Wisp**, the same launcher starts the complete client again
 rather than opening a disconnected UI. If the remote host is temporarily
 offline, the daemon and tray remain available and retry until the host returns.
-Diagnostic output is stored in
-`~/.local/state/wisp/launcher.log`.
+Diagnostic output is available with `journalctl --user -u wisp.service`; Wisp
+does not maintain an unbounded private log file.
 
 `wispd` also publishes a Wisp system-tray icon on desktops that support
 StatusNotifierItem. Left-click the icon to toggle the Wisp panel beside the
@@ -82,10 +81,10 @@ back to RNNoise and reports that backend under **Settings → Audio** and in
 During a hangout, **Share screen** opens the standard XDG desktop portal picker
 for a monitor or individual window, while **Camera on** publishes the selected
 camera as an independent track. Screen and camera can run together, and each
-remote track gets its own **Watch** control and detachable native Wayland
+remote track gets its own **Watch** control and detachable Hyprland-managed
 surface. Receiving video never opens a window or starts decoding until the
-viewer asks to watch it. Closing or hiding a surface pauses that track without
-interrupting voice; resizing the surface selects an appropriate simulcast
+viewer asks to watch it. Closing a surface unmaps its native window and pauses
+that track without interrupting voice; resizing selects an appropriate simulcast
 layer.
 
 Publishing defaults to H.264 at the High profile (screen up to 1080p60 at
@@ -126,27 +125,74 @@ just tailscale-info  # run in another terminal
 ```
 
 Friends on CachyOS clone this repository, run `just friend-bootstrap`, and then
-start their assigned development profile with:
+enroll each computer with its own one-use invite:
 
 ```bash
-just friend-config <host>.ts.net Tyler
+just friend-register <host>.ts.net Tyler
 just friend
 ```
 
-`friend-config` stores the host and assigned identity in
+The host creates the invite with `wispctl invite Tyler`, then sends its code and
+the private media key to that friend separately from GitHub. `friend-register`
+prompts without echoing either secret and stores the host, assigned identity,
+device credential, and media key in
 `~/.config/wisp/friend.env` with user-only permissions. The setting is local to
-that computer and is never committed to the repository. The panel header shows
+that computer and is never committed to the repository. Every computer is a
+separately revocable device with a short-lived server session. The panel header
+shows
 the active profile name and live Open, Knock first, Closed, or Away presence so
 identity and availability are immediately visible. During an active voice
-connection the header shows Connected instead. Explicit arguments such as
-`just friend <host>.ts.net Tyler` override
-and update the saved values. `wispd` itself also requires a profile argument or
-`WISP_PROFILE`, so an unconfigured client can no longer silently become Jared.
+connection the header shows Connected instead. Re-run `friend-register` with a
+new invite to change the saved host, profile, or device. `wispd` itself also
+requires a profile argument or `WISP_PROFILE`, so an unconfigured client can no
+longer silently become Jared.
 
 The Tailscale address and unique Tyler/Jack/Charlie assignments are private test
 information and must not be committed. See
 [`docs/tailscale-friend-test.md`](docs/tailscale-friend-test.md) for complete
 host setup, CachyOS instructions, ports, test steps, and security limitations.
+
+## Messages, Porch, and devices
+
+The app includes direct messages, the small-circle timeline, and the current
+hangout timeline. Messages are committed to SQLite before acknowledgement,
+missed messages synchronize after reconnect, unread cursors are per user, and
+hangout messages expire after 24 hours. **Porch** is a saved meeting spot: it
+appears in NOW only while occupied and reuses no permanent media room.
+
+Friends can open a direct conversation from a friend row. Equivalent CLI
+operations are useful for diagnostics:
+
+```bash
+wispctl dm Tyler "Are you free?"
+wispctl porch
+wispctl devices
+wispctl revoke-device <device-id>
+```
+
+LiveKit audio and video use its built-in AES-GCM end-to-end encryption whenever
+Wisp runs with device authentication. The media key is shared privately and is
+never sent to `wisp-server`; the Settings device page reports whether E2EE is
+active. Coordination data and messages remain server-readable in this private
+alpha, so this is not yet an end-to-end-encrypted messenger.
+
+For an always-on host installed from a release, copy and edit the generated
+`~/.config/wisp/server.env`, configure LiveKit, then install the user units:
+
+```bash
+./scripts/install-host-services.sh
+systemctl --user enable --now wisp-server.service
+systemctl --user status wisp-server.service wisp-backup.timer
+```
+
+The daily backup timer keeps 14 verified SQLite backups under
+`~/.local/share/wisp/server/backups`. Restore only while the server is stopped:
+
+```bash
+systemctl --user stop wisp-server.service
+wisp-restore ~/.local/share/wisp/server/backups/<backup>.sqlite3
+systemctl --user start wisp-server.service
+```
 
 To test voice and remote video without microphone feedback, start Tyler with
 generated media:
@@ -161,7 +207,7 @@ The status output reports the selected microphone/speaker and a growing
 `received_audio_frames` counter. Synthetic screen and camera tracks appear as
 separate available media. The UI's per-track **Watch** button, or
 `wispctl watch Tyler screen_share` / `wispctl watch Tyler camera`, opens a
-GPU-rendered native Wayland window with app ID `dev.wisp.surface`. Unwatching
+GPU-rendered native XWayland window with app ID `dev.wisp.surface`. Unwatching
 either track hides its window and unsubscribes without leaving the LiveKit
 room. `wispctl mute`, `unmute`, `deafen`, `undeafen`, and `leave` operate on the
 LiveKit session.
@@ -234,6 +280,7 @@ just test-media
 just test-reliability
 just test-knock
 just test-ui
+just test-private-alpha
 just lint
 ```
 
@@ -253,6 +300,10 @@ and memory allowance can be adjusted with `WISP_RELIABILITY_CYCLES` and
 `WISP_RSS_GROWTH_LIMIT_KIB`; no one-hour soak is required. See
 `docs/architecture.md`. `just test-knock` covers request deduplication, Later,
 expiry, acceptance, both offline-user cases, and simulator auto-response.
+`just test-private-alpha` covers one-use enrollment, short sessions, scoped
+conversation access, offline delivery, unread cursors, Porch lifecycle,
+retention, restart, online backup/restore, revocation, protocol rejection, and
+the no-message-content logging rule.
 
 ## Automated builds and releases
 
@@ -278,7 +329,7 @@ run:
 
 ```bash
 ./install.sh
-wisp-friend-config <host>.ts.net Tyler
+wisp-friend-register <host>.ts.net Tyler
 wisp
 ```
 

@@ -28,6 +28,7 @@ fi
 
 install -m 0755 "$repo_dir/scripts/wisp-ui.sh" "$bin_root/wisp-ui"
 install -m 0755 "$repo_dir/scripts/configure-friend.sh" "$bin_root/wisp-friend-config"
+install -m 0755 "$repo_dir/scripts/register-friend-device.sh" "$bin_root/wisp-friend-register"
 install -m 0755 "$repo_dir/scripts/friend-tailscale.sh" "$bin_root/wisp-friend"
 install -m 0755 "$repo_dir/scripts/wisp-launch.sh" "$bin_root/wisp-launch"
 install -m 0755 "$repo_dir/scripts/wisp.sh" "$bin_root/wisp"

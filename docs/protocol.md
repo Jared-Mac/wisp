@@ -26,7 +26,9 @@ Supported commands are `hello`, `status`, `set_presence`, `join_friend`,
 `set_audio_preset`, `refresh_video_devices`, `set_camera_device`,
 `set_video_quality`, `set_video_codec`, `set_push_to_talk`,
 `set_push_to_talk_shortcut`, `push_to_talk_press`, and
-`push_to_talk_release`. The legacy `open_surface` and `close_surface` commands
+`push_to_talk_release`. M4 adds `open_direct`, `send_direct`, `send_message`,
+`mark_conversation_read`, `join_spot`, `create_invite`, `list_devices`, and
+`revoke_device`. The legacy `open_surface` and `close_surface` commands
 target the first available video publication. Device commands take a stable
 device `id`; audio presets are `natural`, `clear`, or `studio`. Repeating
 `push_to_talk_press` renews the daemon-owned lease without emitting another
@@ -67,6 +69,20 @@ Manual `muted` state always takes precedence. A PTT press expires after 30
 seconds unless renewed and is also released on room changes or media reconnect.
 `media.active_speakers` contains sorted participant display names from LiveKit.
 
-The server control API uses short-lived development sessions during local work.
-`GET /v1/events?token=...` is a WebSocket. Other `/v1` routes use a Bearer token.
-Development credentials never enter Quickshell.
+Snapshots also contain authorized `conversations`, recent `messages`, saved
+`spots`, the current user's `devices`, and an optional newly created
+`last_invite`. Conversation summaries include type, members, latest message,
+and unread count. Presentation clients still receive complete snapshots rather
+than maintaining a second local message database.
+
+The server control API uses invite-enrolled device credentials to mint 12-hour
+sessions. Every authenticated HTTP and WebSocket request carries its session as
+`Authorization: Bearer …`; query-string tokens remain only for explicitly
+enabled local development sessions. Registration and session requests include
+the protocol version and mismatches are rejected before state is changed.
+Credentials and media keys never enter Quickshell.
+
+Server event frames contain change metadata only. Text content is returned by
+authorized snapshot/message endpoints, and the server commits each message
+before acknowledging it. Normal logs include neither message payloads nor
+device, session, invite, or E2EE secrets.

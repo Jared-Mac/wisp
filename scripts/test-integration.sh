@@ -54,6 +54,25 @@ done
 [[ -S "$XDG_RUNTIME_DIR/wisp/wispd.sock" ]]
 
 target/debug/wispctl status | rg '"display_name": "Jared"' >/dev/null
+target/debug/wispctl dm Tyler "integration hello" >/dev/null
+direct_id=$(target/debug/wispctl status | jq -er \
+  '.conversations[] | select(.kind == "direct" and .label == "Tyler") | .id')
+target/debug/wispctl status | jq -e --arg id "$direct_id" '
+  (.messages[] | select(.conversation_id == $id) | .payload == "integration hello") and
+  (.conversations[] | select(.id == $id) | .last_message.payload == "integration hello")
+' >/dev/null
+target/debug/wispctl read "$direct_id" >/dev/null
+target/debug/wispctl porch >/dev/null
+target/debug/wispctl status | jq -e '
+  . as $root |
+  .self.connection == "connected" and
+  (.spots[] | select(.name == "Porch") | .active_hangout_id == $root.self.hangout_id)
+' >/dev/null
+target/debug/wispctl leave >/dev/null
+target/debug/wispctl status | jq -e '
+  .self.connection == "available" and
+  (.spots[] | select(.name == "Porch") | .active_hangout_id == null)
+' >/dev/null
 target/debug/wispctl ptt shortcut F8 | jq -e '.shortcut == "F8"' >/dev/null
 target/debug/wispctl status | jq -e '.self.push_to_talk.shortcut == "F8"' >/dev/null
 rg -F 'require("hypr.wisp")' "$WISP_HYPR_CONFIG_DIR/bindings.lua" >/dev/null

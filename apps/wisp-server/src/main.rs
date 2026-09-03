@@ -24,6 +24,12 @@ struct Args {
     livekit_api_secret: String,
     #[arg(long, env = "WISP_KNOCK_TTL_SECONDS", default_value_t = 30)]
     knock_ttl_seconds: u64,
+    /// Permit profile-name development login. Defaults on only for loopback binds.
+    #[arg(long, env = "WISP_ALLOW_DEV_SESSIONS")]
+    allow_dev_sessions: Option<bool>,
+    /// One-time administrator enrollment secret. Keep this outside the repository.
+    #[arg(long, env = "WISP_BOOTSTRAP_TOKEN")]
+    bootstrap_token: Option<String>,
 }
 
 fn default_database_url() -> anyhow::Result<String> {
@@ -60,6 +66,10 @@ async fn main() -> anyhow::Result<()> {
         livekit_api_key: args.livekit_api_key,
         livekit_api_secret: args.livekit_api_secret,
         knock_ttl: std::time::Duration::from_secs(args.knock_ttl_seconds.max(1)),
+        allow_dev_sessions: args
+            .allow_dev_sessions
+            .unwrap_or_else(|| args.addr.ip().is_loopback()),
+        bootstrap_token: args.bootstrap_token,
     };
     let state = AppState::new(config).await?;
     let listener = tokio::net::TcpListener::bind(args.addr).await?;

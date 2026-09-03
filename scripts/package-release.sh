@@ -49,17 +49,28 @@ done
 cp -a "$repo_dir/quickshell" "$package_dir/quickshell"
 for script in \
   app-sync.sh \
+  backup-database.sh \
   configure-friend.sh \
   friend-tailscale.sh \
+  install-host-services.sh \
+  register-friend-device.sh \
+  restore-database.sh \
   plugin-sync.sh \
   wisp-launch.sh \
   wisp-ui.sh \
   wisp.sh; do
   install -m 0755 "$repo_dir/scripts/$script" "$package_dir/scripts/$script"
 done
-for asset in dev.wisp.desktop dev.wisp.service dev.wisp.surface.desktop; do
+for asset in \
+  dev.wisp.desktop \
+  dev.wisp.service \
+  dev.wisp.surface.desktop \
+  wisp-backup.service \
+  wisp-backup.timer \
+  wisp-server.service; do
   install -m 0644 "$repo_dir/infra/local/$asset" "$package_dir/infra/local/$asset"
 done
+install -m 0600 "$repo_dir/infra/local/server.env.example" "$package_dir/infra/local/server.env.example"
 install -m 0755 "$repo_dir/scripts/install-release.sh" "$package_dir/install.sh"
 install -m 0644 "$repo_dir/LICENSE" "$repo_dir/README.md" "$package_dir/"
 

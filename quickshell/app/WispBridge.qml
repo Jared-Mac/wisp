@@ -95,13 +95,28 @@ Item {
     },
     "friends": [],
     "hangouts": [],
-    "knocks": []
+    "knocks": [],
+    "conversations": [],
+    "messages": [],
+    "spots": [],
+    "devices": [],
+    "last_invite": null
   })
 
   readonly property var selfState: snapshot["self"] || ({})
   readonly property var friends: snapshot.friends || []
   readonly property var hangouts: snapshot.hangouts || []
   readonly property var knocks: snapshot.knocks || []
+  readonly property var conversations: snapshot.conversations || []
+  readonly property var messages: snapshot.messages || []
+  readonly property var spots: snapshot.spots || []
+  readonly property var devices: snapshot.devices || []
+  readonly property var lastInvite: snapshot.last_invite || null
+  property string activeConversationId: ""
+  property string pendingDirectName: ""
+  readonly property var activeConversation: conversationById(activeConversationId)
+  readonly property var activeMessages: messagesFor(activeConversationId)
+  readonly property int unreadMessages: totalUnread()
   readonly property var mediaState: selfState.media || ({})
   readonly property var pushToTalkState: selfState.push_to_talk || ({
     "enabled": false,
@@ -212,6 +227,7 @@ Item {
   function buildBarText() {
     if (!daemonConnected) return "󰍬  disconnected"
     if (knocks.length > 0) return "󰍬  " + String(knocks[0].from.display_name || "Friend") + " knocked"
+    if (unreadMessages > 0 && !inHangout) return "󰍩  " + String(unreadMessages) + " unread"
     var names = []
     if (inHangout) {
       for (var h = 0; h < hangouts.length; h++) {
@@ -243,6 +259,7 @@ Item {
   function buildBarLabel() {
     if (!daemonConnected) return "disconnected"
     if (knocks.length > 0) return String(knocks[0].from.display_name || "Friend") + " knocked"
+    if (unreadMessages > 0 && !inHangout) return String(unreadMessages) + " unread"
     if (sharing && cameraActive) return "screen + camera"
     if (sharing) return "sharing"
     if (cameraActive) return "camera"
@@ -265,6 +282,7 @@ Item {
   function buildBarTooltip() {
     if (hasError) return errorMessage
     var parts = ["Wisp"]
+    if (unreadMessages > 0) parts.push(String(unreadMessages) + " unread messages")
     if (sharing) parts.push("Sharing " + String(screenShareState.source || "screen"))
     if (cameraActive) parts.push("Camera on")
     if (remoteVideoAvailable) parts.push(remoteVideoLabel + " is sharing")
@@ -275,6 +293,8 @@ Item {
       var backend = String(audioState.denoiser || "deepfilternet")
       parts.push(backend === "deepfilternet" ? "DeepFilterNet neural denoiser" : "RNNoise fallback")
     }
+    if (inHangout) parts.push(mediaState.e2ee_enabled
+      ? "End-to-end encrypted" : "Media encryption off")
     return parts.join(" · ")
   }
 
@@ -287,6 +307,40 @@ Item {
     var nextCamera = nextMedia.camera || ({})
     lastError = String(nextMedia.error || nextMedia.surface_error
       || nextShare.error || nextCamera.error || "")
+    if (pendingDirectName !== "") {
+      var wanted = pendingDirectName
+      var nextConversations = next.conversations || []
+      for (var i = 0; i < nextConversations.length; i++) {
+        if (String(nextConversations[i].kind) === "direct"
+            && String(nextConversations[i].label) === wanted) {
+          activeConversationId = String(nextConversations[i].id)
+          pendingDirectName = ""
+          send("mark_conversation_read", { "conversation_id": activeConversationId })
+          break
+        }
+      }
+    }
+  }
+
+  function conversationById(id) {
+    for (var i = 0; i < conversations.length; i++)
+      if (String(conversations[i].id) === String(id)) return conversations[i]
+    return null
+  }
+
+  function messagesFor(id) {
+    var result = []
+    if (!id) return result
+    for (var i = 0; i < messages.length; i++)
+      if (String(messages[i].conversation_id) === String(id)) result.push(messages[i])
+    return result
+  }
+
+  function totalUnread() {
+    var count = 0
+    for (var i = 0; i < conversations.length; i++)
+      count += Number(conversations[i].unread_count || 0)
+    return count
   }
 
   function handleLine(line) {
@@ -335,6 +389,33 @@ Item {
   function setPresence(value) { send("set_presence", { "presence": value }) }
   function joinFriend(name) { send("join_friend", { "friend": name }) }
   function joinHangout(id) { send("join_hangout", { "hangout_id": id }) }
+  function joinSpot(id) { send("join_spot", { "spot_id": id }) }
+  function openDirect(friendName) {
+    pendingDirectName = String(friendName)
+    send("open_direct", { "friend": String(friendName) })
+  }
+  function selectConversation(id) {
+    activeConversationId = String(id)
+    send("mark_conversation_read", { "conversation_id": activeConversationId })
+  }
+  function closeConversation() { activeConversationId = "" }
+  function sendMessage(text) {
+    var trimmed = String(text || "").trim()
+    if (!activeConversationId || !trimmed) return false
+    send("send_message", {
+      "conversation_id": activeConversationId,
+      "text": trimmed
+    })
+    return true
+  }
+  function createInvite(profile, expiresMinutes) {
+    send("create_invite", {
+      "profile": String(profile),
+      "expires_in_minutes": Number(expiresMinutes || 30)
+    })
+  }
+  function refreshDevices() { send("list_devices", {}) }
+  function revokeDevice(id) { send("revoke_device", { "device_id": String(id) }) }
   function respondKnock(id, response) { send("respond_knock", { "knock_id": id, "response": response }) }
   function toggleMuted() { send("toggle_muted", {}) }
   function toggleDeafened() { send("toggle_deafened", {}) }

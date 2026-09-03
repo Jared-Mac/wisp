@@ -12,4 +12,5 @@ tailscale_dns=$(tailscale status --json | jq -r '.Self.DNSName // empty' | sed '
 echo "Wisp Tailscale host"
 echo "  DNS:  ${tailscale_dns:-unavailable}"
 echo "  IPv4: $tailscale_ip"
-echo "  Friends: just friend ${tailscale_dns:-$tailscale_ip} <Tyler|Jack|Charlie>"
+echo "  Friends: just friend-register ${tailscale_dns:-$tailscale_ip} <Tyler|Jack|Charlie>"
+echo "Share each one-use invite and the media E2EE key privately; never share the bootstrap token."

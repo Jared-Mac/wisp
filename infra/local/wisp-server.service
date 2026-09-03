@@ -1,0 +1,20 @@
+[Unit]
+Description=Wisp coordination server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=%h/.config/wisp/server.env
+ExecStart=%h/.local/bin/wisp-server
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=%h/.local/share/wisp %h/.config/wisp
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

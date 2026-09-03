@@ -32,6 +32,27 @@ enum Command {
     JoinHangout {
         id: String,
     },
+    Porch,
+    Dm {
+        friend: String,
+        text: String,
+    },
+    Message {
+        conversation_id: String,
+        text: String,
+    },
+    Read {
+        conversation_id: String,
+    },
+    Invite {
+        profile: String,
+        #[arg(long, default_value_t = 30)]
+        expires_minutes: u32,
+    },
+    Devices,
+    RevokeDevice {
+        device_id: String,
+    },
     Knock {
         id: String,
         action: KnockAction,
@@ -126,12 +147,35 @@ enum KnockAction {
 }
 
 impl Command {
+    #[allow(clippy::too_many_lines)]
     fn envelope(&self) -> CommandEnvelope {
         let (name, args) = match self {
             Self::Status => ("status", json!({})),
             Self::Presence { state } => ("set_presence", json!({"presence": state})),
             Self::Join { friend } => ("join_friend", json!({"friend": friend})),
             Self::JoinHangout { id } => ("join_hangout", json!({"hangout_id": id})),
+            Self::Porch => ("join_spot", json!({"spot_id": "Porch"})),
+            Self::Dm { friend, text } => ("send_direct", json!({"friend": friend, "text": text})),
+            Self::Message {
+                conversation_id,
+                text,
+            } => (
+                "send_message",
+                json!({"conversation_id": conversation_id, "text": text}),
+            ),
+            Self::Read { conversation_id } => (
+                "mark_conversation_read",
+                json!({"conversation_id": conversation_id}),
+            ),
+            Self::Invite {
+                profile,
+                expires_minutes,
+            } => (
+                "create_invite",
+                json!({"profile": profile, "expires_in_minutes": expires_minutes}),
+            ),
+            Self::Devices => ("list_devices", json!({})),
+            Self::RevokeDevice { device_id } => ("revoke_device", json!({"device_id": device_id})),
             Self::Knock { id, action } => (
                 "respond_knock",
                 json!({

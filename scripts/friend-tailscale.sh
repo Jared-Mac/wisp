@@ -3,7 +3,6 @@ set -euo pipefail
 
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 export PATH="$script_dir:$PATH"
-repo_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 config_file=${XDG_CONFIG_HOME:-${HOME:?HOME is required}/.config}/wisp/friend.env
 socket_path=${XDG_RUNTIME_DIR:?XDG_RUNTIME_DIR is required}/wisp/wispd.sock
 
@@ -24,10 +23,13 @@ explicit_host=${1:-}
 explicit_profile=${2:-}
 host=${explicit_host:-${WISP_FRIEND_HOST:-$(saved_setting WISP_FRIEND_HOST)}}
 profile=${explicit_profile:-${WISP_PROFILE:-$(saved_setting WISP_PROFILE)}}
+device_id=${WISP_DEVICE_ID:-$(saved_setting WISP_DEVICE_ID)}
+device_token=${WISP_DEVICE_TOKEN:-$(saved_setting WISP_DEVICE_TOKEN)}
+e2ee_key=${WISP_E2EE_KEY:-$(saved_setting WISP_E2EE_KEY)}
 
 if [[ -z "$host" || -z "$profile" ]]; then
   echo "No saved Wisp friend identity." >&2
-  echo "Configure one with: just friend-config <tailscale-host-or-ip> <Tyler|Jack|Charlie>" >&2
+  echo "Enroll with: just friend-register <tailscale-host-or-ip> <Tyler|Jack|Charlie>" >&2
   exit 2
 fi
 case "$profile" in
@@ -39,16 +41,15 @@ case "$profile" in
 esac
 export WISP_PROFILE="$profile"
 
-if [[ -n "$explicit_host" && -n "$explicit_profile" ]]; then
-  if [[ -x "$repo_dir/scripts/configure-friend.sh" ]]; then
-    "$repo_dir/scripts/configure-friend.sh" "$host" "$profile" >/dev/null
-  elif command -v wisp-friend-config >/dev/null 2>&1; then
-    wisp-friend-config "$host" "$profile" >/dev/null
-  else
-    echo "wisp-friend-config is missing; reinstall the Wisp application files" >&2
-    exit 1
-  fi
+if [[ -z "$device_id" || -z "$device_token" || -z "$e2ee_key" ]]; then
+  echo "This device has not been enrolled for private-alpha access." >&2
+  echo "Ask the host for a one-use invite and private media key, then run:" >&2
+  echo "  just friend-register $host $profile" >&2
+  exit 2
 fi
+export WISP_DEVICE_ID="$device_id"
+export WISP_DEVICE_TOKEN="$device_token"
+export WISP_E2EE_KEY="$e2ee_key"
 
 for command_name in wispd wisp-ui; do
   if ! command -v "$command_name" >/dev/null 2>&1; then

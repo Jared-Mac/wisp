@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+export WISP_E2EE_KEY="wisp-integration-e2ee-key-32-bytes"
+
 repo_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$repo_dir"
 
@@ -129,6 +131,7 @@ target/debug/wispctl --socket "$socket_path" join Tyler
 wait_for_status '
   .self.connection == "connected" and
   .self.media.livekit_connected == true and
+  .self.media.e2ee_enabled == true and
   .self.media.remote_audio_participants == ["Tyler"] and
   .self.media.received_audio_frames > 0 and
   .self.media.audio.preset == "clear" and

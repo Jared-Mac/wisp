@@ -14,6 +14,11 @@ use gstreamer_app as gst_app;
 use gstreamer_video as gst_video;
 use livekit::track::VideoQuality;
 use livekit::{
+    E2eeOptions,
+    e2ee::{
+        EncryptionType,
+        key_provider::{KeyProvider, KeyProviderOptions},
+    },
     options::{TrackPublishOptions, VideoCodec, VideoEncoderBackend, VideoEncoding},
     prelude::{
         AudioProcessingOptions, LocalAudioTrack, LocalTrack, LocalVideoTrack, Participant,
@@ -343,6 +348,7 @@ pub(crate) struct ConnectedMedia {
     pub remote_audio_participants: Vec<String>,
     pub remote_muted_participants: Vec<String>,
     pub remote_videos: Vec<RemoteVideoState>,
+    pub e2ee_enabled: bool,
 }
 
 pub(crate) struct AudioInventory {
@@ -425,10 +431,14 @@ pub(crate) struct MediaManager {
     denoiser: Arc<DenoiserService>,
     surface: Option<SurfaceController>,
     event_tx: mpsc::UnboundedSender<MediaEvent>,
+    e2ee_key: Option<Vec<u8>>,
 }
 
 impl MediaManager {
-    pub(crate) fn new(surface_enabled: bool) -> (Self, mpsc::UnboundedReceiver<MediaEvent>) {
+    pub(crate) fn new(
+        surface_enabled: bool,
+        e2ee_key: Option<String>,
+    ) -> (Self, mpsc::UnboundedReceiver<MediaEvent>) {
         let (event_tx, event_rx) = mpsc::unbounded_channel();
         let denoiser_backend = Arc::new(AtomicU8::new(DenoiserBackend::DeepFilterNet as u8));
         let denoiser = Arc::new(
@@ -467,6 +477,7 @@ impl MediaManager {
                 denoiser,
                 surface,
                 event_tx,
+                e2ee_key: e2ee_key.map(String::into_bytes),
             },
             event_rx,
         )
@@ -859,9 +870,24 @@ impl MediaManager {
         let mut room_options = RoomOptions::default();
         room_options.auto_subscribe = true;
         room_options.dynacast = true;
+        if let Some(key) = &self.e2ee_key {
+            if key.len() < 16 {
+                bail!("WISP_E2EE_KEY must contain at least 16 bytes");
+            }
+            room_options.encryption = Some(E2eeOptions {
+                encryption_type: EncryptionType::Gcm,
+                key_provider: KeyProvider::with_shared_key(
+                    KeyProviderOptions::default(),
+                    key.clone(),
+                ),
+            });
+        }
         let (room, events) = Room::connect(&credentials.url, &credentials.token, room_options)
             .await
             .with_context(|| format!("connect to LiveKit room {}", credentials.room))?;
+        if self.e2ee_key.is_some() {
+            room.e2ee_manager().set_enabled(true);
+        }
         let room = Arc::new(room);
         let microphone_source = NativeAudioSource::new(AudioSourceOptions::default(), 48_000, 1, 0);
         let microphone_track = LocalAudioTrack::create_audio_track(
@@ -1008,6 +1034,7 @@ impl MediaManager {
             remote_audio_participants,
             remote_muted_participants,
             remote_videos: initial_remote_videos,
+            e2ee_enabled: self.e2ee_key.is_some(),
         })
     }
 

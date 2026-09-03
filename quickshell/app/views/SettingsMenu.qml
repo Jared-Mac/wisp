@@ -24,11 +24,28 @@ Column {
 
     Text {
       width: parent.width
-      text: "Choose how Wisp captures and publishes voice and video."
+      text: "Manage devices, privacy, and how Wisp captures and publishes media."
       color: root.theme.muted
       wrapMode: Text.WordWrap
       font.family: root.theme.font.family
       font.pixelSize: root.theme.font.caption
+    }
+  }
+
+  Rectangle {
+    width: parent.width
+    height: deviceSettings.implicitHeight + root.theme.spacing.xxl * 2
+    radius: root.theme.cornerRadius
+    color: root.theme.alpha(root.theme.foreground, 0.035)
+
+    DeviceSettingsView {
+      id: deviceSettings
+      anchors.left: parent.left
+      anchors.right: parent.right
+      anchors.top: parent.top
+      anchors.margins: root.theme.spacing.xxl
+      bridge: root.bridge
+      theme: root.theme
     }
   }
 

@@ -50,6 +50,7 @@ FocusScope {
     if (settingsOpen) {
       bridge.refreshAudioDevices()
       bridge.refreshVideoDevices()
+      bridge.refreshDevices()
     }
   }
 
@@ -310,11 +311,24 @@ FocusScope {
         onJoined: root.maybeDismiss()
       }
 
+      SpotsView {
+        width: parent.width
+        bridge: root.bridge
+        theme: root.theme
+        onJoined: root.maybeDismiss()
+      }
+
       FriendsView {
         width: parent.width
         bridge: root.bridge
         theme: root.theme
         onSelected: root.maybeDismiss()
+      }
+
+      MessagesView {
+        width: parent.width
+        bridge: root.bridge
+        theme: root.theme
       }
 
       MediaControls {
@@ -363,6 +377,13 @@ FocusScope {
           theme: root.theme
           onJoined: root.maybeDismiss()
         }
+
+        SpotsView {
+          width: parent.width
+          bridge: root.bridge
+          theme: root.theme
+          onJoined: root.maybeDismiss()
+        }
       }
 
       Column {
@@ -374,6 +395,12 @@ FocusScope {
           bridge: root.bridge
           theme: root.theme
           onSelected: root.maybeDismiss()
+        }
+
+        MessagesView {
+          width: parent.width
+          bridge: root.bridge
+          theme: root.theme
         }
 
         MediaControls {

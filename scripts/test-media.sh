@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+export WISP_E2EE_KEY="wisp-integration-e2ee-key-32-bytes"
+
 repo_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$repo_dir"
 
@@ -167,6 +169,7 @@ jq -e '
   .self.connection == "connected" and
   .self.media.livekit_connected == true and
   .self.media.microphone_published == true and
+  .self.media.e2ee_enabled == true and
   .self.media.remote_audio_participants == ["Tyler"] and
   .self.media.received_video_frames == 0 and
   .self.media.rendered_video_frames == 0 and
@@ -439,8 +442,9 @@ fi
 rg -q 'push-to-talk is disabled' "$test_dir/ptt-disabled.err"
 
 if command -v hyprctl >/dev/null && [[ -n "${WAYLAND_DISPLAY:-}" ]]; then
-  hyprctl clients -j | jq -e \
-    '[.[] | select(.class == "dev.wisp.surface")] | length >= 2' >/dev/null
+  hyprctl clients -j | jq -e --argjson daemon_pid "$daemon_pid" \
+    '[.[] | select(.class == "dev.wisp.surface" and .pid == $daemon_pid)] | length == 2' \
+    >/dev/null
 fi
 
 audio_markers_before_close=$(rg -c 'simulator audio still flowing' "$test_dir/sim.log" || true)
@@ -473,6 +477,16 @@ for _ in $(seq 1 100); do
   sleep 0.1
 done
 (( current_audio_markers > audio_markers_before_close ))
+if command -v hyprctl >/dev/null && [[ -n "${WAYLAND_DISPLAY:-}" ]]; then
+  closed_surface_count=-1
+  for _ in $(seq 1 100); do
+    closed_surface_count=$(hyprctl clients -j | jq --argjson daemon_pid "$daemon_pid" \
+      '[.[] | select(.class == "dev.wisp.surface" and .pid == $daemon_pid)] | length')
+    if (( closed_surface_count == 0 )); then break; fi
+    sleep 0.1
+  done
+  (( closed_surface_count == 0 ))
+fi
 hidden_video_frames=$(jq -r '.self.media.received_video_frames' <<<"$closed_json")
 hidden_stable_checks=0
 hidden_settled_json=$closed_json
@@ -521,7 +535,11 @@ jq -e --argjson expect_surface "$expect_surface" '
   any(.self.media.remote_videos[];
     .source == "camera" and (.subscribed | not))
 ' <<<"$reopened_json" >/dev/null
-
+if command -v hyprctl >/dev/null && [[ -n "${WAYLAND_DISPLAY:-}" ]]; then
+  reopened_surface_count=$(hyprctl clients -j | jq --argjson daemon_pid "$daemon_pid" \
+    '[.[] | select(.class == "dev.wisp.surface" and .pid == $daemon_pid)] | length')
+  (( reopened_surface_count == 1 ))
+fi
 target/debug/wispctl --socket "$test_dir/wispd.sock" mute \
   | jq -e '.muted == true' >/dev/null
 target/debug/wispctl --socket "$test_dir/wispd.sock" deafen \

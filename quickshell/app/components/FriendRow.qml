@@ -39,7 +39,7 @@ Item {
 
   Text {
     anchors.right: parent.right
-    anchors.rightMargin: root.theme.spacing.sm
+    anchors.rightMargin: root.theme.space(76)
     anchors.verticalCenter: parent.verticalCenter
     text: root.friend.online ? String(root.friend.presence) : "offline"
     color: root.theme.muted
@@ -55,6 +55,34 @@ Item {
     onClicked: if (root.canRequest) {
       root.bridge.joinFriend(root.friend.display_name)
       root.selected()
+    }
+  }
+
+  Rectangle {
+    width: root.theme.space(66)
+    height: root.theme.space(28)
+    anchors.right: parent.right
+    anchors.rightMargin: root.theme.spacing.sm
+    anchors.verticalCenter: parent.verticalCenter
+    radius: root.theme.cornerRadius
+    color: messageMouse.containsMouse
+      ? root.theme.alpha(root.theme.accent, 0.25)
+      : root.theme.alpha(root.theme.foreground, 0.07)
+
+    Text {
+      anchors.centerIn: parent
+      text: "Message"
+      color: root.theme.foreground
+      font.family: root.theme.font.family
+      font.pixelSize: root.theme.font.caption
+    }
+
+    MouseArea {
+      id: messageMouse
+      anchors.fill: parent
+      hoverEnabled: true
+      cursorShape: Qt.PointingHandCursor
+      onClicked: root.bridge.openDirect(root.friend.display_name)
     }
   }
 }

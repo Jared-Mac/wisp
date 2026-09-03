@@ -64,7 +64,8 @@ jobs:
             pulseaudio \
             pulseaudio-utils \
             pkg-config \
-            ripgrep
+            ripgrep \
+            sqlite3
 
       - name: Install pinned Rust toolchain
         run: rustup toolchain install 1.97.0 --profile minimal --component clippy,rustfmt
@@ -102,6 +103,7 @@ jobs:
           ./scripts/test-integration.sh
           ./scripts/test-knock.sh
           ./scripts/test-media.sh
+          ./scripts/test-private-alpha.sh
 
       - name: Scan tracked source for secrets
         run: ./scripts/scan-secrets.sh

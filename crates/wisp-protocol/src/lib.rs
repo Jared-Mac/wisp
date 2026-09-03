@@ -12,6 +12,8 @@ pub type UserId = Uuid;
 pub type HangoutId = Uuid;
 pub type MessageId = Uuid;
 pub type KnockId = Uuid;
+pub type DeviceId = Uuid;
+pub type InviteId = Uuid;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -376,10 +378,43 @@ pub struct HangoutView {
     pub sharing: Vec<UserSummary>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConversationKind {
+    Direct,
+    Circle,
+    Hangout,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConversationView {
+    pub id: String,
+    pub kind: ConversationKind,
+    pub label: String,
+    pub members: Vec<UserSummary>,
+    #[serde(default)]
+    pub last_message: Option<Box<Message>>,
+    #[serde(default)]
+    pub unread_count: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SpotView {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub active_hangout_id: Option<HangoutId>,
+    #[serde(default)]
+    pub members: Vec<UserSummary>,
+}
+
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MediaState {
     pub livekit_connected: bool,
     pub microphone_published: bool,
+    #[serde(default)]
+    pub e2ee_enabled: bool,
     pub received_audio_frames: u64,
     #[serde(default)]
     pub remote_audio_participants: Vec<String>,
@@ -450,6 +485,16 @@ pub struct Snapshot {
     pub hangouts: Vec<HangoutView>,
     #[serde(default)]
     pub knocks: Vec<KnockRequestView>,
+    #[serde(default)]
+    pub conversations: Vec<ConversationView>,
+    #[serde(default)]
+    pub messages: Vec<Message>,
+    #[serde(default)]
+    pub spots: Vec<SpotView>,
+    #[serde(default)]
+    pub devices: Vec<DeviceView>,
+    #[serde(default)]
+    pub last_invite: Option<DeviceInvite>,
 }
 
 impl Snapshot {
@@ -568,6 +613,85 @@ pub struct DevSessionRequest {
 pub struct DevSession {
     pub token: String,
     pub user: UserSummary,
+    pub protocol_version: u8,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateDirectConversationRequest {
+    pub friend: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MarkConversationReadRequest {
+    pub conversation_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JoinSpotRequest {
+    pub spot_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateInviteRequest {
+    pub profile: String,
+    #[serde(default)]
+    pub expires_in_minutes: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeviceInvite {
+    pub id: InviteId,
+    pub code: String,
+    pub profile: String,
+    pub expires_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegisterDeviceRequest {
+    pub invite_code: String,
+    pub device_name: String,
+    pub protocol_version: u8,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BootstrapDeviceRequest {
+    pub bootstrap_token: String,
+    pub profile: String,
+    pub device_name: String,
+    pub protocol_version: u8,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeviceCredential {
+    pub device_id: DeviceId,
+    pub device_token: String,
+    pub user: UserSummary,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeviceSessionRequest {
+    pub device_id: DeviceId,
+    pub device_token: String,
+    pub protocol_version: u8,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeviceSession {
+    pub token: String,
+    pub expires_at: DateTime<Utc>,
+    pub user: UserSummary,
+    pub device_id: DeviceId,
+    pub protocol_version: u8,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeviceView {
+    pub id: DeviceId,
+    pub name: String,
+    pub created_at: DateTime<Utc>,
+    #[serde(default)]
+    pub last_seen_at: Option<DateTime<Utc>>,
+    pub revoked: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -631,7 +755,7 @@ pub struct LiveKitTokenResponse {
     pub token: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Message {
     pub id: MessageId,
     pub conversation_id: String,

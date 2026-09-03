@@ -12,7 +12,7 @@ use std::{
     path::{Path, PathBuf},
     process::Stdio,
     sync::{
-        Arc,
+        Arc, RwLock as StdRwLock,
         atomic::{AtomicU64, Ordering},
     },
     time::{Duration, Instant},
@@ -22,17 +22,19 @@ use tokio::{
     net::{UnixListener, UnixStream},
     sync::{Mutex, RwLock, broadcast, mpsc, watch},
 };
-use tokio_tungstenite::connect_async;
+use tokio_tungstenite::{connect_async, tungstenite::client::IntoClientRequest};
 use tracing::{debug, error, info, warn};
 use tracing_subscriber::EnvFilter;
 use url::Url;
 use wisp_protocol::{
-    AudioPreset, CameraState, CommandEnvelope, ConnectionState, DaemonEnvelope, DevSession,
-    DevSessionRequest, JoinFriendRequest, JoinFriendResult, JoinHangoutRequest, KnockResponse,
-    LiveKitTokenResponse, MediaState, PROTOCOL_VERSION, Presence, PushToTalkState,
+    AudioPreset, CameraState, CommandEnvelope, ConnectionState, CreateDirectConversationRequest,
+    CreateInviteRequest, DaemonEnvelope, DevSession, DevSessionRequest, DeviceInvite,
+    DeviceSession, DeviceSessionRequest, DeviceView, JoinFriendRequest, JoinFriendResult,
+    JoinHangoutRequest, JoinSpotRequest, KnockResponse, LiveKitTokenResponse,
+    MarkConversationReadRequest, MediaState, PROTOCOL_VERSION, Presence, PushToTalkState,
     RemoteVideoState, RemoteVideoTarget, RespondKnockRequest, RespondKnockResult, ScreenShareState,
-    ServerEvent, SetPresenceRequest, Snapshot, VideoCodecPreference, VideoQualityPreset,
-    VideoSource,
+    SendMessageRequest, ServerEvent, SetPresenceRequest, Snapshot, VideoCodecPreference,
+    VideoQualityPreset, VideoSource,
 };
 
 use crate::media::{AudioInventory, MediaEvent, MediaManager};
@@ -60,7 +62,19 @@ struct Args {
 struct ServerApi {
     client: reqwest::Client,
     base_url: String,
-    token: String,
+    token: Arc<StdRwLock<String>>,
+    auth: AuthMethod,
+}
+
+#[derive(Clone)]
+enum AuthMethod {
+    Development {
+        profile: String,
+    },
+    Device {
+        device_id: uuid::Uuid,
+        device_token: String,
+    },
 }
 
 impl ServerApi {
@@ -68,27 +82,44 @@ impl ServerApi {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(5))
             .build()?;
-        let response = client
-            .post(format!("{base_url}/v1/dev/session"))
-            .json(&DevSessionRequest {
+        let device_id = std::env::var("WISP_DEVICE_ID").ok();
+        let device_token = std::env::var("WISP_DEVICE_TOKEN").ok();
+        let auth = match (device_id, device_token) {
+            (Some(id), Some(token)) => AuthMethod::Device {
+                device_id: id.parse().context("WISP_DEVICE_ID is not a UUID")?,
+                device_token: token,
+            },
+            (None, None) => AuthMethod::Development {
                 profile: profile.into(),
-            })
-            .send()
-            .await?;
-        let session: DevSession = decode(response).await?;
+            },
+            _ => bail!("WISP_DEVICE_ID and WISP_DEVICE_TOKEN must be configured together"),
+        };
+        let token = obtain_session(&client, &base_url, &auth).await?;
         let api = Self {
             client,
             base_url,
-            token: session.token,
+            token: Arc::new(StdRwLock::new(token)),
+            auth,
         };
         let snapshot = api.snapshot().await?;
         Ok((api, snapshot))
     }
 
     fn request(&self, method: reqwest::Method, path: &str) -> reqwest::RequestBuilder {
+        let token = self
+            .token
+            .read()
+            .expect("session token lock poisoned")
+            .clone();
         self.client
             .request(method, format!("{}{}", self.base_url, path))
-            .bearer_auth(&self.token)
+            .bearer_auth(token)
+    }
+
+    async fn renew_session(&self) -> anyhow::Result<()> {
+        let token = obtain_session(&self.client, &self.base_url, &self.auth).await?;
+        *self.token.write().expect("session token lock poisoned") = token;
+        Ok(())
     }
 
     async fn snapshot(&self) -> anyhow::Result<Snapshot> {
@@ -162,15 +193,158 @@ impl ServerApi {
         .await
     }
 
-    fn events_url(&self) -> anyhow::Result<Url> {
+    async fn create_direct(
+        &self,
+        friend: String,
+    ) -> anyhow::Result<wisp_protocol::ConversationView> {
+        decode(
+            self.request(reqwest::Method::POST, "/v1/conversations/direct")
+                .json(&CreateDirectConversationRequest { friend })
+                .send()
+                .await?,
+        )
+        .await
+    }
+
+    async fn send_message(&self, conversation_id: String, text: String) -> anyhow::Result<()> {
+        let _: wisp_protocol::Message = decode(
+            self.request(reqwest::Method::POST, "/v1/messages")
+                .json(&SendMessageRequest {
+                    conversation_id,
+                    content_type: "text/plain".into(),
+                    payload: Value::String(text),
+                    encryption_version: 0,
+                })
+                .send()
+                .await?,
+        )
+        .await?;
+        Ok(())
+    }
+
+    async fn mark_conversation_read(&self, conversation_id: String) -> anyhow::Result<()> {
+        ensure_ok(
+            self.request(reqwest::Method::POST, "/v1/conversations/read")
+                .json(&MarkConversationReadRequest { conversation_id })
+                .send()
+                .await?,
+        )
+        .await
+    }
+
+    async fn join_spot(&self, spot_id: String) -> anyhow::Result<()> {
+        ensure_ok(
+            self.request(reqwest::Method::POST, "/v1/spots/join")
+                .json(&JoinSpotRequest { spot_id })
+                .send()
+                .await?,
+        )
+        .await
+    }
+
+    async fn create_invite(
+        &self,
+        profile: String,
+        expires_in_minutes: Option<u32>,
+    ) -> anyhow::Result<DeviceInvite> {
+        decode(
+            self.request(reqwest::Method::POST, "/v1/admin/invites")
+                .json(&CreateInviteRequest {
+                    profile,
+                    expires_in_minutes,
+                })
+                .send()
+                .await?,
+        )
+        .await
+    }
+
+    async fn devices(&self) -> anyhow::Result<Vec<DeviceView>> {
+        decode(
+            self.request(reqwest::Method::GET, "/v1/devices")
+                .send()
+                .await?,
+        )
+        .await
+    }
+
+    async fn revoke_device(&self, id: uuid::Uuid) -> anyhow::Result<()> {
+        ensure_ok(
+            self.request(reqwest::Method::DELETE, &format!("/v1/devices/{id}"))
+                .send()
+                .await?,
+        )
+        .await
+    }
+
+    fn events_request(&self) -> anyhow::Result<tokio_tungstenite::tungstenite::http::Request<()>> {
         let mut url = Url::parse(&self.base_url)?;
         url.set_scheme(if url.scheme() == "https" { "wss" } else { "ws" })
             .map_err(|()| anyhow!("unsupported server URL scheme"))?;
         url.set_path("/v1/events");
-        url.query_pairs_mut()
-            .clear()
-            .append_pair("token", &self.token);
-        Ok(url)
+        url.set_query(None);
+        let mut request = url.as_str().into_client_request()?;
+        let token = self
+            .token
+            .read()
+            .expect("session token lock poisoned")
+            .clone();
+        request
+            .headers_mut()
+            .insert("Authorization", format!("Bearer {token}").parse()?);
+        Ok(request)
+    }
+}
+
+async fn obtain_session(
+    client: &reqwest::Client,
+    base_url: &str,
+    auth: &AuthMethod,
+) -> anyhow::Result<String> {
+    match auth {
+        AuthMethod::Development { profile } => {
+            let session: DevSession = decode(
+                client
+                    .post(format!("{base_url}/v1/dev/session"))
+                    .json(&DevSessionRequest {
+                        profile: profile.clone(),
+                    })
+                    .send()
+                    .await?,
+            )
+            .await?;
+            if session.protocol_version != PROTOCOL_VERSION {
+                bail!(
+                    "protocol mismatch: daemon is v{PROTOCOL_VERSION}, server is v{}",
+                    session.protocol_version
+                );
+            }
+            Ok(session.token)
+        }
+        AuthMethod::Device {
+            device_id,
+            device_token,
+        } => {
+            let session: DeviceSession = decode(
+                client
+                    .post(format!("{base_url}/v1/sessions"))
+                    .json(&DeviceSessionRequest {
+                        device_id: *device_id,
+                        device_token: device_token.clone(),
+                        protocol_version: PROTOCOL_VERSION,
+                    })
+                    .send()
+                    .await?,
+            )
+            .await?;
+            if session.protocol_version != PROTOCOL_VERSION {
+                bail!(
+                    "protocol mismatch: daemon is v{PROTOCOL_VERSION}, server is v{}",
+                    session.protocol_version
+                );
+            }
+            Ok(session.token)
+        }
     }
 }
 
@@ -261,6 +435,7 @@ impl Daemon {
             incoming.self_state.sharing = current.self_state.sharing;
             incoming.self_state.push_to_talk = current.self_state.push_to_talk.clone();
             incoming.self_state.media = current.self_state.media.clone();
+            incoming.last_invite = current.last_invite.clone();
             incoming.self_state.connection = if incoming.self_state.hangout_id.is_none() {
                 ConnectionState::Available
             } else if current.self_state.media.livekit_connected {
@@ -406,6 +581,7 @@ impl Daemon {
                 let mut media = MediaState {
                     livekit_connected: true,
                     microphone_published: true,
+                    e2ee_enabled: connected.e2ee_enabled,
                     microphone: Some(connected.microphone),
                     speaker: Some(connected.speaker),
                     audio: connected.audio,
@@ -754,6 +930,7 @@ impl Daemon {
         }
     }
 
+    #[allow(clippy::too_many_lines)]
     async fn run_command(&self, command: &CommandEnvelope) -> anyhow::Result<Option<Value>> {
         match command.name.as_str() {
             "hello" => Ok(None),
@@ -805,6 +982,69 @@ impl Daemon {
                 Ok(Some(json!({"presence": presence})))
             }
             "join_friend" => self.join_friend_command(&command.args).await,
+            "open_direct" => {
+                let friend = string_arg(&command.args, "friend")?;
+                let conversation = self.api.create_direct(friend).await?;
+                self.refresh("conversation_changed").await?;
+                Ok(Some(serde_json::to_value(conversation)?))
+            }
+            "send_direct" => {
+                let friend = string_arg(&command.args, "friend")?;
+                let text = string_arg(&command.args, "text")?;
+                let conversation = self.api.create_direct(friend).await?;
+                self.api.send_message(conversation.id.clone(), text).await?;
+                self.refresh("message_created").await?;
+                Ok(Some(json!({"conversation_id": conversation.id})))
+            }
+            "send_message" => {
+                let conversation_id = string_arg(&command.args, "conversation_id")?;
+                let text = string_arg(&command.args, "text")?;
+                self.api.send_message(conversation_id, text).await?;
+                self.refresh("message_created").await?;
+                Ok(None)
+            }
+            "mark_conversation_read" => {
+                let conversation_id = string_arg(&command.args, "conversation_id")?;
+                self.api.mark_conversation_read(conversation_id).await?;
+                self.refresh("conversation_read").await?;
+                Ok(None)
+            }
+            "join_spot" => {
+                let spot_id = string_arg(&command.args, "spot_id")?;
+                self.set_connection(ConnectionState::Joining, None).await;
+                self.api.join_spot(spot_id).await?;
+                self.refresh("hangout_changed").await?;
+                self.reconcile_media().await?;
+                Ok(None)
+            }
+            "create_invite" => {
+                let profile = string_arg(&command.args, "profile")?;
+                let expires = command
+                    .args
+                    .get("expires_in_minutes")
+                    .and_then(Value::as_u64)
+                    .map(u32::try_from)
+                    .transpose()
+                    .context("expires_in_minutes is too large")?;
+                let invite = self.api.create_invite(profile, expires).await?;
+                {
+                    let mut state = self.state.write().await;
+                    state.last_invite = Some(invite.clone());
+                }
+                self.publish_current("invite_created").await;
+                Ok(Some(serde_json::to_value(invite)?))
+            }
+            "list_devices" => {
+                let devices = self.api.devices().await?;
+                self.refresh("devices_changed").await?;
+                Ok(Some(serde_json::to_value(devices)?))
+            }
+            "revoke_device" => {
+                let id = string_arg(&command.args, "device_id")?.parse()?;
+                self.api.revoke_device(id).await?;
+                self.refresh("devices_changed").await?;
+                Ok(None)
+            }
             "respond_knock" => self.respond_knock_command(&command.args).await,
             "join_hangout" => {
                 let id = string_arg(&command.args, "hangout_id")?.parse()?;
@@ -1328,14 +1568,14 @@ async fn write_envelope(
 async fn synchronize_server(daemon: Arc<Daemon>) {
     let mut attempt = 0_u32;
     loop {
-        let url = match daemon.api.events_url() {
-            Ok(url) => url,
+        let request = match daemon.api.events_request() {
+            Ok(request) => request,
             Err(error) => {
-                error!(%error, "invalid server events URL");
+                error!(%error, "invalid server events request");
                 return;
             }
         };
-        match connect_async(url.as_str()).await {
+        match connect_async(request).await {
             Ok((stream, _)) => {
                 attempt = 0;
                 info!("connected to wisp-server events");
@@ -1371,7 +1611,12 @@ async fn synchronize_server(daemon: Arc<Daemon>) {
                     }
                 }
             }
-            Err(error) => warn!(%error, "cannot connect to wisp-server events"),
+            Err(error) => {
+                warn!(%error, "cannot connect to wisp-server events");
+                if let Err(renew_error) = daemon.api.renew_session().await {
+                    warn!(%renew_error, "cannot renew wisp-server session");
+                }
+            }
         }
         daemon
             .set_connection(
@@ -1380,7 +1625,9 @@ async fn synchronize_server(daemon: Arc<Daemon>) {
             )
             .await;
         attempt = attempt.saturating_add(1).min(6);
-        tokio::time::sleep(Duration::from_millis(250 * 2_u64.pow(attempt))).await;
+        let base = 250 * 2_u64.pow(attempt);
+        let jitter = u64::from(daemon.profile.bytes().fold(0_u8, u8::wrapping_add)) * 3;
+        tokio::time::sleep(Duration::from_millis((base + jitter).min(20_000))).await;
     }
 }
 
@@ -2044,6 +2291,11 @@ async fn synchronize_tray_state(daemon: Arc<Daemon>, handle: ksni::Handle<tray::
                     state.self_state.media.screen_share.active,
                     state.self_state.media.camera.active,
                 ),
+                state
+                    .conversations
+                    .iter()
+                    .map(|conversation| conversation.unread_count)
+                    .sum(),
             )
         };
         if previous != Some(current) {
@@ -2178,7 +2430,7 @@ async fn handle_connecting_tray_action(
         let (muted, deafened) = *audio_state;
         let _ = handle
             .update(|tray_service| {
-                tray_service.set_state(tray::TrayState::new((muted, deafened), (false, false)));
+                tray_service.set_state(tray::TrayState::new((muted, deafened), (false, false), 0));
             })
             .await;
     }
@@ -2279,7 +2531,11 @@ async fn start_connected_daemon(
     let shortcut = ShortcutManager::from_environment();
     snapshot.self_state.push_to_talk.shortcut = shortcut.load_shortcut().await;
     snapshot.self_state.push_to_talk.shortcut_backend = shortcut.backend().map(str::to_owned);
-    let (media, media_events) = MediaManager::new(!args.disable_media && !args.disable_surfaces);
+    let e2ee_key = std::env::var("WISP_E2EE_KEY")
+        .ok()
+        .filter(|key| !key.is_empty());
+    let (media, media_events) =
+        MediaManager::new(!args.disable_media && !args.disable_surfaces, e2ee_key);
     snapshot.self_state.media.video = media.video_settings();
     let daemon = Arc::new(Daemon::new(
         args.profile,
@@ -2328,6 +2584,12 @@ async fn main() -> anyhow::Result<()> {
         .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| "wispd=info".into()))
         .init();
     let args = Args::parse();
+    if !args.disable_media
+        && std::env::var_os("WISP_DEVICE_ID").is_some()
+        && std::env::var_os("WISP_E2EE_KEY").is_none()
+    {
+        bail!("WISP_E2EE_KEY is required for device-authenticated media");
+    }
     let socket_path = args.socket.clone().unwrap_or_else(runtime_socket_path);
     let listener = bind_socket(&socket_path).await?;
     let mut connecting_audio_state = (false, false);
@@ -2377,6 +2639,11 @@ async fn main() -> anyhow::Result<()> {
                 state.self_state.media.screen_share.active,
                 state.self_state.media.camera.active,
             ),
+            state
+                .conversations
+                .iter()
+                .map(|conversation| conversation.unread_count)
+                .sum(),
         )
     };
     if let Some(handle) = tray_handle.as_ref() {

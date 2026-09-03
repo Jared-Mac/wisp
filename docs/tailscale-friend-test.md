@@ -1,8 +1,9 @@
 # Trusted Tailscale friend test
 
-This mode is for a short voice test with people you trust. It is not a public
-deployment. Wisp's development login currently identifies a user by one of the
-seeded profile names, so every tester who can reach the host must be trusted.
+This mode is for a private alpha with people you trust. It is not a public
+deployment. Name-only development login is disabled: each computer enrolls
+with a one-use invite, receives its own revocable credential, and uses
+short-lived sessions after that.
 
 No Tailscale address or credential belongs in this repository. The host sends
 friends its Tailscale DNS name and assigns each person one unique profile
@@ -22,14 +23,29 @@ just dev-tailscale
 ```
 
 `dev-tailscale` derives the current `tailscale0` IPv4 address, generates a
-random in-memory LiveKit keypair for that run, and binds the coordination and
-media servers to the tailnet address. Normal `just dev` remains loopback-only.
+random LiveKit server keypair for that run, creates persistent random bootstrap
+and media E2EE secrets in `~/.config/wisp/host.env` (mode `0600`), enrolls the
+host's administrator device, and binds coordination/media only to the tailnet
+address. Normal `just dev` remains loopback-only.
 
-In another terminal, print the two pieces of information to send privately:
+In another terminal, print the host address:
 
 ```bash
 just tailscale-info
 ```
+
+Then create one invite for each assigned friend:
+
+```bash
+cargo run -q -p wispctl -- invite Tyler
+cargo run -q -p wispctl -- invite Jack
+```
+
+Each invite is single-use and expires (30 minutes by default). Send each friend
+three values privately: the host DNS name/IP, only their invite code, and the
+`WISP_E2EE_KEY` value from `~/.config/wisp/host.env`. Do not post any of those
+values in an issue, commit, or chat room you do not trust. Never send the
+bootstrap token or the host's device credential.
 
 Keep `just dev-tailscale` running during the test. Invite friends to the
 tailnet, or share only this machine with them. If the tailnet uses restrictive
@@ -63,18 +79,20 @@ plugins and the detected KDE, Hyprland, or GNOME portal backend needed for
 screen sharing, and starts `tailscaled`. Follow the Tailscale authentication
 URL if prompted.
 
-The host privately provides a host name and one unused profile. Save that
-machine-local assignment once, then start Wisp with:
+The host privately provides the host name, one unused profile, that profile's
+one-use invite, and the shared media key. Enroll this computer once, entering
+the two secrets at the hidden prompts, then start Wisp:
 
 ```bash
-just friend-config <host>.ts.net Tyler
+just friend-register <host>.ts.net Tyler
 just friend
 ```
 
 Use `Jack` or `Charlie` only when that is the profile assigned by the host.
-The assignment is stored outside the Git checkout, so pulls and reinstalls do
-not overwrite it. The original explicit form, `just friend <host>.ts.net
-Tyler`, remains supported and saves the same assignment automatically.
+The assignment, device credential, and media key are stored outside the Git
+checkout in `~/.config/wisp/friend.env` with mode `0600`, so pulls and
+reinstalls do not overwrite them. The invite cannot be replayed on a second
+computer; ask the host for another invite for every additional device.
 Keep the terminal open; `Ctrl+C` stops the local daemon and UI. The resizable
 Wisp app opens automatically. Set presence to **Open**, then one person can
 join another by name. The tray icon opens the same compact panel presentation
@@ -82,7 +100,8 @@ used by Wisp's optional Omarchy bar adapter; choose **Open app** to return to th
 full layout.
 
 The standalone UI works without Omarchy. The settings screen supports audio
-device selection, processing presets, push-to-talk, mute, and deafen. Global
+device selection, processing presets, push-to-talk, mute, deafen, E2EE status,
+and device management. Global
 shortcut installation is currently Omarchy-specific, so CachyOS testers should
 use click-and-hold **Talk** for this first test.
 
@@ -96,31 +115,36 @@ automatically.
 
 ## Test checklist
 
-1. Confirm all testers show as available.
-2. Join one friend and confirm two-way audio.
-3. Add the remaining friends and confirm active-speaker names.
-4. Test mute, deafen, and push-to-talk.
-5. Select **Clear**, compare keyboard/fan/air-conditioner noise with **Studio**,
+1. Confirm an invite cannot be reused and all enrolled testers show as available.
+2. Exchange a direct message while one client is offline, reconnect it, and
+   confirm the message and unread marker arrive.
+3. Join **Porch** and confirm it appears in NOW only while occupied.
+4. Join one friend and confirm two-way audio and that Settings reports E2EE.
+5. Add the remaining friends and confirm active-speaker names.
+6. Test mute, deafen, and push-to-talk.
+7. Select **Clear**, compare keyboard/fan/air-conditioner noise with **Studio**,
    and confirm the settings page reports `deepfilternet` active (or `rnnoise`
    only if the fallback was needed).
-6. Share one monitor, then one window; confirm both friends see a Watch control
+8. Share one monitor, then one window; confirm both friends see a Watch control
    while no video window opens and no video is decoded automatically.
-7. Turn the camera on while sharing. Each friend opens both Watch controls and
+9. Turn the camera on while sharing. Each friend opens both Watch controls and
    confirms independent, correctly colored screen and camera windows. Tile,
    fullscreen, pin, hide, reopen, and close them while confirming voice stays
    connected.
-8. Compare Balanced/H.264 with High/H.264. Try AV1 only when Settings reports a
+10. Compare Balanced/H.264 with High/H.264. Try AV1 only when Settings reports a
    suitable hardware encoder, and record whether every participant negotiates
    it successfully.
-9. Stop both publishers and verify the tray/bar badges and Watch controls clear.
-10. Leave and rejoin once.
-11. Unplug/reconnect one USB or Bluetooth audio device if convenient.
-12. Record subjective notes about echo, keyboard noise, clipping, latency, and
+11. Stop both publishers and verify the tray/bar badges and Watch controls clear.
+12. Leave and rejoin once.
+13. Unplug/reconnect one USB or Bluetooth audio device if convenient.
+14. Record subjective notes about echo, keyboard noise, clipping, latency, and
    dropouts.
 
 Do not forward these ports on the router, enable Tailscale Funnel, or expose
-this development mode to the public internet. Production use still requires
-real device authentication, TLS, durable secret management, and TURN.
+this development mode to the public internet. Tailscale encrypts transport and
+LiveKit media has application-layer E2EE, but stored messages remain readable
+to the Wisp server. Broader deployment still requires TLS, stronger automated
+key distribution/rotation, and TURN.
 
 References: [Tailscale Linux installation](https://tailscale.com/docs/install/linux),
 [Tailscale machine sharing](https://tailscale.com/kb/1084/sharing), and

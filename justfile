@@ -35,8 +35,14 @@ friend host="" profile="":
 friend-config host profile:
     ./scripts/configure-friend.sh "{{host}}" "{{profile}}"
 
+friend-register host profile:
+    ./scripts/register-friend-device.sh "{{host}}" "{{profile}}"
+
 friend-bootstrap:
     ./scripts/friend-bootstrap-cachyos.sh
+
+host-services:
+    ./scripts/install-host-services.sh
 
 plugin-sync:
     ./scripts/plugin-sync.sh
@@ -83,6 +89,9 @@ test-knock:
 
 test-ui:
     ./scripts/test-ui.sh
+
+test-private-alpha:
+    ./scripts/test-private-alpha.sh
 
 fmt:
     cargo fmt --all

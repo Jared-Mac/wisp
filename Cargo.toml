@@ -47,7 +47,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 url = "2.5"
 uuid = { version = "1.18", features = ["v4", "serde"] }
 wgpu = { version = "=30.0.1", default-features = false, features = ["gles", "std", "vulkan", "wgsl"] }
-winit = { version = "=0.30.12", default-features = false, features = ["rwh_06", "wayland", "wayland-csd-adwaita", "wayland-dlopen"] }
+winit = { version = "=0.30.12", default-features = false, features = ["rwh_06", "wayland", "wayland-csd-adwaita", "wayland-dlopen", "x11"] }
 wisp-protocol = { path = "crates/wisp-protocol" }
 
 [profile.dev]

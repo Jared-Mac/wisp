@@ -13,7 +13,7 @@ use winit::{
     dpi::LogicalSize,
     event::WindowEvent,
     event_loop::{ActiveEventLoop, EventLoop, EventLoopProxy},
-    platform::wayland::{EventLoopBuilderExtWayland, WindowAttributesExtWayland},
+    platform::x11::{EventLoopBuilderExtX11, WindowAttributesExtX11},
     window::{Window, WindowId},
 };
 use wisp_protocol::{RemoteVideoTarget, VideoSource};
@@ -81,10 +81,10 @@ impl SurfaceController {
         thread::Builder::new()
             .name("wisp-video-surface".into())
             .spawn(move || run_surface_thread(&ready_tx, &event_tx))
-            .context("spawn Wayland surface thread")?;
+            .context("spawn video surface thread")?;
         let shared = ready_rx
             .recv_timeout(Duration::from_secs(5))
-            .context("Wayland surface thread did not initialize")?
+            .context("video surface thread did not initialize")?
             .map_err(anyhow::Error::msg)?;
         Ok(Self { shared })
     }
@@ -93,14 +93,14 @@ impl SurfaceController {
         self.shared
             .proxy
             .send_event(SurfaceCommand::Open(target))
-            .map_err(|_| anyhow!("Wayland surface event loop is unavailable"))
+            .map_err(|_| anyhow!("video surface event loop is unavailable"))
     }
 
     pub(crate) fn close(&self, target: RemoteVideoTarget) -> anyhow::Result<()> {
         self.shared
             .proxy
             .send_event(SurfaceCommand::Close(target))
-            .map_err(|_| anyhow!("Wayland surface event loop is unavailable"))
+            .map_err(|_| anyhow!("video surface event loop is unavailable"))
     }
 
     pub(crate) fn send_frame(
@@ -140,7 +140,7 @@ impl SurfaceController {
                 .lock()
                 .expect("surface queued-frame lock poisoned")
                 .remove(target);
-            return Err(anyhow!("Wayland surface event loop is unavailable"));
+            return Err(anyhow!("video surface event loop is unavailable"));
         }
         Ok(())
     }
@@ -155,11 +155,14 @@ fn run_surface_thread(
     event_tx: &UnboundedSender<MediaEvent>,
 ) {
     let mut builder = EventLoop::<SurfaceCommand>::with_user_event();
-    builder.with_wayland().with_any_thread(true);
+    // NVIDIA's Vulkan Wayland swapchain teardown can jump through a null
+    // driver function when multiple surfaces are alive. XWayland supports
+    // actually unmapping closed windows without taking down the voice daemon.
+    builder.with_x11().with_any_thread(true);
     let event_loop = match builder.build() {
         Ok(event_loop) => event_loop,
         Err(error) => {
-            let _ = ready_tx.send(Err(format!("create Wayland event loop: {error}")));
+            let _ = ready_tx.send(Err(format!("create X11 event loop: {error}")));
             return;
         }
     };
@@ -182,13 +185,13 @@ fn run_surface_thread(
     if let Err(error) = run_result {
         let _ = event_tx.send(MediaEvent::SurfaceError {
             target: None,
-            message: format!("Wayland event loop stopped: {error}"),
+            message: format!("surface event loop stopped: {error}"),
         });
     }
-    // NVIDIA's proprietary Vulkan driver can jump through a null function
-    // pointer while wgpu destroys a Wayland swapchain. The process is already
-    // shutting down here, so leave the cached GPU resources to the OS instead
-    // of risking a daemon coredump during normal exit.
+    // The process is already exiting, and the NVIDIA driver can fault in
+    // vkDestroyDevice while tearing down a renderer that is still open. Leave
+    // cached GPU objects to the operating system. Normal per-window closes only
+    // unmap them, avoiding the same faulty driver teardown path.
     std::mem::forget(app);
 }
 
@@ -297,20 +300,14 @@ impl SurfaceApp {
             .expect("surface queued-frame lock poisoned")
             .remove(target);
         if let Some(surface) = self.windows.get(&window_id) {
-            // Cache the native surface for this participant/source pair. Apart
-            // from making reopen instant, this avoids an NVIDIA Vulkan driver
-            // crash observed when destroying one of several live swapchains.
+            // Unlike Wayland, X11 can actually unmap the window. Keep its GPU
+            // objects cached because this NVIDIA driver can fault while wgpu
+            // destroys a live Vulkan device; reopening maps the same window.
             surface.window.set_visible(false);
         }
         let _ = self.event_tx.send(MediaEvent::SurfaceClosed {
             target: target.clone(),
         });
-    }
-
-    fn close_all(&mut self) {
-        for target in self.targets.keys().cloned().collect::<Vec<_>>() {
-            self.close(&target);
-        }
     }
 
     fn take_latest_frame(&mut self, target: &RemoteVideoTarget) {
@@ -348,10 +345,7 @@ impl ApplicationHandler<SurfaceCommand> for SurfaceApp {
             SurfaceCommand::Open(target) => self.open(event_loop, target),
             SurfaceCommand::Close(target) => self.close(&target),
             SurfaceCommand::FrameReady(target) => self.take_latest_frame(&target),
-            SurfaceCommand::Shutdown => {
-                self.close_all();
-                event_loop.exit();
-            }
+            SurfaceCommand::Shutdown => event_loop.exit(),
         }
     }
 
@@ -456,7 +450,7 @@ impl Renderer {
         let instance = wgpu::Instance::default();
         let surface = instance
             .create_surface(window.clone())
-            .context("create wgpu Wayland surface")?;
+            .context("create wgpu X11 surface")?;
         let (adapter, device, queue) = request_gpu_device(&instance, &surface).await?;
         let config = surface
             .get_default_config(&adapter, size.width.max(1), size.height.max(1))

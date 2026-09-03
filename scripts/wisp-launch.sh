@@ -5,16 +5,13 @@ bin_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 export PATH="$bin_dir:$PATH"
 
 runtime_dir=${XDG_RUNTIME_DIR:?XDG_RUNTIME_DIR is required}/wisp
-state_dir=${XDG_STATE_HOME:-${HOME:?HOME is required}/.local/state}/wisp
-mkdir -p "$runtime_dir" "$state_dir"
+mkdir -p "$runtime_dir"
 
 exec 9>"$runtime_dir/launcher.lock"
 if ! flock -n 9; then
   exit 0
 fi
 
-log_file="$state_dir/launcher.log"
-exec >>"$log_file" 2>&1
 printf '%s Starting Wisp from the desktop launcher\n' "$(date --iso-8601=seconds)"
 
 notified=0
@@ -28,7 +25,7 @@ while true; do
     if command -v notify-send >/dev/null 2>&1; then
       notify-send --app-name=Wisp --icon=dev.wisp \
         "Wisp needs configuration" \
-        "Run: just friend-config <host> <Tyler|Jack|Charlie>"
+        "Run: wisp-friend-register <host> <Tyler|Jack|Charlie>"
     fi
     exit "$result"
   fi

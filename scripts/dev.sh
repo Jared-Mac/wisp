@@ -48,6 +48,32 @@ for _ in $(seq 1 80); do
   sleep 0.1
 done
 
+if [[ -n ${WISP_BOOTSTRAP_TOKEN:-} && -z ${WISP_DEVICE_ID:-} ]]; then
+  bootstrap_response=$(jq -n \
+    --arg token "$WISP_BOOTSTRAP_TOKEN" \
+    --arg profile "${WISP_PROFILE:-Jared}" \
+    --arg device "${HOSTNAME:-Wisp host}" \
+    '{bootstrap_token:$token, profile:$profile, device_name:$device, protocol_version:1}' \
+    | curl --silent --show-error --fail-with-body \
+        -H 'content-type: application/json' \
+        --data-binary @- \
+        "${WISP_SERVER_URL:-http://127.0.0.1:8787}/v1/devices/bootstrap")
+  export WISP_DEVICE_ID
+  export WISP_DEVICE_TOKEN
+  WISP_DEVICE_ID=$(jq -er '.device_id' <<<"$bootstrap_response")
+  WISP_DEVICE_TOKEN=$(jq -er '.device_token' <<<"$bootstrap_response")
+  if [[ -n ${WISP_HOST_CONFIG_FILE:-} ]]; then
+    config_file=$WISP_HOST_CONFIG_FILE
+    temporary=$(mktemp "${config_file}.XXXXXX")
+    chmod 0600 "$temporary"
+    sed '/^WISP_DEVICE_ID=/d; /^WISP_DEVICE_TOKEN=/d' "$config_file" >"$temporary"
+    printf 'WISP_DEVICE_ID=%s\nWISP_DEVICE_TOKEN=%s\n' \
+      "$WISP_DEVICE_ID" "$WISP_DEVICE_TOKEN" >>"$temporary"
+    mv -f -- "$temporary" "$config_file"
+  fi
+  echo "Registered this host as the administrator device."
+fi
+
 cargo run -p wispd -- --profile "${WISP_PROFILE:-Jared}" &
 child_pids+=("$!")
 

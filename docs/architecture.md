@@ -43,8 +43,38 @@ adds one managed import to the user's bindings file, reloads Hyprland, and
 rolls both files back if config validation fails.
 
 `wisp-server` owns stable users, circle membership, ephemeral hangouts, messages,
-presence events, and short-lived LiveKit grants. It binds to loopback by default.
-The four development users have stable UUIDs and are seeded by the first migration.
+saved spots, device identities, presence events, and short-lived LiveKit grants.
+It binds to loopback by default. The four development users have stable UUIDs
+and are seeded by the first migration.
+
+Private-alpha authentication is device based. An administrator creates a
+single-use, expiring invite for one seeded profile; registration returns one
+opaque credential for that physical installation. Only credential hashes are
+stored in SQLite. A device exchanges that credential for a 12-hour session,
+and `wispd` renews it when needed. Revoking one device invalidates both its
+credential and outstanding sessions without affecting another device owned by
+the same person. Name-only development sessions are available only when
+explicitly enabled and default to loopback-only development.
+
+All authenticated requests require protocol version 1. WebSocket events carry
+only change notifications, never message bodies; clients respond by fetching a
+fresh authorized snapshot. `wispd` reconnects with bounded exponential delay
+and deterministic jitter, then restores its desired hangout/media state.
+
+Conversations are deliberately flat: direct, circle, and current hangout. The
+server verifies membership on every read/write, inserts a message and advances
+the sender's read cursor in one transaction, and acknowledges only after that
+transaction commits. Per-user cursors produce unread counts, while a full
+snapshot supplies missed messages after reconnect. Direct and circle history
+is durable; hangout history is deleted after 24 hours. Porch is a durable Spot
+record whose ephemeral hangout exists only while occupied.
+
+Device-authenticated LiveKit connections require a shared private-alpha media
+key. The key configures LiveKit's built-in AES-GCM E2EE manager in each client
+and never crosses the coordination API. This protects voice and video from the
+SFU, but coordination metadata and stored text are server-readable. The static
+shared key is intentionally a replaceable boundary for future per-device key
+distribution rather than a custom cipher.
 
 The media path publishes a DeepFilterNet-processed platform microphone, plays
 remote audio through the selected platform speaker, and independently publishes
@@ -58,17 +88,19 @@ reports it as available.
 Remote screen and camera publications are availability metadata until the user
 clicks the track's **Watch** control. `wispd` then subscribes to that publication
 and uploads the newest decoded RGBA frame to a `wgpu` texture. Each track has a
-separate `dev.wisp.surface` window on a persistent winit Wayland event-loop
+separate `dev.wisp.surface` XWayland window on a persistent winit event-loop
 thread, so Hyprland can float, tile, fullscreen, or pin it normally. Closing a
 surface unsubscribes only that video track; voice and other video tracks remain
 active. Occlusion pauses delivery and resize events request low, medium, or high
 simulcast layers. Desired subscriptions survive an SFU reconnect without
 opening any window the user did not request.
 
-Closed native surfaces are cached for fast reopening during the daemon's
-lifetime. This also avoids a confirmed proprietary NVIDIA Vulkan driver fault
-when one of several live Wayland swapchains is destroyed; the operating system
-reclaims those GPU resources when `wispd` exits.
+Closing a native surface unmaps its X11 window and unsubscribes the corresponding
+video track; reopening maps the cached surface again. Wisp uses XWayland because
+winit cannot hide Wayland windows, while the proprietary NVIDIA Vulkan driver
+faults when Wisp destroys a live GPU device. At process shutdown, cached
+renderers are left for the operating system to reclaim, avoiding the driver's
+faulty `vkDestroyDevice` path when no application state needs to survive.
 
 Video frames use bounded/latest-frame queues on both sides of the RGBA handoff,
 so rendering delay does not create an unbounded backlog. Surface state and
@@ -103,6 +135,15 @@ screen and camera tracks, explicit per-track watching, no decoded frames while
 hidden, two native surfaces on a graphical host, headless receiving for the
 second viewer, uninterrupted outgoing voice across video close/reopen, camera
 failure as recoverable state, and resubscription after a LiveKit restart.
+
+The M4 private-alpha gate starts the server with development authentication
+disabled. It validates bootstrap of the first administrator device, one-use
+friend invites, replay rejection, short sessions, device revocation, strict
+protocol compatibility, conversation authorization, durable/offline direct
+messages, read cursors, Porch lifecycle, transient hangout retention, restart,
+SQLite online backup/restore, and absence of message content in normal logs.
+Host and client systemd user services use restart-on-failure and journald; the
+daily timer retains 14 integrity-checked backups.
 
 Knocks are ephemeral in-memory control events rather than messages. A request is
 deduplicated by sender/recipient pair and expires after 30 seconds by default.

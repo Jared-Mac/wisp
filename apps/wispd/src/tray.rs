@@ -25,14 +25,16 @@ pub(super) struct TrayState {
     audio: AudioState,
     sharing: bool,
     camera: bool,
+    unread_messages: u64,
 }
 
 impl TrayState {
-    pub(super) fn new(audio: (bool, bool), video: (bool, bool)) -> Self {
+    pub(super) fn new(audio: (bool, bool), video: (bool, bool), unread_messages: u64) -> Self {
         Self {
             audio: AudioState::from_flags(audio.0, audio.1),
             sharing: video.0,
             camera: video.1,
+            unread_messages,
         }
     }
 }
@@ -104,6 +106,11 @@ impl ksni::Tray for WispTray {
         }
         if self.audio_state() != AudioState::Ready {
             states.push(self.audio_state().label());
+        }
+        let unread = (self.state.unread_messages > 0)
+            .then(|| format!("{} unread", self.state.unread_messages));
+        if let Some(unread) = unread.as_deref() {
+            states.push(unread);
         }
         if states.is_empty() {
             "Wisp".into()
@@ -379,7 +386,7 @@ mod tests {
         let (actions, _receiver) = tokio::sync::mpsc::unbounded_channel();
         let tray = WispTray {
             actions,
-            state: TrayState::new((false, false), (true, true)),
+            state: TrayState::new((false, false), (true, true), 0),
         };
         assert_eq!(
             ksni::Tray::title(&tray),

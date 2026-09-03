@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily Wisp database backup
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+RandomizedDelaySec=30m
+Unit=wisp-backup.service
+
+[Install]
+WantedBy=timers.target

@@ -39,6 +39,7 @@ install -m 0755 target/release/wispd "$bin_root/wispd"
 install -m 0755 target/release/wispctl "$bin_root/wispctl"
 ./scripts/app-sync.sh
 
-echo "Wisp client installed. Ask the host for its Tailscale DNS name and your profile."
-echo "Then run: just friend-config <host>.ts.net <Tyler|Jack|Charlie>"
+echo "Wisp client installed. Ask the host for its Tailscale name, a one-use invite,"
+echo "your profile, and the private media key. Then run:"
+echo "  just friend-register <host>.ts.net <Tyler|Jack|Charlie>"
 echo "Future starts only need: just friend"

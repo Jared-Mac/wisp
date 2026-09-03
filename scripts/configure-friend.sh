@@ -20,15 +20,9 @@ case "$profile" in
     ;;
 esac
 
-config_dir=${XDG_CONFIG_HOME:-${HOME:?HOME is required}/.config}/wisp
-config_file="$config_dir/friend.env"
-mkdir -p "$config_dir"
-temporary=$(mktemp "$config_dir/friend.env.XXXXXX")
-trap 'rm -f -- "$temporary"' EXIT
-chmod 0600 "$temporary"
-printf 'WISP_FRIEND_HOST=%s\nWISP_PROFILE=%s\n' "$host" "$profile" >"$temporary"
-mv -f -- "$temporary" "$config_file"
-trap - EXIT
-
-echo "Saved Wisp friend profile $profile through $host"
-echo "Start it with: just friend"
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+echo "Wisp private alpha requires one-use device enrollment."
+if [[ -x "$script_dir/register-friend-device.sh" ]]; then
+  exec "$script_dir/register-friend-device.sh" "$host" "$profile"
+fi
+exec "$script_dir/wisp-friend-register" "$host" "$profile"

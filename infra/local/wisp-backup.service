@@ -1,0 +1,13 @@
+[Unit]
+Description=Back up the Wisp coordination database
+
+[Service]
+Type=oneshot
+EnvironmentFile=%h/.config/wisp/server.env
+ExecStart=%h/.local/bin/wisp-backup
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=%h/.local/share/wisp
+StandardOutput=journal
+StandardError=journal

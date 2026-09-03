@@ -2,6 +2,11 @@ use anyhow::{Context, bail};
 use clap::{Parser, ValueEnum};
 use futures_util::StreamExt;
 use livekit::{
+    E2eeOptions,
+    e2ee::{
+        EncryptionType,
+        key_provider::{KeyProvider, KeyProviderOptions},
+    },
     options::{TrackPublishOptions, VideoCodec},
     prelude::{
         LocalAudioTrack, LocalTrack, LocalVideoTrack, RemoteTrack, Room, RoomEvent, RoomOptions,
@@ -117,10 +122,28 @@ impl SimMedia {
         credentials: LiveKitTokenResponse,
         media_config: MediaConfig,
     ) -> anyhow::Result<Self> {
-        let (room, events) =
-            Room::connect(&credentials.url, &credentials.token, RoomOptions::default())
-                .await
-                .with_context(|| format!("connect to LiveKit room {}", credentials.room))?;
+        let mut room_options = RoomOptions::default();
+        let e2ee_key = std::env::var("WISP_E2EE_KEY")
+            .ok()
+            .filter(|key| !key.is_empty());
+        if let Some(key) = &e2ee_key {
+            if key.len() < 16 {
+                bail!("WISP_E2EE_KEY must contain at least 16 bytes");
+            }
+            room_options.encryption = Some(E2eeOptions {
+                encryption_type: EncryptionType::Gcm,
+                key_provider: KeyProvider::with_shared_key(
+                    KeyProviderOptions::default(),
+                    key.as_bytes().to_vec(),
+                ),
+            });
+        }
+        let (room, events) = Room::connect(&credentials.url, &credentials.token, room_options)
+            .await
+            .with_context(|| format!("connect to LiveKit room {}", credentials.room))?;
+        if e2ee_key.is_some() {
+            room.e2ee_manager().set_enabled(true);
+        }
         let room = Arc::new(room);
 
         let mut source_tasks = Vec::new();
