@@ -7,19 +7,7 @@ Column {
   required property var theme
   signal joined()
   signal roomLeft()
-  readonly property var visibleHangouts: {
-    var currentHangoutId = String(root.bridge.selfState.hangout_id || "")
-    var spots = root.bridge.spots || []
-    var spotHangoutIds = spots.map(function(spot) {
-      return String(spot.active_hangout_id || "")
-    })
-    var hangouts = root.bridge.hangouts || []
-    return hangouts.filter(function(hangout) {
-      var hangoutId = String(hangout.id || "")
-      return hangoutId === currentHangoutId
-        || spotHangoutIds.indexOf(hangoutId) === -1
-    })
-  }
+  readonly property var visibleHangouts: root.bridge.hangouts || []
   width: parent ? parent.width : 0
   spacing: root.theme.spacing.sm
   visible: visibleHangouts.length > 0

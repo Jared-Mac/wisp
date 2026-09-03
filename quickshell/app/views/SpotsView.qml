@@ -6,11 +6,15 @@ Column {
   required property var theme
   signal joined()
   readonly property var availableSpots: {
-    var currentHangoutId = String(root.bridge.selfState.hangout_id || "")
+    var hangouts = root.bridge.hangouts || []
+    var activeHangoutIds = hangouts.map(function(hangout) {
+      return String(hangout.id || "")
+    })
     var spots = root.bridge.spots || []
     return spots.filter(function(spot) {
-      return currentHangoutId === ""
-        || String(spot.active_hangout_id || "") !== currentHangoutId
+      var activeHangoutId = String(spot.active_hangout_id || "")
+      return activeHangoutId === ""
+        || activeHangoutIds.indexOf(activeHangoutId) === -1
     })
   }
   width: parent ? parent.width : 0
