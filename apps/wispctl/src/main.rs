@@ -51,7 +51,8 @@ enum Command {
     },
     Leave,
     Share {
-        #[arg(default_value = "window")]
+        /// Compatibility label; Wisp always opens the desktop portal picker.
+        #[arg(default_value = "portal")]
         source: String,
     },
     StopShare,

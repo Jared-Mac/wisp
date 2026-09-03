@@ -10,8 +10,17 @@ if ! command -v pacman >/dev/null 2>&1; then
 fi
 
 echo "Installing Wisp client build and runtime dependencies..."
+portal_backend=xdg-desktop-portal-gtk
+case "${XDG_CURRENT_DESKTOP:-}" in
+  *Hyprland*) portal_backend=xdg-desktop-portal-hyprland ;;
+  *KDE*) portal_backend=xdg-desktop-portal-kde ;;
+  *GNOME*) portal_backend=xdg-desktop-portal-gnome ;;
+esac
+
 sudo pacman -S --needed \
   base-devel rustup clang cmake pkgconf openssl alsa-lib libpulse pipewire \
+  gst-plugin-pipewire gst-plugins-base gst-plugins-good \
+  xdg-desktop-portal "$portal_backend" \
   quickshell tailscale just jq curl git
 
 sudo systemctl enable --now tailscaled

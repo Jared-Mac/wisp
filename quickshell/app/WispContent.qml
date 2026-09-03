@@ -65,6 +65,9 @@ FocusScope {
     } else if (event.text === "v" || event.text === "V") {
       root.bridge.toggleSurface()
       event.accepted = true
+    } else if (event.text === "s" || event.text === "S") {
+      root.bridge.toggleShare()
+      event.accepted = true
     } else if (event.text === "l" || event.text === "L") {
       root.bridge.leave()
       event.accepted = true

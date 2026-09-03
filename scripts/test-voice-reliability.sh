@@ -130,7 +130,11 @@ wait_for_status '
   .self.connection == "connected" and
   .self.media.livekit_connected == true and
   .self.media.remote_audio_participants == ["Tyler"] and
-  .self.media.received_audio_frames > 0
+  .self.media.received_audio_frames > 0 and
+  .self.media.audio.preset == "clear" and
+  .self.media.audio.denoiser_active == true and
+  .self.media.audio.denoiser == "deepfilternet" and
+  .self.media.audio.processing_latency_ms == 30
 '
 
 WISP_SERVER_URL="http://127.0.0.1:$server_port" RUST_LOG=info \
@@ -166,7 +170,8 @@ for cycle in $(seq 1 "$cycles"); do
     .self.connection == "connected" and
     .self.media.livekit_connected == true and
     .self.media.remote_audio_participants == ["Charlie", "Jack", "Tyler"] and
-    .self.media.received_audio_frames > 0
+    .self.media.received_audio_frames > 0 and
+    .self.media.audio.denoiser == "deepfilternet"
   '
   echo "Leave/rejoin cycle $cycle passed."
 done

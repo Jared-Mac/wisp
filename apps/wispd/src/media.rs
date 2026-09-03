@@ -1,21 +1,42 @@
 use anyhow::{Context, bail};
+use ashpd::desktop::{
+    CreateSessionOptions, PersistMode, Session,
+    screencast::{
+        CursorMode, OpenPipeWireRemoteOptions, Screencast, SelectSourcesOptions, SourceType,
+        StartCastOptions,
+    },
+};
+use df::tract::{DfParams, DfTract, RuntimeParams};
 use futures_util::StreamExt;
+use gstreamer as gst;
+use gstreamer::prelude::*;
+use gstreamer_app as gst_app;
+use gstreamer_video as gst_video;
 use livekit::{
-    options::TrackPublishOptions,
+    options::{TrackPublishOptions, VideoCodec},
     prelude::{
-        AudioProcessingOptions, LocalAudioTrack, LocalTrack, Participant, PlatformAudio,
-        PlayoutDeviceInfo, RecordingDeviceInfo, RemoteAudioTrack, RemoteTrack, RemoteVideoTrack,
-        Room, RoomEvent, RoomOptions, TrackSource,
+        AudioProcessingOptions, LocalAudioTrack, LocalTrack, LocalVideoTrack, Participant,
+        PlatformAudio, PlayoutDeviceInfo, RecordingDeviceInfo, RemoteAudioTrack, RemoteTrack,
+        RemoteVideoTrack, Room, RoomEvent, RoomOptions, RtcAudioSource, TrackSid, TrackSource,
     },
     rtc_engine::lk_runtime::LkRuntime,
     webrtc::{
+        audio_frame::AudioFrame,
+        audio_source::{AudioSourceOptions, native::NativeAudioSource},
         audio_stream::native::NativeAudioStream,
-        peer_connection_factory::native::PeerConnectionFactoryExt, prelude::VideoFormatType,
-        video_frame::native::VideoFrameBufferExt, video_stream::native::NativeVideoStream,
+        peer_connection_factory::native::PeerConnectionFactoryExt,
+        prelude::VideoFormatType,
+        video_frame::{I420Buffer, VideoFrame, VideoRotation, native::VideoFrameBufferExt},
+        video_source::{RtcVideoSource, VideoResolution, native::NativeVideoSource},
+        video_stream::native::NativeVideoStream,
     },
 };
+use ndarray::{ArrayView2, ArrayViewMut2};
+use nnnoiseless::DenoiseState;
 use std::{
+    borrow::Cow,
     collections::HashMap,
+    os::fd::{AsRawFd, OwnedFd},
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering},
@@ -26,9 +47,185 @@ use tokio::{
     task::{JoinHandle, JoinSet},
 };
 use tracing::{debug, info, warn};
-use wisp_protocol::{AudioDevice, AudioPreset, AudioState, HangoutId, LiveKitTokenResponse};
+use wisp_protocol::{
+    AudioDevice, AudioPreset, AudioState, HangoutId, LiveKitTokenResponse, ScreenShareState,
+};
 
 use crate::surface::{RgbaFrame, SurfaceController};
+
+const AUDIO_SAMPLE_RATE: u32 = 48_000;
+const AUDIO_FRAME_SAMPLES: usize = 480;
+const DEEPFILTER_LATENCY_MS: u16 = 30;
+const RNNOISE_LATENCY_MS: u16 = 10;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+enum DenoiserBackend {
+    DeepFilterNet,
+    Rnnoise,
+}
+
+impl DenoiserBackend {
+    fn from_atomic(value: u8) -> Self {
+        if value == Self::Rnnoise as u8 {
+            Self::Rnnoise
+        } else {
+            Self::DeepFilterNet
+        }
+    }
+
+    const fn name(self) -> &'static str {
+        match self {
+            Self::DeepFilterNet => "deepfilternet",
+            Self::Rnnoise => "rnnoise",
+        }
+    }
+
+    const fn latency_ms(self) -> u16 {
+        match self {
+            Self::DeepFilterNet => DEEPFILTER_LATENCY_MS,
+            Self::Rnnoise => RNNOISE_LATENCY_MS,
+        }
+    }
+}
+
+enum NeuralDenoiser {
+    DeepFilterNet(Box<DfTract>),
+    Rnnoise {
+        state: Box<DenoiseState<'static>>,
+        first_frame: bool,
+    },
+}
+
+impl NeuralDenoiser {
+    fn deepfilternet(model: DfTract) -> Self {
+        Self::DeepFilterNet(Box::new(model))
+    }
+
+    fn rnnoise() -> Self {
+        Self::Rnnoise {
+            state: DenoiseState::new(),
+            first_frame: true,
+        }
+    }
+
+    const fn backend(&self) -> DenoiserBackend {
+        match self {
+            Self::DeepFilterNet(_) => DenoiserBackend::DeepFilterNet,
+            Self::Rnnoise { .. } => DenoiserBackend::Rnnoise,
+        }
+    }
+
+    fn process_frame(&mut self, input: &[i16]) -> anyhow::Result<Vec<i16>> {
+        match self {
+            Self::DeepFilterNet(model) => deepfilter_frame(model, input),
+            Self::Rnnoise { state, first_frame } => Ok(rnnoise_frame(state, input, first_frame)),
+        }
+    }
+}
+
+enum DenoiserRequest {
+    StartSession {
+        response: tokio::sync::oneshot::Sender<DenoiserBackend>,
+    },
+    Process {
+        input: Vec<i16>,
+        response: tokio::sync::oneshot::Sender<Vec<i16>>,
+    },
+}
+
+struct DenoiserService {
+    requests: Option<mpsc::Sender<DenoiserRequest>>,
+    worker: Option<std::thread::JoinHandle<()>>,
+}
+
+impl DenoiserService {
+    fn spawn(backend_state: Arc<AtomicU8>) -> anyhow::Result<Self> {
+        let (requests, mut request_rx) = mpsc::channel::<DenoiserRequest>(2);
+        let worker = std::thread::Builder::new()
+            .name("wisp-denoiser".into())
+            .spawn(move || {
+                let mut denoiser = preferred_neural_denoiser();
+                let mut session_processed_audio = false;
+                backend_state.store(denoiser.backend() as u8, Ordering::Release);
+
+                while let Some(request) = request_rx.blocking_recv() {
+                    match request {
+                        DenoiserRequest::StartSession { response } => {
+                            if session_processed_audio {
+                                denoiser = preferred_neural_denoiser();
+                                backend_state
+                                    .store(denoiser.backend() as u8, Ordering::Release);
+                            }
+                            session_processed_audio = false;
+                            let _ = response.send(denoiser.backend());
+                        }
+                        DenoiserRequest::Process { input, response } => {
+                            session_processed_audio = true;
+                            let output = match denoiser.process_frame(&input) {
+                                Ok(output) => output,
+                                Err(error) => {
+                                    warn!(%error, "DeepFilterNet processing failed; falling back to RNNoise");
+                                    denoiser = NeuralDenoiser::rnnoise();
+                                    backend_state.store(
+                                        DenoiserBackend::Rnnoise as u8,
+                                        Ordering::Release,
+                                    );
+                                    denoiser.process_frame(&input).unwrap_or_else(
+                                        |fallback_error| {
+                                            warn!(%fallback_error, "RNNoise fallback failed; publishing raw audio");
+                                            input
+                                        },
+                                    )
+                                }
+                            };
+                            if response.send(output).is_err() {
+                                debug!("discarding denoised frame after microphone pipeline stopped");
+                            }
+                        }
+                    }
+                }
+            })
+            .context("start neural denoiser worker")?;
+        Ok(Self {
+            requests: Some(requests),
+            worker: Some(worker),
+        })
+    }
+
+    async fn start_session(&self) -> anyhow::Result<DenoiserBackend> {
+        let (response, result) = tokio::sync::oneshot::channel();
+        self.requests
+            .as_ref()
+            .context("neural denoiser worker is unavailable")?
+            .send(DenoiserRequest::StartSession { response })
+            .await
+            .context("start neural denoiser session")?;
+        result.await.context("neural denoiser worker stopped")
+    }
+
+    async fn process(&self, input: Vec<i16>) -> anyhow::Result<Vec<i16>> {
+        let (response, result) = tokio::sync::oneshot::channel();
+        self.requests
+            .as_ref()
+            .context("neural denoiser worker is unavailable")?
+            .send(DenoiserRequest::Process { input, response })
+            .await
+            .context("queue neural denoiser frame")?;
+        result.await.context("neural denoiser worker stopped")
+    }
+}
+
+impl Drop for DenoiserService {
+    fn drop(&mut self) {
+        self.requests.take();
+        if let Some(worker) = self.worker.take()
+            && worker.join().is_err()
+        {
+            warn!("neural denoiser worker panicked");
+        }
+    }
+}
 
 #[derive(Debug)]
 pub(crate) enum MediaEvent {
@@ -74,6 +271,14 @@ pub(crate) enum MediaEvent {
         width: u32,
         height: u32,
     },
+    ScreenShareFrames {
+        generation: u64,
+        total: u64,
+    },
+    ScreenShareStopped {
+        generation: u64,
+        error: Option<String>,
+    },
     SurfaceOpened,
     SurfaceClosed,
     SurfaceRendered {
@@ -97,6 +302,10 @@ pub(crate) struct AudioInventory {
     pub error: Option<String>,
 }
 
+pub(crate) struct ScreenShareInfo {
+    pub state: ScreenShareState,
+}
+
 #[derive(Debug, Default)]
 struct AudioPreferences {
     preferred_input_id: Option<String>,
@@ -110,9 +319,21 @@ struct MediaSession {
     hangout_id: HangoutId,
     room: Arc<Room>,
     microphone: LocalAudioTrack,
-    _platform_audio: PlatformAudio,
+    raw_microphone: LocalAudioTrack,
+    microphone_task: JoinHandle<()>,
+    screen_share: Option<ScreenShareSession>,
+    platform_audio: PlatformAudio,
     remote_audio: Arc<Mutex<HashMap<String, RemoteAudioTrack>>>,
     event_task: JoinHandle<()>,
+}
+
+struct ScreenShareSession {
+    publication_sid: TrackSid,
+    pipeline: gst::Pipeline,
+    portal_session: Session<Screencast>,
+    _pipewire_remote: OwnedFd,
+    monitor_running: Arc<AtomicBool>,
+    monitor_task: JoinHandle<()>,
 }
 
 pub(crate) struct MediaManager {
@@ -126,6 +347,9 @@ pub(crate) struct MediaManager {
     input_level: Arc<AtomicU8>,
     platform_audio: Mutex<Option<PlatformAudio>>,
     audio_preferences: Mutex<AudioPreferences>,
+    neural_denoiser_enabled: Arc<AtomicBool>,
+    denoiser_backend: Arc<AtomicU8>,
+    denoiser: Arc<DenoiserService>,
     surface: Option<SurfaceController>,
     event_tx: mpsc::UnboundedSender<MediaEvent>,
 }
@@ -133,6 +357,11 @@ pub(crate) struct MediaManager {
 impl MediaManager {
     pub(crate) fn new(surface_enabled: bool) -> (Self, mpsc::UnboundedReceiver<MediaEvent>) {
         let (event_tx, event_rx) = mpsc::unbounded_channel();
+        let denoiser_backend = Arc::new(AtomicU8::new(DenoiserBackend::DeepFilterNet as u8));
+        let denoiser = Arc::new(
+            DenoiserService::spawn(denoiser_backend.clone())
+                .expect("start neural denoiser service"),
+        );
         let surface = if surface_enabled {
             match SurfaceController::spawn(event_tx.clone()) {
                 Ok(surface) => Some(surface),
@@ -158,6 +387,9 @@ impl MediaManager {
                 input_level: Arc::new(AtomicU8::new(0)),
                 platform_audio: Mutex::new(None),
                 audio_preferences: Mutex::new(AudioPreferences::default()),
+                neural_denoiser_enabled: Arc::new(AtomicBool::new(true)),
+                denoiser_backend,
+                denoiser,
                 surface,
                 event_tx,
             },
@@ -185,6 +417,10 @@ impl MediaManager {
 
     pub(crate) async fn is_active(&self) -> bool {
         self.session.lock().await.is_some()
+    }
+
+    fn denoiser_backend(&self) -> DenoiserBackend {
+        DenoiserBackend::from_atomic(self.denoiser_backend.load(Ordering::Acquire))
     }
 
     pub(crate) async fn refresh_audio_devices(&self) -> AudioInventory {
@@ -251,6 +487,8 @@ impl MediaManager {
             .lock()
             .expect("audio preferences lock poisoned")
             .preset = preset;
+        self.neural_denoiser_enabled
+            .store(preset == AudioPreset::Clear, Ordering::Release);
         Ok(self.reconcile_audio_devices(&audio, self.is_active().await, false))
     }
 
@@ -260,17 +498,20 @@ impl MediaManager {
             .lock()
             .expect("audio preferences lock poisoned")
             .preset;
+        let mut state = AudioState {
+            preset,
+            ..AudioState::default()
+        };
+        apply_denoiser_state(&mut state, self.denoiser_backend());
         AudioInventory {
-            state: AudioState {
-                preset,
-                ..AudioState::default()
-            },
+            state,
             microphone: None,
             speaker: None,
             error: Some(error),
         }
     }
 
+    #[allow(clippy::too_many_lines)]
     fn reconcile_audio_devices(
         &self,
         audio: &PlatformAudio,
@@ -368,15 +609,20 @@ impl MediaManager {
         let selected_output_id = preferences.selected_output_id.clone();
         let microphone = selected_device_name(&input_devices, selected_input_id.as_deref());
         let speaker = selected_device_name(&output_devices, selected_output_id.as_deref());
+        let mut state = AudioState {
+            input_devices,
+            output_devices,
+            selected_input_id,
+            selected_output_id,
+            preset: preferences.preset,
+            input_level: 0,
+            denoiser_active: false,
+            denoiser: None,
+            processing_latency_ms: 0,
+        };
+        apply_denoiser_state(&mut state, self.denoiser_backend());
         AudioInventory {
-            state: AudioState {
-                input_devices,
-                output_devices,
-                selected_input_id,
-                selected_output_id,
-                preset: preferences.preset,
-                input_level: 0,
-            },
+            state,
             microphone,
             speaker,
             error: (!errors.is_empty()).then(|| errors.join("; ")),
@@ -394,6 +640,7 @@ impl MediaManager {
             .is_some_and(|session| session.hangout_id == hangout_id)
     }
 
+    #[allow(clippy::too_many_lines)]
     pub(crate) async fn connect(
         &self,
         hangout_id: HangoutId,
@@ -408,6 +655,7 @@ impl MediaManager {
         self.disconnect_session().await;
 
         let platform_audio = self.platform_audio()?;
+        self.denoiser.start_session().await?;
         let inventory = self.reconcile_audio_devices(&platform_audio, false, false);
         if let Some(error) = &inventory.error {
             bail!(error.clone());
@@ -429,10 +677,19 @@ impl MediaManager {
                 .await
                 .with_context(|| format!("connect to LiveKit room {}", credentials.room))?;
         let room = Arc::new(room);
-        let microphone_track =
-            LocalAudioTrack::create_audio_track("microphone", platform_audio.rtc_source());
+        let raw_microphone =
+            LocalAudioTrack::create_audio_track("microphone-capture", platform_audio.rtc_source());
+        platform_audio
+            .start_recording()
+            .context("start microphone capture for neural processing")?;
+        let microphone_source = NativeAudioSource::new(AudioSourceOptions::default(), 48_000, 1, 0);
+        let microphone_track = LocalAudioTrack::create_audio_track(
+            "microphone",
+            RtcAudioSource::Native(microphone_source.clone()),
+        );
         if muted {
             microphone_track.mute();
+            raw_microphone.disable();
         }
         if let Err(error) = room
             .local_participant()
@@ -445,9 +702,16 @@ impl MediaManager {
             )
             .await
         {
+            let _ = platform_audio.stop_recording();
             let _ = room.close().await;
             return Err(error).context("publish microphone to LiveKit");
         }
+        let microphone_task = tokio::spawn(run_microphone_pipeline(
+            raw_microphone.clone(),
+            microphone_source,
+            self.neural_denoiser_enabled.clone(),
+            self.denoiser.clone(),
+        ));
 
         let generation = self.generation.fetch_add(1, Ordering::AcqRel) + 1;
         self.received_frames.store(0, Ordering::Release);
@@ -474,7 +738,10 @@ impl MediaManager {
             hangout_id,
             room,
             microphone: microphone_track,
-            _platform_audio: platform_audio,
+            raw_microphone,
+            microphone_task,
+            screen_share: None,
+            platform_audio,
             remote_audio,
             event_task,
         });
@@ -507,6 +774,15 @@ impl MediaManager {
         let Some(session) = self.session.lock().await.take() else {
             return;
         };
+        session.raw_microphone.disable();
+        if let Err(error) = session.platform_audio.stop_recording() {
+            debug!(%error, "microphone capture was already stopped");
+        }
+        session.microphone_task.abort();
+        let _ = session.microphone_task.await;
+        if let Some(screen_share) = session.screen_share {
+            stop_screen_share_session(&session.room, screen_share).await;
+        }
         if let Err(error) = session.room.close().await {
             warn!(%error, "LiveKit room did not close cleanly");
         }
@@ -519,12 +795,14 @@ impl MediaManager {
         if let Some(session) = self.session.lock().await.as_ref() {
             if muted {
                 session.microphone.mute();
+                session.raw_microphone.disable();
                 self.input_level.store(0, Ordering::Release);
                 let _ = self.event_tx.send(MediaEvent::InputLevel {
                     generation: self.generation(),
                     level: 0,
                 });
             } else {
+                session.raw_microphone.enable();
                 session.microphone.unmute();
             }
         }
@@ -550,6 +828,42 @@ impl MediaManager {
                     track.enable();
                 }
             }
+        }
+    }
+
+    pub(crate) async fn start_screen_share(&self) -> anyhow::Result<ScreenShareInfo> {
+        let _operation = self.operation.lock().await;
+        let (room, generation) = {
+            let session = self.session.lock().await;
+            let session = session.as_ref().context("join a hangout before sharing")?;
+            if session.screen_share.is_some() {
+                bail!("screen sharing is already active");
+            }
+            (session.room.clone(), self.generation())
+        };
+
+        let (screen_share, state) =
+            create_screen_share(&room, generation, self.event_tx.clone()).await?;
+        let mut session = self.session.lock().await;
+        let Some(session) = session.as_mut() else {
+            stop_screen_share_session(&room, screen_share).await;
+            bail!("the hangout ended while screen sharing started");
+        };
+        session.screen_share = Some(screen_share);
+        Ok(ScreenShareInfo { state })
+    }
+
+    pub(crate) async fn stop_screen_share(&self) {
+        let _operation = self.operation.lock().await;
+        let (room, screen_share) = {
+            let mut session = self.session.lock().await;
+            let Some(session) = session.as_mut() else {
+                return;
+            };
+            (session.room.clone(), session.screen_share.take())
+        };
+        if let Some(screen_share) = screen_share {
+            stop_screen_share_session(&room, screen_share).await;
         }
     }
 
@@ -884,6 +1198,440 @@ fn select_playout_device(
     Ok(())
 }
 
+async fn run_microphone_pipeline(
+    capture_track: LocalAudioTrack,
+    publish_source: NativeAudioSource,
+    neural_enabled: Arc<AtomicBool>,
+    denoiser: Arc<DenoiserService>,
+) {
+    const CHANNELS: u32 = 1;
+
+    let mut stream = NativeAudioStream::new(
+        capture_track.rtc_track(),
+        i32::try_from(AUDIO_SAMPLE_RATE).expect("audio sample rate fits i32"),
+        1,
+    );
+    let mut pending = std::collections::VecDeque::<i16>::with_capacity(AUDIO_FRAME_SAMPLES * 2);
+
+    while let Some(frame) = stream.next().await {
+        pending.extend(frame.data.iter().copied());
+        while pending.len() >= AUDIO_FRAME_SAMPLES {
+            let input = pending.drain(..AUDIO_FRAME_SAMPLES).collect::<Vec<_>>();
+            // Keep the model warm while another preset is selected. This makes switching
+            // back to Clear immediate and keeps DeepFilterNet's lookahead aligned.
+            let neural = neural_enabled.load(Ordering::Acquire);
+            let output = match denoiser.process(input.clone()).await {
+                Ok(processed) if neural => processed,
+                Ok(_) => input,
+                Err(error) => {
+                    warn!(%error, "neural denoiser worker stopped; publishing raw audio");
+                    input
+                }
+            };
+            let frame = AudioFrame {
+                data: Cow::Owned(output),
+                sample_rate: AUDIO_SAMPLE_RATE,
+                num_channels: CHANNELS,
+                samples_per_channel: u32::try_from(AUDIO_FRAME_SAMPLES)
+                    .expect("neural denoiser frame length fits u32"),
+            };
+            if let Err(error) = publish_source.capture_frame(&frame).await {
+                warn!(%error, "neural microphone pipeline stopped");
+                return;
+            }
+        }
+    }
+}
+
+fn preferred_neural_denoiser() -> NeuralDenoiser {
+    match create_deepfilter_model() {
+        Ok(model) => {
+            info!(
+                backend = DenoiserBackend::DeepFilterNet.name(),
+                latency_ms = DEEPFILTER_LATENCY_MS,
+                "neural denoiser ready"
+            );
+            NeuralDenoiser::deepfilternet(model)
+        }
+        Err(error) => {
+            warn!(%error, "DeepFilterNet initialization failed; falling back to RNNoise");
+            NeuralDenoiser::rnnoise()
+        }
+    }
+}
+
+fn create_deepfilter_model() -> anyhow::Result<DfTract> {
+    let model = DfTract::new(DfParams::default(), &RuntimeParams::default())
+        .context("initialize embedded DeepFilterNet model")?;
+    if model.sr != AUDIO_SAMPLE_RATE as usize || model.hop_size != AUDIO_FRAME_SAMPLES {
+        bail!(
+            "unsupported DeepFilterNet format: {} Hz, {} samples",
+            model.sr,
+            model.hop_size
+        );
+    }
+    let delay_samples = model.fft_size - model.hop_size + model.lookahead * model.hop_size;
+    let delay_ms = delay_samples * 1_000 / model.sr;
+    if delay_ms != usize::from(DEEPFILTER_LATENCY_MS) {
+        bail!("unexpected DeepFilterNet latency: {delay_ms} ms");
+    }
+    Ok(model)
+}
+
+#[allow(clippy::cast_possible_truncation)]
+fn deepfilter_frame(model: &mut DfTract, input: &[i16]) -> anyhow::Result<Vec<i16>> {
+    if input.len() != AUDIO_FRAME_SAMPLES {
+        bail!(
+            "DeepFilterNet needs {AUDIO_FRAME_SAMPLES} samples, received {}",
+            input.len()
+        );
+    }
+    let input = input
+        .iter()
+        .map(|sample| f32::from(*sample) / 32_768.0)
+        .collect::<Vec<_>>();
+    let mut output = vec![0.0_f32; AUDIO_FRAME_SAMPLES];
+    model
+        .process(
+            ArrayView2::from_shape((1, AUDIO_FRAME_SAMPLES), &input)
+                .expect("DeepFilterNet input shape is fixed"),
+            ArrayViewMut2::from_shape((1, AUDIO_FRAME_SAMPLES), &mut output)
+                .expect("DeepFilterNet output shape is fixed"),
+        )
+        .context("process DeepFilterNet audio frame")?;
+    Ok(output
+        .into_iter()
+        .map(|sample| {
+            (sample * 32_768.0)
+                .round()
+                .clamp(f32::from(i16::MIN), f32::from(i16::MAX)) as i16
+        })
+        .collect())
+}
+
+#[allow(clippy::cast_possible_truncation)]
+fn rnnoise_frame(
+    denoiser: &mut DenoiseState<'static>,
+    input: &[i16],
+    first_frame: &mut bool,
+) -> Vec<i16> {
+    let input = input
+        .iter()
+        .map(|sample| f32::from(*sample))
+        .collect::<Vec<_>>();
+    let mut output = [0.0_f32; DenoiseState::FRAME_SIZE];
+    denoiser.process_frame(&mut output, &input);
+    if std::mem::take(first_frame) {
+        return vec![0; DenoiseState::FRAME_SIZE];
+    }
+    output
+        .into_iter()
+        .map(|sample| {
+            sample
+                .round()
+                .clamp(f32::from(i16::MIN), f32::from(i16::MAX)) as i16
+        })
+        .collect()
+}
+
+fn apply_denoiser_state(state: &mut AudioState, backend: DenoiserBackend) {
+    state.denoiser_active = state.preset == AudioPreset::Clear;
+    state.denoiser = state.denoiser_active.then(|| backend.name().to_owned());
+    state.processing_latency_ms = if state.denoiser_active {
+        backend.latency_ms()
+    } else {
+        0
+    };
+}
+
+#[allow(clippy::too_many_lines)]
+async fn create_screen_share(
+    room: &Room,
+    generation: u64,
+    event_tx: mpsc::UnboundedSender<MediaEvent>,
+) -> anyhow::Result<(ScreenShareSession, ScreenShareState)> {
+    gst::init().context("initialize GStreamer for screen sharing")?;
+    let portal = Screencast::new()
+        .await
+        .context("connect to the screen cast portal")?;
+    let portal_session = portal
+        .create_session(CreateSessionOptions::default())
+        .await
+        .context("create a screen cast portal session")?;
+    portal
+        .select_sources(
+            &portal_session,
+            SelectSourcesOptions::default()
+                .set_cursor_mode(CursorMode::Embedded)
+                .set_sources(SourceType::Monitor | SourceType::Window)
+                .set_multiple(false)
+                .set_persist_mode(PersistMode::DoNot),
+        )
+        .await
+        .context("configure the screen cast portal")?;
+    let response = portal
+        .start(&portal_session, None, StartCastOptions::default())
+        .await
+        .context("open the screen or window picker")?
+        .response()
+        .context("screen sharing was not selected")?;
+    let stream = response
+        .streams()
+        .first()
+        .cloned()
+        .context("the portal returned no screen cast stream")?;
+    let pipewire_remote = portal
+        .open_pipe_wire_remote(&portal_session, OpenPipeWireRemoteOptions::default())
+        .await
+        .context("open the portal PipeWire stream")?;
+
+    let (width, height) = screen_share_resolution(stream.size());
+    let source_name = match stream.source_type() {
+        Some(SourceType::Monitor) => "monitor",
+        Some(SourceType::Window) => "window",
+        Some(SourceType::Virtual) => "region",
+        None => "screen",
+    };
+    let video_source = NativeVideoSource::new(VideoResolution { width, height }, true);
+    let caps = gst::Caps::builder("video/x-raw")
+        .field("format", "I420")
+        .field(
+            "width",
+            i32::try_from(width).context("screen width is too large")?,
+        )
+        .field(
+            "height",
+            i32::try_from(height).context("screen height is too large")?,
+        )
+        .field("framerate", gst::Fraction::new(30, 1))
+        .build();
+    let published_frames = Arc::new(AtomicU64::new(0));
+    let callback_failed = Arc::new(AtomicBool::new(false));
+    let callback_source = video_source.clone();
+    let callback_frames = published_frames.clone();
+    let callback_events = event_tx.clone();
+    let callback_failure = callback_failed.clone();
+    let app_sink = gst_app::AppSink::builder()
+        .caps(&caps)
+        .max_buffers(2)
+        .drop(true)
+        .sync(false)
+        .enable_last_sample(false)
+        .callbacks(
+            gst_app::AppSinkCallbacks::builder()
+                .new_sample(move |sink| {
+                    let result = capture_screen_sample(sink, &callback_source);
+                    match result {
+                        Ok(()) => {
+                            let total = callback_frames.fetch_add(1, Ordering::AcqRel) + 1;
+                            if total == 1 || total.is_multiple_of(30) {
+                                let _ = callback_events
+                                    .send(MediaEvent::ScreenShareFrames { generation, total });
+                            }
+                            Ok(gst::FlowSuccess::Ok)
+                        }
+                        Err(error) => {
+                            if !callback_failure.swap(true, Ordering::AcqRel) {
+                                let _ = callback_events.send(MediaEvent::ScreenShareStopped {
+                                    generation,
+                                    error: Some(error.to_string()),
+                                });
+                            }
+                            Err(gst::FlowError::Error)
+                        }
+                    }
+                })
+                .build(),
+        )
+        .build();
+    let pipewire = gst::ElementFactory::make("pipewiresrc")
+        .property("fd", pipewire_remote.as_raw_fd())
+        .property("path", stream.pipe_wire_node_id().to_string())
+        .property("do-timestamp", true)
+        .build()
+        .context("the GStreamer PipeWire source is not installed")?;
+    let convert = gst::ElementFactory::make("videoconvert")
+        .build()
+        .context("the GStreamer video converter is not installed")?;
+    let scale = gst::ElementFactory::make("videoscale")
+        .property("add-borders", true)
+        .build()
+        .context("the GStreamer video scaler is not installed")?;
+    let rate = gst::ElementFactory::make("videorate")
+        .build()
+        .context("the GStreamer frame-rate converter is not installed")?;
+    let pipeline = gst::Pipeline::default();
+    pipeline
+        .add_many([&pipewire, &convert, &scale, &rate, app_sink.upcast_ref()])
+        .context("build the screen capture pipeline")?;
+    gst::Element::link_many([&pipewire, &convert, &scale, &rate, app_sink.upcast_ref()])
+        .context("link the screen capture pipeline")?;
+
+    let video_track =
+        LocalVideoTrack::create_video_track("screen-share", RtcVideoSource::Native(video_source));
+    let publication = room
+        .local_participant()
+        .publish_track(
+            LocalTrack::Video(video_track),
+            TrackPublishOptions {
+                source: TrackSource::Screenshare,
+                video_codec: VideoCodec::VP8,
+                simulcast: false,
+                ..Default::default()
+            },
+        )
+        .await
+        .context("publish the screen share to LiveKit")?;
+    if let Err(error) = pipeline.set_state(gst::State::Playing) {
+        let _ = room
+            .local_participant()
+            .unpublish_track(&publication.sid())
+            .await;
+        let _ = portal_session.close().await;
+        return Err(error).context("start the screen capture pipeline");
+    }
+
+    let monitor_running = Arc::new(AtomicBool::new(true));
+    let monitor_task = monitor_screen_share(
+        pipeline
+            .bus()
+            .context("screen capture pipeline has no message bus")?,
+        generation,
+        monitor_running.clone(),
+        event_tx,
+    );
+    let state = ScreenShareState {
+        active: true,
+        source: Some(source_name.into()),
+        width: Some(width),
+        height: Some(height),
+        fps: Some(30),
+        ..ScreenShareState::default()
+    };
+    info!(
+        source = source_name,
+        width,
+        height,
+        fps = 30,
+        "screen share published"
+    );
+    Ok((
+        ScreenShareSession {
+            publication_sid: publication.sid(),
+            pipeline,
+            portal_session,
+            _pipewire_remote: pipewire_remote,
+            monitor_running,
+            monitor_task,
+        },
+        state,
+    ))
+}
+
+fn capture_screen_sample(
+    sink: &gst_app::AppSink,
+    video_source: &NativeVideoSource,
+) -> anyhow::Result<()> {
+    use gst_video::VideoFrameExt;
+
+    let sample = sink.pull_sample().context("read a captured screen frame")?;
+    let caps = sample
+        .caps()
+        .context("captured screen frame has no format")?;
+    let info = gst_video::VideoInfo::from_caps(caps).context("read the screen frame format")?;
+    if info.format() != gst_video::VideoFormat::I420 {
+        bail!("screen frame is not I420");
+    }
+    let buffer = sample
+        .buffer()
+        .context("captured screen sample has no buffer")?;
+    let frame = gst_video::VideoFrameRef::from_buffer_ref_readable(buffer, &info)
+        .context("map the captured screen frame")?;
+    let strides = frame.plane_stride();
+    let mut i420 = I420Buffer::with_strides(
+        info.width(),
+        info.height(),
+        u32::try_from(strides[0]).context("invalid screen luma stride")?,
+        u32::try_from(strides[1]).context("invalid screen chroma stride")?,
+        u32::try_from(strides[2]).context("invalid screen chroma stride")?,
+    );
+    let source_planes = frame.planes_data();
+    let (luma, chroma_u, chroma_v) = i420.data_mut();
+    copy_video_plane(luma, source_planes[0])?;
+    copy_video_plane(chroma_u, source_planes[1])?;
+    copy_video_plane(chroma_v, source_planes[2])?;
+    video_source.capture_frame(&VideoFrame::new(VideoRotation::VideoRotation0, i420));
+    Ok(())
+}
+
+fn copy_video_plane(destination: &mut [u8], source: &[u8]) -> anyhow::Result<()> {
+    if source.len() < destination.len() {
+        bail!("captured screen plane is shorter than its negotiated stride");
+    }
+    destination.copy_from_slice(&source[..destination.len()]);
+    Ok(())
+}
+
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+fn screen_share_resolution(size: Option<(i32, i32)>) -> (u32, u32) {
+    let (source_width, source_height) = size
+        .filter(|(width, height)| *width > 0 && *height > 0)
+        .unwrap_or((1280, 720));
+    let scale = (1920.0_f64 / f64::from(source_width))
+        .min(1080.0_f64 / f64::from(source_height))
+        .min(1.0);
+    let even = |value: i32| {
+        let scaled = (f64::from(value) * scale).round() as u32;
+        scaled.max(2) & !1
+    };
+    (even(source_width), even(source_height))
+}
+
+fn monitor_screen_share(
+    bus: gst::Bus,
+    generation: u64,
+    running: Arc<AtomicBool>,
+    event_tx: mpsc::UnboundedSender<MediaEvent>,
+) -> JoinHandle<()> {
+    tokio::task::spawn_blocking(move || {
+        while running.load(Ordering::Acquire) {
+            let Some(message) = bus.timed_pop(gst::ClockTime::from_mseconds(250)) else {
+                continue;
+            };
+            let error = match message.view() {
+                gst::MessageView::Eos(..) => None,
+                gst::MessageView::Error(error) => {
+                    Some(format!("screen capture stopped: {}", error.error()))
+                }
+                _ => continue,
+            };
+            if running.swap(false, Ordering::AcqRel) {
+                let _ = event_tx.send(MediaEvent::ScreenShareStopped { generation, error });
+            }
+            return;
+        }
+    })
+}
+
+async fn stop_screen_share_session(room: &Room, screen_share: ScreenShareSession) {
+    screen_share.monitor_running.store(false, Ordering::Release);
+    if let Err(error) = screen_share.pipeline.set_state(gst::State::Null) {
+        warn!(%error, "screen capture pipeline did not stop cleanly");
+    }
+    if let Err(error) = room
+        .local_participant()
+        .unpublish_track(&screen_share.publication_sid)
+        .await
+    {
+        debug!(%error, "screen share track was already unpublished");
+    }
+    if let Err(error) = screen_share.portal_session.close().await {
+        debug!(%error, "screen cast portal session was already closed");
+    }
+    let _ = screen_share.monitor_task.await;
+    info!("screen share stopped");
+}
+
 fn processing_options(preset: AudioPreset) -> AudioProcessingOptions {
     match preset {
         AudioPreset::Natural => AudioProcessingOptions {
@@ -894,7 +1642,8 @@ fn processing_options(preset: AudioPreset) -> AudioProcessingOptions {
         },
         AudioPreset::Clear => AudioProcessingOptions {
             echo_cancellation: true,
-            noise_suppression: true,
+            // DeepFilterNet handles suppression in the explicit microphone pipeline.
+            noise_suppression: false,
             auto_gain_control: true,
             prefer_hardware_processing: false,
         },
@@ -995,8 +1744,9 @@ async fn count_audio_frames(
 #[cfg(test)]
 mod tests {
     use super::{
-        audio_level_percent, preferred_or_first, processing_options, public_device_id,
-        same_logical_device,
+        AUDIO_FRAME_SAMPLES, audio_level_percent, create_deepfilter_model, deepfilter_frame,
+        preferred_or_first, processing_options, public_device_id, same_logical_device,
+        screen_share_resolution,
     };
     use wisp_protocol::{AudioDevice, AudioPreset};
 
@@ -1042,8 +1792,38 @@ mod tests {
 
         assert!(natural.echo_cancellation && natural.noise_suppression);
         assert!(!natural.auto_gain_control);
-        assert!(clear.auto_gain_control);
+        assert!(clear.auto_gain_control && !clear.noise_suppression);
         assert!(!studio.echo_cancellation && !studio.noise_suppression);
+    }
+
+    #[test]
+    fn deepfilternet_processes_real_ten_millisecond_frames() {
+        let mut denoiser = create_deepfilter_model().expect("embedded model should load");
+        let mut output = Vec::new();
+        let mut input = Vec::new();
+        for frame_index in 0..10 {
+            input = (0..AUDIO_FRAME_SAMPLES)
+                .map(|index| {
+                    if ((frame_index * AUDIO_FRAME_SAMPLES + index) / 24).is_multiple_of(2) {
+                        12_000
+                    } else {
+                        -12_000
+                    }
+                })
+                .collect::<Vec<_>>();
+            output = deepfilter_frame(&mut denoiser, &input).expect("frame should process");
+        }
+        assert_eq!(output.len(), AUDIO_FRAME_SAMPLES);
+        assert_ne!(output, input);
+    }
+
+    #[test]
+    fn screen_share_resolution_is_even_and_bounded() {
+        assert_eq!(screen_share_resolution(None), (1280, 720));
+        assert_eq!(screen_share_resolution(Some((1920, 1080))), (1920, 1080));
+        let (width, height) = screen_share_resolution(Some((5120, 1440)));
+        assert!(width <= 1920 && height <= 1080);
+        assert!(width.is_multiple_of(2) && height.is_multiple_of(2));
     }
 
     #[test]

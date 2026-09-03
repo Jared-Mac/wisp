@@ -295,11 +295,34 @@ Column {
 
   Text {
     width: parent.width
-    text: "Natural preserves dynamics · Clear evens speech · Studio disables processing"
+    text: "Natural uses WebRTC cleanup · Clear adds DeepFilterNet neural suppression · Studio is unprocessed"
     wrapMode: Text.WordWrap
     color: root.theme.muted
     font.family: root.theme.font.family
     font.pixelSize: root.theme.font.caption
+  }
+
+  Rectangle {
+    visible: !!root.audio.denoiser_active
+    width: parent.width
+    height: root.theme.space(36)
+    radius: root.theme.cornerRadius
+    color: root.theme.alpha(root.theme.accent, 0.12)
+
+    Text {
+      anchors.left: parent.left
+      anchors.right: parent.right
+      anchors.leftMargin: root.theme.spacing.lg
+      anchors.rightMargin: root.theme.spacing.lg
+      anchors.verticalCenter: parent.verticalCenter
+      text: "Neural denoiser active · " + String(root.audio.denoiser || "deepfilternet")
+        + " · " + String(root.audio.processing_latency_ms || 30) + " ms latency"
+      elide: Text.ElideRight
+      color: root.theme.accent
+      font.family: root.theme.font.family
+      font.pixelSize: root.theme.font.caption
+      font.weight: Font.DemiBold
+    }
   }
 
   Rectangle {

@@ -25,7 +25,9 @@ and uses LiveKit's live switch operations so a headset unplug does not leave the
 room. Active calls refresh device inventory every two seconds; opening either
 frontend refreshes it immediately. The daemon exposes Natural, Clear, and
 Studio processing presets plus a throttled local input level through the same
-snapshot/event stream.
+snapshot/event stream. Clear defaults to an embedded DeepFilterNet3 model on a
+dedicated bounded worker; RNNoise remains an automatic fallback. Inference
+state stays off the async networking/UI executor.
 
 Push-to-talk is a daemon-owned microphone gate rather than a UI-only button.
 Manual mute always wins. Presses carry a renewable 30-second lease, and the

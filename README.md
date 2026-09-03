@@ -54,6 +54,19 @@ Auto uses the tray icon's display and edge when the desktop supplies its click
 position; otherwise it falls back to the current system display and its
 bottom-right corner.
 
+The default **Clear** audio preset publishes the microphone through the
+DeepFilterNet3 neural denoiser (48 kHz, 10 ms frames, 30 ms algorithmic
+latency). **Natural** keeps WebRTC's lighter speech cleanup, while **Studio**
+leaves the signal unprocessed. If DeepFilterNet cannot initialize, Wisp falls
+back to RNNoise and reports that backend under **Settings → Audio** and in
+`wispctl status`.
+
+During a hangout, **Share screen** opens the standard XDG desktop portal picker
+for a monitor or individual window. Wisp captures the authorized PipeWire
+stream at up to 1080p/30 fps and publishes it as a LiveKit screen-share track.
+The tray and Omarchy center-bar icon show the same cyan sharing badge; stopping
+from either UI revokes the portal session and unpublishes the track.
+
 **Exit Wisp** closes the Quickshell UI and the tray-owning daemon. When Wisp
 was started with `just dev`, that daemon exit also makes the development
 supervisor stop its local server and LiveKit children, leaving no Wisp

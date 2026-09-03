@@ -16,15 +16,22 @@ rust-version = "1.89"
 
 [workspace.dependencies]
 anyhow = "1.0"
+ashpd = { version = "0.13", default-features = false, features = ["screencast", "tokio"] }
 axum = { version = "0.8", features = ["ws"] }
 base64 = "0.22"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4.5", features = ["derive", "env"] }
+deep_filter = { git = "https://github.com/Rikorose/DeepFilterNet.git", tag = "v0.5.6", default-features = false, features = ["tract", "default-model"] }
 futures-util = "0.3"
+gstreamer = { version = "0.24", features = ["v1_22"] }
+gstreamer-app = { version = "0.24", features = ["v1_22"] }
+gstreamer-video = { version = "0.24", features = ["v1_22"] }
 hound = "3.5"
 hmac = "0.12"
 ksni = "0.3"
 livekit = { version = "=0.8.4", features = ["rustls-tls-native-roots"] }
+nnnoiseless = { version = "0.5", default-features = false }
+ndarray = "0.15"
 pollster = "=1.0.1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 serde = { version = "1.0", features = ["derive"] }

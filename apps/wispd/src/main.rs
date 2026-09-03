@@ -30,7 +30,7 @@ use wisp_protocol::{
     AudioPreset, CommandEnvelope, ConnectionState, DaemonEnvelope, DevSession, DevSessionRequest,
     JoinFriendRequest, JoinFriendResult, JoinHangoutRequest, KnockResponse, LiveKitTokenResponse,
     MediaState, PROTOCOL_VERSION, Presence, PushToTalkState, RespondKnockRequest,
-    RespondKnockResult, ServerEvent, SetPresenceRequest, Snapshot,
+    RespondKnockResult, ScreenShareState, ServerEvent, SetPresenceRequest, Snapshot,
 };
 
 use crate::media::{AudioInventory, MediaEvent, MediaManager};
@@ -415,6 +415,9 @@ impl Daemon {
     ) {
         let snapshot = {
             let mut state = self.state.write().await;
+            if !media.livekit_connected {
+                state.self_state.sharing = false;
+            }
             state.self_state.media = media;
             state.self_state.connection = connection;
             let seq = self.next_seq(state.seq);
@@ -782,21 +785,7 @@ impl Daemon {
             }
             "open_surface" => self.surface_command(true),
             "close_surface" => self.surface_command(false),
-            "share" => {
-                let sharing = command
-                    .args
-                    .get("enabled")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(true);
-                self.set_local_media(
-                    |state| state.self_state.sharing = sharing,
-                    "self_state_changed",
-                )
-                .await;
-                Ok(Some(
-                    json!({"sharing": sharing, "source": command.args.get("source")}),
-                ))
-            }
+            "share" => self.screen_share_command(&command.args).await,
             _ => bail!("unknown command: {}", command.name),
         }
     }
@@ -837,6 +826,63 @@ impl Daemon {
         };
         let audio = self.apply_audio_inventory(inventory, event_name).await;
         Ok(Some(serde_json::to_value(audio)?))
+    }
+
+    async fn screen_share_command(&self, args: &Value) -> anyhow::Result<Option<Value>> {
+        if !self.media_enabled {
+            bail!("media is disabled");
+        }
+        let enabled = args.get("enabled").and_then(Value::as_bool).unwrap_or(true);
+        if !enabled {
+            self.media.stop_screen_share().await;
+            self.set_local_media(
+                |state| {
+                    state.self_state.sharing = false;
+                    state.self_state.media.screen_share = ScreenShareState::default();
+                },
+                "screen_share_stopped",
+            )
+            .await;
+            return Ok(Some(json!({"sharing": false})));
+        }
+
+        self.set_local_media(
+            |state| {
+                state.self_state.sharing = false;
+                state.self_state.media.screen_share.starting = true;
+                state.self_state.media.screen_share.error = None;
+            },
+            "screen_share_starting",
+        )
+        .await;
+        match self.media.start_screen_share().await {
+            Ok(info) => {
+                let result = serde_json::to_value(&info.state)?;
+                self.set_local_media(
+                    |state| {
+                        state.self_state.sharing = true;
+                        state.self_state.media.screen_share = info.state;
+                    },
+                    "screen_share_started",
+                )
+                .await;
+                Ok(Some(result))
+            }
+            Err(error) => {
+                let message = error.to_string();
+                self.set_local_media(
+                    |state| {
+                        state.self_state.sharing = false;
+                        state.self_state.media.screen_share.starting = false;
+                        state.self_state.media.screen_share.active = false;
+                        state.self_state.media.screen_share.error = Some(message.clone());
+                    },
+                    "screen_share_failed",
+                )
+                .await;
+                Err(error)
+            }
+        }
     }
 
     async fn join_friend_command(&self, args: &Value) -> anyhow::Result<Option<Value>> {
@@ -1103,6 +1149,7 @@ async fn synchronize_server(daemon: Arc<Daemon>) {
     }
 }
 
+#[allow(clippy::too_many_lines)]
 async fn synchronize_media_events(
     daemon: Arc<Daemon>,
     mut events: mpsc::UnboundedReceiver<MediaEvent>,
@@ -1118,7 +1165,9 @@ async fn synchronize_media_events(
             | MediaEvent::InputLevel { generation, .. }
             | MediaEvent::ActiveSpeakers { generation, .. }
             | MediaEvent::VideoSubscribed { generation, .. }
-            | MediaEvent::VideoFrames { generation, .. } => Some(*generation),
+            | MediaEvent::VideoFrames { generation, .. }
+            | MediaEvent::ScreenShareFrames { generation, .. }
+            | MediaEvent::ScreenShareStopped { generation, .. } => Some(*generation),
             MediaEvent::SurfaceOpened
             | MediaEvent::SurfaceClosed
             | MediaEvent::SurfaceRendered { .. }
@@ -1162,8 +1211,25 @@ async fn synchronize_media_events(
             | MediaEvent::InputLevel { .. }
             | MediaEvent::ActiveSpeakers { .. }
             | MediaEvent::VideoSubscribed { .. }
-            | MediaEvent::VideoFrames { .. }) => {
+            | MediaEvent::VideoFrames { .. }
+            | MediaEvent::ScreenShareFrames { .. }) => {
                 synchronize_track_event(&daemon, track_event).await;
+            }
+            MediaEvent::ScreenShareStopped { error, .. } => {
+                daemon.media.stop_screen_share().await;
+                if let Some(message) = &error {
+                    warn!(%message, "screen share stopped unexpectedly");
+                }
+                daemon
+                    .set_local_media(
+                        |state| {
+                            state.self_state.sharing = false;
+                            state.self_state.media.screen_share = ScreenShareState::default();
+                            state.self_state.media.screen_share.error = error;
+                        },
+                        "screen_share_stopped",
+                    )
+                    .await;
             }
             surface_event @ (MediaEvent::SurfaceOpened
             | MediaEvent::SurfaceClosed
@@ -1277,6 +1343,13 @@ async fn synchronize_track_event(daemon: &Daemon, event: MediaEvent) {
                     media.last_video_from = Some(participant);
                     media.video_width = Some(width);
                     media.video_height = Some(height);
+                })
+                .await;
+        }
+        MediaEvent::ScreenShareFrames { total, .. } => {
+            daemon
+                .update_media_state(None, "screen_share_frame_published", |media| {
+                    media.screen_share.published_frames = total;
                 })
                 .await;
         }
@@ -1459,11 +1532,15 @@ async fn synchronize_tray_state(daemon: Arc<Daemon>, handle: ksni::Handle<tray::
     loop {
         let current = {
             let state = daemon.state.read().await;
-            (state.self_state.muted, state.self_state.deafened)
+            (
+                state.self_state.muted,
+                state.self_state.deafened,
+                state.self_state.media.screen_share.active,
+            )
         };
         if previous != Some(current) {
             if handle
-                .update(|tray| tray.set_audio_state(current.0, current.1))
+                .update(|tray| tray.set_state(current.0, current.1, current.2))
                 .await
                 .is_none()
             {
@@ -1510,6 +1587,22 @@ async fn handle_tray_action(action: TrayAction, daemon: &Arc<Daemon>) -> bool {
         TrayAction::ToggleDeafened => {
             daemon.update_deafened(None).await;
         }
+        TrayAction::ToggleShare => {
+            let enabled = !daemon
+                .state
+                .read()
+                .await
+                .self_state
+                .media
+                .screen_share
+                .active;
+            if let Err(error) = daemon
+                .screen_share_command(&json!({"enabled": enabled}))
+                .await
+            {
+                warn!(%error, "tray screen sharing action failed");
+            }
+        }
         TrayAction::Exit => {
             info!("exit requested from system tray");
             quit_all_ui_instances().await;
@@ -1537,6 +1630,7 @@ fn describe_media_failure(error: &anyhow::Error) -> (String, String) {
 }
 
 #[tokio::main]
+#[allow(clippy::too_many_lines)]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| "wispd=info".into()))
@@ -1581,14 +1675,24 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
-    let initial_audio_state = {
+    let initial_tray_state = {
         let state = daemon.state.read().await;
-        (state.self_state.muted, state.self_state.deafened)
+        (
+            state.self_state.muted,
+            state.self_state.deafened,
+            state.self_state.media.screen_share.active,
+        )
     };
     let (mut tray_actions, tray_handle) = if std::env::var_os("WISP_DISABLE_TRAY").is_some() {
         (None, None)
     } else {
-        match tray::spawn(initial_audio_state.0, initial_audio_state.1).await {
+        match tray::spawn(
+            initial_tray_state.0,
+            initial_tray_state.1,
+            initial_tray_state.2,
+        )
+        .await
+        {
             Ok((receiver, handle)) => (Some(receiver), Some(handle)),
             Err(error) => {
                 warn!(%error, "system tray is unavailable; continuing without a tray icon");

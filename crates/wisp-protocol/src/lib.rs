@@ -113,6 +113,36 @@ pub struct AudioState {
     pub preset: AudioPreset,
     #[serde(default)]
     pub input_level: u8,
+    /// Whether microphone frames are currently routed through the neural
+    /// denoiser before publication.
+    #[serde(default)]
+    pub denoiser_active: bool,
+    /// Stable implementation name for diagnostics and UI copy.
+    #[serde(default)]
+    pub denoiser: Option<String>,
+    /// Algorithmic frame latency introduced by the selected processor.
+    #[serde(default)]
+    pub processing_latency_ms: u16,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScreenShareState {
+    #[serde(default)]
+    pub starting: bool,
+    #[serde(default)]
+    pub active: bool,
+    #[serde(default)]
+    pub source: Option<String>,
+    #[serde(default)]
+    pub width: Option<u32>,
+    #[serde(default)]
+    pub height: Option<u32>,
+    #[serde(default)]
+    pub fps: Option<u32>,
+    #[serde(default)]
+    pub published_frames: u64,
+    #[serde(default)]
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -176,6 +206,8 @@ pub struct MediaState {
     pub speaker: Option<String>,
     #[serde(default)]
     pub audio: AudioState,
+    #[serde(default)]
+    pub screen_share: ScreenShareState,
     #[serde(default)]
     pub last_audio_from: Option<String>,
     #[serde(default)]

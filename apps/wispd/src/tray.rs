@@ -9,6 +9,7 @@ pub enum TrayAction {
     OpenApp,
     ToggleMuted,
     ToggleDeafened,
+    ToggleShare,
     SetAnchor(&'static str),
     Exit,
 }
@@ -17,6 +18,7 @@ pub(super) struct WispTray {
     actions: mpsc::UnboundedSender<TrayAction>,
     muted: bool,
     deafened: bool,
+    sharing: bool,
 }
 
 impl WispTray {
@@ -24,9 +26,10 @@ impl WispTray {
         let _ = self.actions.send(action);
     }
 
-    pub(super) fn set_audio_state(&mut self, muted: bool, deafened: bool) {
+    pub(super) fn set_state(&mut self, muted: bool, deafened: bool, sharing: bool) {
         self.muted = muted;
         self.deafened = deafened;
+        self.sharing = sharing;
     }
 
     fn audio_state(&self) -> AudioState {
@@ -69,9 +72,11 @@ impl ksni::Tray for WispTray {
     }
 
     fn title(&self) -> String {
-        match self.audio_state() {
-            AudioState::Ready => "Wisp".into(),
-            state => format!("Wisp · {}", state.label()),
+        match (self.sharing, self.audio_state()) {
+            (false, AudioState::Ready) => "Wisp".into(),
+            (true, AudioState::Ready) => "Wisp · Sharing screen".into(),
+            (false, state) => format!("Wisp · {}", state.label()),
+            (true, state) => format!("Wisp · Sharing screen · {}", state.label()),
         }
     }
 
@@ -84,7 +89,7 @@ impl ksni::Tray for WispTray {
     }
 
     fn icon_pixmap(&self) -> Vec<ksni::Icon> {
-        vec![waveform_icon(32, self.audio_state())]
+        vec![waveform_icon(32, self.audio_state(), self.sharing)]
     }
 
     fn tool_tip(&self) -> ToolTip {
@@ -92,7 +97,11 @@ impl ksni::Tray for WispTray {
             icon_name: String::new(),
             icon_pixmap: self.icon_pixmap(),
             title: "Wisp".into(),
-            description: self.audio_state().label().into(),
+            description: if self.sharing {
+                format!("Sharing screen · {}", self.audio_state().label())
+            } else {
+                self.audio_state().label().into()
+            },
         }
     }
 
@@ -143,6 +152,15 @@ impl ksni::Tray for WispTray {
             MenuItem::Separator,
             muted.into(),
             deafened.into(),
+            action(
+                if self.sharing {
+                    "Stop screen sharing"
+                } else {
+                    "Share a screen or window"
+                },
+                "video-display",
+                TrayAction::ToggleShare,
+            ),
             SubMenu {
                 label: "Panel anchor".into(),
                 icon_name: "transform-move".into(),
@@ -165,19 +183,21 @@ impl ksni::Tray for WispTray {
 pub(super) async fn spawn(
     muted: bool,
     deafened: bool,
+    sharing: bool,
 ) -> anyhow::Result<(mpsc::UnboundedReceiver<TrayAction>, ksni::Handle<WispTray>)> {
     let (actions, receiver) = mpsc::unbounded_channel();
     let handle = WispTray {
         actions,
         muted,
         deafened,
+        sharing,
     }
     .spawn()
     .await?;
     Ok((receiver, handle))
 }
 
-fn waveform_icon(size: i32, state: AudioState) -> ksni::Icon {
+fn waveform_icon(size: i32, state: AudioState, sharing: bool) -> ksni::Icon {
     let dimension = usize::try_from(size).expect("positive tray icon size");
     let mut data = vec![0_u8; dimension * dimension * 4];
     let center = size / 2;
@@ -195,12 +215,40 @@ fn waveform_icon(size: i32, state: AudioState) -> ksni::Icon {
             }
         }
     }
+    if sharing {
+        draw_share_badge(&mut data, dimension, size);
+    }
     draw_state_badge(&mut data, dimension, size, state);
     ksni::Icon {
         width: size,
         height: size,
         data,
     }
+}
+
+fn draw_share_badge(data: &mut [u8], dimension: usize, size: i32) {
+    let center = (size - 7, 7);
+    let radius = 7;
+    for y in (center.1 - radius)..=(center.1 + radius) {
+        for x in (center.0 - radius)..=(center.0 + radius) {
+            if (x - center.0).pow(2) + (y - center.1).pow(2) <= radius.pow(2) {
+                set_pixel(data, dimension, x, y, [255, 50, 230, 244]);
+            }
+        }
+    }
+    let ink = [255, 21, 24, 33];
+    for x in (center.0 - 4)..=(center.0 + 4) {
+        set_pixel(data, dimension, x, center.1 - 3, ink);
+        set_pixel(data, dimension, x, center.1 + 2, ink);
+    }
+    for y in (center.1 - 3)..=(center.1 + 2) {
+        set_pixel(data, dimension, center.0 - 4, y, ink);
+        set_pixel(data, dimension, center.0 + 4, y, ink);
+    }
+    for x in (center.0 - 2)..=(center.0 + 2) {
+        set_pixel(data, dimension, x, center.1 + 4, ink);
+    }
+    set_pixel(data, dimension, center.0, center.1 + 3, ink);
 }
 
 fn set_pixel(data: &mut [u8], dimension: usize, x: i32, y: i32, color: [u8; 4]) {
@@ -264,7 +312,7 @@ mod tests {
 
     #[test]
     fn tray_icon_is_argb32() {
-        let icon = waveform_icon(32, AudioState::Ready);
+        let icon = waveform_icon(32, AudioState::Ready, false);
         assert_eq!(icon.width, 32);
         assert_eq!(icon.height, 32);
         assert_eq!(icon.data.len(), 32 * 32 * 4);
@@ -278,12 +326,20 @@ mod tests {
             AudioState::Muted,
             AudioState::MutedAndDeafened,
         ];
-        let icons = states.map(|state| waveform_icon(32, state).data);
+        let icons = states.map(|state| waveform_icon(32, state, false).data);
         for left in 0..icons.len() {
             for right in (left + 1)..icons.len() {
                 assert_ne!(icons[left], icons[right]);
             }
         }
+    }
+
+    #[test]
+    fn screen_sharing_adds_a_distinct_badge() {
+        assert_ne!(
+            waveform_icon(32, AudioState::Ready, false).data,
+            waveform_icon(32, AudioState::Ready, true).data
+        );
     }
 
     #[test]

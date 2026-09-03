@@ -113,6 +113,9 @@ for _ in $(seq 1 100); do
     (.self.media.audio.selected_input_id | type) == "string" and
     (.self.media.audio.selected_output_id | type) == "string" and
     .self.media.audio.preset == "clear" and
+    .self.media.audio.denoiser_active == true and
+    .self.media.audio.denoiser == "deepfilternet" and
+    .self.media.audio.processing_latency_ms == 30 and
     .self.media.audio.input_level >= 0 and
     .self.media.audio.input_level <= 100
   ' <<<"$status_json" >/dev/null; then
@@ -140,9 +143,18 @@ jq -e '
   (.self.media.audio.selected_input_id | type) == "string" and
   (.self.media.audio.selected_output_id | type) == "string" and
   .self.media.audio.preset == "clear" and
+  .self.media.audio.denoiser_active == true and
+  .self.media.audio.denoiser == "deepfilternet" and
+  .self.media.audio.processing_latency_ms == 30 and
   .self.media.audio.input_level >= 0 and
   .self.media.audio.input_level <= 100
 ' <<<"$status_json" >/dev/null
+
+for _ in $(seq 1 100); do
+  if rg -q 'simulator received remote audio frames' "$test_dir/sim.log"; then break; fi
+  sleep 0.05
+done
+rg -q 'simulator received remote audio frames' "$test_dir/sim.log"
 
 speaker_json=""
 for _ in $(seq 1 100); do
@@ -178,9 +190,19 @@ target/debug/wispctl --socket "$test_dir/wispd.sock" audio output -- "$alternate
 target/debug/wispctl --socket "$test_dir/wispd.sock" audio output -- "$output_id" \
   | jq -e --arg id "$output_id" '.selected_output_id == $id' >/dev/null
 target/debug/wispctl --socket "$test_dir/wispd.sock" audio preset studio \
-  | jq -e '.preset == "studio"' >/dev/null
+  | jq -e '
+    .preset == "studio" and
+    .denoiser_active == false and
+    .denoiser == null and
+    .processing_latency_ms == 0
+  ' >/dev/null
 target/debug/wispctl --socket "$test_dir/wispd.sock" audio preset clear \
-  | jq -e '.preset == "clear"' >/dev/null
+  | jq -e '
+    .preset == "clear" and
+    .denoiser_active == true and
+    .denoiser == "deepfilternet" and
+    .processing_latency_ms == 30
+  ' >/dev/null
 
 target/debug/wispctl --socket "$test_dir/wispd.sock" ptt enable \
   | jq -e '

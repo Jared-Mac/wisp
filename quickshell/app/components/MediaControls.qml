@@ -24,11 +24,12 @@ Column {
       id: controlRepeater
       model: [
         { "label": root.bridge.mediaState.surface_open ? "Close video" : "Open video", "action": "video" },
-        { "label": root.bridge.selfState.sharing ? "Stop share" : "Share", "action": "share" },
+        { "label": root.bridge.shareStarting ? "Choosing…" : root.bridge.sharing ? "Stop share" : "Share screen", "action": "share" },
         { "label": "Leave", "action": "leave" }
       ]
       delegate: Rectangle {
         required property var modelData
+        readonly property bool controlEnabled: modelData.action !== "share" || !root.bridge.shareStarting
         width: (controls.width - audioControls.width
           - controls.spacing * controlRepeater.count)
           / Math.max(1, controlRepeater.count)
@@ -37,6 +38,7 @@ Column {
         color: controlMouse.containsMouse
           ? (modelData.action === "leave" ? root.theme.alpha(root.theme.danger, 0.28) : root.theme.alpha(root.theme.foreground, 0.12))
           : root.theme.alpha(root.theme.foreground, 0.065)
+        opacity: controlEnabled ? 1 : 0.55
 
         Text {
           anchors.centerIn: parent
@@ -48,8 +50,9 @@ Column {
         MouseArea {
           id: controlMouse
           anchors.fill: parent
+          enabled: parent.controlEnabled
           hoverEnabled: true
-          cursorShape: Qt.PointingHandCursor
+          cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
           onClicked: {
             if (modelData.action === "video") root.bridge.toggleSurface()
             else if (modelData.action === "share") root.bridge.toggleShare()
@@ -57,6 +60,33 @@ Column {
           }
         }
       }
+    }
+  }
+
+  Rectangle {
+    visible: root.bridge.shareStarting || root.bridge.sharing
+    width: parent.width
+    height: root.theme.space(34)
+    radius: root.theme.cornerRadius
+    color: root.theme.alpha(root.theme.accent, 0.12)
+
+    Text {
+      anchors.left: parent.left
+      anchors.right: parent.right
+      anchors.leftMargin: root.theme.spacing.lg
+      anchors.rightMargin: root.theme.spacing.lg
+      anchors.verticalCenter: parent.verticalCenter
+      text: root.bridge.shareStarting
+        ? "Choose a monitor or window in the system picker"
+        : "Sharing " + String(root.bridge.screenShareState.source || "screen")
+          + " · " + String(root.bridge.screenShareState.width || "?")
+          + "×" + String(root.bridge.screenShareState.height || "?")
+          + " @ " + String(root.bridge.screenShareState.fps || 30) + " fps"
+      elide: Text.ElideRight
+      color: root.theme.accent
+      font.family: root.theme.font.family
+      font.pixelSize: root.theme.font.caption
+      font.weight: Font.DemiBold
     }
   }
 

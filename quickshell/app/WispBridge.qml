@@ -48,7 +48,20 @@ Item {
           "selected_input_id": null,
           "selected_output_id": null,
           "preset": "clear",
-          "input_level": 0
+          "input_level": 0,
+          "denoiser_active": true,
+          "denoiser": "deepfilternet",
+          "processing_latency_ms": 30
+        },
+        "screen_share": {
+          "starting": false,
+          "active": false,
+          "source": null,
+          "width": null,
+          "height": null,
+          "fps": null,
+          "published_frames": 0,
+          "error": null
         }
       }
     },
@@ -78,15 +91,33 @@ Item {
     "selected_input_id": null,
     "selected_output_id": null,
     "preset": "clear",
-    "input_level": 0
+    "input_level": 0,
+    "denoiser_active": true,
+    "denoiser": "deepfilternet",
+    "processing_latency_ms": 30
   })
+  readonly property var screenShareState: mediaState.screen_share || ({
+    "starting": false,
+    "active": false,
+    "source": null,
+    "width": null,
+    "height": null,
+    "fps": null,
+    "published_frames": 0,
+    "error": null
+  })
+  readonly property bool sharing: !!screenShareState.active
+  readonly property bool shareStarting: !!screenShareState.starting
   readonly property bool inHangout: selfState.hangout_id !== null && selfState.hangout_id !== undefined
-  readonly property bool hasError: !daemonConnected || selfState.connection === "failed" || !!mediaState.error || !!mediaState.surface_error
+  readonly property bool hasError: !daemonConnected || selfState.connection === "failed"
+    || !!mediaState.error || !!mediaState.surface_error || !!screenShareState.error
   readonly property string selfStatusLabel: buildSelfStatusLabel()
   readonly property string errorMessage: !daemonConnected
     ? "wispd is not running"
-    : String(lastError || mediaState.error || mediaState.surface_error || "")
+    : String(lastError || mediaState.error || mediaState.surface_error || screenShareState.error || "")
   readonly property string barText: buildBarText()
+  readonly property string barLabel: buildBarLabel()
+  readonly property string barTooltip: buildBarTooltip()
 
   signal commandFailed(string message)
 
@@ -129,12 +160,47 @@ Item {
     return "󰍬" + (names.length ? "  " + names.join(" ") : "")
   }
 
+  function buildBarLabel() {
+    if (!daemonConnected) return "disconnected"
+    if (knocks.length > 0) return String(knocks[0].from.display_name || "Friend") + " knocked"
+    if (sharing) return "sharing"
+    var names = []
+    if (inHangout) {
+      for (var h = 0; h < hangouts.length; h++) {
+        if (hangouts[h].id !== selfState.hangout_id) continue
+        var members = hangouts[h].members || []
+        for (var m = 0; m < members.length; m++)
+          if (members[m].id !== selfState.id) names.push(members[m].display_name)
+      }
+      if (activeSpeakers.length > 0) return activeSpeakers.join(" + ") + " speaking"
+      return names.join(" ")
+    }
+    for (var i = 0; i < friends.length; i++)
+      if (friends[i].online) names.push(friends[i].display_name)
+    return names.join(" ")
+  }
+
+  function buildBarTooltip() {
+    if (hasError) return errorMessage
+    var parts = ["Wisp"]
+    if (sharing) parts.push("Sharing " + String(screenShareState.source || "screen"))
+    if (selfState.deafened) parts.push("Deafened")
+    else if (effectiveMuted) parts.push("Microphone muted")
+    else parts.push("Audio ready")
+    if (audioState.denoiser_active) {
+      var backend = String(audioState.denoiser || "deepfilternet")
+      parts.push(backend === "deepfilternet" ? "DeepFilterNet neural denoiser" : "RNNoise fallback")
+    }
+    return parts.join(" · ")
+  }
+
   function applySnapshot(next) {
     if (!next) return
     snapshot = next
     var nextSelf = next["self"] || ({})
     var nextMedia = nextSelf.media || ({})
-    lastError = String(nextMedia.error || nextMedia.surface_error || "")
+    var nextShare = nextMedia.screen_share || ({})
+    lastError = String(nextMedia.error || nextMedia.surface_error || nextShare.error || "")
   }
 
   function handleLine(line) {
@@ -200,7 +266,10 @@ Item {
   function closeSurface() { send("close_surface", {}) }
   function toggleSurface() { mediaState.surface_open ? closeSurface() : openSurface() }
   function leave() { send("leave", {}) }
-  function toggleShare() { send("share", { "enabled": !selfState.sharing, "source": "window" }) }
+  function toggleShare() {
+    if (shareStarting) return
+    send("share", { "enabled": !sharing, "source": "portal" })
+  }
 
   Component {
     id: socketComponent

@@ -71,12 +71,87 @@ Panel {
     id: barButton
     anchors.fill: parent
     bar: root.bar
-    text: bridge.barText
+    text: ""
+    labelVisible: false
+    hasVisualContent: true
+    fixedWidth: barVisual.implicitWidth + Style.space(14)
     active: bridge.hasError
-    tooltipText: bridge.hasError ? bridge.errorMessage : "Wisp — friends and hangouts"
+    tooltipText: bridge.barTooltip
     onPressed: function(buttonCode) {
       if (buttonCode === Qt.RightButton) bridge.toggleMuted()
       else root.toggle()
+    }
+
+    Row {
+      id: barVisual
+      anchors.centerIn: parent
+      spacing: Style.space(5)
+
+      Item {
+        width: Style.space(22)
+        height: width
+
+        Image {
+          anchors.centerIn: parent
+          width: Style.space(20)
+          height: width
+          source: Qt.resolvedUrl("app/assets/waveform.svg")
+          fillMode: Image.PreserveAspectFit
+          opacity: bridge.daemonConnected ? 1 : 0.42
+        }
+
+        Rectangle {
+          visible: bridge.sharing
+          anchors.right: parent.right
+          anchors.top: parent.top
+          width: Style.space(9)
+          height: width
+          radius: width / 2
+          color: "#32e6f4"
+          border.width: 1
+          border.color: Color.background
+
+          Rectangle {
+            anchors.centerIn: parent
+            width: parent.width * 0.55
+            height: parent.height * 0.38
+            radius: 1
+            color: "transparent"
+            border.width: 1
+            border.color: "#151821"
+          }
+        }
+
+        Rectangle {
+          visible: bridge.effectiveMuted
+          anchors.right: parent.right
+          anchors.bottom: parent.bottom
+          width: Style.space(9)
+          height: width
+          radius: width / 2
+          color: bridge.selfState.deafened ? "#ff5c6c" : "#f5b94c"
+          border.width: 1
+          border.color: Color.background
+
+          Text {
+            anchors.centerIn: parent
+            text: bridge.selfState.deafened ? "×" : "/"
+            color: "#151821"
+            font.pixelSize: parent.height * 0.9
+            font.bold: true
+          }
+        }
+      }
+
+      Text {
+        visible: text.length > 0
+        anchors.verticalCenter: parent.verticalCenter
+        text: bridge.barLabel
+        color: bridge.hasError ? Color.urgent : barButton.foreground
+        font.family: barButton.fontFamily
+        font.pixelSize: barButton.fontSize
+        renderType: Text.NativeRendering
+      }
     }
   }
 

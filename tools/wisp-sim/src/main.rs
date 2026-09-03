@@ -10,8 +10,10 @@ use livekit::{
     webrtc::{
         audio_frame::AudioFrame,
         audio_source::{AudioSourceOptions, native::NativeAudioSource},
+        audio_stream::native::NativeAudioStream,
         prelude::{I420Buffer, RtcVideoSource, VideoFrame, VideoResolution, VideoRotation},
         video_source::native::NativeVideoSource,
+        video_stream::native::NativeVideoStream,
     },
 };
 use std::{
@@ -343,10 +345,33 @@ async fn log_room_events(mut events: tokio::sync::mpsc::UnboundedReceiver<RoomEv
                 break;
             }
             RoomEvent::TrackSubscribed {
-                track: RemoteTrack::Audio(_),
+                track: RemoteTrack::Audio(track),
                 participant,
                 ..
-            } => debug!(participant = %participant.identity(), "simulator subscribed to audio"),
+            } => {
+                let participant = participant.identity().to_string();
+                debug!(%participant, "simulator subscribed to audio");
+                tokio::spawn(async move {
+                    let mut stream = NativeAudioStream::new(track.rtc_track(), 48_000, 1);
+                    if stream.next().await.is_some() {
+                        info!(%participant, "simulator received remote audio frames");
+                    }
+                });
+            }
+            RoomEvent::TrackSubscribed {
+                track: RemoteTrack::Video(track),
+                participant,
+                ..
+            } => {
+                let participant = participant.identity().to_string();
+                debug!(%participant, "simulator subscribed to video");
+                tokio::spawn(async move {
+                    let mut stream = NativeVideoStream::new(track.rtc_track());
+                    if stream.next().await.is_some() {
+                        info!(%participant, "simulator received remote video frames");
+                    }
+                });
+            }
             other => debug!(?other, "simulator LiveKit event"),
         }
     }

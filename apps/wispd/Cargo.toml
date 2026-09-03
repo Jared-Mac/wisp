@@ -7,10 +7,17 @@ rust-version.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+ashpd.workspace = true
 clap.workspace = true
+deep_filter.workspace = true
 futures-util.workspace = true
+gstreamer.workspace = true
+gstreamer-app.workspace = true
+gstreamer-video.workspace = true
 ksni.workspace = true
 livekit.workspace = true
+nnnoiseless.workspace = true
+ndarray.workspace = true
 pollster.workspace = true
 reqwest.workspace = true
 serde.workspace = true

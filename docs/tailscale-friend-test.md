@@ -58,8 +58,10 @@ cd wisp
 ```
 
 The bootstrap uses CachyOS/Arch packages, builds only the client binaries,
-installs the standalone Quickshell UI, and starts `tailscaled`. Follow the
-Tailscale authentication URL if prompted.
+installs the standalone Quickshell UI plus the PipeWire/GStreamer portal
+plugins and the detected KDE, Hyprland, or GNOME portal backend needed for
+screen sharing, and starts `tailscaled`. Follow the Tailscale authentication
+URL if prompted.
 
 The host privately provides a host name and one unused profile. Save that
 machine-local assignment once, then start Wisp with:
@@ -84,15 +86,25 @@ device selection, processing presets, push-to-talk, mute, and deafen. Global
 shortcut installation is currently Omarchy-specific, so CachyOS testers should
 use click-and-hold **Talk** for this first test.
 
+Use **Clear** for the default DeepFilterNet neural denoiser. While connected, **Share screen**
+opens the desktop's trusted portal picker; select one monitor or window. The
+cyan badge on both the tray and Wisp UI means the LiveKit share track is
+actually active, not merely requested.
+
 ## Test checklist
 
 1. Confirm all testers show as available.
 2. Join one friend and confirm two-way audio.
 3. Add the remaining friends and confirm active-speaker names.
 4. Test mute, deafen, and push-to-talk.
-5. Leave and rejoin once.
-6. Unplug/reconnect one USB or Bluetooth audio device if convenient.
-7. Record subjective notes about echo, keyboard noise, clipping, latency, and
+5. Select **Clear**, compare keyboard/fan/air-conditioner noise with **Studio**,
+   and confirm the settings page reports `deepfilternet` active (or `rnnoise`
+   only if the fallback was needed).
+6. Share one monitor, then one window; confirm video reaches every friend and
+   the cyan tray/bar badge clears after **Stop share**.
+7. Leave and rejoin once.
+8. Unplug/reconnect one USB or Bluetooth audio device if convenient.
+9. Record subjective notes about echo, keyboard noise, clipping, latency, and
    dropouts.
 
 Do not forward these ports on the router, enable Tailscale Funnel, or expose
