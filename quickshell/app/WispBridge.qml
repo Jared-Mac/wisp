@@ -302,6 +302,8 @@ Item {
     if (sharing) parts.push("Sharing " + String(screenShareState.source || "screen"))
     if (cameraActive) parts.push("Camera on")
     if (remoteVideoAvailable) parts.push(remoteVideoLabel + " is sharing")
+    if (remoteMutedParticipants.length > 0)
+      parts.push(remoteMutedParticipants.join(" + ") + " muted")
     if (selfState.deafened) parts.push("Deafened")
     else if (effectiveMuted) parts.push("Microphone muted")
     else parts.push("Audio ready")

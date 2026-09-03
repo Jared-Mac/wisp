@@ -91,8 +91,10 @@ Publishing defaults to H.264 at the High profile (screen up to 1080p60 at
 8 Mbps; camera up to 720p30 at 2.5 Mbps). Settings also expose Balanced and
 Ultra profiles plus VP8 and AV1. Wisp asks LiveKit for a detected hardware
 encoder when one exists and reports the selected backend instead of assuming
-GPU support. The tray and Omarchy center-bar icon show matching screen/camera
-badges; stopping a share revokes its portal session and unpublishes the track.
+GPU support. The tray and Omarchy center-bar icon show matching, independent
+screen/camera badges. The Omarchy icon also keeps unread-message and
+remote-video indicators visible while a call is active; stopping a share
+revokes its portal session and unpublishes the track.
 
 **Exit Wisp** closes the Quickshell UI and the tray-owning daemon. When Wisp
 was started with `just dev`, that daemon exit also makes the development
