@@ -131,7 +131,8 @@ impl ksni::Tray for WispTray {
         vec![waveform_icon(
             32,
             self.audio_state(),
-            self.state.sharing || self.state.camera,
+            self.state.sharing,
+            self.state.camera,
         )]
     }
 
@@ -236,7 +237,7 @@ pub(super) async fn spawn(
     Ok((receiver, handle))
 }
 
-fn waveform_icon(size: i32, state: AudioState, sharing: bool) -> ksni::Icon {
+fn waveform_icon(size: i32, state: AudioState, sharing: bool, camera: bool) -> ksni::Icon {
     let dimension = usize::try_from(size).expect("positive tray icon size");
     let mut data = vec![0_u8; dimension * dimension * 4];
     let center = size / 2;
@@ -254,8 +255,13 @@ fn waveform_icon(size: i32, state: AudioState, sharing: bool) -> ksni::Icon {
             }
         }
     }
-    if sharing {
-        draw_share_badge(&mut data, dimension, size);
+    if sharing && camera {
+        draw_share_badge(&mut data, dimension, (7, 7));
+    } else if sharing {
+        draw_share_badge(&mut data, dimension, (size - 7, 7));
+    }
+    if camera {
+        draw_camera_badge(&mut data, dimension, (size - 7, 7));
     }
     draw_state_badge(&mut data, dimension, size, state);
     ksni::Icon {
@@ -265,8 +271,7 @@ fn waveform_icon(size: i32, state: AudioState, sharing: bool) -> ksni::Icon {
     }
 }
 
-fn draw_share_badge(data: &mut [u8], dimension: usize, size: i32) {
-    let center = (size - 7, 7);
+fn draw_share_badge(data: &mut [u8], dimension: usize, center: (i32, i32)) {
     let radius = 7;
     for y in (center.1 - radius)..=(center.1 + radius) {
         for x in (center.0 - radius)..=(center.0 + radius) {
@@ -288,6 +293,34 @@ fn draw_share_badge(data: &mut [u8], dimension: usize, size: i32) {
         set_pixel(data, dimension, x, center.1 + 4, ink);
     }
     set_pixel(data, dimension, center.0, center.1 + 3, ink);
+}
+
+fn draw_camera_badge(data: &mut [u8], dimension: usize, center: (i32, i32)) {
+    let radius = 7;
+    for y in (center.1 - radius)..=(center.1 + radius) {
+        for x in (center.0 - radius)..=(center.0 + radius) {
+            if (x - center.0).pow(2) + (y - center.1).pow(2) <= radius.pow(2) {
+                set_pixel(data, dimension, x, y, [255, 72, 220, 150]);
+            }
+        }
+    }
+
+    let ink = [255, 21, 24, 33];
+    for y in (center.1 - 3)..=(center.1 + 3) {
+        for x in (center.0 - 4)..=(center.0 + 3) {
+            set_pixel(data, dimension, x, y, ink);
+        }
+    }
+    for y in (center.1 - 2)..=(center.1 + 2) {
+        for x in (center.0 + 4)..=(center.0 + 5) {
+            set_pixel(data, dimension, x, y, ink);
+        }
+    }
+    for y in (center.1 - 1)..=(center.1 + 1) {
+        for x in (center.0 - 1)..=(center.0 + 1) {
+            set_pixel(data, dimension, x, y, [255, 72, 220, 150]);
+        }
+    }
 }
 
 fn set_pixel(data: &mut [u8], dimension: usize, x: i32, y: i32, color: [u8; 4]) {
@@ -351,7 +384,7 @@ mod tests {
 
     #[test]
     fn tray_icon_is_argb32() {
-        let icon = waveform_icon(32, AudioState::Ready, false);
+        let icon = waveform_icon(32, AudioState::Ready, false, false);
         assert_eq!(icon.width, 32);
         assert_eq!(icon.height, 32);
         assert_eq!(icon.data.len(), 32 * 32 * 4);
@@ -365,7 +398,7 @@ mod tests {
             AudioState::Muted,
             AudioState::MutedAndDeafened,
         ];
-        let icons = states.map(|state| waveform_icon(32, state, false).data);
+        let icons = states.map(|state| waveform_icon(32, state, false, false).data);
         for left in 0..icons.len() {
             for right in (left + 1)..icons.len() {
                 assert_ne!(icons[left], icons[right]);
@@ -376,9 +409,21 @@ mod tests {
     #[test]
     fn screen_sharing_adds_a_distinct_badge() {
         assert_ne!(
-            waveform_icon(32, AudioState::Ready, false).data,
-            waveform_icon(32, AudioState::Ready, true).data
+            waveform_icon(32, AudioState::Ready, false, false).data,
+            waveform_icon(32, AudioState::Ready, true, false).data
         );
+    }
+
+    #[test]
+    fn camera_adds_a_distinct_badge() {
+        let idle = waveform_icon(32, AudioState::Ready, false, false).data;
+        let sharing = waveform_icon(32, AudioState::Ready, true, false).data;
+        let camera = waveform_icon(32, AudioState::Ready, false, true).data;
+        let both = waveform_icon(32, AudioState::Ready, true, true).data;
+        assert_ne!(camera, idle);
+        assert_ne!(camera, sharing);
+        assert_ne!(both, camera);
+        assert_ne!(both, sharing);
     }
 
     #[test]

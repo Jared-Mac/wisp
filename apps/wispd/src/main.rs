@@ -574,7 +574,7 @@ impl Daemon {
                 let (camera, video) = {
                     let state = self.state.read().await;
                     (
-                        state.self_state.media.camera.clone(),
+                        inactive_camera_state(&state.self_state.media.camera),
                         state.self_state.media.video.clone(),
                     )
                 };
@@ -1224,7 +1224,10 @@ impl Daemon {
         if !self.media_enabled {
             bail!("media is disabled");
         }
-        let enabled = args.get("enabled").and_then(Value::as_bool).unwrap_or(true);
+        let enabled = args
+            .get("enabled")
+            .and_then(Value::as_bool)
+            .context("camera command requires an explicit enabled boolean")?;
         if !enabled {
             self.media.stop_camera().await;
             self.set_local_media(
@@ -2074,6 +2077,14 @@ fn merge_camera_inventory(current: &mut CameraState, refreshed: CameraState) {
     current.selected_device_id = refreshed.selected_device_id;
 }
 
+fn inactive_camera_state(current: &CameraState) -> CameraState {
+    CameraState {
+        devices: current.devices.clone(),
+        selected_device_id: current.selected_device_id.clone(),
+        ..CameraState::default()
+    }
+}
+
 fn find_remote_video_mut<'a>(
     media: &'a mut MediaState,
     target: &RemoteVideoTarget,
@@ -2741,10 +2752,35 @@ async fn main() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        deafen_transition, describe_media_failure, effective_muted, mute_transition,
-        update_remote_mute_state,
+        deafen_transition, describe_media_failure, effective_muted, inactive_camera_state,
+        mute_transition, update_remote_mute_state,
     };
-    use wisp_protocol::{MediaState, PushToTalkState};
+    use wisp_protocol::{CameraState, MediaState, PushToTalkState};
+
+    #[test]
+    fn media_reconnect_never_preserves_camera_activation() {
+        let active = CameraState {
+            selected_device_id: Some("camera-1".into()),
+            starting: true,
+            active: true,
+            width: Some(1280),
+            height: Some(720),
+            fps: Some(30),
+            published_frames: 42,
+            encoder_backend: Some("software".into()),
+            viewers: vec!["Jared".into()],
+            error: Some("old error".into()),
+            ..CameraState::default()
+        };
+
+        let reset = inactive_camera_state(&active);
+        assert_eq!(reset.selected_device_id.as_deref(), Some("camera-1"));
+        assert!(!reset.starting);
+        assert!(!reset.active);
+        assert_eq!(reset.published_frames, 0);
+        assert!(reset.viewers.is_empty());
+        assert!(reset.error.is_none());
+    }
 
     #[test]
     fn remote_mute_state_is_sorted_deduplicated_and_not_speaking() {
