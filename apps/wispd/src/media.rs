@@ -1262,6 +1262,12 @@ impl MediaManager {
             publication.set_subscribed(false);
             return Err(error);
         }
+        // Report viewing intent immediately. Waiting only for TrackSubscribed is
+        // racy when LiveKit has already attached the track by the time the local
+        // surface is opened; the later callback remains as an idempotent retry.
+        if let Some(room) = self.connected_room().await {
+            spawn_video_watch_signal(room, target, true);
+        }
         Ok(())
     }
 
@@ -1393,8 +1399,20 @@ async fn publish_video_watch_signal(
 
 fn spawn_video_watch_signal(room: Arc<Room>, target: RemoteVideoTarget, watching: bool) {
     tokio::spawn(async move {
-        if let Err(error) = publish_video_watch_signal(&room, &target, watching).await {
-            warn!(%error, watching, "could not notify the video publisher about viewing state");
+        match publish_video_watch_signal(&room, &target, watching).await {
+            Ok(()) => info!(
+                participant = %target.participant,
+                source = %target.source,
+                watching,
+                "sent video viewer update"
+            ),
+            Err(error) => warn!(
+                %error,
+                participant = %target.participant,
+                source = %target.source,
+                watching,
+                "could not notify the video publisher about viewing state"
+            ),
         }
     });
 }
