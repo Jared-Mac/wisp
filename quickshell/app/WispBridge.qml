@@ -23,12 +23,15 @@ Item {
   property var sendingConversations: ({})
   property var savedFiles: ({})
   property var savingFiles: ({})
+  property var transferProgress: ({})
   property var chatImageUrls: ({})
   property var imageErrors: ({})
   property var imageRequests: ({})
   property var requests: ({})
   signal clipboardTextReady(string conversationId, string value)
   signal messageMutationFinished(string messageId, string action, bool success, string error)
+  signal historyClearFinished(string conversationId, bool success, string error)
+  signal roomActionFinished(string action, bool success, string error)
   onAppFocusedChanged: markVisibleConversationRead()
   onChatVisibleChanged: markVisibleConversationRead()
   readonly property string runtimeDir: Quickshell.env("XDG_RUNTIME_DIR")
@@ -446,6 +449,11 @@ Item {
       lastError = "Invalid response from wispd"
       return
     }
+    if (message.type === "event" && message.name === "file_transfer_progress") {
+      var progress = message.payload || ({})
+      transferProgress = replaceEntry(transferProgress, progress.direction + ":" + progress.id, progress)
+      return
+    }
     if (message.type === "snapshot") {
       applySnapshot(message.snapshot)
       return
@@ -504,6 +512,15 @@ Item {
     }
   }
   function attachmentsFor(id) { return pendingAttachments[id] || [] }
+  function setAttachmentKeep(conversationId, token, keep) {
+    pendingAttachments = replaceEntry(pendingAttachments, conversationId, attachmentsFor(conversationId).map(function(a) {
+      return a.token === token ? Object.assign({}, a, {keep:keep}) : a
+    }))
+  }
+  function transferLabel(direction, id) {
+    var value = transferProgress[direction + ":" + id]
+    return value && value.total > 0 ? " " + Math.min(100, Math.floor(value.bytes * 100 / value.total)) + "%" : "…"
+  }
   function importChatFiles(conversationId, urls) {
     if (!conversationId || sendingConversations[conversationId]) return
     var values = []
@@ -520,7 +537,8 @@ Item {
       attachmentsFor(conversationId).filter(function(a) { return a.token !== token }))
   }
   function sendAttachmentQueue(conversationId, tokens, caption, originalText) {
-    var id = send("send_attachment_message", {conversation_id: conversationId, token: tokens[0], caption: caption})
+    var attachment = attachmentsFor(conversationId).filter(function(a) { return a.token === tokens[0] })[0]
+    var id = send("send_attachment_message", {conversation_id: conversationId, token: tokens[0], caption: caption, keep:!!(attachment && attachment.keep)})
     if (id) {
       requests[id] = {kind: "send", conversationId: conversationId, text: originalText, token: tokens[0], remaining: tokens.slice(1)}
       sendingConversations = replaceEntry(sendingConversations, conversationId, true)
@@ -550,6 +568,7 @@ Item {
     }
   }
   function fileSize(size) {
+    if (size >= 1000000000) return (size / 1000000000).toFixed(2) + " GB"
     return size >= 1048576 ? (size / 1048576).toFixed(1) + " MB"
       : size >= 1024 ? Math.ceil(size / 1024) + " KB" : size + " bytes"
   }
@@ -570,6 +589,11 @@ Item {
     if (action.kind === "edit" || action.kind === "delete") {
       messageMutationFinished(action.messageId, action.kind, !!message.ok,
         message.error ? String(message.error.message || "Could not update message") : "")
+    } else if (action.kind === "clear") {
+      historyClearFinished(action.conversationId, !!message.ok, message.error ? String(message.error.message || "Could not clear history") : "")
+    } else if (action.kind === "room") {
+      if (message.ok && action.action === "create_room" && value.id) activeConversationId = String(value.id)
+      roomActionFinished(action.action, !!message.ok, message.error ? String(message.error.message || "Could not update room") : "")
     } else if (action.kind === "send") {
       sendingConversations = replaceEntry(sendingConversations, conversationId, undefined)
       if (message.ok) {
@@ -621,8 +645,18 @@ Item {
   function exitConversation(id) {
     send("set_conversation_tab", { "conversation_id": String(id), "closed": true })
   }
-  function clearChatHistory(id) {
-    send("clear_chat_history", { "conversation_id": String(id) })
+  function clearChatHistory(id, forEveryone) {
+    var request = send("clear_chat_history", {conversation_id:String(id), for_everyone:!!forEveryone})
+    if (request) requests[request] = {kind:"clear",conversationId:String(id)}
+    return !!request
+  }
+  function setFileRetention(id, keep) {
+    send("set_file_retention", {message_id:String(id),keep:keep})
+  }
+  function roomAction(action, args) {
+    var request = send(action, args)
+    if (request) requests[request] = {kind:"room",action:action}
+    return !!request
   }
   function closeConversation() { activeConversationId = "" }
   function sendMessage(text) {

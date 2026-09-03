@@ -6,7 +6,7 @@ trap 'rm -rf -- "$test_dir"' EXIT
 mkdir -p "$test_dir/config/wisp"
 cp -a "$repo_dir/quickshell/app" "$test_dir/app"
 cp "$repo_dir/tests/quickshell/ChatWorkspace.qml" "$test_dir/shell.qml"
-for fixture_mode in app image panel settings edit files; do
+for fixture_mode in app image panel settings edit files clearroom cleardm roomsettings newroom; do
   screenshot=""
   if [[ -n "${WISP_CHAT_SCREENSHOT:-}" ]]; then
     screenshot="${WISP_CHAT_SCREENSHOT%.png}-$fixture_mode.png"
@@ -22,4 +22,4 @@ for fixture_mode in app image panel settings edit files; do
   rg -q 'CHAT_WORKSPACE_OK' "$test_dir/log"
 done
 jq -e '.muted == true and .volume == 35 and .soundPath == "file:///tmp/test-custom-sound.wav"' "$test_dir/config/wisp/notifications.json" >/dev/null || { cat "$test_dir/config/wisp/notifications.json"; exit 1; }
-echo 'App/tray image layouts, draft behavior, and local notification settings passed'
+echo 'App/tray attachments, room permissions, clear confirmation, drafts, and notification settings passed'

@@ -1,6 +1,7 @@
 import QtQuick
 import Quickshell
 import "app" as Wisp
+import "app/components" as Components
 
 ShellRoot {
   id: test
@@ -24,6 +25,11 @@ ShellRoot {
     function send(name, args) { sent.push({name:name,args:args}); requestId++; return "test-" + requestId }
   }
   Wisp.WispWindow { id: window; bridge: bridge; theme: theme; visible: test.mode !== "panel" }
+  Item {
+    parent: window.contentItem
+    Components.ClearHistoryDialog { id: clearDialog; bridge: bridge; theme: theme }
+    Components.RoomManager { id: roomDialog; bridge: bridge; theme: theme }
+  }
   FloatingWindow {
     id: compact
     visible: test.mode === "panel"
@@ -47,7 +53,8 @@ ShellRoot {
     data.self.connection = "available"
     data.self.presence = "open"
     data.conversations = [
-      {id:"porch",kind:"hangout",label:"Porch",spot_id:"porch",unread_count:0},
+      {id:"porch",kind:"hangout",label:"Porch",spot_id:"porch",unread_count:0, self_role:"host", can_clear_for_everyone:true,
+        members:[{id:"self",display_name:"Tyler"},{id:"jared",display_name:"Jared"}],member_roles:{self:"host",jared:"member"}},
       {id:"dm",kind:"direct",label:"Jared",unread_count:2},
       {id:"friends",kind:"circle",label:"Friends",unread_count:0}
     ]
@@ -84,9 +91,11 @@ ShellRoot {
       {token:"one",file_name:"one.txt",size:100,is_image:false},
       {token:"two",file_name:"two.txt",size:200,is_image:false}
     ]}})
+    bridge.setAttachmentKeep("dm", "one", true)
     bridge.sendComposedMessage("dm")
     var firstUploadId = "test-" + bridge.requestId
     test.check(bridge.sent[bridge.sent.length-1].args.caption === "A separate DM draft", "caption accompanies first attachment")
+    test.check(bridge.sent[bridge.sent.length-1].args.keep === true, "manual retention flag accompanies file")
     bridge.finishRequest({id:firstUploadId,ok:true})
     test.check(bridge.attachmentsFor("dm").length === 1 && bridge.sendingConversations.dm, "successful file advances queue")
     test.check(bridge.sent[bridge.sent.length-1].args.caption === "", "caption is not duplicated across attachments")
@@ -104,7 +113,7 @@ ShellRoot {
     }
     if (test.mode === "files" || test.mode === "panel") {
       data = JSON.parse(JSON.stringify(data))
-      data.messages.push({id:"file",conversation_id:"porch",sender:{id:"jared",display_name:"Jared"},created_at:"2026-09-03T17:04:00Z",content_type:"application/octet-stream",payload:{file_name:"project-notes.txt",size:3400,caption:"Here are the notes."}})
+      data.messages.push({id:"file",conversation_id:"porch",sender:{id:"jared",display_name:"Jared"},created_at:"2026-09-03T17:04:00Z",content_type:"application/octet-stream",payload:{file_name:"project-footage.mp4",size:6000000000,expires_at:"2026-09-04T17:04:00Z",keep:false,caption:"Here is the footage."}})
       bridge.applySnapshot(data)
       bridge.pendingAttachments = {porch:[{token:"pending-file",file_name:"notes.txt",size:3000,is_image:false},{token:"pending-image",file_name:"Screenshot.png",size:8000,is_image:true,url:String(Qt.resolvedUrl("app/assets/waveform.svg"))}]}
       bridge.saveChatFile("file")
@@ -116,6 +125,23 @@ ShellRoot {
     bridge.notificationVolume = 35
     bridge.notificationSoundPath = "file:///tmp/test-custom-sound.wav"
     if (test.mode === "settings") window.contentItem.children[0].children[0].settingsOpen = true
+  }
+  Timer {
+    interval: 650; running: ["clearroom","cleardm","roomsettings","newroom"].indexOf(test.mode) >= 0
+    onTriggered: {
+      if (test.mode === "clearroom" || test.mode === "cleardm") {
+        clearDialog.confirm(test.mode === "clearroom" ? "porch" : "dm")
+        test.check(clearDialog.forEveryone === (test.mode === "clearroom"), "global clearing requires room permission")
+        clearDialog.clearing = bridge.clearChatHistory(clearDialog.conversationId, clearDialog.forEveryone)
+        test.check(bridge.sent[bridge.sent.length-1].args.for_everyone === clearDialog.forEveryone, "clear request explicitly scopes deletion")
+        bridge.finishRequest({id:"test-" + bridge.requestId,ok:false,error:{message:"Test failure — history was not cleared."}})
+        test.check(!clearDialog.clearing && clearDialog.error !== "", "failed clearing remains retryable")
+      } else if (test.mode === "roomsettings") {
+        roomDialog.manage("porch")
+        test.check(roomDialog.owner && roomDialog.admin, "owner has administration controls")
+        test.check(roomDialog.invitees.length === 1 && roomDialog.invitees[0].id === "charlie", "only non-members offered invitations")
+      } else roomDialog.createRoom()
+    }
   }
   Timer {
     interval: 400; running: test.mode !== "settings"
@@ -159,6 +185,8 @@ ShellRoot {
       test.check(window.height >= 850, "large app default height")
       var path = Quickshell.env("WISP_CHAT_SCREENSHOT")
       var target = test.mode === "panel" ? compactSurface : window.contentItem.children[0]
+      if (test.mode === "clearroom" || test.mode === "cleardm") target = clearDialog.contentItem.parent
+      if (test.mode === "roomsettings" || test.mode === "newroom") target = roomDialog.contentItem.parent
       if (test.mode === "edit") {
         var feed = test.findFeed(window.contentItem)
         test.check(feed && feed.editOpen, "edit dialog stays open after a failed save")

@@ -10,15 +10,21 @@ Column {
   readonly property var visibleHangouts: root.bridge.hangouts || []
   width: parent ? parent.width : 0
   spacing: root.theme.spacing.sm
-  visible: visibleHangouts.length > 0
+  visible: true
 
-  Text {
+  Item {
+    width: parent.width; height: root.theme.space(30)
+    Text {
+    anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
     text: "ROOMS"
     color: root.theme.muted
     font.family: root.theme.font.family
     font.pixelSize: root.theme.font.caption
     font.weight: Font.Bold
+    }
+    ChatButton { anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; theme: root.theme; text: "New room"; onClicked: roomManager.createRoom() }
   }
+  RoomManager { id: roomManager; bridge: root.bridge; theme: root.theme }
 
   Repeater {
     model: root.visibleHangouts

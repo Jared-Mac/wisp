@@ -95,8 +95,9 @@ Rectangle {
     palette.text: root.theme.foreground
     x: root.width - width - root.theme.space(18); y: chatHeading.y + chatHeading.height
     MenuItem { text: "Close conversation"; onTriggered: root.bridge.exitConversation(root.currentId) }
+    MenuItem { text: "Room settings…"; visible: !!(root.current && root.current.spot_id); height: visible ? implicitHeight : 0; onTriggered: roomManager.manage(root.currentId) }
     MenuSeparator {}
-    MenuItem { text: "Clear Chat History…"; onTriggered: { root.confirmationId = root.currentId; confirmClear.open() } }
+    MenuItem { text: "Clear Chat History…"; onTriggered: confirmClear.confirm(root.currentId) }
   }
   MessageFeed {
     anchors.left: parent.left; anchors.right: parent.right
@@ -129,22 +130,6 @@ Rectangle {
     visible: !!root.current
     bridge: root.bridge; theme: root.theme; conversationId: root.currentId
   }
-  Dialog {
-    id: confirmClear
-    anchors.centerIn: parent
-    width: Math.min(root.width - 32, 430)
-    implicitHeight: 260
-    title: "Clear Chat History?"
-    modal: true
-    standardButtons: Dialog.Cancel | Dialog.Ok
-    palette.window: root.theme.surface
-    palette.windowText: root.theme.foreground
-    palette.buttonText: root.theme.foreground
-    contentItem: Text {
-      text: "Clear your saved history with " + root.label(root.bridge.conversationById(root.confirmationId)) + "?\n\nThis cannot be undone here. Other participants keep their history. New messages will still arrive."
-      wrapMode: Text.Wrap
-      color: root.theme.foreground
-    }
-    onAccepted: root.bridge.clearChatHistory(root.confirmationId)
-  }
+  ClearHistoryDialog { id: confirmClear; bridge: root.bridge; theme: root.theme }
+  RoomManager { id: roomManager; bridge: root.bridge; theme: root.theme }
 }

@@ -21,14 +21,6 @@ Column {
   spacing: root.theme.spacing.sm
   visible: availableSpots.length > 0
 
-  Text {
-    text: "SPOTS"
-    color: root.theme.muted
-    font.family: root.theme.font.family
-    font.pixelSize: root.theme.font.caption
-    font.weight: Font.Bold
-  }
-
   Repeater {
     model: root.availableSpots
     delegate: Rectangle {

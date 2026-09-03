@@ -13,7 +13,7 @@ Column {
 
   Flickable {
     visible: root.attachments.length > 0
-    width: parent.width; height: root.theme.space(100)
+    width: parent.width; height: root.theme.space(124)
     contentWidth: attachmentRow.width; contentHeight: height
     clip: true; flickableDirection: Flickable.HorizontalFlick
     ScrollBar.horizontal: ScrollBar {}
@@ -24,7 +24,7 @@ Column {
         model: root.attachments
         Rectangle {
           required property var modelData
-          width: root.theme.space(170); height: root.theme.space(90)
+          width: root.theme.space(180); height: root.theme.space(116)
           color: root.theme.surface; radius: root.theme.cornerRadius
           Image {
             anchors.left: parent.left; anchors.top: parent.top; anchors.margins: root.theme.spacing.md
@@ -45,10 +45,18 @@ Column {
             ToolTip.visible: hovered; ToolTip.text: "Remove attachment"
           }
           Text {
-            anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
+            anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: keepBox.top
             anchors.margins: root.theme.spacing.md
             text: String(modelData.file_name || "Screenshot.png") + " · " + root.bridge.fileSize(Number(modelData.size || 0))
             elide: Text.ElideMiddle; color: root.theme.foreground; font.pixelSize: root.theme.font.caption
+          }
+          CheckBox {
+            id: keepBox
+            anchors.left: parent.left; anchors.bottom: parent.bottom
+            height: root.theme.space(32); visible: !modelData.is_image
+            text: "Keep on server"; checked: !!modelData.keep; enabled: !root.busy
+            palette.windowText: root.theme.foreground
+            onToggled: root.bridge.setAttachmentKeep(root.conversationId, modelData.token, checked)
           }
         }
       }
@@ -106,7 +114,7 @@ Column {
     ChatButton {
       id: sendButton
       theme: root.theme; primary: true
-      text: root.bridge.sendingConversations[root.conversationId] ? "Sending…" : root.bridge.importingConversations[root.conversationId] ? "Preparing…" : "Send"
+      text: root.bridge.sendingConversations[root.conversationId] ? "Sending" + root.bridge.transferLabel("upload", root.attachments.length ? root.attachments[0].token : "") : root.bridge.importingConversations[root.conversationId] ? "Preparing…" : "Send"
       enabled: !root.busy
         && (root.attachments.length > 0 || root.bridge.draftFor(root.conversationId).trim().length > 0)
       onClicked: root.bridge.sendComposedMessage(root.conversationId)

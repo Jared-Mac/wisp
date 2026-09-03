@@ -1,4 +1,5 @@
 mod chat_images;
+mod chat_transfers;
 mod media;
 mod shortcut;
 mod surface;
@@ -1027,6 +1028,25 @@ impl Daemon {
                 self.refresh("conversation_changed").await?;
                 Ok(Some(serde_json::to_value(conversation)?))
             }
+            "create_room" | "invite_to_room" | "set_room_admin" => {
+                let endpoint = match command.name.as_str() {
+                    "create_room" => "/v1/rooms",
+                    "invite_to_room" => "/v1/rooms/invite",
+                    _ => "/v1/rooms/admin",
+                };
+                let value: Value = decode(
+                    self.api
+                        .request(reqwest::Method::POST, endpoint)
+                        .json(&command.args)
+                        .send()
+                        .await?,
+                )
+                .await?;
+                if let Err(error) = self.refresh("room_changed").await {
+                    warn!(%error, "room changed but snapshot refresh failed");
+                }
+                Ok(Some(value))
+            }
             "send_direct" => {
                 let friend = string_arg(&command.args, "friend")?;
                 let text = string_arg(&command.args, "text")?;
@@ -1093,42 +1113,40 @@ impl Daemon {
                 let token = string_arg(&command.args, "token")?.parse()?;
                 let draft = self.chat_images.draft(token).await?;
                 let conversation_id = string_arg(&command.args, "conversation_id")?;
-                let caption: String = command
+                let caption = command
                     .args
                     .get("caption")
                     .and_then(Value::as_str)
                     .unwrap_or_default()
-                    .into();
+                    .to_owned();
                 if command.name == "send_image_message" && !draft.is_image {
                     bail!("This attachment is not an image");
                 }
-                let (endpoint, request) = if draft.is_image {
-                    (
-                        "/v1/messages/image",
-                        serde_json::to_value(wisp_protocol::SendImageMessageRequest {
+                if !draft.is_image {
+                    return self
+                        .send_chunked_file(
+                            token,
+                            draft,
+                            conversation_id,
+                            caption,
+                            command
+                                .args
+                                .get("keep")
+                                .and_then(Value::as_bool)
+                                .unwrap_or(false),
+                        )
+                        .await;
+                }
+                let _: wisp_protocol::Message = decode(
+                    self.api
+                        .request(reqwest::Method::POST, "/v1/messages/image")
+                        .timeout(Duration::from_secs(120))
+                        .json(&wisp_protocol::SendImageMessageRequest {
                             conversation_id,
                             caption,
                             png_base64: base64::engine::general_purpose::STANDARD
                                 .encode(draft.bytes),
-                        })?,
-                    )
-                } else {
-                    (
-                        "/v1/messages/file",
-                        serde_json::to_value(wisp_protocol::SendFileMessageRequest {
-                            conversation_id,
-                            caption,
-                            file_name: draft.file_name,
-                            data_base64: base64::engine::general_purpose::STANDARD
-                                .encode(draft.bytes),
-                        })?,
-                    )
-                };
-                let _: wisp_protocol::Message = decode(
-                    self.api
-                        .request(reqwest::Method::POST, endpoint)
-                        .timeout(Duration::from_secs(120))
-                        .json(&request)
+                        })
                         .send()
                         .await?,
                 )
@@ -1139,83 +1157,24 @@ impl Daemon {
                 }
                 Ok(None)
             }
-            "save_chat_file" => {
+            "save_chat_file" => self.save_streamed_file(&command.args).await,
+            "set_file_retention" => {
                 let id: uuid::Uuid = string_arg(&command.args, "message_id")?.parse()?;
-                let message = self
-                    .state
-                    .read()
-                    .await
-                    .messages
-                    .iter()
-                    .find(|message| {
-                        message.id == id && message.content_type == "application/octet-stream"
-                    })
-                    .cloned()
-                    .context("File is not in your visible chat history")?;
-                let name = message.payload["file_name"]
-                    .as_str()
-                    .context("Missing filename")?;
-                if !wisp_protocol::valid_chat_file_name(name) {
-                    bail!("Invalid filename");
-                }
-                let expected = message.payload["size"]
-                    .as_u64()
-                    .context("Missing file size")?;
-                if expected > wisp_protocol::MAX_CHAT_FILE_BYTES as u64 {
-                    bail!("File exceeds 25 MB");
-                }
-                let mut response = self
-                    .api
-                    .request(reqwest::Method::GET, &format!("/v1/messages/{id}/file"))
-                    .timeout(Duration::from_secs(120))
-                    .send()
-                    .await?
-                    .error_for_status()?;
-                let mut bytes = Vec::new();
-                while let Some(chunk) = response.chunk().await? {
-                    if bytes.len() + chunk.len() > wisp_protocol::MAX_CHAT_FILE_BYTES {
-                        bail!("File exceeds 25 MB");
-                    }
-                    bytes.extend_from_slice(&chunk);
-                }
-                if bytes.len() as u64 != expected {
-                    bail!("Downloaded file size does not match");
-                }
-                let directory = tokio::process::Command::new("xdg-user-dir")
-                    .arg("DOWNLOAD")
-                    .output()
-                    .await
-                    .ok()
-                    .filter(|output| output.status.success())
-                    .and_then(|output| String::from_utf8(output.stdout).ok())
-                    .map(|value| PathBuf::from(value.trim()))
-                    .filter(|path| path.is_absolute())
-                    .or_else(|| {
-                        std::env::var_os("HOME").map(|home| PathBuf::from(home).join("Downloads"))
-                    })
-                    .context("No Downloads directory available")?
-                    .join("Wisp")
-                    .join(uuid::Uuid::new_v4().to_string());
-                tokio::fs::create_dir_all(&directory).await?;
-                let path = directory.join(name);
-                // User explicitly saves files; never automatically open/execute them,
-                // overwrite existing files, or restore executable permission bits.
-                let mut file = tokio::fs::OpenOptions::new()
-                    .write(true)
-                    .create_new(true)
-                    .mode(0o600)
-                    .open(&path)
-                    .await?;
-                if let Err(error) = file.write_all(&bytes).await {
-                    drop(file);
-                    let _ = tokio::fs::remove_file(&path).await;
-                    return Err(error.into());
-                }
-                file.flush().await?;
-                Ok(Some(
-                    json!({"message_id": id, "url": chat_images::file_url(&path)?,
-                    "directory_url": chat_images::file_url(&directory)?}),
-                ))
+                ensure_ok(
+                    self.api
+                        .request(
+                            reqwest::Method::PATCH,
+                            &format!("/v1/messages/{id}/retention"),
+                        )
+                        .json(&wisp_protocol::SetFileRetention {
+                            keep: boolean_arg(&command.args, "keep")?,
+                        })
+                        .send()
+                        .await?,
+                )
+                .await?;
+                self.refresh("file_retention_changed").await?;
+                Ok(None)
             }
             "load_chat_image" => {
                 let _cache_operation = self.chat_images.cache_operation.lock().await;
@@ -1795,8 +1754,14 @@ async fn serve_client(stream: UnixStream, daemon: Arc<Daemon>) -> anyhow::Result
     let (reader, mut writer) = stream.into_split();
     let mut lines = BufReader::new(reader).lines();
     let mut events = daemon.events.subscribe();
+    let mut transfers = tokio::task::JoinSet::new();
     loop {
         tokio::select! {
+            result = transfers.join_next(), if !transfers.is_empty() => {
+                if let Some(Ok(envelopes)) = result {
+                    for envelope in envelopes { write_envelope(&mut writer, &envelope).await?; }
+                }
+            },
             line = lines.next_line() => match line? {
                 Some(line) => {
                     let command = match serde_json::from_str::<CommandEnvelope>(&line) {
@@ -1806,7 +1771,16 @@ async fn serve_client(stream: UnixStream, daemon: Arc<Daemon>) -> anyhow::Result
                             continue;
                         }
                     };
-                    for envelope in daemon.handle_command(command).await { write_envelope(&mut writer, &envelope).await?; }
+                    if matches!(command.name.as_str(), "send_attachment_message" | "send_image_message" | "save_chat_file" | "import_chat_files" | "paste_clipboard") {
+                        if transfers.len() >= 8 {
+                            write_envelope(&mut writer, &DaemonEnvelope::failure(command.id, "transfers_busy", "Too many active transfers")).await?;
+                        } else {
+                            let daemon = daemon.clone();
+                            transfers.spawn(async move { daemon.handle_command(command).await });
+                        }
+                    } else {
+                        for envelope in daemon.handle_command(command).await { write_envelope(&mut writer, &envelope).await?; }
+                    }
                 }
                 None => return Ok(()),
             },

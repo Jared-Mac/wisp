@@ -1,3 +1,6 @@
+mod attachments;
+mod rooms;
+
 use axum::{
     Json, Router,
     extract::{
@@ -6,7 +9,7 @@ use axum::{
     },
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
-    routing::{delete, get, patch, post},
+    routing::{delete, get, patch, post, put},
 };
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{Duration as ChronoDuration, Utc};
@@ -188,6 +191,7 @@ impl AppState {
         cleanup_stale_sessions(&pool).await?;
         seed_development_users(&pool).await?;
         cleanup_expired_data(&pool).await?;
+        attachments::cleanup(&pool, Utc::now()).await?;
         let (events, _) = broadcast::channel(256);
         Ok(Self {
             pool,
@@ -232,6 +236,7 @@ impl AppState {
 
     async fn snapshot(&self, self_id: UserId) -> Result<Snapshot, ApiError> {
         let knocks = self.incoming_knocks(self_id).await;
+        let hangouts = load_hangouts(&self.pool, self_id).await?;
         let users =
             sqlx::query("SELECT id, display_name FROM users ORDER BY display_name COLLATE NOCASE")
                 .fetch_all(&self.pool)
@@ -257,17 +262,18 @@ impl AppState {
                 user,
                 presence: state.presence,
                 online: state.connections > 0,
-                hangout_id: active_hangout_for(&self.pool, id).await?,
+                hangout_id: active_hangout_for(&self.pool, id)
+                    .await?
+                    .filter(|active| hangouts.iter().any(|room| room.id == *active)),
                 activity: None,
             });
         }
         drop(runtime);
         let self_user = self_user.ok_or_else(|| ApiError::not_found("user does not exist"))?;
         let self_hangout = active_hangout_for(&self.pool, self_id).await?;
-        let hangouts = load_hangouts(&self.pool).await?;
         let conversations = load_conversations(&self.pool, self_id).await?;
         let messages = load_recent_messages(&self.pool, self_id).await?;
-        let spots = load_spots(&self.pool).await?;
+        let spots = load_spots(&self.pool, self_id).await?;
         let devices = load_devices(&self.pool, self_id).await?;
         Ok(Snapshot {
             seq,
@@ -400,6 +406,9 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/knocks/respond", post(respond_knock))
         .route("/v1/hangouts/leave", post(leave_hangout))
         .route("/v1/spots/join", post(join_spot))
+        .route("/v1/rooms", post(rooms::create))
+        .route("/v1/rooms/invite", post(rooms::invite))
+        .route("/v1/rooms/admin", post(rooms::set_admin))
         .route("/v1/livekit/token", post(livekit_token))
         .route("/v1/messages", get(list_messages).post(send_message))
         .route(
@@ -412,6 +421,17 @@ pub fn router(state: AppState) -> Router {
             post(send_file_message).layer(DefaultBodyLimit::max(36 * 1024 * 1024)),
         )
         .route("/v1/messages/{id}/file", get(get_chat_file))
+        .route("/v1/file-uploads", post(attachments::begin))
+        .route(
+            "/v1/file-uploads/{id}/chunks/{index}",
+            put(attachments::chunk)
+                .layer(DefaultBodyLimit::max(wisp_protocol::CHAT_FILE_CHUNK_BYTES)),
+        )
+        .route(
+            "/v1/file-uploads/{id}/complete",
+            post(attachments::complete),
+        )
+        .route("/v1/messages/{id}/retention", patch(attachments::retention))
         .route(
             "/v1/messages/{id}",
             patch(edit_message).delete(delete_message),
@@ -917,6 +937,8 @@ async fn join_users(
             .map_err(ApiError::internal)?;
         create_hangout_conversation(&mut tx, id, None).await?;
         add_member(&mut tx, id, friend_id).await?;
+        sqlx::query("UPDATE conversation_members SET role = 'host' WHERE conversation_id = ? AND user_id = ?")
+            .bind(format!("hangout:{id}")).bind(friend_id.to_string()).execute(&mut *tx).await.map_err(ApiError::internal)?;
         id
     };
     add_member(&mut tx, hangout_id, self_id).await?;
@@ -991,6 +1013,7 @@ async fn join_spot(
         .ok_or_else(|| ApiError::not_found("spot does not exist"))?;
     let spot_id: String = spot.get("id");
     let spot_name: String = spot.get("name");
+    ensure_conversation_member(&state.pool, &format!("spot:{spot_id}"), self_id).await?;
     let mut tx = state.pool.begin().await.map_err(ApiError::internal)?;
     ensure_spot_conversation(&mut tx, &spot_id, &spot_name)
         .await
@@ -1104,6 +1127,7 @@ async fn send_message(
 enum StoredAttachment {
     Image(Vec<u8>),
     File(Vec<u8>),
+    Upload(Uuid),
 }
 
 async fn persist_message(
@@ -1129,7 +1153,23 @@ async fn persist_message(
         .bind(message.created_at.to_rfc3339()).bind(&message.content_type)
         .bind(serde_json::to_string(&message.payload).map_err(ApiError::internal)?)
         .bind(message.encryption_version).execute(&mut *tx).await.map_err(ApiError::internal)?;
-    if let Some(attachment) = attachment {
+    if let Some(StoredAttachment::Upload(upload_id)) = attachment {
+        let changed = sqlx::query("UPDATE file_uploads SET message_id = ? WHERE id = ? AND owner_id = ? AND conversation_id = ? AND message_id IS NULL AND received_bytes = size")
+            .bind(message.id.to_string()).bind(upload_id.to_string()).bind(sender_id.to_string())
+            .bind(&message.conversation_id).execute(&mut *tx).await.map_err(ApiError::internal)?;
+        if changed.rows_affected() != 1 {
+            return Err(ApiError::conflict(
+                "upload_changed",
+                "Upload already completed or incomplete; retry",
+            ));
+        }
+        sqlx::query("INSERT INTO chat_files(message_id, data, upload_id) VALUES (?, X'', ?)")
+            .bind(message.id.to_string())
+            .bind(upload_id.to_string())
+            .execute(&mut *tx)
+            .await
+            .map_err(ApiError::internal)?;
+    } else if let Some(attachment) = attachment {
         let (statement, bytes) = match attachment {
             StoredAttachment::Image(bytes) => (
                 "INSERT INTO chat_images(message_id, png) VALUES (?, ?)",
@@ -1139,6 +1179,7 @@ async fn persist_message(
                 "INSERT INTO chat_files(message_id, data) VALUES (?, ?)",
                 bytes,
             ),
+            StoredAttachment::Upload(_) => unreachable!(),
         };
         sqlx::query(statement)
             .bind(message.id.to_string())
@@ -1286,6 +1327,9 @@ async fn get_chat_file(
     headers: HeaderMap,
     Path(id): Path<Uuid>,
 ) -> Result<Response, ApiError> {
+    if let Some(response) = attachments::download(&state, &headers, id).await? {
+        return Ok(response);
+    }
     let user_id = authenticate_headers(&state, &headers).await?;
     let bytes = sqlx::query_scalar::<_, Vec<u8>>("SELECT cf.data FROM chat_files cf JOIN messages m ON m.id = cf.message_id JOIN conversation_members cm ON cm.conversation_id = m.conversation_id WHERE cf.message_id = ? AND cm.user_id = ? AND m.created_at > COALESCE(cm.history_cleared_at, '')")
         .bind(id.to_string()).bind(user_id.to_string())
@@ -1370,10 +1414,12 @@ async fn edit_message(
         payload = json!(text);
     }
     if payload != original {
-        sqlx::query(
-            "UPDATE messages SET payload = ?, edited_at = ? WHERE id = ? AND sender_id = ?",
-        )
-        .bind(serde_json::to_string(&payload).map_err(ApiError::internal)?)
+        sqlx::query(if is_attachment {
+            "UPDATE messages SET payload = json_set(payload, '$.caption', ?), edited_at = ? WHERE id = ? AND sender_id = ?"
+        } else {
+            "UPDATE messages SET payload = ?, edited_at = ? WHERE id = ? AND sender_id = ?"
+        })
+        .bind(if is_attachment { text.to_owned() } else { serde_json::to_string(&payload).map_err(ApiError::internal)? })
         .bind(Utc::now().to_rfc3339())
         .bind(id.to_string())
         .bind(user_id.to_string())
@@ -1489,23 +1535,64 @@ async fn clear_history_for(
     conversation_id: &str,
 ) -> Result<(), ApiError> {
     ensure_conversation_member(pool, conversation_id, user_id).await?;
+    let mut tx = pool.begin().await.map_err(ApiError::internal)?;
     sqlx::query("UPDATE conversation_members SET history_cleared_at = ? WHERE conversation_id = ? AND user_id = ?")
         .bind(Utc::now().to_rfc3339()).bind(conversation_id).bind(user_id.to_string())
-        .execute(pool).await.map_err(ApiError::internal)?;
+        .execute(&mut *tx).await.map_err(ApiError::internal)?;
+    // Only prune the common cleared prefix. Newer messages the other person
+    // has not cleared remain available to them, including attachments.
+    sqlx::query("DELETE FROM messages WHERE conversation_id = ? AND conversation_id IN (SELECT id FROM conversations WHERE kind = 'direct') AND (SELECT COUNT(*) FROM conversation_members WHERE conversation_id = ?) = 2 AND (SELECT COUNT(history_cleared_at) FROM conversation_members WHERE conversation_id = ?) = 2 AND created_at <= (SELECT MIN(history_cleared_at) FROM conversation_members WHERE conversation_id = ?)")
+        .bind(conversation_id).bind(conversation_id).bind(conversation_id).bind(conversation_id)
+        .execute(&mut *tx).await.map_err(ApiError::internal)?;
+    tx.commit().await.map_err(ApiError::internal)?;
     Ok(())
 }
 
 async fn clear_conversation_history(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Json(request): Json<MarkConversationReadRequest>,
+    Json(request): Json<wisp_protocol::ClearChatHistoryRequest>,
 ) -> Result<Json<Value>, ApiError> {
     let user_id = authenticate_headers(&state, &headers).await?;
-    clear_history_for(&state.pool, user_id, &request.conversation_id).await?;
+    if request.for_everyone {
+        clear_room_history(&state.pool, user_id, &request.conversation_id).await?;
+    } else {
+        clear_history_for(&state.pool, user_id, &request.conversation_id).await?;
+    }
     state
         .emit("conversation_changed", json!({"changed": true}))
         .await;
     Ok(Json(json!({"ok": true})))
+}
+
+async fn can_clear_room(pool: &SqlitePool, user: UserId, id: &str) -> Result<bool, ApiError> {
+    let allowed: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM conversation_members cm JOIN conversations c ON c.id = cm.conversation_id WHERE cm.conversation_id = ? AND cm.user_id = ? AND c.kind != 'direct' AND cm.role IN ('host','admin'))")
+        .bind(id).bind(user.to_string()).fetch_one(pool).await.map_err(ApiError::internal)?;
+    Ok(allowed)
+}
+
+async fn clear_room_history(pool: &SqlitePool, user: UserId, id: &str) -> Result<(), ApiError> {
+    if !can_clear_room(pool, user, id).await? {
+        return Err(ApiError::forbidden(
+            "Only a room host or administrator can clear everyone's history",
+        ));
+    }
+    let now = Utc::now().to_rfc3339();
+    let mut tx = pool.begin().await.map_err(ApiError::internal)?;
+    sqlx::query("UPDATE conversation_members SET history_cleared_at = ? WHERE conversation_id = ?")
+        .bind(&now)
+        .bind(id)
+        .execute(&mut *tx)
+        .await
+        .map_err(ApiError::internal)?;
+    sqlx::query("DELETE FROM messages WHERE conversation_id = ? AND created_at <= ?")
+        .bind(id)
+        .bind(&now)
+        .execute(&mut *tx)
+        .await
+        .map_err(ApiError::internal)?;
+    tx.commit().await.map_err(ApiError::internal)?;
+    Ok(())
 }
 
 async fn user_by_id(
@@ -1631,6 +1718,9 @@ async fn seed_development_users(pool: &SqlitePool) -> anyhow::Result<()> {
         .execute(&mut *tx)
         .await?;
     ensure_spot_conversation(&mut tx, PORCH_ID, "Porch").await?;
+    sqlx::query("UPDATE conversation_members SET role = CASE WHEN conversation_id = ? THEN 'host' ELSE 'admin' END WHERE user_id = ? AND conversation_id IN (?, ?)")
+        .bind(format!("spot:{PORCH_ID}")).bind(JARED_ID).bind(format!("spot:{PORCH_ID}")).bind(CIRCLE_CONVERSATION_ID)
+        .execute(&mut *tx).await?;
     tx.commit().await?;
     info!("development profiles ready");
     Ok(())
@@ -1639,7 +1729,7 @@ async fn seed_development_users(pool: &SqlitePool) -> anyhow::Result<()> {
 async fn cleanup_expired_messages(pool: &SqlitePool) -> anyhow::Result<()> {
     let cutoff = (Utc::now() - ChronoDuration::hours(HANGOUT_MESSAGE_RETENTION_HOURS)).to_rfc3339();
     sqlx::query(
-        "DELETE FROM messages WHERE created_at < ? AND conversation_id IN (SELECT id FROM conversations WHERE kind = 'hangout' AND spot_id IS NULL)",
+        "DELETE FROM messages WHERE content_type != 'application/octet-stream' AND created_at < ? AND conversation_id IN (SELECT id FROM conversations WHERE kind = 'hangout' AND spot_id IS NULL)",
     )
     .bind(cutoff)
     .execute(pool)
@@ -2011,6 +2101,25 @@ async fn load_conversation(
     };
     Ok(ConversationView {
         id: id.into(),
+        self_role: sqlx::query_scalar(
+            "SELECT role FROM conversation_members WHERE conversation_id = ? AND user_id = ?",
+        )
+        .bind(id)
+        .bind(user_id.to_string())
+        .fetch_one(pool)
+        .await
+        .map_err(ApiError::internal)?,
+        member_roles: sqlx::query_as::<_, (String, String)>(
+            "SELECT user_id, role FROM conversation_members WHERE conversation_id = ?",
+        )
+        .bind(id)
+        .fetch_all(pool)
+        .await
+        .map_err(ApiError::internal)?
+        .into_iter()
+        .map(|(user, role)| Ok((parse_uuid(&user)?, role)))
+        .collect::<Result<_, ApiError>>()?,
+        can_clear_for_everyone: can_clear_room(pool, user_id, id).await?,
         kind,
         label,
         spot_id,
@@ -2025,8 +2134,9 @@ async fn load_conversation(
     })
 }
 
-async fn load_spots(pool: &SqlitePool) -> Result<Vec<SpotView>, ApiError> {
-    let rows = sqlx::query("SELECT id, name FROM spots ORDER BY name COLLATE NOCASE")
+async fn load_spots(pool: &SqlitePool, user: UserId) -> Result<Vec<SpotView>, ApiError> {
+    let rows = sqlx::query("SELECT s.id, s.name FROM spots s JOIN conversations c ON c.spot_id = s.id JOIN conversation_members cm ON cm.conversation_id = c.id WHERE cm.user_id = ? ORDER BY s.name COLLATE NOCASE")
+        .bind(user.to_string())
         .fetch_all(pool)
         .await
         .map_err(ApiError::internal)?;
@@ -2112,9 +2222,10 @@ async fn active_hangout_for_tx(
     value.as_deref().map(parse_uuid).transpose()
 }
 
-async fn load_hangouts(pool: &SqlitePool) -> Result<Vec<HangoutView>, ApiError> {
+async fn load_hangouts(pool: &SqlitePool, user: UserId) -> Result<Vec<HangoutView>, ApiError> {
     let rows =
-        sqlx::query("SELECT id, label FROM hangouts WHERE ended_at IS NULL ORDER BY created_at")
+        sqlx::query("SELECT h.id, h.label FROM hangouts h WHERE h.ended_at IS NULL AND (h.spot_id IS NULL OR EXISTS(SELECT 1 FROM conversations c JOIN conversation_members cm ON cm.conversation_id = c.id WHERE c.spot_id = h.spot_id AND cm.user_id = ?)) ORDER BY h.created_at")
+            .bind(user.to_string())
             .fetch_all(pool)
             .await
             .map_err(ApiError::internal)?;
@@ -2161,6 +2272,13 @@ async fn add_member(
     hangout_id: HangoutId,
     user_id: UserId,
 ) -> Result<(), ApiError> {
+    let allowed: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM hangouts h WHERE h.id = ? AND (h.spot_id IS NULL OR EXISTS(SELECT 1 FROM conversations c JOIN conversation_members cm ON cm.conversation_id = c.id WHERE c.spot_id = h.spot_id AND cm.user_id = ?)))")
+        .bind(hangout_id.to_string()).bind(user_id.to_string()).fetch_one(&mut **tx).await.map_err(ApiError::internal)?;
+    if !allowed {
+        return Err(ApiError::forbidden(
+            "Ask a room administrator for an invite first",
+        ));
+    }
     let already_member = sqlx::query_scalar::<_, i64>(
         "SELECT COUNT(*) FROM hangout_members WHERE hangout_id = ? AND user_id = ? AND left_at IS NULL",
     ).bind(hangout_id.to_string()).bind(user_id.to_string()).fetch_one(&mut **tx).await.map_err(ApiError::internal)? > 0;
@@ -2220,10 +2338,11 @@ async fn ensure_spot_conversation(
     .execute(&mut **tx)
     .await?;
     sqlx::query(
-        "INSERT OR IGNORE INTO conversation_members(conversation_id, user_id, joined_at) SELECT ?, user_id, ? FROM circle_members",
+        "INSERT OR IGNORE INTO conversation_members(conversation_id, user_id, joined_at) SELECT ?, user_id, ? FROM circle_members WHERE EXISTS(SELECT 1 FROM spots WHERE id = ? AND private = 0)",
     )
     .bind(&conversation_id)
     .bind(&now)
+    .bind(spot_id)
     .execute(&mut **tx)
     .await?;
     Ok(conversation_id)
@@ -2303,7 +2422,7 @@ fn issue_livekit_token(
 mod tests {
     use super::*;
 
-    fn test_config() -> AppConfig {
+    pub(super) fn test_config() -> AppConfig {
         AppConfig {
             database_url: "sqlite::memory:".into(),
             livekit_url: "ws://127.0.0.1:7880".into(),
@@ -2336,7 +2455,9 @@ mod tests {
         assert_eq!(porch.id, format!("spot:{PORCH_ID}"));
         assert_eq!(porch.spot_id.as_deref(), Some(PORCH_ID));
         assert_eq!(porch.members.len(), 4);
-        let spots = load_spots(&state.pool).await.unwrap();
+        let spots = load_spots(&state.pool, Uuid::parse_str(JARED_ID).unwrap())
+            .await
+            .unwrap();
         assert_eq!(spots.len(), 1);
         assert_eq!(spots[0].name, "Porch");
         assert!(spots[0].active_hangout_id.is_none());
@@ -2404,7 +2525,7 @@ mod tests {
         );
     }
 
-    fn chat_headers(id: &str) -> HeaderMap {
+    pub(super) fn chat_headers(id: &str) -> HeaderMap {
         let mut headers = HeaderMap::new();
         headers.insert("authorization", format!("Bearer dev:{id}").parse().unwrap());
         headers

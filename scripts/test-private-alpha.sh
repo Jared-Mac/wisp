@@ -184,7 +184,7 @@ post_json /v1/messages "$(jq -cn --arg id "$porch_conversation" \
 sqlite3 "$database" <<'SQL'
 UPDATE messages
 SET created_at = '2000-01-01T00:00:00Z'
-WHERE payload = 'persistent porch message';
+WHERE payload = '"persistent porch message"';
 INSERT INTO hangouts(id, livekit_room, created_at, ended_at)
 VALUES (
   '00000000-0000-4000-8000-000000000099',
@@ -216,7 +216,7 @@ VALUES (
   '00000000-0000-4000-8000-000000000001',
   '2000-01-01T00:00:00Z',
   'text/plain',
-  'temporary room message',
+  '"temporary room message"',
   0
 );
 SQL
@@ -242,6 +242,26 @@ curl --silent --fail -X PATCH -H "authorization: Bearer $charlie_token" -H 'cont
   -d '{"text":"Edited attachment caption"}' "$server_url/v1/messages/$file_id" >/dev/null
 post_json /v1/conversations/clear "$(jq -cn --arg id "$history_conversation" '{conversation_id:$id}')" "$tyler_token" >/dev/null
 post_json /v1/conversations/tab "$(jq -cn --arg id "$history_conversation" '{conversation_id:$id,closed:true}')" "$tyler_token" >/dev/null
+# Private rooms and chunked attachment data must survive a database backup/restore.
+private_room=$(post_json /v1/rooms '{"name":"Tyler test room"}' "$tyler_token")
+private_conversation=$(jq -er '.id' <<<"$private_room")
+jq -e '.self_role == "host" and .can_clear_for_everyone and (.members | length == 1)' <<<"$private_room" >/dev/null
+charlie_user=$(jq -er '.user.id' <<<"$charlie_session")
+post_json /v1/rooms/invite "$(jq -cn --arg id "$private_conversation" --arg user "$charlie_user" '{conversation_id:$id,user_id:$user}')" "$tyler_token" >/dev/null
+if post_json /v1/conversations/clear "$(jq -cn --arg id "$private_conversation" '{conversation_id:$id,for_everyone:true}')" "$charlie_token" >/dev/null 2>&1; then
+  echo 'Ordinary member globally cleared room history' >&2; exit 1
+fi
+post_json /v1/rooms/admin "$(jq -cn --arg id "$private_conversation" --arg user "$charlie_user" '{conversation_id:$id,user_id:$user,admin:true}')" "$tyler_token" >/dev/null
+curl --silent --fail -H "authorization: Bearer $jared_token" "$server_url/v1/snapshot" \
+  | jq -e --arg id "$private_conversation" '[.conversations[] | select(.id == $id)] | length == 0' >/dev/null
+upload_id=$(cat /proc/sys/kernel/random/uuid)
+post_json /v1/file-uploads "$(jq -cn --arg id "$upload_id" --arg room "$private_conversation" '{id:$id,conversation_id:$room,file_name:"stream.txt",size:16,keep:true}')" "$tyler_token" \
+  | jq -e '.received_bytes == 0 and .next_chunk == 0' >/dev/null
+curl --silent --fail -X PUT -H "authorization: Bearer $tyler_token" --data-binary 'streamed payload' \
+  "$server_url/v1/file-uploads/$upload_id/chunks/0" | jq -e '.received_bytes == 16' >/dev/null
+chunked_message=$(post_json "/v1/file-uploads/$upload_id/complete" '{}' "$tyler_token" | jq -er '.id')
+[[ $(post_json "/v1/file-uploads/$upload_id/complete" '{}' "$tyler_token" | jq -er '.id') == "$chunked_message" ]]
+[[ $(curl --silent --fail -H "authorization: Bearer $charlie_token" "$server_url/v1/messages/$chunked_message/file") == 'streamed payload' ]]
 (
   for message_number in $(seq 1 40); do
     post_json /v1/messages "$(jq -cn --arg id "$circle_conversation" \
@@ -270,6 +290,18 @@ start_server
 
 jared_token=$(new_session "$jared_device_id" "$jared_device_token" | jq -er '.token')
 tyler_token=$(new_session "$tyler_device_id" "$tyler_device_token" | jq -er '.token')
+curl --silent --fail -H "authorization: Bearer $charlie_token" "$server_url/v1/snapshot" \
+  | jq -e --arg id "$private_conversation" '.conversations[] | select(.id == $id) | .self_role == "admin" and .can_clear_for_everyone' >/dev/null
+curl --silent --fail -H "authorization: Bearer $tyler_token" "$server_url/v1/snapshot" \
+  | jq -e '.self.hangout_id == null' >/dev/null
+[[ $(curl --silent --fail -H "authorization: Bearer $charlie_token" "$server_url/v1/messages/$chunked_message/file") == 'streamed payload' ]]
+post_json /v1/conversations/clear "$(jq -cn --arg id "$private_conversation" '{conversation_id:$id,for_everyone:true}')" "$charlie_token" >/dev/null
+[[ $(sqlite3 "$database" "SELECT COUNT(*) FROM messages WHERE id='$chunked_message';") == 0 ]]
+[[ $(sqlite3 "$database" "SELECT COUNT(*) FROM file_uploads WHERE id='$upload_id';") == 0 ]]
+[[ $(sqlite3 "$database" "SELECT COUNT(*) FROM file_chunks WHERE upload_id='$upload_id';") == 0 ]]
+if curl --silent --fail -H "authorization: Bearer $tyler_token" "$server_url/v1/messages/$chunked_message/file" >/dev/null; then
+  echo 'Room clear retained a kept file' >&2; exit 1
+fi
 curl --silent --fail -H "authorization: Bearer $tyler_token" "$server_url/v1/snapshot" \
   | jq -e --arg id "$history_conversation" '.conversations[] | select(.id == $id) | .tab_closed and .last_message == null and .unread_count == 0' >/dev/null
 if curl --silent --fail -H "authorization: Bearer $tyler_token" "$server_url/v1/messages/$image_id/image" >/dev/null; then
@@ -287,6 +319,11 @@ if curl --silent --fail -H "authorization: Bearer $charlie_token" "$server_url/v
   echo 'Deleted attachment remained downloadable' >&2; exit 1
 fi
 post_json /v1/messages "$(jq -cn --arg id "$history_conversation" '{conversation_id:$id,payload:"new DM after close"}')" "$charlie_token" >/dev/null
+# Charlie clears too: only the prefix already cleared by Tyler is pruned.
+post_json /v1/conversations/clear "$(jq -cn --arg id "$history_conversation" '{conversation_id:$id}')" "$charlie_token" >/dev/null
+[[ $(sqlite3 "$database" "SELECT COUNT(*) FROM messages WHERE id='$image_id';") == 0 ]]
+[[ $(sqlite3 "$database" "SELECT COUNT(*) FROM chat_images WHERE message_id='$image_id';") == 0 ]]
+[[ $(sqlite3 "$database" "SELECT COUNT(*) FROM messages WHERE conversation_id='$history_conversation' AND json_extract(payload, '$')='new DM after close';") == 1 ]]
 curl --silent --fail -H "authorization: Bearer $tyler_token" "$server_url/v1/snapshot" \
   | jq -e --arg id "$history_conversation" '.conversations[] | select(.id == $id) | (.tab_closed | not) and .last_message.payload == "new DM after close"' >/dev/null
 curl --silent --fail -H "authorization: Bearer $tyler_token" \

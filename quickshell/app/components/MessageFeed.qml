@@ -105,7 +105,7 @@ Rectangle {
       }
       Rectangle {
         visible: message.isFile
-        width: Math.min(parent.width, root.theme.space(480)); height: root.theme.space(96)
+        width: Math.min(parent.width, root.theme.space(480)); height: root.theme.space(136)
         color: root.theme.surface; radius: root.theme.cornerRadius
         Column {
           anchors.fill: parent; anchors.margins: root.theme.spacing.lg
@@ -124,13 +124,27 @@ Rectangle {
             }
             ChatButton {
               theme: root.theme
-              enabled: !root.bridge.savingFiles[String(message.modelData.id)]
-              text: root.bridge.savingFiles[String(message.modelData.id)] ? "Saving…" : root.bridge.savedFiles[String(message.modelData.id)] ? "Saved · Show folder" : "Save file"
+              enabled: !root.bridge.savingFiles[String(message.modelData.id)] && (!message.modelData.payload.expired || !!root.bridge.savedFiles[String(message.modelData.id)])
+              text: root.bridge.savingFiles[String(message.modelData.id)] ? "Saving" + root.bridge.transferLabel("download", String(message.modelData.id)) : root.bridge.savedFiles[String(message.modelData.id)] ? "Saved · Show folder" : message.modelData.payload.expired ? "File expired" : "Save file"
               onClicked: {
                 var saved = root.bridge.savedFiles[String(message.modelData.id)]
                 if (saved) Qt.openUrlExternally(saved.directory_url)
                 else root.bridge.saveChatFile(String(message.modelData.id))
               }
+            }
+          }
+          Row {
+            spacing: root.theme.spacing.lg
+            ChatButton {
+              visible: !message.modelData.payload.expired
+              theme: root.theme
+              text: message.modelData.payload.keep ? "Kept · Allow expiry" : "Keep file"
+              onClicked: root.bridge.setFileRetention(message.modelData.id, !message.modelData.payload.keep)
+            }
+            Text {
+              anchors.verticalCenter: parent.verticalCenter
+              text: message.modelData.payload.expired ? "Removed from server" : message.modelData.payload.keep ? "Kept on server" : message.modelData.payload.expires_at ? "Expires " + Qt.formatDateTime(new Date(message.modelData.payload.expires_at), "MMM d, h:mm AP") : "No automatic expiry"
+              color: root.theme.muted; font.pixelSize: root.theme.space(10)
             }
           }
         }

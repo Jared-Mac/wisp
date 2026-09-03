@@ -178,17 +178,32 @@ tabs. Switching tabs, hiding the window, or restarting Wisp does not close a
 conversation. **Chat options → Close conversation** hides its tab without
 deleting messages. A new incoming DM or opening that friend's DM restores it;
 **All conversations** can also reopen closed tabs. **Clear Chat History…** is a
-separate confirmed action that clears only your view, including cached images,
-not another participant's copy. These preferences are saved per user on the host.
+separate confirmed action. In DMs it clears your view first; messages and attached
+files cleared by both participants are then removed from active server storage.
+Newer messages not yet cleared by both remain. Room owners/admins clear history
+for everyone, with an irreversible-action warning, red **Yes, clear**, and normal
+**Cancel**. Other members can clear only their own view. These preferences are
+saved per user on the host. Clearing overrides file Keep flags; it does not erase
+existing backups or copies already saved outside Wisp.
+
+Use **Rooms → New room** to create a private room you own. **Chat options → Room
+settings…** lets owners/admins invite friends, and lets owners grant or revoke
+admin access. Membership and permissions survive restarts. Jared owns Porch;
+owning Porch does not confer privileges in someone else's room. Creating or
+being invited to a room never automatically joins a voice/video call.
 
 Both the full app and tray chat accept **Ctrl+V** screenshot pastes and local
 file/image drops onto the conversation or composer. Attachments stay in a
 removable preview strip until **Send** and may include a caption. Multiple files
 send in order; a failed upload retains the unsent files without resending those
 already acknowledged. **Enter** sends; **Shift+Enter** adds a line break.
-Images are limited to 12 MB / 32 megapixels. PNG, JPEG, GIF, and WebP drops are
-converted to a still PNG (animated formats use their first frame); other files
-are attachments up to 25 MB each. Up to eight attachments can be staged across
+Inline image previews have a 12 MiB / 32 megapixel safety limit. PNG, JPEG, GIF,
+and WebP drops within those limits are converted to a still PNG (animated formats
+use their first frame); larger dropped images are sent as ordinary files.
+Files have no application size cap: uploads resume in 4 MiB chunks, and uploads
+and downloads stream without buffering the entire file. Available disk space
+and the host/proxy configuration still constrain transfers. The legacy endpoint
+for old clients retains its 25 MiB request limit. Up to eight attachments can be staged across
 all conversations. Folders, symlinks, and web URLs are not imported.
 Only conversation members can download attachments. Click an image to open it
 in the system viewer. **Save file** downloads a generic attachment into a new
@@ -196,6 +211,19 @@ folder under Downloads/Wisp without opening it or giving it executable permissio
 Explicitly saved files remain yours even if the chat is later cleared/deleted.
 Clipboard support includes Wayland data-control and X11/XWayland; nothing uploads
 until Send. Drafts survive tab/window navigation, not a complete app restart.
+
+Automatic file retention uses decimal GB, measured from completed upload:
+files up to 1 GB have no automatic expiry; files over 1 GB through 5 GB expire
+after 48 hours; files over 5 GB expire after 24 hours. **Keep on server** before
+sending, or **Keep file** afterward, exempts a file from automatic expiry. Any
+member with access to that message can change this flag. Removing Keep applies
+the original upload deadline, so an older file may expire immediately. Expired
+messages retain a marker but their server file bytes are removed. Cleanup runs
+on startup and every minute, and expired downloads are denied immediately.
+Abandoned incomplete uploads are removed after 24 hours of inactivity.
+Chunks are stored in SQLite so database backups include the files. Deletion
+releases database pages for reuse; it does not necessarily shrink the database
+file or remove copies in older backups.
 
 Use the **···** menu on your own messages to edit text or an attachment caption, or
 confirm **Delete message…** to remove it for everyone. Edits display a subtle
@@ -209,8 +237,9 @@ mute, volume, and a custom local sound file; these settings live only on this
 device in `~/.config/wisp/notifications.json`. Playback uses PipeWire's `pw-play`.
 The explicit **Test sound** button works while Settings is focused.
 
-Deploy the updated host and clients together: database migrations 0004–0007 add
-per-user conversation preferences, authenticated attachment storage, and edit timestamps. Existing
+Deploy the updated host and clients together: database migrations 0004–0010 add
+per-user conversation preferences, authenticated attachment storage, edit timestamps,
+chunked uploads, and persistent room membership/roles. Existing
 messages and conversations are preserved. Images, like text, are server-readable
 in this alpha; media-call E2EE does not apply to chat attachments.
 

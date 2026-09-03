@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls
 import "../components"
 
 Column {
@@ -12,12 +13,26 @@ Column {
   Item {
     width: parent.width; height: root.theme.space(30)
     Text {
-      anchors.left: parent.left; anchors.right: allConversations.left
+      anchors.left: parent.left; anchors.right: chatOptions.left
       anchors.rightMargin: root.theme.spacing.md; anchors.verticalCenter: parent.verticalCenter
       elide: Text.ElideRight
       text: root.bridge.activeConversation ? "MESSAGES · " + root.conversationLabel(root.bridge.activeConversation) : "MESSAGES"
       color: root.theme.muted; font.family: root.theme.font.family
       font.pixelSize: root.theme.font.caption; font.bold: true
+    }
+    ChatButton {
+      id: chatOptions
+      anchors.right: allConversations.left; anchors.verticalCenter: parent.verticalCenter
+      anchors.rightMargin: root.theme.spacing.md
+      visible: !!root.bridge.activeConversation
+      theme: root.theme; text: "···"; implicitWidth: root.theme.space(28)
+      onClicked: optionsMenu.open()
+      Menu {
+        id: optionsMenu
+        palette.window: root.theme.surface; palette.text: root.theme.foreground
+        MenuItem { text: "Clear Chat History…"; onTriggered: clearDialog.confirm(root.bridge.activeConversationId) }
+        MenuItem { text: "Room settings…"; visible: !!(root.bridge.activeConversation && root.bridge.activeConversation.spot_id); height: visible ? implicitHeight : 0; onTriggered: roomManager.manage(root.bridge.activeConversationId) }
+      }
     }
     ChatButton {
       id: allConversations
@@ -94,4 +109,6 @@ Column {
       bridge: root.bridge; theme: root.theme; conversationId: root.bridge.activeConversationId
     }
   }
+  ClearHistoryDialog { id: clearDialog; bridge: root.bridge; theme: root.theme }
+  RoomManager { id: roomManager; bridge: root.bridge; theme: root.theme }
 }

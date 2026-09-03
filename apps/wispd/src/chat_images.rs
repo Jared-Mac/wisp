@@ -4,18 +4,58 @@ use std::{
     collections::HashMap,
     io::{Cursor, Read},
     path::PathBuf,
+    sync::Arc,
+    time::SystemTime,
 };
 use tokio::sync::Mutex;
 use uuid::Uuid;
-use wisp_protocol::{
-    MAX_CHAT_DRAFTS, MAX_CHAT_FILE_BYTES, MAX_CHAT_IMAGE_BYTES, MAX_CHAT_IMAGE_PIXELS,
-};
+use wisp_protocol::{MAX_CHAT_DRAFTS, MAX_CHAT_IMAGE_BYTES, MAX_CHAT_IMAGE_PIXELS};
 
 #[derive(Clone)]
 pub(crate) struct AttachmentDraft {
     pub(crate) bytes: Vec<u8>,
     pub(crate) file_name: String,
     pub(crate) is_image: bool,
+    pub(crate) size: u64,
+    source: Option<Arc<std::fs::File>>,
+    modified: Option<SystemTime>,
+}
+
+impl AttachmentDraft {
+    pub(crate) async fn chunk(&self, offset: u64) -> anyhow::Result<Vec<u8>> {
+        let length = usize::try_from(
+            self.size
+                .saturating_sub(offset)
+                .min(wisp_protocol::CHAT_FILE_CHUNK_BYTES as u64),
+        )?;
+        if let Some(source) = self.source.clone() {
+            let size = self.size;
+            let modified = self.modified;
+            tokio::task::spawn_blocking(move || {
+                use std::os::unix::fs::FileExt;
+                let validate = || -> anyhow::Result<()> {
+                    let metadata = source.metadata()?;
+                    if metadata.len() != size || metadata.modified().ok() != modified {
+                        bail!("File changed since it was attached; remove it and attach again");
+                    }
+                    Ok(())
+                };
+                validate()?;
+                let mut bytes = vec![0; length];
+                source.read_exact_at(&mut bytes, offset)?;
+                validate()?;
+                Ok(bytes)
+            })
+            .await?
+        } else {
+            let offset = usize::try_from(offset)?;
+            Ok(self
+                .bytes
+                .get(offset..offset + length)
+                .context("Invalid attachment offset")?
+                .to_vec())
+        }
+    }
 }
 
 fn read_dropped_file(uri: &str) -> anyhow::Result<AttachmentDraft> {
@@ -41,16 +81,16 @@ fn read_dropped_file(uri: &str) -> anyhow::Result<AttachmentDraft> {
         .open(&path)
         .context("Open dropped file")?;
     let metadata = file.metadata()?;
-    if !metadata.is_file() || metadata.len() > MAX_CHAT_FILE_BYTES as u64 {
-        bail!("Files must be regular files of 25 MB or smaller");
+    if !metadata.is_file() {
+        bail!("Drop regular files only");
     }
     let mut bytes = Vec::new();
-    file.take(MAX_CHAT_FILE_BYTES as u64 + 1)
-        .read_to_end(&mut bytes)?;
-    if bytes.len() > MAX_CHAT_FILE_BYTES {
-        bail!("File exceeds 25 MB");
+    if metadata.len() <= MAX_CHAT_IMAGE_BYTES as u64 {
+        (&file)
+            .take(MAX_CHAT_IMAGE_BYTES as u64 + 1)
+            .read_to_end(&mut bytes)?;
     }
-    let is_image = matches!(
+    let mut is_image = matches!(
         image::guess_format(&bytes),
         Ok(image::ImageFormat::Png
             | image::ImageFormat::Jpeg
@@ -58,30 +98,46 @@ fn read_dropped_file(uri: &str) -> anyhow::Result<AttachmentDraft> {
             | image::ImageFormat::WebP)
     );
     if is_image {
-        if bytes.len() > MAX_CHAT_IMAGE_BYTES {
-            bail!("Images must be 12 MB or smaller");
-        }
-        let mut reader = image::ImageReader::new(Cursor::new(&bytes)).with_guessed_format()?;
-        let mut limits = image::Limits::default();
-        limits.max_image_width = Some(16384);
-        limits.max_image_height = Some(16384);
-        limits.max_alloc = Some(128 * 1024 * 1024);
-        reader.limits(limits);
-        let decoded = reader.decode().context("Decode dropped image")?;
-        if u64::from(decoded.width()) * u64::from(decoded.height()) > MAX_CHAT_IMAGE_PIXELS {
-            bail!("Image exceeds 32 megapixels");
-        }
-        let mut png = Cursor::new(Vec::new());
-        decoded.write_to(&mut png, image::ImageFormat::Png)?;
-        bytes = png.into_inner();
-        if bytes.len() > MAX_CHAT_IMAGE_BYTES {
-            bail!("Converted image exceeds 12 MB");
+        let preview = (|| -> anyhow::Result<Vec<u8>> {
+            let mut reader = image::ImageReader::new(Cursor::new(&bytes)).with_guessed_format()?;
+            let mut limits = image::Limits::default();
+            limits.max_image_width = Some(16384);
+            limits.max_image_height = Some(16384);
+            limits.max_alloc = Some(128 * 1024 * 1024);
+            reader.limits(limits);
+            let decoded = reader.decode().context("Decode dropped image")?;
+            if u64::from(decoded.width()) * u64::from(decoded.height()) > MAX_CHAT_IMAGE_PIXELS {
+                bail!("Image exceeds 32 megapixels");
+            }
+            let mut png = Cursor::new(Vec::new());
+            decoded.write_to(&mut png, image::ImageFormat::Png)?;
+            let bytes = png.into_inner();
+            if bytes.len() > MAX_CHAT_IMAGE_BYTES {
+                bail!("Converted image exceeds 12 MB");
+            }
+            Ok(bytes)
+        })();
+        if let Ok(png) = preview {
+            bytes = png;
+        } else {
+            is_image = false;
         }
     }
+    if !is_image {
+        bytes.clear();
+    }
+    let size = if is_image {
+        bytes.len() as u64
+    } else {
+        metadata.len()
+    };
     Ok(AttachmentDraft {
         bytes,
         file_name,
         is_image,
+        size,
+        source: if is_image { None } else { Some(Arc::new(file)) },
+        modified: metadata.modified().ok(),
     })
 }
 
@@ -165,9 +221,6 @@ impl ImageStore {
                 let mut png = Cursor::new(Vec::new());
                 image::DynamicImage::ImageRgba8(pixels)
                     .write_to(&mut png, image::ImageFormat::Png)?;
-                if png.get_ref().len() > MAX_CHAT_IMAGE_BYTES {
-                    bail!("Screenshot exceeds 12 MB");
-                }
                 Ok((Some(png.into_inner()), String::new()))
             } else {
                 let text = clipboard
@@ -182,9 +235,12 @@ impl ImageStore {
         };
         let mut staged = self
             .stage(vec![AttachmentDraft {
+                size: png.len() as u64,
+                is_image: png.len() <= MAX_CHAT_IMAGE_BYTES,
                 bytes: png,
                 file_name: "Screenshot.png".into(),
-                is_image: true,
+                source: None,
+                modified: None,
             }])
             .await?;
         Ok(staged.remove(0))
@@ -237,7 +293,7 @@ impl ImageStore {
         for (token, draft, url) in staged {
             result.push(
                 json!({"token": token, "url": url, "file_name": draft.file_name,
-                "size": draft.bytes.len(), "is_image": draft.is_image}),
+                "size": draft.size, "is_image": draft.is_image}),
             );
             drafts.insert(token, draft);
         }
@@ -276,13 +332,14 @@ impl Drop for ImageStore {
 mod tests {
     use super::*;
 
-    #[test]
-    fn drops_accept_regular_files_and_reject_unsafe_sources() {
+    #[tokio::test]
+    async fn drops_accept_regular_files_and_reject_unsafe_sources() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("notes.txt");
         std::fs::write(&path, b"hello").unwrap();
         let draft = read_dropped_file(&file_url(&path).unwrap()).unwrap();
-        assert_eq!(draft.bytes, b"hello");
+        assert_eq!(draft.chunk(0).await.unwrap(), b"hello");
+        assert!(draft.bytes.is_empty());
         assert_eq!(draft.file_name, "notes.txt");
         assert!(!draft.is_image);
         assert!(read_dropped_file("https://example.com/notes.txt").is_err());
@@ -292,9 +349,13 @@ mod tests {
         assert!(read_dropped_file(&file_url(&symlink).unwrap()).is_err());
         std::fs::File::create(&path)
             .unwrap()
-            .set_len(MAX_CHAT_FILE_BYTES as u64 + 1)
+            .set_len(10_000_000_000)
             .unwrap();
-        assert!(read_dropped_file(&file_url(&path).unwrap()).is_err());
+        let large = read_dropped_file(&file_url(&path).unwrap()).unwrap();
+        assert_eq!(large.size, 10_000_000_000);
+        assert!(large.bytes.is_empty());
+        assert_eq!(large.chunk(9_999_999_999).await.unwrap(), [0]);
+        assert!(draft.chunk(0).await.is_err());
     }
 
     #[test]
@@ -348,7 +409,10 @@ mod tests {
             .unwrap()
             .parse()
             .unwrap();
-        assert_eq!(store.draft(token).await.unwrap().bytes, b"hello");
+        assert_eq!(
+            store.draft(token).await.unwrap().chunk(0).await.unwrap(),
+            b"hello"
+        );
         store.discard(token).await;
         assert!(store.draft(token).await.is_err());
     }

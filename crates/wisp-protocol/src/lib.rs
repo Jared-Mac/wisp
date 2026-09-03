@@ -408,6 +408,12 @@ pub struct ConversationView {
     pub tab_closed: bool,
     #[serde(default)]
     pub history_cleared_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub can_clear_for_everyone: bool,
+    #[serde(default)]
+    pub self_role: String,
+    #[serde(default)]
+    pub member_roles: std::collections::BTreeMap<UserId, String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -804,6 +810,67 @@ pub struct SendMessageRequest {
 pub const MAX_CHAT_IMAGE_BYTES: usize = 12 * 1024 * 1024;
 pub const MAX_CHAT_IMAGE_PIXELS: u64 = 32 * 1024 * 1024;
 pub const MAX_CHAT_FILE_BYTES: usize = 25 * 1024 * 1024;
+/// Transport chunk bound, not a file size limit. Legacy JSON uploads use the
+/// old `MAX_CHAT_FILE_BYTES` bound; current clients use chunked transfers.
+pub const CHAT_FILE_CHUNK_BYTES: usize = 4 * 1024 * 1024;
+
+#[must_use]
+pub fn file_retention_hours(size: u64) -> Option<i64> {
+    if size > 5_000_000_000 {
+        Some(24)
+    } else if size > 1_000_000_000 {
+        Some(48)
+    } else {
+        None
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BeginFileUpload {
+    pub id: Uuid,
+    pub conversation_id: String,
+    pub file_name: String,
+    pub size: u64,
+    #[serde(default)]
+    pub caption: String,
+    #[serde(default)]
+    pub keep: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileUploadStatus {
+    pub received_bytes: u64,
+    pub next_chunk: u64,
+    pub message_id: Option<Uuid>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SetFileRetention {
+    pub keep: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClearChatHistoryRequest {
+    pub conversation_id: String,
+    #[serde(default)]
+    pub for_everyone: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateRoomRequest {
+    pub name: String,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RoomMemberRequest {
+    pub conversation_id: String,
+    pub user_id: UserId,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SetRoomAdminRequest {
+    pub conversation_id: String,
+    pub user_id: UserId,
+    pub admin: bool,
+}
 pub const MAX_CHAT_DRAFTS: usize = 8;
 
 #[must_use]
