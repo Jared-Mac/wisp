@@ -14,6 +14,7 @@ viewer_pid=""
 sim_pid=""
 expect_surface=true
 surface_args=()
+media_attempts=${WISP_MEDIA_ATTEMPTS:-200}
 if [[ -z "${WAYLAND_DISPLAY:-}" || -z "${XDG_RUNTIME_DIR:-}" ]]; then
   expect_surface=false
   surface_args=(--disable-surfaces)
@@ -240,7 +241,7 @@ done
 [[ -S "$test_dir/viewer.sock" ]]
 target/debug/wispctl --socket "$test_dir/viewer.sock" join Tyler
 viewer_hidden_json=""
-for _ in $(seq 1 100); do
+for _ in $(seq 1 "$media_attempts"); do
   viewer_hidden_json=$(target/debug/wispctl --socket "$test_dir/viewer.sock" status)
   if jq -e '
     .self.connection == "connected" and
@@ -257,14 +258,18 @@ jq -e '
   (.self.media.remote_videos | length) == 2 and
   .self.media.received_video_frames == 0 and
   ([.self.media.remote_videos[].subscribed] | all(. == false))
-' <<<"$viewer_hidden_json" >/dev/null
+' <<<"$viewer_hidden_json" >/dev/null || {
+  echo "headless viewer did not reach the hidden-video state" >&2
+  jq '.self | {connection, media}' <<<"$viewer_hidden_json" >&2
+  exit 1
+}
 
 target/debug/wispctl --socket "$test_dir/wispd.sock" watch Tyler screen_share \
   | jq -e '.watched == true and .source == "screen_share"' >/dev/null
 target/debug/wispctl --socket "$test_dir/viewer.sock" watch Tyler screen_share \
   | jq -e '.watched == true and .source == "screen_share"' >/dev/null
 watched_json=""
-for _ in $(seq 1 100); do
+for _ in $(seq 1 "$media_attempts"); do
   watched_json=$(target/debug/wispctl --socket "$test_dir/wispd.sock" status)
   if jq -e --argjson expect_surface "$expect_surface" '
     .self.connection == "connected" and
@@ -291,13 +296,17 @@ jq -e --argjson expect_surface "$expect_surface" '
     .source == "screen_share" and .subscribed and .received_frames > 0) and
   any(.self.media.remote_videos[];
     .source == "camera" and (.subscribed | not) and .received_frames == 0)
-' <<<"$watched_json" >/dev/null
+' <<<"$watched_json" >/dev/null || {
+  echo "screen-share subscription did not begin" >&2
+  jq '.self | {connection, media}' <<<"$watched_json" >&2
+  exit 1
+}
 
 target/debug/wispctl --socket "$test_dir/wispd.sock" watch Tyler camera \
   | jq -e '.watched == true and .source == "camera"' >/dev/null
 target/debug/wispctl --socket "$test_dir/viewer.sock" watch Tyler camera \
   | jq -e '.watched == true and .source == "camera"' >/dev/null
-for _ in $(seq 1 100); do
+for _ in $(seq 1 "$media_attempts"); do
   watched_json=$(target/debug/wispctl --socket "$test_dir/wispd.sock" status)
   viewer_watched_json=$(target/debug/wispctl --socket "$test_dir/viewer.sock" status)
   if jq -e --argjson expect_surface "$expect_surface" '
@@ -318,20 +327,28 @@ jq -e --argjson expect_surface "$expect_surface" '
   ([.self.media.remote_videos[] | select(.subscribed and .received_frames > 0)] | length) == 2 and
   .self.media.surface_open == $expect_surface
 ' \
-  <<<"$watched_json" >/dev/null
+  <<<"$watched_json" >/dev/null || {
+  echo "primary viewer did not receive both video tracks" >&2
+  jq '.self | {connection, media}' <<<"$watched_json" >&2
+  exit 1
+}
 jq -e '
   ([.self.media.remote_videos[] | select(.subscribed and .received_frames > 0)] | length) == 2 and
   .self.media.surface_open == false
-' <<<"$viewer_watched_json" >/dev/null
+' <<<"$viewer_watched_json" >/dev/null || {
+  echo "headless viewer did not receive both video tracks" >&2
+  jq '.self | {connection, media}' <<<"$viewer_watched_json" >&2
+  exit 1
+}
 status_json=$watched_json
 
-for _ in $(seq 1 100); do
+for _ in $(seq 1 "$media_attempts"); do
   if rg -q 'simulator received remote audio frames' "$test_dir/sim.log"; then break; fi
   sleep 0.05
 done
 rg -q 'simulator received remote audio frames' "$test_dir/sim.log"
 
-for _ in $(seq 1 100); do
+for _ in $(seq 1 "$media_attempts"); do
   if rg -q 'simulator received nonzero remote audio' "$test_dir/sim.log"; then break; fi
   sleep 0.05
 done
