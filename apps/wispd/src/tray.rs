@@ -120,7 +120,11 @@ impl ksni::Tray for WispTray {
     }
 
     fn status(&self) -> Status {
-        Status::Active
+        if self.state.unread_messages > 0 {
+            Status::NeedsAttention
+        } else {
+            Status::Active
+        }
     }
 
     fn icon_name(&self) -> String {
@@ -128,12 +132,20 @@ impl ksni::Tray for WispTray {
     }
 
     fn icon_pixmap(&self) -> Vec<ksni::Icon> {
-        vec![waveform_icon(
+        let mut icon = waveform_icon(
             32,
             self.audio_state(),
             self.state.sharing,
             self.state.camera,
-        )]
+        );
+        if self.state.unread_messages > 0 {
+            draw_unread_badge(&mut icon.data, 32, self.state.unread_messages);
+        }
+        vec![icon]
+    }
+
+    fn attention_icon_pixmap(&self) -> Vec<ksni::Icon> {
+        self.icon_pixmap()
     }
 
     fn tool_tip(&self) -> ToolTip {
@@ -271,6 +283,43 @@ fn waveform_icon(size: i32, state: AudioState, sharing: bool, camera: bool) -> k
     }
 }
 
+fn draw_unread_badge(data: &mut [u8], dimension: usize, count: u64) {
+    for y in 18..32 {
+        for x in 0..14 {
+            if (x - 7_i32).pow(2) + (y - 25_i32).pow(2) <= 49 {
+                set_pixel(data, dimension, x, y, [255, 255, 92, 108]);
+            }
+        }
+    }
+    // A legible tiny numeral, or + for ten or more. Audio/camera badges
+    // occupy the other corners and remain visible independently.
+    let glyph = match count {
+        1 => [2, 6, 2, 2, 7],
+        2 => [7, 1, 7, 4, 7],
+        3 => [7, 1, 7, 1, 7],
+        4 => [5, 5, 7, 1, 1],
+        5 => [7, 4, 7, 1, 7],
+        6 => [7, 4, 7, 5, 7],
+        7 => [7, 1, 1, 1, 1],
+        8 => [7, 5, 7, 5, 7],
+        9 => [7, 5, 7, 1, 7],
+        _ => [0, 2, 7, 2, 0],
+    };
+    for (row, bits) in glyph.iter().enumerate() {
+        for column in 0..3 {
+            if bits & (1 << (2 - column)) != 0 {
+                set_pixel(
+                    data,
+                    dimension,
+                    6 + column,
+                    23 + i32::try_from(row).unwrap(),
+                    [255, 255, 255, 255],
+                );
+            }
+        }
+    }
+}
+
 fn draw_share_badge(data: &mut [u8], dimension: usize, center: (i32, i32)) {
     let radius = 7;
     for y in (center.1 - radius)..=(center.1 + radius) {
@@ -389,6 +438,24 @@ mod tests {
         assert_eq!(icon.height, 32);
         assert_eq!(icon.data.len(), 32 * 32 * 4);
         assert!(icon.data.chunks_exact(4).any(|pixel| pixel[0] == 255));
+    }
+
+    #[test]
+    fn unread_messages_add_a_badge_and_request_attention() {
+        use ksni::Tray;
+        let (actions, _) = tokio::sync::mpsc::unbounded_channel();
+        let mut tray = WispTray {
+            actions,
+            state: TrayState::new((true, true), (true, true), 0),
+        };
+        let read_icon = tray.icon_pixmap().remove(0).data;
+        tray.state.unread_messages = 3;
+        assert_eq!(tray.status(), ksni::Status::NeedsAttention);
+        assert_ne!(read_icon, tray.icon_pixmap().remove(0).data);
+        assert!(tray.title().contains("3 unread"));
+        tray.state.unread_messages = 0;
+        assert_eq!(tray.status(), ksni::Status::Active);
+        assert_eq!(read_icon, tray.icon_pixmap().remove(0).data);
     }
 
     #[test]

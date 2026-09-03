@@ -12,6 +12,7 @@ PanelWindow {
   required property var anchorController
   property int verticalInset: theme.space(12)
   property bool localPreviewsPoppedOut: false
+  readonly property bool chatVisible: visible && !content.settingsOpen
   signal hideRequested()
   signal appRequested()
   signal popOutLocalPreviewsRequested()

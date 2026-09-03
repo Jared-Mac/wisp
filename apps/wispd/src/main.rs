@@ -1,9 +1,11 @@
+mod chat_images;
 mod media;
 mod shortcut;
 mod surface;
 mod tray;
 
 use anyhow::{Context, anyhow, bail};
+use base64::Engine as _;
 use clap::Parser;
 use futures_util::StreamExt;
 use reqwest::StatusCode;
@@ -232,6 +234,19 @@ impl ServerApi {
         .await
     }
 
+    async fn conversation_action(&self, action: &str, args: &Value) -> anyhow::Result<()> {
+        ensure_ok(
+            self.request(
+                reqwest::Method::POST,
+                &format!("/v1/conversations/{action}"),
+            )
+            .json(args)
+            .send()
+            .await?,
+        )
+        .await
+    }
+
     async fn join_spot(&self, spot_id: String) -> anyhow::Result<()> {
         ensure_ok(
             self.request(reqwest::Method::POST, "/v1/spots/join")
@@ -375,6 +390,7 @@ async fn ensure_ok(response: reqwest::Response) -> anyhow::Result<()> {
 }
 
 struct Daemon {
+    chat_images: chat_images::ImageStore,
     profile: String,
     api: ServerApi,
     state: RwLock<Snapshot>,
@@ -404,6 +420,7 @@ impl Daemon {
         let (events, _) = broadcast::channel(256);
         let (ptt_lease_tx, _) = watch::channel::<Option<Instant>>(None);
         Self {
+            chat_images: chat_images::ImageStore::default(),
             profile,
             api,
             state: RwLock::new(snapshot),
@@ -428,8 +445,30 @@ impl Daemon {
     }
 
     async fn merge_server_snapshot(&self, mut incoming: Snapshot, event_name: &str) {
+        let _cache_operation = self.chat_images.cache_operation.lock().await;
         {
             let current = self.state.read().await;
+            for conversation in &incoming.conversations {
+                if conversation.history_cleared_at.is_some()
+                    && current
+                        .conversations
+                        .iter()
+                        .find(|old| old.id == conversation.id)
+                        .is_none_or(|old| old.history_cleared_at != conversation.history_cleared_at)
+                    && let Err(error) = chat_images::clear_cache(&conversation.id)
+                {
+                    warn!(%error, "could not remove cleared chat image cache");
+                }
+            }
+            for message in &current.messages {
+                if message.content_type == "image/png"
+                    && !incoming.messages.iter().any(|next| next.id == message.id)
+                    && let Ok(path) =
+                        chat_images::cache_path(message.id, Some(&message.conversation_id))
+                {
+                    let _ = std::fs::remove_file(path);
+                }
+            }
             incoming.self_state.muted = current.self_state.muted;
             incoming.self_state.deafened = current.self_state.deafened;
             incoming.self_state.sharing = current.self_state.sharing;
@@ -1000,13 +1039,235 @@ impl Daemon {
                 let conversation_id = string_arg(&command.args, "conversation_id")?;
                 let text = string_arg(&command.args, "text")?;
                 self.api.send_message(conversation_id, text).await?;
-                self.refresh("message_created").await?;
+                if let Err(error) = self.refresh("message_created").await {
+                    warn!(%error, "message sent but snapshot refresh failed");
+                }
                 Ok(None)
+            }
+            "paste_clipboard" => Ok(Some(self.chat_images.paste().await?)),
+            "import_chat_files" => {
+                let urls: Vec<String> = serde_json::from_value(
+                    command
+                        .args
+                        .get("urls")
+                        .context("urls is required")?
+                        .clone(),
+                )?;
+                Ok(Some(self.chat_images.import_files(urls).await?))
+            }
+            "edit_message" | "delete_message" => {
+                let id: uuid::Uuid = string_arg(&command.args, "message_id")?.parse()?;
+                let editing = command.name == "edit_message";
+                let mut request = self.api.request(
+                    if editing {
+                        reqwest::Method::PATCH
+                    } else {
+                        reqwest::Method::DELETE
+                    },
+                    &format!("/v1/messages/{id}"),
+                );
+                if editing {
+                    request = request.json(&wisp_protocol::EditMessageRequest {
+                        text: opaque_string_arg(&command.args, "text")?,
+                    });
+                }
+                ensure_ok(request.send().await?).await?;
+                if let Err(error) = self
+                    .refresh(if editing {
+                        "message_updated"
+                    } else {
+                        "message_deleted"
+                    })
+                    .await
+                {
+                    warn!(%error, "message changed but snapshot refresh failed");
+                }
+                Ok(None)
+            }
+            "discard_image_draft" | "discard_attachment_draft" => {
+                let token = string_arg(&command.args, "token")?.parse()?;
+                self.chat_images.discard(token).await;
+                Ok(None)
+            }
+            "send_image_message" | "send_attachment_message" => {
+                let token = string_arg(&command.args, "token")?.parse()?;
+                let draft = self.chat_images.draft(token).await?;
+                let conversation_id = string_arg(&command.args, "conversation_id")?;
+                let caption: String = command
+                    .args
+                    .get("caption")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .into();
+                if command.name == "send_image_message" && !draft.is_image {
+                    bail!("This attachment is not an image");
+                }
+                let (endpoint, request) = if draft.is_image {
+                    (
+                        "/v1/messages/image",
+                        serde_json::to_value(wisp_protocol::SendImageMessageRequest {
+                            conversation_id,
+                            caption,
+                            png_base64: base64::engine::general_purpose::STANDARD
+                                .encode(draft.bytes),
+                        })?,
+                    )
+                } else {
+                    (
+                        "/v1/messages/file",
+                        serde_json::to_value(wisp_protocol::SendFileMessageRequest {
+                            conversation_id,
+                            caption,
+                            file_name: draft.file_name,
+                            data_base64: base64::engine::general_purpose::STANDARD
+                                .encode(draft.bytes),
+                        })?,
+                    )
+                };
+                let _: wisp_protocol::Message = decode(
+                    self.api
+                        .request(reqwest::Method::POST, endpoint)
+                        .timeout(Duration::from_secs(120))
+                        .json(&request)
+                        .send()
+                        .await?,
+                )
+                .await?;
+                self.chat_images.discard(token).await;
+                if let Err(error) = self.refresh("message_created").await {
+                    warn!(%error, "attachment sent but snapshot refresh failed");
+                }
+                Ok(None)
+            }
+            "save_chat_file" => {
+                let id: uuid::Uuid = string_arg(&command.args, "message_id")?.parse()?;
+                let message = self
+                    .state
+                    .read()
+                    .await
+                    .messages
+                    .iter()
+                    .find(|message| {
+                        message.id == id && message.content_type == "application/octet-stream"
+                    })
+                    .cloned()
+                    .context("File is not in your visible chat history")?;
+                let name = message.payload["file_name"]
+                    .as_str()
+                    .context("Missing filename")?;
+                if !wisp_protocol::valid_chat_file_name(name) {
+                    bail!("Invalid filename");
+                }
+                let expected = message.payload["size"]
+                    .as_u64()
+                    .context("Missing file size")?;
+                if expected > wisp_protocol::MAX_CHAT_FILE_BYTES as u64 {
+                    bail!("File exceeds 25 MB");
+                }
+                let mut response = self
+                    .api
+                    .request(reqwest::Method::GET, &format!("/v1/messages/{id}/file"))
+                    .timeout(Duration::from_secs(120))
+                    .send()
+                    .await?
+                    .error_for_status()?;
+                let mut bytes = Vec::new();
+                while let Some(chunk) = response.chunk().await? {
+                    if bytes.len() + chunk.len() > wisp_protocol::MAX_CHAT_FILE_BYTES {
+                        bail!("File exceeds 25 MB");
+                    }
+                    bytes.extend_from_slice(&chunk);
+                }
+                if bytes.len() as u64 != expected {
+                    bail!("Downloaded file size does not match");
+                }
+                let directory = tokio::process::Command::new("xdg-user-dir")
+                    .arg("DOWNLOAD")
+                    .output()
+                    .await
+                    .ok()
+                    .filter(|output| output.status.success())
+                    .and_then(|output| String::from_utf8(output.stdout).ok())
+                    .map(|value| PathBuf::from(value.trim()))
+                    .filter(|path| path.is_absolute())
+                    .or_else(|| {
+                        std::env::var_os("HOME").map(|home| PathBuf::from(home).join("Downloads"))
+                    })
+                    .context("No Downloads directory available")?
+                    .join("Wisp")
+                    .join(uuid::Uuid::new_v4().to_string());
+                tokio::fs::create_dir_all(&directory).await?;
+                let path = directory.join(name);
+                // User explicitly saves files; never automatically open/execute them,
+                // overwrite existing files, or restore executable permission bits.
+                let mut file = tokio::fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .mode(0o600)
+                    .open(&path)
+                    .await?;
+                if let Err(error) = file.write_all(&bytes).await {
+                    drop(file);
+                    let _ = tokio::fs::remove_file(&path).await;
+                    return Err(error.into());
+                }
+                file.flush().await?;
+                Ok(Some(
+                    json!({"message_id": id, "url": chat_images::file_url(&path)?,
+                    "directory_url": chat_images::file_url(&directory)?}),
+                ))
+            }
+            "load_chat_image" => {
+                let _cache_operation = self.chat_images.cache_operation.lock().await;
+                let id: uuid::Uuid = string_arg(&command.args, "message_id")?.parse()?;
+                let conversation_id = self
+                    .state
+                    .read()
+                    .await
+                    .messages
+                    .iter()
+                    .find(|m| m.id == id && m.content_type == "image/png")
+                    .map(|m| m.conversation_id.clone())
+                    .context("Image is not in your visible chat history")?;
+                let path = chat_images::cache_path(id, Some(&conversation_id))?;
+                if !path.is_file() {
+                    let mut response = self
+                        .api
+                        .request(reqwest::Method::GET, &format!("/v1/messages/{id}/image"))
+                        .timeout(Duration::from_secs(120))
+                        .send()
+                        .await?
+                        .error_for_status()?;
+                    let mut bytes = Vec::new();
+                    while let Some(chunk) = response.chunk().await? {
+                        if bytes.len() + chunk.len() > wisp_protocol::MAX_CHAT_IMAGE_BYTES {
+                            bail!("Image exceeds 12 MB");
+                        }
+                        bytes.extend_from_slice(&chunk);
+                    }
+                    let temporary = path.with_extension("part");
+                    tokio::fs::write(&temporary, bytes).await?;
+                    tokio::fs::rename(&temporary, &path).await?;
+                }
+                Ok(Some(
+                    json!({"message_id": id, "url": chat_images::file_url(&path)?}),
+                ))
             }
             "mark_conversation_read" => {
                 let conversation_id = string_arg(&command.args, "conversation_id")?;
                 self.api.mark_conversation_read(conversation_id).await?;
                 self.refresh("conversation_read").await?;
+                Ok(None)
+            }
+            "set_conversation_tab" | "clear_chat_history" => {
+                let _ = string_arg(&command.args, "conversation_id")?;
+                let action = if command.name == "set_conversation_tab" {
+                    "tab"
+                } else {
+                    "clear"
+                };
+                self.api.conversation_action(action, &command.args).await?;
+                self.refresh("conversation_changed").await?;
                 Ok(None)
             }
             "join_spot" => {
@@ -1592,12 +1853,15 @@ async fn synchronize_server(daemon: Arc<Daemon>) {
                 while let Some(message) = incoming.next().await {
                     match message {
                         Ok(message) if message.is_text() => {
-                            if let Ok(event) = serde_json::from_str::<ServerEvent>(
+                            let event_name = if let Ok(event) = serde_json::from_str::<ServerEvent>(
                                 message.to_text().unwrap_or_default(),
                             ) {
                                 debug!(name = %event.name, seq = event.seq, "server event");
-                            }
-                            if let Err(error) = daemon.refresh("server_state_changed").await {
+                                event.name
+                            } else {
+                                "server_state_changed".into()
+                            };
+                            if let Err(error) = daemon.refresh(&event_name).await {
                                 warn!(%error, "server snapshot refresh failed");
                                 break;
                             }

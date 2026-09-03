@@ -34,6 +34,22 @@ Column {
 
   Rectangle {
     width: parent.width
+    height: notificationSettings.implicitHeight + root.theme.spacing.xxl * 2
+    radius: root.theme.cornerRadius
+    color: root.theme.alpha(root.theme.foreground, 0.035)
+    NotificationSettingsView {
+      id: notificationSettings
+      anchors.left: parent.left
+      anchors.right: parent.right
+      anchors.top: parent.top
+      anchors.margins: root.theme.spacing.xxl
+      bridge: root.bridge
+      theme: root.theme
+    }
+  }
+
+  Rectangle {
+    width: parent.width
     height: deviceSettings.implicitHeight + root.theme.spacing.xxl * 2
     radius: root.theme.cornerRadius
     color: root.theme.alpha(root.theme.foreground, 0.035)

@@ -1,16 +1,41 @@
 import QtQuick
 import Quickshell
 import Quickshell.Io
+import "ChatLogic.js" as ChatLogic
 
 Item {
   id: root
 
   property string clientName: "quickshell"
+  // Only the standalone desktop host plays sounds, never its tray adapter.
+  property bool notificationSoundsEnabled: false
+  property bool appFocused: false
+  property bool chatVisible: false
+  property bool receivedSnapshot: false
+  property string lastReadMessageId: ""
+  property alias notificationMuted: notificationSettings.muted
+  property alias notificationVolume: notificationSettings.volume
+  property alias notificationSoundPath: notificationSettings.soundPath
+  property string notificationError: ""
+  property var drafts: ({})
+  property var pendingAttachments: ({})
+  property var importingConversations: ({})
+  property var sendingConversations: ({})
+  property var savedFiles: ({})
+  property var savingFiles: ({})
+  property var chatImageUrls: ({})
+  property var imageErrors: ({})
+  property var imageRequests: ({})
+  property var requests: ({})
+  signal clipboardTextReady(string conversationId, string value)
+  signal messageMutationFinished(string messageId, string action, bool success, string error)
+  onAppFocusedChanged: markVisibleConversationRead()
+  onChatVisibleChanged: markVisibleConversationRead()
   readonly property string runtimeDir: Quickshell.env("XDG_RUNTIME_DIR")
   readonly property string configHome: String(Quickshell.env("XDG_CONFIG_HOME")
     || (Quickshell.env("HOME") + "/.config"))
   readonly property string configuredProfile: readConfiguredProfile()
-  readonly property string socketPath: runtimeDir + "/wisp/wispd.sock"
+  readonly property string socketPath: String(Quickshell.env("WISP_SOCKET") || runtimeDir + "/wisp/wispd.sock")
   readonly property var activeSocket: socketLoader.item
   readonly property bool daemonConnected: !!(activeSocket && activeSocket.connected)
   property int requestId: 0
@@ -223,6 +248,44 @@ Item {
     onFileChanged: reload()
   }
 
+  FileView {
+    path: root.configHome + "/wisp/notifications.json"
+    blockLoading: true
+    blockWrites: true
+    atomicWrites: true
+    printErrors: false
+    watchChanges: true
+    onFileChanged: reload()
+    onAdapterUpdated: writeAdapter()
+    JsonAdapter {
+      id: notificationSettings
+      property bool muted: false
+      property int volume: 50
+      property string soundPath: ""
+    }
+  }
+
+  Process {
+    id: notificationPlayer
+    onExited: function(exitCode, exitStatus) {
+      if (exitCode !== 0) root.notificationError = "Could not play this sound. Choose a readable audio file and check that pw-play is installed."
+    }
+  }
+
+  function playNotificationSound() {
+    if (notificationMuted || notificationVolume <= 0 || notificationPlayer.running) return
+    notificationError = ""
+    var path = String(notificationSoundPath || Qt.resolvedUrl("assets/message.wav"))
+    if (path.indexOf("file://") === 0) path = decodeURIComponent(path.slice(7))
+    if (path.charAt(0) !== "/") {
+      notificationError = "Choose an absolute path to a local audio file."
+      return
+    }
+    notificationPlayer.command = ["pw-play", "--volume",
+      String(Math.max(0, Math.min(100, notificationVolume)) / 100), path]
+    notificationPlayer.running = true
+  }
+
   function buildSelfStatusLabel() {
     if (!daemonConnected) return "Disconnected"
     var connection = String(selfState.connection || "offline")
@@ -317,9 +380,13 @@ Item {
     return parts.join(" · ")
   }
 
-  function applySnapshot(next) {
+  function applySnapshot(next, eventName) {
     if (!next) return
+    var incoming = ChatLogic.hasIncomingMessage(receivedSnapshot ? snapshot : null, next, eventName)
     snapshot = next
+    receivedSnapshot = true
+    if (notificationSoundsEnabled && ChatLogic.shouldPlaySound(incoming,
+        appFocused, notificationMuted, notificationVolume)) playNotificationSound()
     var nextSelf = next["self"] || ({})
     var nextMedia = nextSelf.media || ({})
     var nextShare = nextMedia.screen_share || ({})
@@ -339,6 +406,16 @@ Item {
         }
       }
     }
+    markVisibleConversationRead()
+  }
+
+  function markVisibleConversationRead() {
+    var c = activeConversation
+    if (!appFocused || !chatVisible || !c || !c.last_message || !c.unread_count) return
+    var id = String(c.last_message.id)
+    if (lastReadMessageId === id) return
+    lastReadMessageId = id
+    send("mark_conversation_read", { "conversation_id": String(c.id) })
   }
 
   function conversationById(id) {
@@ -374,9 +451,10 @@ Item {
       return
     }
     if (message.type === "event" && message.payload && message.payload.snapshot) {
-      applySnapshot(message.payload.snapshot)
+      applySnapshot(message.payload.snapshot, message.name)
       return
     }
+    if (message.type === "result") finishRequest(message)
     if (message.type === "result" && message.ok !== true && message.error) {
       lastError = String(message.error.message || "Wisp command failed")
       commandFailed(lastError)
@@ -385,14 +463,16 @@ Item {
 
   function sendThrough(socket, name, args) {
     requestId += 1
+    var id = "qml-" + requestId
     socket.write(JSON.stringify({
       "v": 1,
-      "id": "qml-" + requestId,
+      "id": id,
       "type": "command",
       "name": name,
       "args": args || ({})
     }) + "\n")
     socket.flush()
+    return id
   }
 
   function send(name, args) {
@@ -402,10 +482,129 @@ Item {
       commandFailed(lastError)
       return
     }
-    sendThrough(socket, name, args)
+    return sendThrough(socket, name, args)
+  }
+
+  function replaceEntry(map, key, value) {
+    var next = Object.assign({}, map)
+    if (value === undefined) delete next[key]
+    else next[key] = value
+    return next
+  }
+  function draftFor(id) { return String(drafts[id] || "") }
+  function setDraft(id, value) {
+    if (id && draftFor(id) !== value) drafts = replaceEntry(drafts, id, value)
+  }
+  function pasteClipboard(conversationId) {
+    if (!conversationId || sendingConversations[conversationId]) return
+    var id = send("paste_clipboard", {})
+    if (id) {
+      requests[id] = { kind: "paste", conversationId: conversationId }
+      importingConversations = replaceEntry(importingConversations, conversationId, (importingConversations[conversationId] || 0) + 1)
+    }
+  }
+  function attachmentsFor(id) { return pendingAttachments[id] || [] }
+  function importChatFiles(conversationId, urls) {
+    if (!conversationId || sendingConversations[conversationId]) return
+    var values = []
+    for (var i = 0; i < urls.length; i++) values.push(String(urls[i]))
+    var id = send("import_chat_files", {urls: values})
+    if (id) {
+      requests[id] = {kind: "import", conversationId: conversationId}
+      importingConversations = replaceEntry(importingConversations, conversationId, (importingConversations[conversationId] || 0) + 1)
+    }
+  }
+  function removeAttachment(conversationId, token, alreadySent) {
+    if (!alreadySent) send("discard_attachment_draft", {token: token})
+    pendingAttachments = replaceEntry(pendingAttachments, conversationId,
+      attachmentsFor(conversationId).filter(function(a) { return a.token !== token }))
+  }
+  function sendAttachmentQueue(conversationId, tokens, caption, originalText) {
+    var id = send("send_attachment_message", {conversation_id: conversationId, token: tokens[0], caption: caption})
+    if (id) {
+      requests[id] = {kind: "send", conversationId: conversationId, text: originalText, token: tokens[0], remaining: tokens.slice(1)}
+      sendingConversations = replaceEntry(sendingConversations, conversationId, true)
+    } else sendingConversations = replaceEntry(sendingConversations, conversationId, undefined)
+  }
+  function sendComposedMessage(conversationId) {
+    if (!conversationId || sendingConversations[conversationId] || importingConversations[conversationId]) return
+    var text = draftFor(conversationId).trim()
+    var attachments = attachmentsFor(conversationId)
+    if (attachments.length > 0) {
+      sendAttachmentQueue(conversationId, attachments.map(function(a) { return a.token }), text, draftFor(conversationId))
+      return
+    }
+    if (!text) return
+    var id = send("send_message", {conversation_id: conversationId, text: text})
+    if (id) {
+      requests[id] = {kind: "send", conversationId: conversationId, text: draftFor(conversationId), token: ""}
+      sendingConversations = replaceEntry(sendingConversations, conversationId, true)
+    }
+  }
+  function saveChatFile(messageId) {
+    if (savingFiles[messageId]) return
+    var id = send("save_chat_file", {message_id: messageId})
+    if (id) {
+      requests[id] = {kind: "saveFile", messageId: messageId}
+      savingFiles = replaceEntry(savingFiles, messageId, true)
+    }
+  }
+  function fileSize(size) {
+    return size >= 1048576 ? (size / 1048576).toFixed(1) + " MB"
+      : size >= 1024 ? Math.ceil(size / 1024) + " KB" : size + " bytes"
+  }
+  function loadChatImage(messageId, retry) {
+    if (chatImageUrls[messageId] || (imageRequests[messageId] && !retry)) return
+    var id = send("load_chat_image", {message_id: messageId})
+    if (id) {
+      imageRequests[messageId] = true
+      requests[id] = {kind: "image", messageId: messageId}
+    }
+  }
+  function finishRequest(message) {
+    var action = requests[message.id]
+    if (!action) return
+    delete requests[message.id]
+    var value = message.value || ({})
+    var conversationId = action.conversationId
+    if (action.kind === "edit" || action.kind === "delete") {
+      messageMutationFinished(action.messageId, action.kind, !!message.ok,
+        message.error ? String(message.error.message || "Could not update message") : "")
+    } else if (action.kind === "send") {
+      sendingConversations = replaceEntry(sendingConversations, conversationId, undefined)
+      if (message.ok) {
+        if (action.text !== undefined && draftFor(conversationId) === action.text) setDraft(conversationId, "")
+        if (action.token) removeAttachment(conversationId, action.token, true)
+        if (action.remaining && action.remaining.length > 0)
+          sendAttachmentQueue(conversationId, action.remaining, "", undefined)
+      }
+    } else if (action.kind === "paste" || action.kind === "import") {
+      importingConversations = replaceEntry(importingConversations, conversationId,
+        Math.max(0, (importingConversations[conversationId] || 1) - 1))
+      if (message.ok) {
+        var added = value.attachments || (value.token ? [value] : [])
+        if (added.length > 0) pendingAttachments = replaceEntry(pendingAttachments, conversationId, attachmentsFor(conversationId).concat(added))
+        else if (value.text !== undefined) clipboardTextReady(conversationId, String(value.text))
+      }
+    } else if (action.kind === "saveFile") {
+      savingFiles = replaceEntry(savingFiles, action.messageId, undefined)
+      if (message.ok) savedFiles = replaceEntry(savedFiles, action.messageId, value)
+    } else if (action.kind === "image") {
+      if (message.ok) chatImageUrls = replaceEntry(chatImageUrls, action.messageId, value.url)
+      else imageErrors = replaceEntry(imageErrors, action.messageId, true)
+    }
   }
 
   function setPresence(value) { send("set_presence", { "presence": value }) }
+  function editChatMessage(messageId, text) {
+    var id = send("edit_message", {message_id: messageId, text: text})
+    if (id) requests[id] = {kind: "edit", messageId: messageId}
+    return !!id
+  }
+  function deleteChatMessage(messageId) {
+    var id = send("delete_message", {message_id: messageId})
+    if (id) requests[id] = {kind: "delete", messageId: messageId}
+  }
   function joinFriend(name) { send("join_friend", { "friend": name }) }
   function joinHangout(id) { send("join_hangout", { "hangout_id": id }) }
   function joinSpot(id) { send("join_spot", { "spot_id": id }) }
@@ -415,7 +614,15 @@ Item {
   }
   function selectConversation(id) {
     activeConversationId = String(id)
+    var c = conversationById(id)
+    if (c && c.tab_closed) send("set_conversation_tab", { "conversation_id": String(id), "closed": false })
     send("mark_conversation_read", { "conversation_id": activeConversationId })
+  }
+  function exitConversation(id) {
+    send("set_conversation_tab", { "conversation_id": String(id), "closed": true })
+  }
+  function clearChatHistory(id) {
+    send("clear_chat_history", { "conversation_id": String(id) })
   }
   function closeConversation() { activeConversationId = "" }
   function sendMessage(text) {
@@ -492,6 +699,14 @@ Item {
           root.sendThrough(connection, "hello", { "client": root.clientName })
           root.sendThrough(connection, "refresh_audio_devices", {})
           root.sendThrough(connection, "refresh_video_devices", {})
+        } else {
+          root.receivedSnapshot = false
+          root.requests = ({})
+          root.sendingConversations = ({})
+          root.importingConversations = ({})
+          root.savingFiles = ({})
+          root.imageRequests = ({})
+          root.lastReadMessageId = ""
         }
       }
     }

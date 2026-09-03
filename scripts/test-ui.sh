@@ -43,6 +43,7 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 WISP_PRIMARY_SCREEN="$primary_screen" \
+  WISP_SOCKET="$test_root/wisp/wispd.sock" \
   qs --path "$config_dir" --no-duplicate >"$log_file" 2>&1 &
 ui_pid=$!
 

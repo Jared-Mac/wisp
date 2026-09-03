@@ -16,6 +16,8 @@ rust-version = "1.89"
 
 [workspace.dependencies]
 anyhow = "1.0"
+arboard = { version = "3.6.1", features = ["wayland-data-control"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 ashpd = { version = "0.13", default-features = false, features = ["screencast", "tokio"] }
 axum = { version = "0.8", features = ["ws"] }
 base64 = "0.22"
@@ -29,6 +31,7 @@ gstreamer-video = { version = "0.24", features = ["v1_22"] }
 hound = "3.5"
 hmac = "0.12"
 ksni = "0.3"
+libc = "0.2"
 livekit = { version = "=0.8.4", features = ["rustls-tls-native-roots"] }
 nnnoiseless = { version = "0.5", default-features = false }
 ndarray = "0.15"

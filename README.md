@@ -173,6 +173,47 @@ wispctl devices
 wispctl revoke-device <device-id>
 ```
 
+The full app has a large, resizable chat workspace and persistent conversation
+tabs. Switching tabs, hiding the window, or restarting Wisp does not close a
+conversation. **Chat options → Close conversation** hides its tab without
+deleting messages. A new incoming DM or opening that friend's DM restores it;
+**All conversations** can also reopen closed tabs. **Clear Chat History…** is a
+separate confirmed action that clears only your view, including cached images,
+not another participant's copy. These preferences are saved per user on the host.
+
+Both the full app and tray chat accept **Ctrl+V** screenshot pastes and local
+file/image drops onto the conversation or composer. Attachments stay in a
+removable preview strip until **Send** and may include a caption. Multiple files
+send in order; a failed upload retains the unsent files without resending those
+already acknowledged. **Enter** sends; **Shift+Enter** adds a line break.
+Images are limited to 12 MB / 32 megapixels. PNG, JPEG, GIF, and WebP drops are
+converted to a still PNG (animated formats use their first frame); other files
+are attachments up to 25 MB each. Up to eight attachments can be staged across
+all conversations. Folders, symlinks, and web URLs are not imported.
+Only conversation members can download attachments. Click an image to open it
+in the system viewer. **Save file** downloads a generic attachment into a new
+folder under Downloads/Wisp without opening it or giving it executable permissions.
+Explicitly saved files remain yours even if the chat is later cleared/deleted.
+Clipboard support includes Wayland data-control and X11/XWayland; nothing uploads
+until Send. Drafts survive tab/window navigation, not a complete app restart.
+
+Use the **···** menu on your own messages to edit text or an attachment caption, or
+confirm **Delete message…** to remove it for everyone. Edits display a subtle
+**edited** label without changing the original timestamp. Deleting an attachment
+also removes its stored attachment; deletion does not erase existing backups
+or copies someone has already saved outside Wisp.
+
+Unread messages add a count badge to the system tray. Incoming messages play a
+short sound only when Wisp is not focused. **Settings → Notifications** controls
+mute, volume, and a custom local sound file; these settings live only on this
+device in `~/.config/wisp/notifications.json`. Playback uses PipeWire's `pw-play`.
+The explicit **Test sound** button works while Settings is focused.
+
+Deploy the updated host and clients together: database migrations 0004–0007 add
+per-user conversation preferences, authenticated attachment storage, and edit timestamps. Existing
+messages and conversations are preserved. Images, like text, are server-readable
+in this alpha; media-call E2EE does not apply to chat attachments.
+
 LiveKit audio and video use its built-in AES-GCM end-to-end encryption whenever
 Wisp runs with device authentication. The media key is shared privately and is
 never sent to `wisp-server`; the Settings device page reports whether E2EE is

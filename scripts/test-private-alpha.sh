@@ -222,6 +222,26 @@ VALUES (
 SQL
 circle_conversation=$(jq -er '.conversations[] | select(.kind == "circle") | .id' \
   <<<"$jared_snapshot")
+# Independent DM verifies image access and per-user close/clear across backup/restart.
+history_conversation=$(post_json /v1/conversations/direct '{"friend":"Tyler"}' "$charlie_token" | jq -er '.id')
+image_message=$(post_json /v1/messages/image "$(jq -cn --arg id "$history_conversation" \
+  '{conversation_id:$id,png_base64:"iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAEUlEQVR4nGPQ7/n/H4QZYAwAXFAK5eZRdEUAAAAASUVORK5CYII=",caption:"image history test"}')" "$charlie_token")
+image_id=$(jq -er '.id' <<<"$image_message")
+curl --silent --fail -H "authorization: Bearer $tyler_token" "$server_url/v1/messages/$image_id/image" >/dev/null
+if curl --silent --fail -H "authorization: Bearer $jared_token" "$server_url/v1/messages/$image_id/image" >/dev/null; then
+  echo 'Non-member downloaded a chat image' >&2; exit 1
+fi
+file_message=$(post_json /v1/messages/file "$(jq -cn --arg id "$history_conversation" \
+  '{conversation_id:$id,file_name:"notes.txt",data_base64:"cHJpdmF0ZSBub3Rlcw==",caption:"file history test"}')" "$charlie_token")
+file_id=$(jq -er '.id' <<<"$file_message")
+[[ $(curl --silent --fail -H "authorization: Bearer $tyler_token" "$server_url/v1/messages/$file_id/file") == 'private notes' ]]
+if curl --silent --fail -H "authorization: Bearer $jared_token" "$server_url/v1/messages/$file_id/file" >/dev/null; then
+  echo 'Non-member downloaded a chat file' >&2; exit 1
+fi
+curl --silent --fail -X PATCH -H "authorization: Bearer $charlie_token" -H 'content-type: application/json' \
+  -d '{"text":"Edited attachment caption"}' "$server_url/v1/messages/$file_id" >/dev/null
+post_json /v1/conversations/clear "$(jq -cn --arg id "$history_conversation" '{conversation_id:$id}')" "$tyler_token" >/dev/null
+post_json /v1/conversations/tab "$(jq -cn --arg id "$history_conversation" '{conversation_id:$id,closed:true}')" "$tyler_token" >/dev/null
 (
   for message_number in $(seq 1 40); do
     post_json /v1/messages "$(jq -cn --arg id "$circle_conversation" \
@@ -250,6 +270,25 @@ start_server
 
 jared_token=$(new_session "$jared_device_id" "$jared_device_token" | jq -er '.token')
 tyler_token=$(new_session "$tyler_device_id" "$tyler_device_token" | jq -er '.token')
+curl --silent --fail -H "authorization: Bearer $tyler_token" "$server_url/v1/snapshot" \
+  | jq -e --arg id "$history_conversation" '.conversations[] | select(.id == $id) | .tab_closed and .last_message == null and .unread_count == 0' >/dev/null
+if curl --silent --fail -H "authorization: Bearer $tyler_token" "$server_url/v1/messages/$image_id/image" >/dev/null; then
+  echo 'Cleared image became visible after restart' >&2; exit 1
+fi
+curl --silent --fail -H "authorization: Bearer $charlie_token" "$server_url/v1/messages/$image_id/image" >/dev/null
+if curl --silent --fail -H "authorization: Bearer $tyler_token" "$server_url/v1/messages/$file_id/file" >/dev/null; then
+  echo 'Cleared file became visible after restart' >&2; exit 1
+fi
+[[ $(curl --silent --fail -H "authorization: Bearer $charlie_token" "$server_url/v1/messages/$file_id/file") == 'private notes' ]]
+curl --silent --fail -H "authorization: Bearer $charlie_token" "$server_url/v1/snapshot" \
+  | jq -e --arg id "$file_id" '.messages[] | select(.id == $id) | .edited_at != null and .payload.caption == "Edited attachment caption"' >/dev/null
+curl --silent --fail -X DELETE -H "authorization: Bearer $charlie_token" "$server_url/v1/messages/$file_id" >/dev/null
+if curl --silent --fail -H "authorization: Bearer $charlie_token" "$server_url/v1/messages/$file_id/file" >/dev/null; then
+  echo 'Deleted attachment remained downloadable' >&2; exit 1
+fi
+post_json /v1/messages "$(jq -cn --arg id "$history_conversation" '{conversation_id:$id,payload:"new DM after close"}')" "$charlie_token" >/dev/null
+curl --silent --fail -H "authorization: Bearer $tyler_token" "$server_url/v1/snapshot" \
+  | jq -e --arg id "$history_conversation" '.conversations[] | select(.id == $id) | (.tab_closed | not) and .last_message.payload == "new DM after close"' >/dev/null
 curl --silent --fail -H "authorization: Bearer $tyler_token" \
   --get --data-urlencode "conversation_id=$conversation_id" "$server_url/v1/messages" \
   | jq -e 'length == 1 and .[0].payload == "offline hello"' >/dev/null

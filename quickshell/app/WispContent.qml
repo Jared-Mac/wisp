@@ -56,8 +56,10 @@ FocusScope {
     }
   }
 
-  Keys.priority: Keys.BeforeItem
+  // Editors consume typing/paste before the single-letter call shortcuts.
+  Keys.priority: Keys.AfterItem
   Keys.onPressed: function(event) {
+    if (event.modifiers !== Qt.NoModifier && event.key !== Qt.Key_Escape) return
     if (event.key === Qt.Key_Escape) {
       if (root.settingsOpen) root.toggleSettings()
       else root.requestClose()
@@ -90,6 +92,7 @@ FocusScope {
     contentHeight: panelColumn.implicitHeight + root.contentPadding * 2
     clip: true
     boundsBehavior: Flickable.StopAtBounds
+    interactive: root.presentation !== "app" || root.settingsOpen
 
     Column {
       id: panelColumn
@@ -275,7 +278,10 @@ FocusScope {
         id: dashboardLoader
         visible: !root.settingsOpen
         width: parent.width
-        sourceComponent: root.wideLayout
+        height: root.presentation === "app" && !root.settingsOpen
+          ? Math.max(root.theme.space(550), root.height - y - root.contentPadding * 2)
+          : implicitHeight
+        sourceComponent: root.presentation === "app"
           ? wideDashboardComponent : compactDashboardComponent
       }
     }
@@ -353,11 +359,18 @@ FocusScope {
     Row {
       id: wideDashboard
       spacing: root.theme.spacing.xxl
-
-      Column {
-        id: activityColumn
-        width: Math.round((wideDashboard.width - wideDashboard.spacing) * 0.57)
-        spacing: root.theme.spacing.lg
+      height: dashboardLoader.height
+      Flickable {
+        width: root.theme.space(280)
+        height: parent.height
+        contentWidth: width
+        contentHeight: activityColumn.implicitHeight
+        clip: true
+        boundsBehavior: Flickable.StopAtBounds
+        Column {
+          id: activityColumn
+          width: parent.width
+          spacing: root.theme.spacing.lg
 
         SettingsView {
           width: parent.width
@@ -391,24 +404,19 @@ FocusScope {
           theme: root.theme
           onJoined: root.maybeDismiss()
         }
-      }
-
-      Column {
-        width: wideDashboard.width - activityColumn.width - wideDashboard.spacing
-        spacing: root.theme.spacing.lg
-
         FriendsView {
           width: parent.width
           bridge: root.bridge
           theme: root.theme
           onSelected: root.maybeDismiss()
         }
-
-        MessagesView {
-          width: parent.width
-          bridge: root.bridge
-          theme: root.theme
         }
+      }
+      ConversationWorkspace {
+        width: wideDashboard.width - root.theme.space(280) - wideDashboard.spacing
+        height: parent.height
+        bridge: root.bridge
+        theme: root.theme
       }
     }
   }

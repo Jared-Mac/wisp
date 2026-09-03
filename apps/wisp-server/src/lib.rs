@@ -1,12 +1,12 @@
 use axum::{
     Json, Router,
     extract::{
-        Path, Query, State, WebSocketUpgrade,
+        DefaultBodyLimit, Path, Query, State, WebSocketUpgrade,
         ws::{Message as WsMessage, WebSocket},
     },
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
-    routing::{delete, get, post},
+    routing::{delete, get, patch, post},
 };
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{Duration as ChronoDuration, Utc};
@@ -32,7 +32,8 @@ use wisp_protocol::{
     JoinSpotRequest, KnockId, KnockRequestView, KnockResponse, LiveKitTokenResponse,
     MarkConversationReadRequest, Message, PROTOCOL_VERSION, Presence, ProtocolError,
     RegisterDeviceRequest, RespondKnockRequest, RespondKnockResult, SendMessageRequest,
-    ServerEvent, SetPresenceRequest, Snapshot, SpotView, UserId, UserSummary,
+    ServerEvent, SetConversationTabRequest, SetPresenceRequest, Snapshot, SpotView, UserId,
+    UserSummary,
 };
 
 const JARED_ID: &str = "00000000-0000-4000-8000-000000000001";
@@ -401,8 +402,24 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/spots/join", post(join_spot))
         .route("/v1/livekit/token", post(livekit_token))
         .route("/v1/messages", get(list_messages).post(send_message))
+        .route(
+            "/v1/messages/image",
+            post(send_image_message).layer(DefaultBodyLimit::max(18 * 1024 * 1024)),
+        )
+        .route("/v1/messages/{id}/image", get(get_chat_image))
+        .route(
+            "/v1/messages/file",
+            post(send_file_message).layer(DefaultBodyLimit::max(36 * 1024 * 1024)),
+        )
+        .route("/v1/messages/{id}/file", get(get_chat_file))
+        .route(
+            "/v1/messages/{id}",
+            patch(edit_message).delete(delete_message),
+        )
         .route("/v1/conversations/direct", post(create_direct_conversation))
         .route("/v1/conversations/read", post(mark_conversation_read))
+        .route("/v1/conversations/tab", post(set_conversation_tab))
+        .route("/v1/conversations/clear", post(clear_conversation_history))
         .route("/v1/users/{id}", get(user_by_id))
         .layer(TraceLayer::new_for_http())
         .with_state(state)
@@ -1055,8 +1072,9 @@ async fn list_messages(
         .await
         .map_err(ApiError::internal)?;
     let rows = sqlx::query(
-        "SELECT m.id, m.conversation_id, m.created_at, m.content_type, m.payload, m.encryption_version, u.id AS sender_id, u.display_name FROM messages m JOIN users u ON u.id = m.sender_id WHERE m.conversation_id = ? AND (? IS NULL OR m.created_at > ?) ORDER BY m.created_at, m.id LIMIT 200",
+        "SELECT m.id, m.conversation_id, m.created_at, m.content_type, m.payload, m.encryption_version, m.edited_at, u.id AS sender_id, u.display_name FROM messages m JOIN users u ON u.id = m.sender_id JOIN conversation_members cm ON cm.conversation_id = m.conversation_id AND cm.user_id = ? WHERE m.conversation_id = ? AND m.created_at > COALESCE(cm.history_cleared_at, '') AND (? IS NULL OR m.created_at > ?) ORDER BY m.created_at, m.id LIMIT 200",
     )
+    .bind(user_id.to_string())
     .bind(&query.conversation_id)
     .bind(query.after.as_deref())
     .bind(query.after.as_deref())
@@ -1078,6 +1096,22 @@ async fn send_message(
     let sender_id = authenticate_headers(&state, &headers).await?;
     ensure_conversation_member(&state.pool, &request.conversation_id, sender_id).await?;
     validate_message(&request)?;
+    persist_message(&state, sender_id, request, None)
+        .await
+        .map(Json)
+}
+
+enum StoredAttachment {
+    Image(Vec<u8>),
+    File(Vec<u8>),
+}
+
+async fn persist_message(
+    state: &AppState,
+    sender_id: UserId,
+    request: SendMessageRequest,
+    attachment: Option<StoredAttachment>,
+) -> Result<Message, ApiError> {
     let sender = find_user(&state.pool, &sender_id.to_string()).await?;
     let message = Message {
         id: Uuid::new_v4(),
@@ -1087,6 +1121,7 @@ async fn send_message(
         content_type: request.content_type,
         payload: request.payload,
         encryption_version: request.encryption_version,
+        edited_at: None,
     };
     let mut tx = state.pool.begin().await.map_err(ApiError::internal)?;
     sqlx::query("INSERT INTO messages(id, conversation_id, sender_id, created_at, content_type, payload, encryption_version) VALUES (?, ?, ?, ?, ?, ?, ?)")
@@ -1094,6 +1129,31 @@ async fn send_message(
         .bind(message.created_at.to_rfc3339()).bind(&message.content_type)
         .bind(serde_json::to_string(&message.payload).map_err(ApiError::internal)?)
         .bind(message.encryption_version).execute(&mut *tx).await.map_err(ApiError::internal)?;
+    if let Some(attachment) = attachment {
+        let (statement, bytes) = match attachment {
+            StoredAttachment::Image(bytes) => (
+                "INSERT INTO chat_images(message_id, png) VALUES (?, ?)",
+                bytes,
+            ),
+            StoredAttachment::File(bytes) => (
+                "INSERT INTO chat_files(message_id, data) VALUES (?, ?)",
+                bytes,
+            ),
+        };
+        sqlx::query(statement)
+            .bind(message.id.to_string())
+            .bind(bytes)
+            .execute(&mut *tx)
+            .await
+            .map_err(ApiError::internal)?;
+    }
+    // A new DM restores the recipient's tab. Other conversations stay closed
+    // until deliberately reopened, and sending always opens the sender's tab.
+    sqlx::query("UPDATE conversation_members SET tab_closed = 0 WHERE conversation_id = ? AND (user_id = ? OR EXISTS (SELECT 1 FROM conversations WHERE id = ? AND kind = 'direct'))")
+        .bind(&message.conversation_id)
+        .bind(sender_id.to_string())
+        .bind(&message.conversation_id)
+        .execute(&mut *tx).await.map_err(ApiError::internal)?;
     sqlx::query("INSERT INTO message_reads(conversation_id, user_id, last_read_at) VALUES (?, ?, ?) ON CONFLICT(conversation_id, user_id) DO UPDATE SET last_read_at = excluded.last_read_at")
         .bind(&message.conversation_id)
         .bind(sender_id.to_string())
@@ -1106,7 +1166,244 @@ async fn send_message(
     state
         .emit("message_created", json!({"changed": true}))
         .await;
+    Ok(message)
+}
+
+fn normalize_chat_image(png: &[u8]) -> Result<(Vec<u8>, u32, u32), ApiError> {
+    use std::io::Cursor;
+    if png.len() > wisp_protocol::MAX_CHAT_IMAGE_BYTES {
+        return Err(ApiError::bad_request(
+            "image_too_large",
+            "Images must be 12 MB or smaller",
+        ));
+    }
+    let mut reader = image::ImageReader::with_format(Cursor::new(png), image::ImageFormat::Png);
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(16384);
+    limits.max_image_height = Some(16384);
+    limits.max_alloc = Some(128 * 1024 * 1024);
+    reader.limits(limits);
+    let image = reader.decode().map_err(|_| {
+        ApiError::bad_request("invalid_image", "Clipboard image is not a supported PNG")
+    })?;
+    if u64::from(image.width()) * u64::from(image.height()) > wisp_protocol::MAX_CHAT_IMAGE_PIXELS {
+        return Err(ApiError::bad_request(
+            "image_too_large",
+            "Image dimensions exceed 32 megapixels",
+        ));
+    }
+    // Re-encode pixels only: strip clipboard metadata and reject malformed PNGs.
+    let mut output = Cursor::new(Vec::new());
+    image
+        .write_to(&mut output, image::ImageFormat::Png)
+        .map_err(ApiError::internal)?;
+    if output.get_ref().len() > wisp_protocol::MAX_CHAT_IMAGE_BYTES {
+        return Err(ApiError::bad_request(
+            "image_too_large",
+            "Images must be 12 MB or smaller",
+        ));
+    }
+    Ok((output.into_inner(), image.width(), image.height()))
+}
+
+async fn send_image_message(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<wisp_protocol::SendImageMessageRequest>,
+) -> Result<Json<Message>, ApiError> {
+    let sender_id = authenticate_headers(&state, &headers).await?;
+    ensure_conversation_member(&state.pool, &request.conversation_id, sender_id).await?;
+    if request.caption.chars().count() > 4000
+        || request.png_base64.len() > wisp_protocol::MAX_CHAT_IMAGE_BYTES * 4 / 3 + 4
+    {
+        return Err(ApiError::bad_request(
+            "image_too_large",
+            "Use an image under 12 MB and a caption under 4000 characters",
+        ));
+    }
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(&request.png_base64)
+        .map_err(|_| ApiError::bad_request("invalid_image", "Invalid image encoding"))?;
+    let (png, width, height) = tokio::task::spawn_blocking(move || normalize_chat_image(&bytes))
+        .await
+        .map_err(ApiError::internal)??;
+    let message = persist_message(
+        &state,
+        sender_id,
+        SendMessageRequest {
+            conversation_id: request.conversation_id,
+            content_type: "image/png".into(),
+            payload: json!({"width": width, "height": height, "caption": request.caption}),
+            encryption_version: 0,
+        },
+        Some(StoredAttachment::Image(png)),
+    )
+    .await?;
     Ok(Json(message))
+}
+
+async fn send_file_message(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<wisp_protocol::SendFileMessageRequest>,
+) -> Result<Json<Message>, ApiError> {
+    let sender_id = authenticate_headers(&state, &headers).await?;
+    ensure_conversation_member(&state.pool, &request.conversation_id, sender_id).await?;
+    if !wisp_protocol::valid_chat_file_name(&request.file_name) {
+        return Err(ApiError::bad_request(
+            "invalid_filename",
+            "Use a filename of 1–200 bytes without path separators or control characters",
+        ));
+    }
+    if request.caption.chars().count() > 4000
+        || request.data_base64.len() > wisp_protocol::MAX_CHAT_FILE_BYTES.div_ceil(3) * 4
+    {
+        return Err(ApiError::bad_request(
+            "file_too_large",
+            "Files must be 25 MB or smaller and captions at most 4000 characters",
+        ));
+    }
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(&request.data_base64)
+        .map_err(|_| ApiError::bad_request("invalid_file", "Invalid file encoding"))?;
+    if bytes.len() > wisp_protocol::MAX_CHAT_FILE_BYTES {
+        return Err(ApiError::bad_request(
+            "file_too_large",
+            "Files must be 25 MB or smaller",
+        ));
+    }
+    let message = persist_message(&state, sender_id, SendMessageRequest {
+        conversation_id: request.conversation_id,
+        content_type: "application/octet-stream".into(),
+        payload: json!({"file_name": request.file_name, "size": bytes.len(), "caption": request.caption}),
+        encryption_version: 0,
+    }, Some(StoredAttachment::File(bytes))).await?;
+    Ok(Json(message))
+}
+
+async fn get_chat_file(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+) -> Result<Response, ApiError> {
+    let user_id = authenticate_headers(&state, &headers).await?;
+    let bytes = sqlx::query_scalar::<_, Vec<u8>>("SELECT cf.data FROM chat_files cf JOIN messages m ON m.id = cf.message_id JOIN conversation_members cm ON cm.conversation_id = m.conversation_id WHERE cf.message_id = ? AND cm.user_id = ? AND m.created_at > COALESCE(cm.history_cleared_at, '')")
+        .bind(id.to_string()).bind(user_id.to_string())
+        .fetch_optional(&state.pool).await.map_err(ApiError::internal)?
+        .ok_or_else(|| ApiError::not_found("file is unavailable"))?;
+    Ok((
+        [
+            ("content-type", "application/octet-stream"),
+            ("content-disposition", "attachment"),
+            ("cache-control", "private, no-store"),
+            ("x-content-type-options", "nosniff"),
+        ],
+        bytes,
+    )
+        .into_response())
+}
+
+async fn get_chat_image(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+) -> Result<Response, ApiError> {
+    let user_id = authenticate_headers(&state, &headers).await?;
+    let png = sqlx::query_scalar::<_, Vec<u8>>("SELECT ci.png FROM chat_images ci JOIN messages m ON m.id = ci.message_id JOIN conversation_members cm ON cm.conversation_id = m.conversation_id WHERE ci.message_id = ? AND cm.user_id = ? AND m.created_at > COALESCE(cm.history_cleared_at, '')")
+        .bind(id.to_string()).bind(user_id.to_string())
+        .fetch_optional(&state.pool).await.map_err(ApiError::internal)?
+        .ok_or_else(|| ApiError::not_found("image is unavailable"))?;
+    Ok((
+        [
+            ("content-type", "image/png"),
+            ("cache-control", "private, no-store"),
+            ("x-content-type-options", "nosniff"),
+        ],
+        png,
+    )
+        .into_response())
+}
+
+async fn own_message(pool: &SqlitePool, user_id: UserId, id: Uuid) -> Result<SqliteRow, ApiError> {
+    let row = sqlx::query(
+        "SELECT sender_id, conversation_id, content_type, payload FROM messages WHERE id = ?",
+    )
+    .bind(id.to_string())
+    .fetch_optional(pool)
+    .await
+    .map_err(ApiError::internal)?
+    .ok_or_else(|| ApiError::not_found("message does not exist"))?;
+    if row.get::<String, _>("sender_id") != user_id.to_string() {
+        return Err(ApiError::forbidden(
+            "you can only edit or delete your own messages",
+        ));
+    }
+    ensure_conversation_member(pool, &row.get::<String, _>("conversation_id"), user_id).await?;
+    Ok(row)
+}
+
+async fn edit_message(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+    Json(request): Json<wisp_protocol::EditMessageRequest>,
+) -> Result<Json<Value>, ApiError> {
+    let user_id = authenticate_headers(&state, &headers).await?;
+    let row = own_message(&state.pool, user_id, id).await?;
+    let text = request.text.trim();
+    let is_attachment = matches!(
+        row.get::<String, _>("content_type").as_str(),
+        "image/png" | "application/octet-stream"
+    );
+    if text.chars().count() > 4000 || (!is_attachment && text.is_empty()) {
+        return Err(ApiError::bad_request(
+            "invalid_message",
+            "Text must contain 1–4000 characters; attachment captions may be empty",
+        ));
+    }
+    let original: Value =
+        serde_json::from_str(&row.get::<String, _>("payload")).map_err(ApiError::internal)?;
+    let mut payload = original.clone();
+    if is_attachment {
+        payload["caption"] = json!(text);
+    } else {
+        payload = json!(text);
+    }
+    if payload != original {
+        sqlx::query(
+            "UPDATE messages SET payload = ?, edited_at = ? WHERE id = ? AND sender_id = ?",
+        )
+        .bind(serde_json::to_string(&payload).map_err(ApiError::internal)?)
+        .bind(Utc::now().to_rfc3339())
+        .bind(id.to_string())
+        .bind(user_id.to_string())
+        .execute(&state.pool)
+        .await
+        .map_err(ApiError::internal)?;
+        state
+            .emit("message_updated", json!({"changed": true}))
+            .await;
+    }
+    Ok(Json(json!({"ok": true})))
+}
+
+async fn delete_message(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Value>, ApiError> {
+    let user_id = authenticate_headers(&state, &headers).await?;
+    own_message(&state.pool, user_id, id).await?;
+    sqlx::query("DELETE FROM messages WHERE id = ? AND sender_id = ?")
+        .bind(id.to_string())
+        .bind(user_id.to_string())
+        .execute(&state.pool)
+        .await
+        .map_err(ApiError::internal)?;
+    state
+        .emit("message_deleted", json!({"changed": true}))
+        .await;
+    Ok(Json(json!({"ok": true})))
 }
 
 async fn create_direct_conversation(
@@ -1123,6 +1420,7 @@ async fn create_direct_conversation(
         ));
     }
     let conversation_id = find_or_create_direct(&state.pool, self_id, friend.id).await?;
+    update_conversation_tab(&state.pool, self_id, &conversation_id, false).await?;
     let conversation = load_conversation(&state.pool, self_id, &conversation_id).await?;
     state
         .emit("conversation_changed", json!({"changed": true}))
@@ -1144,6 +1442,69 @@ async fn mark_conversation_read(
         .execute(&state.pool)
         .await
         .map_err(ApiError::internal)?;
+    Ok(Json(json!({"ok": true})))
+}
+
+async fn update_conversation_tab(
+    pool: &SqlitePool,
+    user_id: UserId,
+    conversation_id: &str,
+    closed: bool,
+) -> Result<(), ApiError> {
+    ensure_conversation_member(pool, conversation_id, user_id).await?;
+    sqlx::query(
+        "UPDATE conversation_members SET tab_closed = ? WHERE conversation_id = ? AND user_id = ?",
+    )
+    .bind(closed)
+    .bind(conversation_id)
+    .bind(user_id.to_string())
+    .execute(pool)
+    .await
+    .map_err(ApiError::internal)?;
+    Ok(())
+}
+
+async fn set_conversation_tab(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<SetConversationTabRequest>,
+) -> Result<Json<Value>, ApiError> {
+    let user_id = authenticate_headers(&state, &headers).await?;
+    update_conversation_tab(
+        &state.pool,
+        user_id,
+        &request.conversation_id,
+        request.closed,
+    )
+    .await?;
+    state
+        .emit("conversation_changed", json!({"changed": true}))
+        .await;
+    Ok(Json(json!({"ok": true})))
+}
+
+async fn clear_history_for(
+    pool: &SqlitePool,
+    user_id: UserId,
+    conversation_id: &str,
+) -> Result<(), ApiError> {
+    ensure_conversation_member(pool, conversation_id, user_id).await?;
+    sqlx::query("UPDATE conversation_members SET history_cleared_at = ? WHERE conversation_id = ? AND user_id = ?")
+        .bind(Utc::now().to_rfc3339()).bind(conversation_id).bind(user_id.to_string())
+        .execute(pool).await.map_err(ApiError::internal)?;
+    Ok(())
+}
+
+async fn clear_conversation_history(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<MarkConversationReadRequest>,
+) -> Result<Json<Value>, ApiError> {
+    let user_id = authenticate_headers(&state, &headers).await?;
+    clear_history_for(&state.pool, user_id, &request.conversation_id).await?;
+    state
+        .emit("conversation_changed", json!({"changed": true}))
+        .await;
     Ok(Json(json!({"ok": true})))
 }
 
@@ -1437,6 +1798,10 @@ fn message_from_row(row: &SqliteRow) -> Result<Message, ApiError> {
         payload: serde_json::from_str(&row.get::<String, _>("payload"))
             .map_err(ApiError::internal)?,
         encryption_version: row.get("encryption_version"),
+        edited_at: row
+            .get::<Option<String>, _>("edited_at")
+            .map(|value| value.parse().map_err(ApiError::internal))
+            .transpose()?,
     })
 }
 
@@ -1565,7 +1930,7 @@ async fn load_recent_messages(
         .await
         .map_err(ApiError::internal)?;
     let rows = sqlx::query(
-        "SELECT recent.id, recent.conversation_id, recent.created_at, recent.content_type, recent.payload, recent.encryption_version, u.id AS sender_id, u.display_name FROM (SELECT m.* FROM messages m JOIN conversation_members cm ON cm.conversation_id = m.conversation_id WHERE cm.user_id = ? ORDER BY m.created_at DESC, m.id DESC LIMIT 500) recent JOIN users u ON u.id = recent.sender_id ORDER BY recent.created_at, recent.id",
+        "SELECT recent.id, recent.conversation_id, recent.created_at, recent.content_type, recent.payload, recent.encryption_version, recent.edited_at, u.id AS sender_id, u.display_name FROM (SELECT m.* FROM messages m JOIN conversation_members cm ON cm.conversation_id = m.conversation_id WHERE cm.user_id = ? AND m.created_at > COALESCE(cm.history_cleared_at, '') ORDER BY m.created_at DESC, m.id DESC LIMIT 500) recent JOIN users u ON u.id = recent.sender_id ORDER BY recent.created_at, recent.id",
     )
     .bind(user_id.to_string())
     .fetch_all(pool)
@@ -1580,8 +1945,9 @@ async fn load_conversation(
     id: &str,
 ) -> Result<ConversationView, ApiError> {
     ensure_conversation_member(pool, id, user_id).await?;
-    let row = sqlx::query("SELECT kind, label, spot_id FROM conversations WHERE id = ?")
+    let row = sqlx::query("SELECT c.kind, c.label, c.spot_id, cm.tab_closed, cm.history_cleared_at FROM conversations c JOIN conversation_members cm ON cm.conversation_id = c.id WHERE c.id = ? AND cm.user_id = ?")
         .bind(id)
+        .bind(user_id.to_string())
         .fetch_optional(pool)
         .await
         .map_err(ApiError::internal)?
@@ -1610,9 +1976,10 @@ async fn load_conversation(
         })
         .collect::<Result<Vec<_>, ApiError>>()?;
     let message_row = sqlx::query(
-        "SELECT m.id, m.conversation_id, m.created_at, m.content_type, m.payload, m.encryption_version, u.id AS sender_id, u.display_name FROM messages m JOIN users u ON u.id = m.sender_id WHERE m.conversation_id = ? ORDER BY m.created_at DESC, m.id DESC LIMIT 1",
+        "SELECT m.id, m.conversation_id, m.created_at, m.content_type, m.payload, m.encryption_version, m.edited_at, u.id AS sender_id, u.display_name FROM messages m JOIN users u ON u.id = m.sender_id WHERE m.conversation_id = ? AND m.created_at > COALESCE(?, '') ORDER BY m.created_at DESC, m.id DESC LIMIT 1",
     )
     .bind(id)
+    .bind(row.get::<Option<String>, _>("history_cleared_at"))
     .fetch_optional(pool)
     .await
     .map_err(ApiError::internal)?;
@@ -1622,12 +1989,13 @@ async fn load_conversation(
         .transpose()?
         .map(Box::new);
     let unread_count = sqlx::query_scalar::<_, i64>(
-        "SELECT COUNT(*) FROM messages m WHERE m.conversation_id = ? AND m.sender_id != ? AND m.created_at > COALESCE((SELECT last_read_at FROM message_reads WHERE conversation_id = ? AND user_id = ?), '0000-01-01T00:00:00Z')",
+        "SELECT COUNT(*) FROM messages m WHERE m.conversation_id = ? AND m.sender_id != ? AND m.created_at > COALESCE((SELECT last_read_at FROM message_reads WHERE conversation_id = ? AND user_id = ?), '0000-01-01T00:00:00Z') AND m.created_at > COALESCE(?, '')",
     )
     .bind(id)
     .bind(user_id.to_string())
     .bind(id)
     .bind(user_id.to_string())
+    .bind(row.get::<Option<String>, _>("history_cleared_at"))
     .fetch_one(pool)
     .await
     .map_err(ApiError::internal)?;
@@ -1649,6 +2017,11 @@ async fn load_conversation(
         members,
         last_message,
         unread_count: u64::try_from(unread_count).unwrap_or(0),
+        tab_closed: row.get("tab_closed"),
+        history_cleared_at: row
+            .get::<Option<String>, _>("history_cleared_at")
+            .map(|value| value.parse().map_err(ApiError::internal))
+            .transpose()?,
     })
 }
 
@@ -2028,6 +2401,540 @@ mod tests {
                 .await
                 .unwrap(),
             id
+        );
+    }
+
+    fn chat_headers(id: &str) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert("authorization", format!("Bearer dev:{id}").parse().unwrap());
+        headers
+    }
+
+    #[tokio::test]
+    async fn closed_tabs_keep_history_and_new_dms_reopen_them() {
+        let state = AppState::new(test_config()).await.unwrap();
+        let jared = Uuid::parse_str(JARED_ID).unwrap();
+        let tyler = Uuid::parse_str(TYLER_ID).unwrap();
+        let id = find_or_create_direct(&state.pool, jared, tyler)
+            .await
+            .unwrap();
+        let post = || SendMessageRequest {
+            conversation_id: id.clone(),
+            content_type: "text/plain".into(),
+            payload: json!("hello"),
+            encryption_version: 0,
+        };
+        let _ = send_message(State(state.clone()), chat_headers(JARED_ID), Json(post()))
+            .await
+            .unwrap();
+        update_conversation_tab(&state.pool, tyler, &id, true)
+            .await
+            .unwrap();
+        assert!(
+            load_conversation(&state.pool, tyler, &id)
+                .await
+                .unwrap()
+                .tab_closed
+        );
+        assert!(
+            !load_conversation(&state.pool, jared, &id)
+                .await
+                .unwrap()
+                .tab_closed
+        );
+        assert_eq!(
+            load_recent_messages(&state.pool, tyler)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+        // Explicit reopen through a friend uses the same saved DM, not a new one.
+        let reopened = create_direct_conversation(
+            State(state.clone()),
+            chat_headers(TYLER_ID),
+            Json(CreateDirectConversationRequest {
+                friend: "Jared".into(),
+            }),
+        )
+        .await
+        .unwrap()
+        .0;
+        assert_eq!(reopened.id, id);
+        assert!(!reopened.tab_closed);
+        update_conversation_tab(&state.pool, tyler, &id, true)
+            .await
+            .unwrap();
+        let _ = send_message(State(state.clone()), chat_headers(JARED_ID), Json(post()))
+            .await
+            .unwrap();
+        assert!(
+            !load_conversation(&state.pool, tyler, &id)
+                .await
+                .unwrap()
+                .tab_closed
+        );
+        assert_eq!(
+            load_recent_messages(&state.pool, tyler)
+                .await
+                .unwrap()
+                .len(),
+            2
+        );
+    }
+
+    #[tokio::test]
+    #[allow(clippy::too_many_lines)]
+    async fn image_messages_and_history_clearing_are_private_to_each_member() {
+        let state = AppState::new(test_config()).await.unwrap();
+        let jared = Uuid::parse_str(JARED_ID).unwrap();
+        let tyler = Uuid::parse_str(TYLER_ID).unwrap();
+        let charlie = Uuid::parse_str(CHARLIE_ID).unwrap();
+        let id = find_or_create_direct(&state.pool, jared, tyler)
+            .await
+            .unwrap();
+        let mut bytes = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::new_rgba8(4, 3)
+            .write_to(&mut bytes, image::ImageFormat::Png)
+            .unwrap();
+        let request = wisp_protocol::SendImageMessageRequest {
+            conversation_id: id.clone(),
+            png_base64: base64::engine::general_purpose::STANDARD.encode(bytes.into_inner()),
+            caption: "Screenshot".into(),
+        };
+        assert!(
+            send_image_message(
+                State(state.clone()),
+                chat_headers(CHARLIE_ID),
+                Json(request.clone())
+            )
+            .await
+            .is_err()
+        );
+        let sent = send_image_message(State(state.clone()), chat_headers(JARED_ID), Json(request))
+            .await
+            .unwrap()
+            .0;
+        assert_eq!(sent.content_type, "image/png");
+        assert_eq!(sent.payload["width"], 4);
+        assert_eq!(sent.payload["height"], 3);
+        assert!(sent.payload.get("png_base64").is_none());
+        let _ = edit_message(
+            State(state.clone()),
+            chat_headers(JARED_ID),
+            Path(sent.id),
+            Json(wisp_protocol::EditMessageRequest {
+                text: "Updated screenshot caption".into(),
+            }),
+        )
+        .await
+        .unwrap();
+        let edited_image = load_recent_messages(&state.pool, tyler)
+            .await
+            .unwrap()
+            .remove(0);
+        assert_eq!(
+            edited_image.payload["caption"],
+            "Updated screenshot caption"
+        );
+        assert_eq!(edited_image.payload["width"], 4);
+        assert!(edited_image.edited_at.is_some());
+        assert!(
+            get_chat_image(State(state.clone()), chat_headers(TYLER_ID), Path(sent.id))
+                .await
+                .is_ok()
+        );
+        assert!(
+            get_chat_image(
+                State(state.clone()),
+                chat_headers(CHARLIE_ID),
+                Path(sent.id)
+            )
+            .await
+            .is_err()
+        );
+        assert!(clear_history_for(&state.pool, charlie, &id).await.is_err());
+        clear_history_for(&state.pool, tyler, &id).await.unwrap();
+        let cleared = load_conversation(&state.pool, tyler, &id).await.unwrap();
+        assert_eq!(cleared.unread_count, 0);
+        assert!(cleared.last_message.is_none());
+        assert!(
+            load_recent_messages(&state.pool, tyler)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            load_recent_messages(&state.pool, jared)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(
+            list_messages(
+                State(state.clone()),
+                chat_headers(TYLER_ID),
+                Query(MessageQuery {
+                    conversation_id: id.clone(),
+                    after: None
+                })
+            )
+            .await
+            .unwrap()
+            .0
+            .is_empty()
+        );
+        assert!(
+            get_chat_image(State(state.clone()), chat_headers(TYLER_ID), Path(sent.id))
+                .await
+                .is_err()
+        );
+        assert!(
+            get_chat_image(State(state.clone()), chat_headers(JARED_ID), Path(sent.id))
+                .await
+                .is_ok()
+        );
+        let _ = send_message(
+            State(state.clone()),
+            chat_headers(JARED_ID),
+            Json(SendMessageRequest {
+                conversation_id: id,
+                content_type: "text/plain".into(),
+                payload: json!("new message"),
+                encryption_version: 0,
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            load_recent_messages(&state.pool, tyler)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn deleting_image_message_removes_stored_attachment() {
+        let state = AppState::new(test_config()).await.unwrap();
+        let jared = Uuid::parse_str(JARED_ID).unwrap();
+        let tyler = Uuid::parse_str(TYLER_ID).unwrap();
+        let id = find_or_create_direct(&state.pool, jared, tyler)
+            .await
+            .unwrap();
+        let message = persist_message(
+            &state,
+            jared,
+            SendMessageRequest {
+                conversation_id: id,
+                content_type: "image/png".into(),
+                payload: json!({"caption":"image","width":1,"height":1}),
+                encryption_version: 0,
+            },
+            Some(StoredAttachment::Image(vec![1, 2, 3])),
+        )
+        .await
+        .unwrap();
+        let _ = edit_message(
+            State(state.clone()),
+            chat_headers(JARED_ID),
+            Path(message.id),
+            Json(wisp_protocol::EditMessageRequest {
+                text: String::new(),
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            load_recent_messages(&state.pool, tyler).await.unwrap()[0].payload["caption"],
+            ""
+        );
+        let _ = delete_message(
+            State(state.clone()),
+            chat_headers(JARED_ID),
+            Path(message.id),
+        )
+        .await
+        .unwrap();
+        assert!(
+            get_chat_image(
+                State(state.clone()),
+                chat_headers(JARED_ID),
+                Path(message.id)
+            )
+            .await
+            .is_err()
+        );
+        let count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM chat_images WHERE message_id = ?")
+                .bind(message.id.to_string())
+                .fetch_one(&state.pool)
+                .await
+                .unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[tokio::test]
+    #[allow(clippy::too_many_lines)]
+    async fn file_access_edits_clearing_and_deletion_are_scoped() {
+        let state = AppState::new(test_config()).await.unwrap();
+        let jared = Uuid::parse_str(JARED_ID).unwrap();
+        let tyler = Uuid::parse_str(TYLER_ID).unwrap();
+        let conversation_id = find_or_create_direct(&state.pool, jared, tyler)
+            .await
+            .unwrap();
+        let request = wisp_protocol::SendFileMessageRequest {
+            conversation_id: conversation_id.clone(),
+            file_name: "notes.txt".into(),
+            data_base64: base64::engine::general_purpose::STANDARD.encode(b"private notes"),
+            caption: "Read these".into(),
+        };
+        assert!(
+            send_file_message(
+                State(state.clone()),
+                chat_headers(CHARLIE_ID),
+                Json(request.clone())
+            )
+            .await
+            .is_err()
+        );
+        let message = send_file_message(
+            State(state.clone()),
+            chat_headers(JARED_ID),
+            Json(request.clone()),
+        )
+        .await
+        .unwrap()
+        .0;
+        assert_eq!(message.content_type, "application/octet-stream");
+        assert_eq!(message.payload["size"], 13);
+        assert!(message.payload.get("data_base64").is_none());
+        assert!(
+            get_chat_file(
+                State(state.clone()),
+                chat_headers(CHARLIE_ID),
+                Path(message.id)
+            )
+            .await
+            .is_err()
+        );
+        let response = get_chat_file(
+            State(state.clone()),
+            chat_headers(TYLER_ID),
+            Path(message.id),
+        )
+        .await
+        .unwrap();
+        assert_eq!(response.headers()["content-disposition"], "attachment");
+        assert_eq!(
+            axum::body::to_bytes(response.into_body(), 100)
+                .await
+                .unwrap()
+                .as_ref(),
+            b"private notes"
+        );
+        let _ = edit_message(
+            State(state.clone()),
+            chat_headers(JARED_ID),
+            Path(message.id),
+            Json(wisp_protocol::EditMessageRequest {
+                text: String::new(),
+            }),
+        )
+        .await
+        .unwrap();
+        let edited = load_recent_messages(&state.pool, tyler)
+            .await
+            .unwrap()
+            .remove(0);
+        assert!(edited.edited_at.is_some());
+        assert_eq!(edited.payload["file_name"], "notes.txt");
+        assert_eq!(edited.payload["caption"], "");
+        clear_history_for(&state.pool, tyler, &conversation_id)
+            .await
+            .unwrap();
+        assert!(
+            get_chat_file(
+                State(state.clone()),
+                chat_headers(TYLER_ID),
+                Path(message.id)
+            )
+            .await
+            .is_err()
+        );
+        assert!(
+            get_chat_file(
+                State(state.clone()),
+                chat_headers(JARED_ID),
+                Path(message.id)
+            )
+            .await
+            .is_ok()
+        );
+        let _ = delete_message(
+            State(state.clone()),
+            chat_headers(JARED_ID),
+            Path(message.id),
+        )
+        .await
+        .unwrap();
+        assert!(
+            get_chat_file(
+                State(state.clone()),
+                chat_headers(JARED_ID),
+                Path(message.id)
+            )
+            .await
+            .is_err()
+        );
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM chat_files WHERE message_id = ?")
+            .bind(message.id.to_string())
+            .fetch_one(&state.pool)
+            .await
+            .unwrap();
+        assert_eq!(count, 0);
+        for file_name in ["../escape", "/absolute", "..", "bad\nname"] {
+            let mut invalid = request.clone();
+            invalid.file_name = file_name.into();
+            assert!(
+                send_file_message(State(state.clone()), chat_headers(JARED_ID), Json(invalid))
+                    .await
+                    .is_err()
+            );
+        }
+        let mut invalid = request.clone();
+        invalid.data_base64 = "not base64!".into();
+        assert!(
+            send_file_message(State(state.clone()), chat_headers(JARED_ID), Json(invalid))
+                .await
+                .is_err()
+        );
+        let mut invalid = request;
+        invalid.data_base64 = "A".repeat(wisp_protocol::MAX_CHAT_FILE_BYTES.div_ceil(3) * 4 + 1);
+        assert!(
+            send_file_message(State(state), chat_headers(JARED_ID), Json(invalid))
+                .await
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn invalid_or_oversized_images_are_rejected() {
+        assert!(normalize_chat_image(b"not a PNG").is_err());
+        assert!(normalize_chat_image(&vec![0; wisp_protocol::MAX_CHAT_IMAGE_BYTES + 1]).is_err());
+    }
+
+    #[tokio::test]
+    #[allow(clippy::too_many_lines)]
+    async fn message_edit_delete_are_sender_only_and_do_not_create_unread_messages() {
+        let state = AppState::new(test_config()).await.unwrap();
+        let jared = Uuid::parse_str(JARED_ID).unwrap();
+        let tyler = Uuid::parse_str(TYLER_ID).unwrap();
+        let id = find_or_create_direct(&state.pool, jared, tyler)
+            .await
+            .unwrap();
+        let message = send_message(
+            State(state.clone()),
+            chat_headers(JARED_ID),
+            Json(SendMessageRequest {
+                conversation_id: id.clone(),
+                content_type: "text/plain".into(),
+                payload: json!("original"),
+                encryption_version: 0,
+            }),
+        )
+        .await
+        .unwrap()
+        .0;
+        assert!(message.edited_at.is_none());
+        let _ = mark_conversation_read(
+            State(state.clone()),
+            chat_headers(TYLER_ID),
+            Json(MarkConversationReadRequest {
+                conversation_id: id.clone(),
+            }),
+        )
+        .await
+        .unwrap();
+        let edit = || {
+            Json(wisp_protocol::EditMessageRequest {
+                text: "updated".into(),
+            })
+        };
+        assert!(
+            edit_message(
+                State(state.clone()),
+                chat_headers(TYLER_ID),
+                Path(message.id),
+                edit()
+            )
+            .await
+            .is_err()
+        );
+        let _ = edit_message(
+            State(state.clone()),
+            chat_headers(JARED_ID),
+            Path(message.id),
+            edit(),
+        )
+        .await
+        .unwrap();
+        let updated = load_recent_messages(&state.pool, tyler)
+            .await
+            .unwrap()
+            .remove(0);
+        assert_eq!(updated.payload, "updated");
+        assert!(updated.edited_at.is_some());
+        assert_eq!(updated.created_at, message.created_at);
+        assert_eq!(
+            load_conversation(&state.pool, tyler, &id)
+                .await
+                .unwrap()
+                .unread_count,
+            0
+        );
+        let _ = edit_message(
+            State(state.clone()),
+            chat_headers(JARED_ID),
+            Path(message.id),
+            edit(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            load_recent_messages(&state.pool, tyler).await.unwrap()[0].edited_at,
+            updated.edited_at
+        );
+        assert!(
+            delete_message(
+                State(state.clone()),
+                chat_headers(TYLER_ID),
+                Path(message.id)
+            )
+            .await
+            .is_err()
+        );
+        let _ = delete_message(
+            State(state.clone()),
+            chat_headers(JARED_ID),
+            Path(message.id),
+        )
+        .await
+        .unwrap();
+        assert!(
+            load_recent_messages(&state.pool, tyler)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            load_conversation(&state.pool, tyler, &id)
+                .await
+                .unwrap()
+                .last_message
+                .is_none()
         );
     }
 

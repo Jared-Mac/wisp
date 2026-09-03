@@ -404,6 +404,10 @@ pub struct ConversationView {
     pub last_message: Option<Box<Message>>,
     #[serde(default)]
     pub unread_count: u64,
+    #[serde(default)]
+    pub tab_closed: bool,
+    #[serde(default)]
+    pub history_cleared_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -635,6 +639,12 @@ pub struct MarkConversationReadRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SetConversationTabRequest {
+    pub conversation_id: String,
+    pub closed: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JoinSpotRequest {
     pub spot_id: String,
 }
@@ -772,6 +782,13 @@ pub struct Message {
     pub content_type: String,
     pub payload: Value,
     pub encryption_version: i64,
+    #[serde(default)]
+    pub edited_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EditMessageRequest {
+    pub text: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -782,6 +799,39 @@ pub struct SendMessageRequest {
     pub payload: Value,
     #[serde(default)]
     pub encryption_version: i64,
+}
+
+pub const MAX_CHAT_IMAGE_BYTES: usize = 12 * 1024 * 1024;
+pub const MAX_CHAT_IMAGE_PIXELS: u64 = 32 * 1024 * 1024;
+pub const MAX_CHAT_FILE_BYTES: usize = 25 * 1024 * 1024;
+pub const MAX_CHAT_DRAFTS: usize = 8;
+
+#[must_use]
+pub fn valid_chat_file_name(name: &str) -> bool {
+    !name.trim().is_empty()
+        && name.len() <= 200
+        && name != "."
+        && name != ".."
+        && !name
+            .chars()
+            .any(|c| c.is_control() || matches!(c, '/' | '\\'))
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SendFileMessageRequest {
+    pub conversation_id: String,
+    pub file_name: String,
+    pub data_base64: String,
+    #[serde(default)]
+    pub caption: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SendImageMessageRequest {
+    pub conversation_id: String,
+    pub png_base64: String,
+    #[serde(default)]
+    pub caption: String,
 }
 
 fn default_content_type() -> String {
@@ -801,6 +851,25 @@ pub struct ServerEvent {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn attachment_names_cannot_escape_the_download_directory() {
+        for name in [
+            "",
+            ".",
+            "..",
+            "../notes",
+            "/tmp/notes",
+            "a\\b",
+            "new\nline",
+            "nul\0byte",
+        ] {
+            assert!(!valid_chat_file_name(name), "accepted {name:?}");
+        }
+        assert!(!valid_chat_file_name(&"a".repeat(201)));
+        assert!(valid_chat_file_name("Screenshot 2026-09-03.png"));
+        assert!(valid_chat_file_name("notes—final.txt"));
+    }
 
     #[test]
     fn presence_round_trip_is_stable() {

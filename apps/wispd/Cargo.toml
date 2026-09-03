@@ -7,6 +7,9 @@ rust-version.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+arboard.workspace = true
+base64.workspace = true
+image.workspace = true
 ashpd.workspace = true
 clap.workspace = true
 deep_filter.workspace = true
@@ -15,6 +18,7 @@ gstreamer.workspace = true
 gstreamer-app.workspace = true
 gstreamer-video.workspace = true
 ksni.workspace = true
+libc.workspace = true
 livekit.workspace = true
 nnnoiseless.workspace = true
 ndarray.workspace = true
@@ -31,6 +35,9 @@ uuid.workspace = true
 wgpu.workspace = true
 winit.workspace = true
 wisp-protocol.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
 
 [lints]
 workspace = true

@@ -9,13 +9,14 @@ FloatingWindow {
   required property var bridge
   required property var theme
   property bool localPreviewsPoppedOut: false
+  readonly property bool chatVisible: visible && !content.settingsOpen
   signal hideRequested()
   signal popOutLocalPreviewsRequested()
 
   title: "Wisp"
-  implicitWidth: theme.space(960)
-  implicitHeight: theme.space(840)
-  minimumSize: Qt.size(theme.space(420), theme.space(520))
+  implicitWidth: theme.space(1180)
+  implicitHeight: theme.space(900)
+  minimumSize: Qt.size(theme.space(840), theme.space(700))
   color: theme.background
 
   function reveal() {

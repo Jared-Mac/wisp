@@ -131,6 +131,11 @@ ShellRoot {
   WispBridge {
     id: bridge
     clientName: "quickshell-desktop"
+    notificationSoundsEnabled: true
+    appFocused: (appWindow.visible && !!appWindow.contentItem.window && appWindow.contentItem.window.active)
+      || (panelWindow.visible && !!panelWindow.contentItem.window && panelWindow.contentItem.window.active)
+      || (previewWindow.visible && !!previewWindow.contentItem.window && previewWindow.contentItem.window.active)
+    chatVisible: appWindow.chatVisible || panelWindow.chatVisible
   }
 
   // Compatibility endpoint: direct Wisp launches now mean the full app.
