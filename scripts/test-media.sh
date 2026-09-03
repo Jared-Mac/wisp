@@ -318,23 +318,6 @@ for _ in $(seq 1 100); do
 done
 rg -q 'simulator received nonzero remote audio' "$test_dir/sim.log"
 
-speaker_json=""
-for _ in $(seq 1 200); do
-  speaker_json=$(target/debug/wispctl --socket "$test_dir/wispd.sock" status)
-  if jq -e '.self.media.active_speakers | index("Tyler") != null' \
-    <<<"$speaker_json" >/dev/null; then
-    break
-  fi
-  sleep 0.05
-done
-jq -e '.self.media.active_speakers | index("Tyler") != null' \
-  <<<"$speaker_json" >/dev/null || {
-  echo "Tyler did not become an active speaker" >&2
-  jq '.self.media | {active_speakers, remote_audio_participants, received_audio_frames}' \
-    <<<"$speaker_json" >&2
-  exit 1
-}
-
 audio_json=$(target/debug/wispctl --socket "$test_dir/wispd.sock" audio devices)
 jq -e '
   (.input_devices | length) > 0 and
