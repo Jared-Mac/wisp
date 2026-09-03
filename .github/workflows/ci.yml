@@ -18,6 +18,8 @@ env:
   CARGO_INCREMENTAL: "0"
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: "1"
+  CC: clang-21
+  CXX: clang++-21
 
 jobs:
   build:
@@ -31,9 +33,21 @@ jobs:
 
       - name: Install native build dependencies
         run: |
+          llvm_key="$RUNNER_TEMP/llvm-snapshot.gpg.key"
+          llvm_keyring="$RUNNER_TEMP/llvm-archive-keyring.gpg"
+          curl --fail --location --silent --show-error \
+            https://apt.llvm.org/llvm-snapshot.gpg.key \
+            --output "$llvm_key"
+          llvm_fingerprint=$(gpg --show-keys --with-colons "$llvm_key" \
+            | awk -F: '$1 == "fpr" { print $10; exit }')
+          test "$llvm_fingerprint" = "6084F3CF814B57C1CF12EFD515CF4D18AF4F7421"
+          gpg --dearmor --output "$llvm_keyring" "$llvm_key"
+          sudo install -m 0644 "$llvm_keyring" /usr/share/keyrings/llvm-archive-keyring.gpg
+          echo 'deb [signed-by=/usr/share/keyrings/llvm-archive-keyring.gpg] https://apt.llvm.org/noble/ llvm-toolchain-noble-21 main' \
+            | sudo tee /etc/apt/sources.list.d/llvm.list >/dev/null
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends \
-            clang \
+            clang-21 \
             cmake \
             jq \
             libasound2-dev \
@@ -109,6 +123,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
+      actions: read
       contents: write
 
     steps:
