@@ -6,6 +6,7 @@ Column {
   required property var bridge
   required property var theme
   signal joined()
+  signal roomLeft()
   width: parent ? parent.width : 0
   spacing: root.theme.spacing.sm
 
@@ -27,13 +28,27 @@ Column {
 
   Repeater {
     model: root.bridge.hangouts
-    delegate: HangoutCard {
+    delegate: Column {
+      id: hangoutEntry
       required property var modelData
       width: root.width
-      hangout: modelData
-      bridge: root.bridge
-      theme: root.theme
-      onJoined: root.joined()
+      spacing: root.theme.spacing.sm
+
+      HangoutCard {
+        width: parent.width
+        hangout: hangoutEntry.modelData
+        bridge: root.bridge
+        theme: root.theme
+        onJoined: root.joined()
+      }
+
+      MediaControls {
+        visible: root.bridge.selfState.hangout_id === hangoutEntry.modelData.id
+        width: parent.width
+        bridge: root.bridge
+        theme: root.theme
+        onLeaveRequested: root.roomLeft()
+      }
     }
   }
 }

@@ -163,7 +163,7 @@ Panel {
     open: root.opened
     focusTarget: content
     contentWidth: panel.fittedContentWidth(content.implicitWidth)
-    contentHeight: panel.fittedContentHeight(content.implicitHeight, Style.space(620))
+    contentHeight: panel.fittedContentHeight(content.implicitHeight, Style.space(800))
 
     WispContent {
       id: content

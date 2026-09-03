@@ -14,7 +14,7 @@ FloatingWindow {
 
   title: "Wisp"
   implicitWidth: theme.space(960)
-  implicitHeight: theme.space(720)
+  implicitHeight: theme.space(840)
   minimumSize: Qt.size(theme.space(420), theme.space(520))
   color: theme.background
 

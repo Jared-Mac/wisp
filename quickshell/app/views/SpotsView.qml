@@ -5,8 +5,17 @@ Column {
   required property var bridge
   required property var theme
   signal joined()
+  readonly property var availableSpots: {
+    var currentHangoutId = String(root.bridge.selfState.hangout_id || "")
+    var spots = root.bridge.spots || []
+    return spots.filter(function(spot) {
+      return currentHangoutId === ""
+        || String(spot.active_hangout_id || "") !== currentHangoutId
+    })
+  }
   width: parent ? parent.width : 0
   spacing: root.theme.spacing.sm
+  visible: availableSpots.length > 0
 
   Text {
     text: "SPOTS"
@@ -17,7 +26,7 @@ Column {
   }
 
   Repeater {
-    model: root.bridge.spots
+    model: root.availableSpots
     delegate: Rectangle {
       required property var modelData
       width: root.width

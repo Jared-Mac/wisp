@@ -28,8 +28,8 @@ FocusScope {
   implicitWidth: presentation === "app"
     ? theme.space(960) : theme.space(390) + contentPadding * 2
   implicitHeight: presentation === "app"
-    ? theme.space(720)
-    : Math.min(theme.space(620), panelColumn.implicitHeight + contentPadding * 2)
+    ? theme.space(840)
+    : Math.min(theme.space(800), panelColumn.implicitHeight + contentPadding * 2)
   focus: true
 
   function maybeDismiss() {
@@ -320,7 +320,9 @@ FocusScope {
         bridge: root.bridge
         theme: root.theme
         onJoined: root.maybeDismiss()
+        onRoomLeft: root.maybeDismiss()
       }
+
 
       SpotsView {
         width: parent.width
@@ -342,13 +344,6 @@ FocusScope {
         theme: root.theme
       }
 
-      MediaControls {
-        visible: root.bridge.inHangout
-        width: parent.width
-        bridge: root.bridge
-        theme: root.theme
-        onLeaveRequested: root.maybeDismiss()
-      }
     }
   }
 
@@ -387,6 +382,7 @@ FocusScope {
           bridge: root.bridge
           theme: root.theme
           onJoined: root.maybeDismiss()
+          onRoomLeft: root.maybeDismiss()
         }
 
         SpotsView {
@@ -412,14 +408,6 @@ FocusScope {
           width: parent.width
           bridge: root.bridge
           theme: root.theme
-        }
-
-        MediaControls {
-          visible: root.bridge.inHangout
-          width: parent.width
-          bridge: root.bridge
-          theme: root.theme
-          onLeaveRequested: root.maybeDismiss()
         }
       }
     }

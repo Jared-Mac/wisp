@@ -90,6 +90,8 @@ ShellRoot {
   function panelDesktop() {
     return JSON.stringify({
       "visible": panelWindow.visible,
+      "width": panelWindow.width,
+      "height": panelWindow.height,
       "anchor": appSettings.anchor,
       "resolved_anchor": app.resolvedAnchor,
       "screen": app.selectedPanelScreen ? app.selectedPanelScreen.name : null,

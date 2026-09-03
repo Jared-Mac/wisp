@@ -70,6 +70,7 @@ qs --path "$config_dir" ipc call dev.wisp.panel open
 panel=$(qs --path "$config_dir" ipc call dev.wisp.panel desktop)
 printf '%s' "$panel" | jq -e '
   .visible == true and
+  .width >= 420 and .height >= 760 and
   (.resolved_anchor | IN("bottom-right", "bottom-left", "top-right", "top-left")) and
   (.screen | type == "string")
 ' >/dev/null
@@ -88,7 +89,7 @@ qs --path "$config_dir" ipc call dev.wisp.app open
 app=$(qs --path "$config_dir" ipc call dev.wisp.app desktop)
 panel=$(qs --path "$config_dir" ipc call dev.wisp.panel desktop)
 printf '%s' "$app" | jq -e '
-  .visible == true and .width >= 420 and .height >= 520 and
+  .visible == true and .width >= 420 and .height >= 800 and
   (.wide_layout | type == "boolean")
 ' >/dev/null
 printf '%s' "$panel" | jq -e '.visible == false' >/dev/null

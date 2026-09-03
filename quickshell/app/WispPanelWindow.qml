@@ -17,7 +17,7 @@ PanelWindow {
   signal popOutLocalPreviewsRequested()
 
   implicitWidth: theme.space(460)
-  implicitHeight: theme.space(700)
+  implicitHeight: theme.space(800)
   color: "transparent"
   focusable: true
   aboveWindows: true
