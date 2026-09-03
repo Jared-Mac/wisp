@@ -76,6 +76,8 @@ const PREVIEW_MAX_HEIGHT: u32 = 270;
 #[derive(Debug, Serialize, Deserialize)]
 struct VideoWatchSignal {
     participant: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    participant_identity: Option<String>,
     source: VideoSource,
     watching: bool,
 }
@@ -455,12 +457,14 @@ pub(crate) struct MediaManager {
     surface: Option<SurfaceController>,
     event_tx: mpsc::UnboundedSender<MediaEvent>,
     e2ee_key: Option<Vec<u8>>,
+    local_name: String,
 }
 
 impl MediaManager {
     pub(crate) fn new(
         surface_enabled: bool,
         e2ee_key: Option<String>,
+        local_name: String,
     ) -> (Self, mpsc::UnboundedReceiver<MediaEvent>) {
         remove_local_preview(VideoSource::Camera);
         remove_local_preview(VideoSource::ScreenShare);
@@ -503,6 +507,7 @@ impl MediaManager {
                 surface,
                 event_tx,
                 e2ee_key: e2ee_key.map(String::into_bytes),
+                local_name,
             },
             event_rx,
         )
@@ -968,7 +973,8 @@ impl MediaManager {
             generation,
             event_tx: self.event_tx.clone(),
             room: room.clone(),
-            local_name: room.local_participant().name(),
+            local_name: self.local_name.clone(),
+            local_identity: room.local_participant().identity().to_string(),
             remote_audio: remote_audio.clone(),
             remote_video: remote_video.clone(),
             desired_video: desired_video.clone(),
@@ -1381,8 +1387,19 @@ async fn publish_video_watch_signal(
     target: &RemoteVideoTarget,
     watching: bool,
 ) -> anyhow::Result<()> {
+    let target_participant = room
+        .remote_participants()
+        .into_values()
+        .find(|participant| participant.name() == target.participant);
+    let participant_identity = target_participant
+        .as_ref()
+        .map(|participant| participant.identity().to_string());
+    let destination_identities = target_participant
+        .map(|participant| vec![participant.identity()])
+        .unwrap_or_default();
     let payload = serde_json::to_vec(&VideoWatchSignal {
         participant: target.participant.clone(),
+        participant_identity,
         source: target.source,
         watching,
     })?;
@@ -1391,7 +1408,7 @@ async fn publish_video_watch_signal(
             payload,
             topic: Some(VIDEO_WATCH_TOPIC.into()),
             reliable: true,
-            destination_identities: Vec::new(),
+            destination_identities,
         })
         .await
         .context("publish the video viewer update")
@@ -1422,6 +1439,7 @@ struct RoomEventContext {
     event_tx: mpsc::UnboundedSender<MediaEvent>,
     room: Arc<Room>,
     local_name: String,
+    local_identity: String,
     remote_audio: Arc<Mutex<HashMap<String, RemoteAudioTrack>>>,
     remote_video: Arc<Mutex<HashMap<RemoteVideoTarget, RemoteTrackPublication>>>,
     desired_video: Arc<Mutex<HashSet<RemoteVideoTarget>>>,
@@ -1696,7 +1714,13 @@ async fn run_room_events(
                 ..
             } if topic == VIDEO_WATCH_TOPIC => {
                 match serde_json::from_slice::<VideoWatchSignal>(&payload) {
-                    Ok(signal) if signal.participant == context.local_name => {
+                    Ok(signal)
+                        if video_watch_targets_local(
+                            &signal,
+                            &context.local_name,
+                            &context.local_identity,
+                        ) =>
+                    {
                         let viewer = participant.name();
                         let participant = if viewer.is_empty() {
                             participant.identity().to_string()
@@ -1764,6 +1788,17 @@ async fn run_room_events(
     }
     track_tasks.abort_all();
     while track_tasks.join_next().await.is_some() {}
+}
+
+fn video_watch_targets_local(
+    signal: &VideoWatchSignal,
+    local_name: &str,
+    local_identity: &str,
+) -> bool {
+    signal.participant_identity.as_deref().map_or_else(
+        || signal.participant == local_name,
+        |identity| identity == local_identity,
+    )
 }
 
 fn recording_device_id(device: &RecordingDeviceInfo) -> String {
@@ -3178,10 +3213,10 @@ async fn count_audio_frames(
 #[cfg(test)]
 mod tests {
     use super::{
-        AUDIO_FRAME_SAMPLES, create_deepfilter_model, deepfilter_frame, i420_to_rgba_texture,
-        pcm_level_percent, preferred_or_first, processing_options, public_device_id,
-        publishing_video_encoder, same_logical_device, screen_share_resolution, surface_quality,
-        video_profile,
+        AUDIO_FRAME_SAMPLES, VideoWatchSignal, create_deepfilter_model, deepfilter_frame,
+        i420_to_rgba_texture, pcm_level_percent, preferred_or_first, processing_options,
+        public_device_id, publishing_video_encoder, same_logical_device, screen_share_resolution,
+        surface_quality, video_profile, video_watch_targets_local,
     };
     use livekit::options::VideoEncoderBackend;
     use livekit::track::VideoQuality;
@@ -3193,6 +3228,45 @@ mod tests {
             id: id.into(),
             name: id.into(),
         }
+    }
+
+    #[test]
+    fn video_viewer_updates_use_identity_with_legacy_name_fallback() {
+        let identity_signal = VideoWatchSignal {
+            participant: "stale display name".into(),
+            participant_identity: Some("user-tyler".into()),
+            source: VideoSource::Camera,
+            watching: true,
+        };
+        assert!(video_watch_targets_local(
+            &identity_signal,
+            "Tyler",
+            "user-tyler"
+        ));
+
+        let wrong_identity_signal = VideoWatchSignal {
+            participant: "Tyler".into(),
+            participant_identity: Some("user-jared".into()),
+            source: VideoSource::ScreenShare,
+            watching: true,
+        };
+        assert!(!video_watch_targets_local(
+            &wrong_identity_signal,
+            "Tyler",
+            "user-tyler"
+        ));
+
+        let legacy_signal = VideoWatchSignal {
+            participant: "Tyler".into(),
+            participant_identity: None,
+            source: VideoSource::Camera,
+            watching: true,
+        };
+        assert!(video_watch_targets_local(
+            &legacy_signal,
+            "Tyler",
+            "user-tyler"
+        ));
     }
 
     #[test]

@@ -2593,8 +2593,11 @@ async fn start_connected_daemon(
     let e2ee_key = std::env::var("WISP_E2EE_KEY")
         .ok()
         .filter(|key| !key.is_empty());
-    let (media, media_events) =
-        MediaManager::new(!args.disable_media && !args.disable_surfaces, e2ee_key);
+    let (media, media_events) = MediaManager::new(
+        !args.disable_media && !args.disable_surfaces,
+        e2ee_key,
+        snapshot.self_state.user.display_name.clone(),
+    );
     snapshot.self_state.media.video = media.video_settings();
     let daemon = Arc::new(Daemon::new(
         args.profile,
