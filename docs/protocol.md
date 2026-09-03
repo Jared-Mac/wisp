@@ -39,9 +39,13 @@ sender and expiration time. Joining a friend in Knock presence returns a
 `knock_sent` result instead of treating the request as an error.
 
 The snapshot's media state includes `remote_audio_participants`,
-`remote_video_participants`, per-track `remote_videos`, receive/render counters,
+`remote_muted_participants`, `remote_video_participants`, per-track
+`remote_videos`, receive/render counters,
 native-surface state, and optional `error_code`/`error` fields. A remote video
 publication makes Watch available but remains unsubscribed until requested.
+Screen sharing reports the portal's native `source_width`/`source_height`
+separately from the encoded `width`/`height`, plus the actual
+`encoder_backend` used for the share.
 Each remote screen/camera entry reports its target, MIME type, simulcast
 capability, subscription, requested layer, dimensions, and frame counters. The
 nested `camera` object contains capture devices, selection, publication state,

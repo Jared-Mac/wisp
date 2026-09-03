@@ -38,6 +38,7 @@ Item {
         "microphone_published": false,
         "received_audio_frames": 0,
         "remote_audio_participants": [],
+        "remote_muted_participants": [],
         "remote_video_participants": [],
         "active_speakers": [],
         "received_video_frames": 0,
@@ -61,10 +62,13 @@ Item {
           "starting": false,
           "active": false,
           "source": null,
+          "source_width": null,
+          "source_height": null,
           "width": null,
           "height": null,
           "fps": null,
           "published_frames": 0,
+          "encoder_backend": null,
           "error": null
         },
         "camera": {
@@ -109,6 +113,7 @@ Item {
   readonly property bool effectiveMuted: !!selfState.muted || !!selfState.deafened
     || (!!pushToTalkState.enabled && !pushToTalkState.active)
   readonly property var activeSpeakers: mediaState.active_speakers || []
+  readonly property var remoteMutedParticipants: mediaState.remote_muted_participants || []
   readonly property var remoteVideos: mediaState.remote_videos || []
   readonly property var remoteVideoParticipants: mediaState.remote_video_participants || []
   readonly property bool remoteVideoAvailable: remoteVideos.length > 0
@@ -129,10 +134,13 @@ Item {
     "starting": false,
     "active": false,
     "source": null,
+    "source_width": null,
+    "source_height": null,
     "width": null,
     "height": null,
     "fps": null,
     "published_frames": 0,
+    "encoder_backend": null,
     "error": null
   })
   readonly property bool sharing: !!screenShareState.active

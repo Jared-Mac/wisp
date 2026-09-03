@@ -7,6 +7,14 @@ Column {
   signal leaveRequested()
   spacing: root.theme.spacing.sm
 
+  function shareResolutionLabel() {
+    var share = root.bridge.screenShareState
+    var output = String(share.width || "?") + "×" + String(share.height || "?")
+    if (!share.source_width || !share.source_height) return output
+    var source = String(share.source_width) + "×" + String(share.source_height)
+    return source === output ? source : source + " source → " + output + " stream"
+  }
+
   Row {
     id: controls
     width: parent.width
@@ -138,8 +146,7 @@ Column {
       text: root.bridge.shareStarting
         ? "Choose a monitor or window in the system picker"
         : "Sharing " + String(root.bridge.screenShareState.source || "screen")
-          + " · " + String(root.bridge.screenShareState.width || "?")
-          + "×" + String(root.bridge.screenShareState.height || "?")
+          + " · " + root.shareResolutionLabel()
           + " @ " + String(root.bridge.screenShareState.fps || 30) + " fps"
       elide: Text.ElideRight
       color: root.theme.accent

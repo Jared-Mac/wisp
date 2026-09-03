@@ -251,6 +251,11 @@ pub(crate) enum MediaEvent {
         generation: u64,
         participant: String,
     },
+    RemoteMuteChanged {
+        generation: u64,
+        participant: String,
+        muted: bool,
+    },
     AudioFrames {
         generation: u64,
         participant: String,
@@ -336,6 +341,7 @@ pub(crate) struct ConnectedMedia {
     pub speaker: String,
     pub audio: AudioState,
     pub remote_audio_participants: Vec<String>,
+    pub remote_muted_participants: Vec<String>,
     pub remote_videos: Vec<RemoteVideoState>,
 }
 
@@ -920,12 +926,18 @@ impl MediaManager {
             surface: self.surface.clone(),
         };
         let mut remote_audio_participants = Vec::new();
+        let mut remote_muted_participants = Vec::new();
         let mut initial_remote_videos = Vec::new();
         for participant in room.remote_participants().into_values() {
             let name = participant.name();
             for publication in participant.track_publications().into_values() {
                 match publication.kind() {
-                    TrackKind::Audio => remote_audio_participants.push(name.clone()),
+                    TrackKind::Audio => {
+                        remote_audio_participants.push(name.clone());
+                        if publication.is_muted() {
+                            remote_muted_participants.push(name.clone());
+                        }
+                    }
                     TrackKind::Video => {
                         if let Some(source) = protocol_video_source(publication.source()) {
                             initial_remote_videos.push(RemoteVideoState {
@@ -953,6 +965,8 @@ impl MediaManager {
         }
         remote_audio_participants.sort();
         remote_audio_participants.dedup();
+        remote_muted_participants.sort();
+        remote_muted_participants.dedup();
         initial_remote_videos.sort_by(|left, right| {
             left.target
                 .participant
@@ -992,6 +1006,7 @@ impl MediaManager {
             speaker,
             audio: inventory.state,
             remote_audio_participants,
+            remote_muted_participants,
             remote_videos: initial_remote_videos,
         })
     }
@@ -1305,7 +1320,14 @@ struct RoomEventContext {
 impl RoomEventContext {
     fn register_publication(&self, participant: String, publication: &RemoteTrackPublication) {
         match publication.kind() {
-            TrackKind::Audio => publication.set_subscribed(true),
+            TrackKind::Audio => {
+                publication.set_subscribed(true);
+                let _ = self.event_tx.send(MediaEvent::RemoteMuteChanged {
+                    generation: self.generation,
+                    participant,
+                    muted: publication.is_muted(),
+                });
+            }
             TrackKind::Video => {
                 let Some(source) = protocol_video_source(publication.source()) else {
                     return;
@@ -1530,6 +1552,20 @@ async fn run_room_events(
                     });
                 }
             }
+            RoomEvent::TrackMuted {
+                participant,
+                publication,
+            }
+            | RoomEvent::TrackUnmuted {
+                participant,
+                publication,
+            } if publication.is_remote() && publication.kind() == TrackKind::Audio => {
+                let _ = context.event_tx.send(MediaEvent::RemoteMuteChanged {
+                    generation: context.generation,
+                    participant: participant.name(),
+                    muted: publication.is_muted(),
+                });
+            }
             RoomEvent::ActiveSpeakersChanged { speakers } => {
                 context.active_speakers_changed(&speakers, &mut active_speakers);
             }
@@ -1629,6 +1665,21 @@ fn selected_video_encoder(backends: &[VideoEncoderBackend]) -> VideoEncoderBacke
     .unwrap_or(VideoEncoderBackend::Software)
 }
 
+fn publishing_video_encoder(
+    backends: &[VideoEncoderBackend],
+    source: VideoSource,
+) -> VideoEncoderBackend {
+    let selected = selected_video_encoder(backends);
+    if source == VideoSource::ScreenShare && selected == VideoEncoderBackend::Vaapi {
+        // Intel's VA-API driver can crash the process while encoding non-standard
+        // ultrawide frame sizes. Screen sharing must remain reliable, so keep
+        // VA-API available for camera video but use the software encoder here.
+        VideoEncoderBackend::Software
+    } else {
+        selected
+    }
+}
+
 fn detected_video_settings(
     quality: VideoQualityPreset,
     codec: VideoCodecPreference,
@@ -1707,9 +1758,9 @@ fn video_publish_options(
     source: VideoSource,
     quality: VideoQualityPreset,
     codec: VideoCodecPreference,
+    encoder: VideoEncoderBackend,
 ) -> TrackPublishOptions {
     let profile = video_profile(quality, source);
-    let backends = available_video_encoder_backends();
     TrackPublishOptions {
         source: livekit_video_source(source),
         video_codec: livekit_video_codec(codec),
@@ -1717,7 +1768,7 @@ fn video_publish_options(
             max_bitrate: profile.max_bitrate,
             max_framerate: f64::from(profile.fps),
         }),
-        video_encoder: selected_video_encoder(&backends),
+        video_encoder: encoder,
         simulcast: true,
         ..Default::default()
     }
@@ -2146,6 +2197,8 @@ async fn create_camera(
         .create_element(Some("wisp-camera-source"))
         .with_context(|| format!("open camera {}", protocol_device.name))?;
     let profile = video_profile(quality, VideoSource::Camera);
+    let encoder =
+        publishing_video_encoder(&available_video_encoder_backends(), VideoSource::Camera);
     let video_source = NativeVideoSource::new(
         VideoResolution {
             width: profile.width,
@@ -2224,7 +2277,7 @@ async fn create_camera(
         .local_participant()
         .publish_track(
             LocalTrack::Video(video_track),
-            video_publish_options(VideoSource::Camera, quality, codec),
+            video_publish_options(VideoSource::Camera, quality, codec, encoder),
         )
         .await
         .context("publish camera to LiveKit")?;
@@ -2249,6 +2302,7 @@ async fn create_camera(
         width = profile.width,
         height = profile.height,
         fps = profile.fps,
+        encoder = encoder_backend_name(encoder),
         codec = %codec,
         quality = %quality,
         "camera published"
@@ -2358,7 +2412,17 @@ async fn create_screen_share(
         .context("open the portal PipeWire stream")?;
 
     let profile = video_profile(quality, VideoSource::ScreenShare);
-    let (width, height) = screen_share_resolution(stream.size(), profile.width, profile.height);
+    let source_size = stream.size();
+    let (width, height) = screen_share_resolution(source_size, profile.width, profile.height);
+    let (source_width, source_height) = source_size
+        .filter(|(width, height)| *width > 0 && *height > 0)
+        .map_or((None, None), |(width, height)| {
+            (u32::try_from(width).ok(), u32::try_from(height).ok())
+        });
+    let encoder = publishing_video_encoder(
+        &available_video_encoder_backends(),
+        VideoSource::ScreenShare,
+    );
     let source_name = match stream.source_type() {
         Some(SourceType::Monitor) => "monitor",
         Some(SourceType::Window) => "window",
@@ -2449,7 +2513,7 @@ async fn create_screen_share(
         .local_participant()
         .publish_track(
             LocalTrack::Video(video_track),
-            video_publish_options(VideoSource::ScreenShare, quality, codec),
+            video_publish_options(VideoSource::ScreenShare, quality, codec, encoder),
         )
         .await
         .context("publish the screen share to LiveKit")?;
@@ -2474,9 +2538,12 @@ async fn create_screen_share(
     let state = ScreenShareState {
         active: true,
         source: Some(source_name.into()),
+        source_width,
+        source_height,
         width: Some(width),
         height: Some(height),
         fps: Some(profile.fps),
+        encoder_backend: Some(encoder_backend_name(encoder).into()),
         ..ScreenShareState::default()
     };
     info!(
@@ -2485,6 +2552,7 @@ async fn create_screen_share(
         height,
         fps = profile.fps,
         max_bitrate = profile.max_bitrate,
+        encoder = encoder_backend_name(encoder),
         codec = %codec,
         quality = %quality,
         "screen share published"
@@ -2756,8 +2824,10 @@ mod tests {
     use super::{
         AUDIO_FRAME_SAMPLES, create_deepfilter_model, deepfilter_frame, i420_to_rgba_texture,
         pcm_level_percent, preferred_or_first, processing_options, public_device_id,
-        same_logical_device, screen_share_resolution, surface_quality, video_profile,
+        publishing_video_encoder, same_logical_device, screen_share_resolution, surface_quality,
+        video_profile,
     };
+    use livekit::options::VideoEncoderBackend;
     use livekit::track::VideoQuality;
     use livekit::webrtc::video_frame::I420Buffer;
     use wisp_protocol::{AudioDevice, AudioPreset, VideoQualityPreset, VideoSource};
@@ -2837,8 +2907,21 @@ mod tests {
             (1920, 1080)
         );
         let (width, height) = screen_share_resolution(Some((5120, 1440)), 1920, 1080);
-        assert!(width <= 1920 && height <= 1080);
+        assert_eq!((width, height), (1920, 540));
         assert!(width.is_multiple_of(2) && height.is_multiple_of(2));
+    }
+
+    #[test]
+    fn screen_sharing_avoids_the_unstable_vaapi_encoder() {
+        let backends = [VideoEncoderBackend::Software, VideoEncoderBackend::Vaapi];
+        assert_eq!(
+            publishing_video_encoder(&backends, VideoSource::ScreenShare),
+            VideoEncoderBackend::Software
+        );
+        assert_eq!(
+            publishing_video_encoder(&backends, VideoSource::Camera),
+            VideoEncoderBackend::Vaapi
+        );
     }
 
     #[test]

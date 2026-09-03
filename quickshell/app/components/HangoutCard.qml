@@ -33,6 +33,14 @@ Rectangle {
     return member && member.id === bridge.selfState.id
   }
 
+  function memberMuted(member) {
+    if (root.isSelf(member)) return !!root.bridge.effectiveMuted
+    var muted = root.bridge.remoteMutedParticipants || []
+    for (var i = 0; i < muted.length; i++)
+      if (muted[i] === member.display_name) return true
+    return false
+  }
+
   Column {
     anchors.left: parent.left
     anchors.leftMargin: root.theme.spacing.lg
@@ -63,8 +71,7 @@ Rectangle {
           }
 
           Image {
-            visible: root.isSelf(modelData)
-              && (!!root.bridge.selfState.muted || !!root.bridge.selfState.deafened)
+            visible: root.memberMuted(modelData)
             anchors.verticalCenter: parent.verticalCenter
             width: visible ? root.theme.space(14) : 0
             height: width

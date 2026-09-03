@@ -134,6 +134,10 @@ pub struct ScreenShareState {
     #[serde(default)]
     pub source: Option<String>,
     #[serde(default)]
+    pub source_width: Option<u32>,
+    #[serde(default)]
+    pub source_height: Option<u32>,
+    #[serde(default)]
     pub width: Option<u32>,
     #[serde(default)]
     pub height: Option<u32>,
@@ -141,6 +145,8 @@ pub struct ScreenShareState {
     pub fps: Option<u32>,
     #[serde(default)]
     pub published_frames: u64,
+    #[serde(default)]
+    pub encoder_backend: Option<String>,
     #[serde(default)]
     pub error: Option<String>,
 }
@@ -377,6 +383,8 @@ pub struct MediaState {
     pub received_audio_frames: u64,
     #[serde(default)]
     pub remote_audio_participants: Vec<String>,
+    #[serde(default)]
+    pub remote_muted_participants: Vec<String>,
     #[serde(default)]
     pub remote_video_participants: Vec<String>,
     #[serde(default)]
@@ -721,6 +729,7 @@ mod tests {
         assert!(state.livekit_connected);
         assert_eq!(state.received_audio_frames, 42);
         assert!(state.remote_audio_participants.is_empty());
+        assert!(state.remote_muted_participants.is_empty());
         assert!(state.remote_video_participants.is_empty());
         assert!(state.active_speakers.is_empty());
         assert_eq!(state.received_video_frames, 0);

@@ -410,6 +410,7 @@ impl Daemon {
                     speaker: Some(connected.speaker),
                     audio: connected.audio,
                     remote_audio_participants: connected.remote_audio_participants,
+                    remote_muted_participants: connected.remote_muted_participants,
                     remote_videos: connected.remote_videos,
                     camera,
                     video,
@@ -1214,6 +1215,24 @@ fn clear_local_speaker(snapshot: &mut Snapshot, profile: &str) {
     snapshot.self_state.media.audio.input_level = 0;
 }
 
+fn update_remote_mute_state(media: &mut MediaState, participant: &str, muted: bool) {
+    if muted {
+        if !media
+            .remote_muted_participants
+            .iter()
+            .any(|name| name == participant)
+        {
+            media.remote_muted_participants.push(participant.into());
+            media.remote_muted_participants.sort();
+        }
+        media.active_speakers.retain(|name| name != participant);
+    } else {
+        media
+            .remote_muted_participants
+            .retain(|name| name != participant);
+    }
+}
+
 fn voice_gate_value(
     muted: bool,
     push_to_talk: &PushToTalkState,
@@ -1377,6 +1396,7 @@ async fn synchronize_media_events(
             | MediaEvent::Disconnected { generation, .. }
             | MediaEvent::AudioSubscribed { generation, .. }
             | MediaEvent::AudioUnsubscribed { generation, .. }
+            | MediaEvent::RemoteMuteChanged { generation, .. }
             | MediaEvent::AudioFrames { generation, .. }
             | MediaEvent::InputLevel { generation, .. }
             | MediaEvent::ActiveSpeakers { generation, .. }
@@ -1430,6 +1450,7 @@ async fn synchronize_media_events(
             }
             track_event @ (MediaEvent::AudioSubscribed { .. }
             | MediaEvent::AudioUnsubscribed { .. }
+            | MediaEvent::RemoteMuteChanged { .. }
             | MediaEvent::AudioFrames { .. }
             | MediaEvent::InputLevel { .. }
             | MediaEvent::ActiveSpeakers { .. }
@@ -1497,6 +1518,7 @@ async fn synchronize_media_events(
                         |media| {
                             media.livekit_connected = false;
                             media.remote_audio_participants.clear();
+                            media.remote_muted_participants.clear();
                             media.remote_video_participants.clear();
                             media.remote_videos.clear();
                             media.active_speakers.clear();
@@ -1536,7 +1558,20 @@ async fn synchronize_track_event(daemon: &Daemon, event: MediaEvent) {
                     media
                         .remote_audio_participants
                         .retain(|name| name != &participant);
+                    media
+                        .remote_muted_participants
+                        .retain(|name| name != &participant);
                     media.active_speakers.retain(|name| name != &participant);
+                })
+                .await;
+        }
+        MediaEvent::RemoteMuteChanged {
+            participant, muted, ..
+        } => {
+            info!(%participant, muted, "remote microphone mute changed");
+            daemon
+                .update_media_state(None, "remote_mute_changed", |media| {
+                    update_remote_mute_state(media, &participant, muted);
                 })
                 .await;
         }
@@ -2390,8 +2425,28 @@ async fn main() -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{deafen_transition, describe_media_failure, effective_muted, mute_transition};
-    use wisp_protocol::PushToTalkState;
+    use super::{
+        deafen_transition, describe_media_failure, effective_muted, mute_transition,
+        update_remote_mute_state,
+    };
+    use wisp_protocol::{MediaState, PushToTalkState};
+
+    #[test]
+    fn remote_mute_state_is_sorted_deduplicated_and_not_speaking() {
+        let mut media = MediaState {
+            active_speakers: vec!["Tyler".into(), "Jared".into()],
+            ..MediaState::default()
+        };
+
+        update_remote_mute_state(&mut media, "Tyler", true);
+        update_remote_mute_state(&mut media, "Aaron", true);
+        update_remote_mute_state(&mut media, "Tyler", true);
+        assert_eq!(media.remote_muted_participants, ["Aaron", "Tyler"]);
+        assert_eq!(media.active_speakers, ["Jared"]);
+
+        update_remote_mute_state(&mut media, "Tyler", false);
+        assert_eq!(media.remote_muted_participants, ["Aaron"]);
+    }
 
     #[test]
     fn media_failures_have_stable_codes_and_clear_labels() {
