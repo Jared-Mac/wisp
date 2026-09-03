@@ -13,7 +13,7 @@ Column {
   visible: visibleHangouts.length > 0
 
   Text {
-    text: "HANGOUTS"
+    text: "ROOMS"
     color: root.theme.muted
     font.family: root.theme.font.family
     font.pixelSize: root.theme.font.caption

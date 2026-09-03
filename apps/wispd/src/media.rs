@@ -870,7 +870,7 @@ impl MediaManager {
     ) -> anyhow::Result<ConnectedMedia> {
         let _operation = self.operation.lock().await;
         if self.is_connected_to(hangout_id).await {
-            bail!("already connected to this hangout");
+            bail!("already connected to this room");
         }
         self.disconnect_session().await;
 
@@ -1148,7 +1148,7 @@ impl MediaManager {
         let _operation = self.operation.lock().await;
         let (room, generation) = {
             let session = self.session.lock().await;
-            let session = session.as_ref().context("join a hangout before sharing")?;
+            let session = session.as_ref().context("join a room before sharing")?;
             if session.screen_share.is_some() {
                 bail!("screen sharing is already active");
             }
@@ -1167,7 +1167,7 @@ impl MediaManager {
         let mut session = self.session.lock().await;
         let Some(session) = session.as_mut() else {
             stop_screen_share_session(&room, screen_share).await;
-            bail!("the hangout ended while screen sharing started");
+            bail!("the room ended while screen sharing started");
         };
         session.screen_share = Some(screen_share);
         Ok(ScreenShareInfo { state })
@@ -1193,7 +1193,7 @@ impl MediaManager {
             let session = self.session.lock().await;
             let session = session
                 .as_ref()
-                .context("join a hangout before starting the camera")?;
+                .context("join a room before starting the camera")?;
             if session.camera.is_some() {
                 bail!("the camera is already active");
             }
@@ -1222,7 +1222,7 @@ impl MediaManager {
         let mut session = self.session.lock().await;
         let Some(session) = session.as_mut() else {
             stop_camera_session(&room, camera).await;
-            bail!("the hangout ended while the camera started");
+            bail!("the room ended while the camera started");
         };
         session.camera = Some(camera);
         Ok(CameraInfo { state })

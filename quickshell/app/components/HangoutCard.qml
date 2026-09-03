@@ -91,7 +91,7 @@ Rectangle {
       }
     }
     Text {
-      text: root.hangout.label || "Hanging out"
+      text: root.hangout.label || "Room"
       color: root.theme.muted
       font.family: root.theme.font.family
       font.pixelSize: root.theme.font.caption

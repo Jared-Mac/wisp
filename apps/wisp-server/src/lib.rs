@@ -925,7 +925,7 @@ async fn join_hangout(
     .map_err(ApiError::internal)?
         > 0;
     if !exists {
-        return Err(ApiError::not_found("hangout is no longer active"));
+        return Err(ApiError::not_found("room is no longer active"));
     }
     let mut tx = state.pool.begin().await.map_err(ApiError::internal)?;
     let previous_hangout = active_hangout_for_tx(&mut tx, self_id).await?;
@@ -1021,7 +1021,7 @@ async fn livekit_token(
     let user = find_user(&state.pool, &user_id.to_string()).await?;
     let hangout_id = active_hangout_for(&state.pool, user_id)
         .await?
-        .ok_or_else(|| ApiError::bad_request("not_in_hangout", "join a hangout first"))?;
+        .ok_or_else(|| ApiError::bad_request("not_in_hangout", "join a room first"))?;
     let room: String = sqlx::query_scalar("SELECT livekit_room FROM hangouts WHERE id = ?")
         .bind(hangout_id.to_string())
         .fetch_one(&state.pool)
@@ -1816,7 +1816,7 @@ async fn create_hangout_conversation(
         "INSERT INTO conversations(id, kind, label, hangout_id, created_at) VALUES (?, 'hangout', ?, ?, ?)",
     )
     .bind(format!("hangout:{hangout_id}"))
-    .bind(label.unwrap_or("Hangout"))
+    .bind(label.unwrap_or("Room"))
     .bind(hangout_id.to_string())
     .bind(Utc::now().to_rfc3339())
     .execute(&mut **tx)

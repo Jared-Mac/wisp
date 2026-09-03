@@ -7,13 +7,23 @@ Column {
   width: parent ? parent.width : 0
   spacing: root.theme.spacing.sm
 
+  function conversationLabel(conversation) {
+    var label = String((conversation && conversation.label) || "Conversation")
+    return label === "Hangout" ? "Room" : label
+  }
+
+  function conversationKindLabel(kind) {
+    var value = String(kind || "").replace("_", " ")
+    return value === "hangout" ? "room" : value
+  }
+
   Row {
     width: parent.width
     spacing: root.theme.spacing.sm
 
     Text {
       text: root.bridge.activeConversation ? "MESSAGES · "
-        + String(root.bridge.activeConversation.label || "Conversation") : "MESSAGES"
+        + root.conversationLabel(root.bridge.activeConversation) : "MESSAGES"
       color: root.theme.muted
       font.family: root.theme.font.family
       font.pixelSize: root.theme.font.caption
@@ -56,7 +66,7 @@ Column {
         anchors.verticalCenter: parent.verticalCenter
 
         Text {
-          text: String(modelData.label || "Conversation")
+          text: root.conversationLabel(modelData)
           color: root.theme.foreground
           font.family: root.theme.font.family
           font.pixelSize: root.theme.font.body
@@ -69,7 +79,7 @@ Column {
           text: modelData.last_message
             ? String(modelData.last_message.sender.display_name) + ": "
               + String(modelData.last_message.payload || "")
-            : String(modelData.kind || "").replace("_", " ")
+            : root.conversationKindLabel(modelData.kind)
           color: root.theme.muted
           font.family: root.theme.font.family
           font.pixelSize: root.theme.font.caption
