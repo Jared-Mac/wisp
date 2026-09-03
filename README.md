@@ -228,3 +228,34 @@ and memory allowance can be adjusted with `WISP_RELIABILITY_CYCLES` and
 `WISP_RSS_GROWTH_LIMIT_KIB`; no one-hour soak is required. See
 `docs/architecture.md`. `just test-knock` covers request deduplication, Later,
 expiry, acceptance, both offline-user cases, and simulator auto-response.
+
+## Automated builds and releases
+
+GitHub Actions builds Wisp on every push to `main` and every pull request. The
+CI workflow checks formatting and Clippy, runs the Rust and headless integration
+tests, scans for obvious secrets, and produces a release-mode Linux x86_64
+archive. Archives from ordinary CI runs are available as workflow artifacts for
+14 days.
+
+Pushing a version tag creates a GitHub release with the archive and its SHA-256
+checksum:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+The archive contains `wispd`, `wispctl`, `wisp-server`, the standalone
+Quickshell app, the Omarchy adapter, and the runtime launch scripts. After
+installing the CachyOS runtime dependencies listed in
+[`docs/tailscale-friend-test.md`](docs/tailscale-friend-test.md), extract it and
+run:
+
+```bash
+./install.sh
+wisp-friend-config <host>.ts.net Tyler
+wisp
+```
+
+The release job uses GitHub's short-lived repository token. It does not require
+or receive Tailscale credentials, LiveKit secrets, or a personal access token.
