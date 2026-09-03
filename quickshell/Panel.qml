@@ -22,6 +22,7 @@ Panel {
 
   WispTheme {
     id: pluginTheme
+    profile: "legacy"
     foreground: Color.foreground
     background: Color.popups.background
     surface: Color.popups.background
@@ -43,7 +44,7 @@ Panel {
 
   Process {
     id: appLauncher
-    command: ["wisp-ui", "app", "open"]
+    command: ["env", "WISP_INTEGRATION=omarchy", "wisp-ui", "app", "open"]
   }
 
   IpcHandler {

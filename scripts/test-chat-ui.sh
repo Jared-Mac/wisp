@@ -4,9 +4,9 @@ repo_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 test_dir=$(mktemp -d)
 trap 'rm -rf -- "$test_dir"' EXIT
 mkdir -p "$test_dir/config/wisp"
-cp -a "$repo_dir/quickshell/app" "$test_dir/app"
+cp -a "${WISP_TEST_APP_SOURCE:-$repo_dir/quickshell/app}" "$test_dir/app"
 cp "$repo_dir/tests/quickshell/ChatWorkspace.qml" "$test_dir/shell.qml"
-for fixture_mode in app image panel settings edit files clearroom cleardm roomsettings newroom; do
+for fixture_mode in ${WISP_TEST_MODES:-app image panel settings edit files clearroom cleardm roomsettings newroom}; do
   screenshot=""
   if [[ -n "${WISP_CHAT_SCREENSHOT:-}" ]]; then
     screenshot="${WISP_CHAT_SCREENSHOT%.png}-$fixture_mode.png"

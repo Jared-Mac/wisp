@@ -22,6 +22,8 @@ Rectangle {
     editField.forceActiveFocus()
   }
   radius: theme.cornerRadius
+  border.width: theme.terminal ? 1 : 0
+  border.color: theme.separator
   color: theme.alpha(theme.foreground, 0.025)
   onConversationIdChanged: Qt.callLater(function() { messages.positionViewAtEnd() })
   ListView {
@@ -52,10 +54,12 @@ Rectangle {
           font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption; font.bold: true
         }
         Text {
+          Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
           text: Qt.formatDateTime(new Date(message.modelData.created_at), "MMM d · h:mm AP")
           color: root.theme.muted; font.pixelSize: root.theme.font.caption
         }
         Text {
+          Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
           visible: !!message.modelData.edited_at
           text: "edited"
           color: root.theme.alpha(root.theme.muted, 0.8)
@@ -67,11 +71,24 @@ Rectangle {
           implicitWidth: root.theme.space(26); implicitHeight: root.theme.space(20)
           onClicked: messageMenu.open()
           Menu {
+            TrialControlStyle { theme: root.theme; control: messageMenu }
+            Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
+            Binding on font.pixelSize { when: root.theme.terminal; value: root.theme.font.caption; restoreMode: Binding.RestoreBindingOrValue }
             id: messageMenu
             palette.window: root.theme.surface
             palette.text: root.theme.foreground
-            MenuItem { text: message.isImage || message.isFile ? "Edit caption…" : "Edit message…"; onTriggered: root.beginEdit(message.modelData) }
-            MenuItem { text: "Delete message…"; onTriggered: { root.deletingId = String(message.modelData.id); deleteDialog.open() } }
+            MenuItem {
+              id: trialControl0
+              TrialControlStyle { theme: root.theme; control: trialControl0 }
+              Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
+              Binding on font.pixelSize { when: root.theme.terminal; value: root.theme.font.caption; restoreMode: Binding.RestoreBindingOrValue }
+               text: message.isImage || message.isFile ? "Edit caption…" : "Edit message…"; onTriggered: root.beginEdit(message.modelData) }
+            MenuItem {
+              id: trialControl1
+              TrialControlStyle { theme: root.theme; control: trialControl1 }
+              Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
+              Binding on font.pixelSize { when: root.theme.terminal; value: root.theme.font.caption; restoreMode: Binding.RestoreBindingOrValue }
+               text: "Delete message…"; onTriggered: { root.deletingId = String(message.modelData.id); deleteDialog.open() } }
           }
         }
       }
@@ -89,6 +106,8 @@ Rectangle {
           fillMode: Image.PreserveAspectFit
         }
         Text {
+          Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
+          Binding on font.pixelSize { when: root.theme.terminal; value: root.theme.font.body; restoreMode: Binding.RestoreBindingOrValue }
           anchors.centerIn: parent
           visible: photo.status !== Image.Ready
           text: root.bridge.imageErrors[String(message.modelData.id)] ? "Image unavailable · click to retry" : "Loading image…"
@@ -111,6 +130,7 @@ Rectangle {
           anchors.fill: parent; anchors.margins: root.theme.spacing.lg
           spacing: root.theme.spacing.md
           Text {
+            Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
             width: parent.width; elide: Text.ElideMiddle
             text: String(message.modelData.payload.file_name || "File")
             color: root.theme.foreground; font.pixelSize: root.theme.font.body
@@ -118,6 +138,7 @@ Rectangle {
           Row {
             spacing: root.theme.spacing.lg
             Text {
+              Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
               anchors.verticalCenter: parent.verticalCenter
               text: root.bridge.fileSize(Number(message.modelData.payload.size || 0))
               color: root.theme.muted; font.pixelSize: root.theme.font.caption
@@ -142,6 +163,7 @@ Rectangle {
               onClicked: root.bridge.setFileRetention(message.modelData.id, !message.modelData.payload.keep)
             }
             Text {
+              Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
               anchors.verticalCenter: parent.verticalCenter
               text: message.modelData.payload.expired ? "Removed from server" : message.modelData.payload.keep ? "Kept on server" : message.modelData.payload.expires_at ? "Expires " + Qt.formatDateTime(new Date(message.modelData.payload.expires_at), "MMM d, h:mm AP") : "No automatic expiry"
               color: root.theme.muted; font.pixelSize: root.theme.space(10)
@@ -162,12 +184,16 @@ Rectangle {
     }
   }
   Text {
+    Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
     anchors.centerIn: parent
     visible: messages.count === 0
     text: "This is the start of your conversation."
     color: root.theme.muted; font.pixelSize: root.theme.font.body
   }
   Dialog {
+    TrialControlStyle { theme: root.theme; control: editDialog }
+    Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
+    Binding on font.pixelSize { when: root.theme.terminal; value: root.theme.font.caption; restoreMode: Binding.RestoreBindingOrValue }
     id: editDialog
     parent: Overlay.overlay
     x: parent ? (parent.width - width) / 2 : 0; y: parent ? (parent.height - height) / 2 : 0
@@ -181,14 +207,23 @@ Rectangle {
       ScrollView {
         width: parent.width; height: root.theme.space(150)
         TextArea {
+          TrialControlStyle { theme: root.theme; control: editField }
+          Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
+          Binding on font.pixelSize { when: root.theme.terminal; value: root.theme.font.body; restoreMode: Binding.RestoreBindingOrValue }
           id: editField
           enabled: !root.savingEdit
           color: root.theme.foreground
           wrapMode: TextEdit.Wrap; textFormat: TextEdit.PlainText; selectByMouse: true
-          background: Rectangle { color: root.theme.background; radius: root.theme.cornerRadius }
+          background: Rectangle {
+            color: root.theme.background; radius: root.theme.cornerRadius
+            border.width: root.theme.terminal ? 1 : 0
+            border.color: editField.activeFocus ? root.theme.focusBorder : root.theme.separator
+          }
         }
       }
-      Text { width: parent.width; text: root.editError; visible: text !== ""; color: root.theme.danger; wrapMode: Text.Wrap; font.pixelSize: root.theme.font.caption }
+      Text {
+        Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
+         width: parent.width; text: root.editError; visible: text !== ""; color: root.theme.danger; wrapMode: Text.Wrap; font.pixelSize: root.theme.font.caption }
       Row {
         spacing: root.theme.spacing.lg
         ChatButton { theme: root.theme; text: "Cancel"; enabled: !root.savingEdit; onClicked: editDialog.close() }
@@ -201,6 +236,9 @@ Rectangle {
     }
   }
   Dialog {
+    TrialControlStyle { theme: root.theme; control: deleteDialog }
+    Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
+    Binding on font.pixelSize { when: root.theme.terminal; value: root.theme.font.caption; restoreMode: Binding.RestoreBindingOrValue }
     id: deleteDialog
     parent: Overlay.overlay
     x: parent ? (parent.width - width) / 2 : 0; y: parent ? (parent.height - height) / 2 : 0
@@ -210,6 +248,8 @@ Rectangle {
     standardButtons: Dialog.Cancel | Dialog.Yes
     palette.window: root.theme.surface; palette.windowText: root.theme.foreground
     contentItem: Text {
+      Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
+      Binding on font.pixelSize { when: root.theme.terminal; value: root.theme.font.body; restoreMode: Binding.RestoreBindingOrValue }
       text: "Delete this message for everyone in the conversation? This cannot be undone."
       color: root.theme.foreground; wrapMode: Text.Wrap
     }

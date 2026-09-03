@@ -111,6 +111,7 @@ FocusScope {
         height: root.theme.space(36)
 
         Row {
+          id: identityRow
           anchors.left: parent.left
           anchors.verticalCenter: parent.verticalCenter
           spacing: root.theme.spacing.md
@@ -135,6 +136,7 @@ FocusScope {
             }
 
             Row {
+              id: identityStatus
               spacing: root.theme.spacing.xs
 
               PresenceDot {
@@ -153,6 +155,8 @@ FocusScope {
                 color: root.bridge.hasError ? root.theme.danger : root.theme.muted
                 font.family: root.theme.font.family
                 font.pixelSize: root.theme.font.caption
+                width: root.theme.terminal ? Math.max(0, headerActions.x - identityRow.x - root.theme.space(30) - root.theme.spacing.md - root.theme.space(20)) : implicitWidth
+                elide: root.theme.terminal ? Text.ElideRight : Text.ElideNone
               }
             }
           }

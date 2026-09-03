@@ -1,6 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Appearance launch metadata only. Never infer an integration from a user name
+# or from "standalone". Omarchy takes precedence over the experimental opt-in.
+export WISP_APPEARANCE_ENVIRONMENT=unknown
+if [[ ${WISP_INTEGRATION:-} == omarchy || -n ${OMARCHY_PATH:-} \
+    || -d ${XDG_CONFIG_HOME:-$HOME/.config}/omarchy \
+    || -d $HOME/.local/share/omarchy ]] \
+    || command -v omarchy >/dev/null 2>&1 \
+    || command -v omarchy-shell >/dev/null 2>&1; then
+  export WISP_APPEARANCE_ENVIRONMENT=omarchy
+elif [[ -r /etc/os-release ]] && grep -Eq '^ID="?cachyos"?$' /etc/os-release; then
+  export WISP_APPEARANCE_ENVIRONMENT=cachyos
+fi
+
 detect_primary_screen() {
   if [[ -n ${WISP_PRIMARY_SCREEN:-} ]]; then
     printf '%s\n' "$WISP_PRIMARY_SCREEN"

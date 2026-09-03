@@ -13,6 +13,8 @@ Rectangle {
   readonly property var current: bridge.conversationById(currentId)
   color: theme.surface
   radius: theme.cornerRadius
+  border.width: theme.terminal ? 1 : 0
+  border.color: theme.separator
 
   function label(c) { return c && c.label === "Hangout" ? "Room" : String(c ? c.label : "Messages") }
   function syncTabs() {
@@ -31,6 +33,7 @@ Rectangle {
     anchors.margins: root.theme.space(18)
     height: root.theme.space(36)
     Text {
+      Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
       width: parent.width - allButton.width
       anchors.verticalCenter: parent.verticalCenter
       text: "Messages"
@@ -39,6 +42,9 @@ Rectangle {
     ChatButton { id: allButton; theme: root.theme; text: "All conversations ▾"; onClicked: allMenu.open() }
   }
   Menu {
+    TrialControlStyle { theme: root.theme; control: allMenu }
+    Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
+    Binding on font.pixelSize { when: root.theme.terminal; value: root.theme.font.caption; restoreMode: Binding.RestoreBindingOrValue }
     id: allMenu
     palette.window: root.theme.surface
     palette.text: root.theme.foreground
@@ -46,6 +52,10 @@ Rectangle {
     Repeater {
       model: root.bridge.conversations
       MenuItem {
+        id: trialControl0
+        TrialControlStyle { theme: root.theme; control: trialControl0 }
+        Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
+        Binding on font.pixelSize { when: root.theme.terminal; value: root.theme.font.caption; restoreMode: Binding.RestoreBindingOrValue }
         required property var modelData
         text: root.label(modelData) + (modelData.tab_closed ? " · closed" : "")
         onTriggered: root.bridge.selectConversation(modelData.id)
@@ -84,20 +94,43 @@ Rectangle {
     visible: !!root.current
     Column {
       width: parent.width - optionsButton.width
-      Text { text: root.label(root.current); color: root.theme.foreground; font.bold: true; font.pixelSize: root.theme.font.body }
-      Text { text: root.current && root.current.kind === "direct" ? "Direct message · history saved" : "Conversation · history saved"; color: root.theme.muted; font.pixelSize: root.theme.font.caption }
+      Text {
+        Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
+         text: root.label(root.current); color: root.theme.foreground; font.bold: true; font.pixelSize: root.theme.font.body }
+      Text {
+        Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
+         text: root.current && root.current.kind === "direct" ? "Direct message · history saved" : "Conversation · history saved"; color: root.theme.muted; font.pixelSize: root.theme.font.caption }
     }
     ChatButton { id: optionsButton; theme: root.theme; text: "Chat options ▾"; onClicked: optionsMenu.open() }
   }
   Menu {
+    TrialControlStyle { theme: root.theme; control: optionsMenu }
+    Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
+    Binding on font.pixelSize { when: root.theme.terminal; value: root.theme.font.caption; restoreMode: Binding.RestoreBindingOrValue }
     id: optionsMenu
+    objectName: "wispChatOptions"
     palette.window: root.theme.surface
     palette.text: root.theme.foreground
     x: root.width - width - root.theme.space(18); y: chatHeading.y + chatHeading.height
-    MenuItem { text: "Close conversation"; onTriggered: root.bridge.exitConversation(root.currentId) }
-    MenuItem { text: "Room settings…"; visible: !!(root.current && root.current.spot_id); height: visible ? implicitHeight : 0; onTriggered: roomManager.manage(root.currentId) }
+    MenuItem {
+      id: trialControl1
+      TrialControlStyle { theme: root.theme; control: trialControl1 }
+      Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
+      Binding on font.pixelSize { when: root.theme.terminal; value: root.theme.font.caption; restoreMode: Binding.RestoreBindingOrValue }
+       text: "Close conversation"; onTriggered: root.bridge.exitConversation(root.currentId) }
+    MenuItem {
+      id: trialControl2
+      TrialControlStyle { theme: root.theme; control: trialControl2 }
+      Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
+      Binding on font.pixelSize { when: root.theme.terminal; value: root.theme.font.caption; restoreMode: Binding.RestoreBindingOrValue }
+       text: "Room settings…"; visible: !!(root.current && root.current.spot_id); height: visible ? implicitHeight : 0; onTriggered: roomManager.manage(root.currentId) }
     MenuSeparator {}
-    MenuItem { text: "Clear Chat History…"; onTriggered: confirmClear.confirm(root.currentId) }
+    MenuItem {
+      id: trialControl3
+      TrialControlStyle { theme: root.theme; control: trialControl3 }
+      Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
+      Binding on font.pixelSize { when: root.theme.terminal; value: root.theme.font.caption; restoreMode: Binding.RestoreBindingOrValue }
+       text: "Clear Chat History…"; onTriggered: confirmClear.confirm(root.currentId) }
   }
   MessageFeed {
     anchors.left: parent.left; anchors.right: parent.right
@@ -115,6 +148,7 @@ Rectangle {
     spacious: true
   }
   Text {
+    Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
     anchors.centerIn: parent
     visible: !root.current
     width: parent.width - root.theme.space(48)

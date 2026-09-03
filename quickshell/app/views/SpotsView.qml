@@ -34,8 +34,11 @@ Column {
         anchors.left: parent.left
         anchors.leftMargin: root.theme.spacing.lg
         anchors.verticalCenter: parent.verticalCenter
+        width: root.theme.terminal ? Math.max(0, joinButton.x - x - root.theme.spacing.lg) : implicitWidth
 
         Text {
+          width: root.theme.terminal ? parent.width : implicitWidth
+          elide: root.theme.terminal ? Text.ElideRight : Text.ElideNone
           text: String(modelData.name || "Spot")
           color: root.theme.foreground
           font.family: root.theme.font.family
@@ -44,6 +47,8 @@ Column {
         }
 
         Text {
+          width: root.theme.terminal ? parent.width : implicitWidth
+          elide: root.theme.terminal ? Text.ElideRight : Text.ElideNone
           text: (modelData.members || []).length
             ? modelData.members.map(function(member) { return member.display_name }).join(" · ")
             : "Empty · starts when you join"
@@ -54,6 +59,7 @@ Column {
       }
 
       Rectangle {
+        id: joinButton
         width: joinText.implicitWidth + root.theme.spacing.lg * 2
         height: root.theme.space(30)
         anchors.right: parent.right

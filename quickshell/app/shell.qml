@@ -84,7 +84,10 @@ ShellRoot {
       "visible": appWindow.visible,
       "width": appWindow.width,
       "height": appWindow.height,
-      "wide_layout": appWindow.width >= appTheme.space(760)
+      "wide_layout": appWindow.width >= appTheme.space(760),
+      "appearance": appTheme.profile,
+      "appearance_environment": appearance.environment,
+      "font_family": appTheme.font.family
     })
   }
   function panelDesktop() {
@@ -95,7 +98,10 @@ ShellRoot {
       "anchor": appSettings.anchor,
       "resolved_anchor": app.resolvedAnchor,
       "screen": app.selectedPanelScreen ? app.selectedPanelScreen.name : null,
-      "vertical_inset": panelWindow.verticalInset
+      "vertical_inset": panelWindow.verticalInset,
+      "appearance": appTheme.profile,
+      "appearance_environment": appearance.environment,
+      "font_family": appTheme.font.family
     })
   }
 
@@ -115,7 +121,8 @@ ShellRoot {
     "setAnchor": function(value) { app.setAnchor(value) }
   })
 
-  WispTheme { id: appTheme }
+  WispAppearance { id: appearance }
+  WispTheme { id: appTheme; profile: appearance.profile }
 
   FileView {
     id: settingsFile

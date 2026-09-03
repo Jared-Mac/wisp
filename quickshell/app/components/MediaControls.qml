@@ -7,9 +7,11 @@ Column {
   signal leaveRequested()
   spacing: root.theme.spacing.sm
 
-  Row {
+  Flow {
     id: controls
-    width: parent.width
+    // Legacy Row allowed rounded children to overrun by a pixel. Leave a
+    // non-rendering guard band so Flow never wraps that unchanged legacy row.
+    width: parent.width + (root.theme.terminal ? 0 : root.theme.space(4))
     spacing: root.theme.spacing.sm
 
     AudioStateIndicator {
@@ -32,9 +34,9 @@ Column {
         readonly property bool controlEnabled: (modelData.action !== "share" || !root.bridge.shareStarting)
           && (modelData.action !== "camera" || (!root.bridge.cameraStarting
             && root.bridge.cameraState.devices.length > 0))
-        width: (controls.width - audioControls.width
+        width: Math.max(root.theme.terminal ? controlLabel.implicitWidth + root.theme.space(20) : 0, (root.width - audioControls.width
           - controls.spacing * controlRepeater.count)
-          / Math.max(1, controlRepeater.count)
+          / Math.max(1, controlRepeater.count))
         height: root.theme.space(34)
         radius: root.theme.cornerRadius
         color: controlMouse.containsMouse
@@ -43,6 +45,7 @@ Column {
         opacity: controlEnabled ? 1 : 0.55
 
         Text {
+          id: controlLabel
           anchors.centerIn: parent
           text: modelData.label
           color: modelData.action === "leave" ? root.theme.danger : root.theme.foreground
@@ -89,9 +92,12 @@ Column {
         font.family: root.theme.font.family
         font.pixelSize: root.theme.font.caption
         font.weight: Font.DemiBold
+        width: root.theme.terminal ? Math.max(0, watchButton.x - x - root.theme.spacing.md) : implicitWidth
+        elide: root.theme.terminal ? Text.ElideRight : Text.ElideNone
       }
 
       Rectangle {
+        id: watchButton
         anchors.right: parent.right
         anchors.rightMargin: root.theme.spacing.sm
         anchors.verticalCenter: parent.verticalCenter

@@ -28,6 +28,7 @@ Item {
   }
 
   Text {
+    id: friendName
     anchors.left: dot.right
     anchors.leftMargin: root.theme.spacing.md
     anchors.verticalCenter: parent.verticalCenter
@@ -35,11 +36,14 @@ Item {
     color: root.friend.online ? root.theme.foreground : root.theme.muted
     font.family: root.theme.font.family
     font.pixelSize: root.theme.font.body
+    width: root.theme.terminal ? Math.max(0, statusText.x - x - root.theme.spacing.md) : implicitWidth
+    elide: root.theme.terminal ? Text.ElideRight : Text.ElideNone
   }
 
   Text {
+    id: statusText
     anchors.right: parent.right
-    anchors.rightMargin: root.theme.space(76)
+    anchors.rightMargin: root.theme.terminal ? messageButton.width + root.theme.spacing.lg * 2 : root.theme.space(76)
     anchors.verticalCenter: parent.verticalCenter
     text: root.friend.online ? String(root.friend.presence) : "offline"
     color: root.theme.muted
@@ -59,7 +63,8 @@ Item {
   }
 
   Rectangle {
-    width: root.theme.space(66)
+    id: messageButton
+    width: root.theme.terminal ? messageLabel.implicitWidth + root.theme.space(18) : root.theme.space(66)
     height: root.theme.space(28)
     anchors.right: parent.right
     anchors.rightMargin: root.theme.spacing.sm
@@ -70,6 +75,7 @@ Item {
       : root.theme.alpha(root.theme.foreground, 0.07)
 
     Text {
+      id: messageLabel
       anchors.centerIn: parent
       text: "Message"
       color: root.theme.foreground

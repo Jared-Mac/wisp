@@ -2,6 +2,8 @@ import QtQuick
 import QtQuick.Controls
 
 Button {
+  Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
+  Binding on font.pixelSize { when: root.theme.terminal; value: root.theme.font.caption; restoreMode: Binding.RestoreBindingOrValue }
   id: root
   required property var theme
   property bool primary: false
@@ -13,6 +15,13 @@ Button {
     color: root.primary ? (root.destructive ? root.theme.danger : root.theme.accent) : root.theme.alpha(root.destructive
       ? root.theme.danger : root.theme.foreground, root.hovered ? 0.14 : 0.06)
     opacity: root.enabled ? 1 : 0.4
+    border.width: root.theme.terminal ? 1 : 0
+    border.color: root.visualFocus ? root.theme.focusBorder : root.theme.separator
+    Rectangle {
+      anchors.fill: parent; radius: parent.radius
+      visible: root.theme.terminal && root.down
+      color: root.theme.alpha(root.theme.foreground, 0.10)
+    }
   }
   contentItem: Text {
     id: label

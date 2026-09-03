@@ -6,6 +6,17 @@ import QtQuick
 QtObject {
   id: root
 
+  // Legacy is deliberately the default, including direct/unknown launches.
+  property string profile: "legacy"
+  readonly property bool terminal: profile === "terminal-experimental"
+  readonly property string monospaceFamily: {
+    var available = Qt.fontFamilies()
+    var candidates = ["Hack", "DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", "Adwaita Mono"]
+    for (var i = 0; i < candidates.length; i++)
+      if (available.indexOf(candidates[i]) >= 0) return candidates[i]
+    return "monospace" // Qt/fontconfig's generic fixed-width family, not a CSS list.
+  }
+
   property color foreground: "#e8ecf3"
   property color background: "#151821"
   property color surface: "#1c202b"
@@ -14,12 +25,14 @@ QtObject {
   property color danger: "#ff7777"
   property color warning: "#f5b94c"
 
-  property int cornerRadius: 9
+  property int cornerRadius: terminal ? 4 : 9
   property real spacingScale: 1.0
-  property string fontFamily: "sans-serif"
+  property string fontFamily: terminal ? monospaceFamily : "sans-serif"
   property int captionSize: 12
-  property int bodySize: 14
-  property int titleSize: 18
+  property int bodySize: terminal ? 13 : 14
+  property int titleSize: terminal ? 16 : 18
+  readonly property color separator: alpha(foreground, 0.10)
+  readonly property color focusBorder: alpha(accent, 0.85)
 
   function space(px) {
     var value = Number(px)

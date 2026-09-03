@@ -27,6 +27,7 @@ DropArea {
     color: root.theme.alpha(root.theme.surface, 0.96)
     border.color: root.theme.accent; border.width: 2
     Text {
+      Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
       anchors.centerIn: parent
       text: "Drop to attach"
       color: root.theme.foreground; font.pixelSize: root.theme.font.title

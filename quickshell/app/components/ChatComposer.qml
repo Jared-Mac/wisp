@@ -33,6 +33,7 @@ Column {
             fillMode: Image.PreserveAspectFit
           }
           Text {
+            Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
             anchors.left: parent.left; anchors.top: parent.top; anchors.margins: root.theme.spacing.lg
             visible: !modelData.is_image
             text: "FILE"; color: root.theme.muted; font.pixelSize: root.theme.font.caption
@@ -45,12 +46,16 @@ Column {
             ToolTip.visible: hovered; ToolTip.text: "Remove attachment"
           }
           Text {
+            Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
             anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: keepBox.top
             anchors.margins: root.theme.spacing.md
             text: String(modelData.file_name || "Screenshot.png") + " · " + root.bridge.fileSize(Number(modelData.size || 0))
             elide: Text.ElideMiddle; color: root.theme.foreground; font.pixelSize: root.theme.font.caption
           }
           CheckBox {
+            TrialControlStyle { theme: root.theme; control: keepBox }
+            Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
+            Binding on font.pixelSize { when: root.theme.terminal; value: root.theme.font.caption; restoreMode: Binding.RestoreBindingOrValue }
             id: keepBox
             anchors.left: parent.left; anchors.bottom: parent.bottom
             height: root.theme.space(32); visible: !modelData.is_image
@@ -74,6 +79,7 @@ Column {
       anchors.fill: parent
       anchors.margins: root.theme.spacing.lg
       TextArea {
+        TrialControlStyle { theme: root.theme; control: editor }
         id: editor
         property bool wispTextEditor: true
         text: root.bridge.draftFor(root.conversationId)
@@ -105,6 +111,7 @@ Column {
     spacing: root.theme.spacing.lg
     Item { width: Math.max(0, parent.width - (pasteHint.visible ? pasteHint.implicitWidth : 0) - sendButton.width - parent.spacing * 2); height: 1 }
     Text {
+      Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
       id: pasteHint
       visible: root.spacious
       anchors.verticalCenter: parent.verticalCenter

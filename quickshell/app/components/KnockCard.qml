@@ -18,8 +18,11 @@ Rectangle {
     anchors.leftMargin: root.theme.spacing.lg
     anchors.verticalCenter: parent.verticalCenter
     spacing: root.theme.spacing.xs
+    width: root.theme.terminal ? Math.max(0, knockActions.x - x - root.theme.spacing.lg) : implicitWidth
 
     Text {
+      width: root.theme.terminal ? parent.width : implicitWidth
+      elide: root.theme.terminal ? Text.ElideRight : Text.ElideNone
       text: String(root.knock.from.display_name || "A friend") + " wants to hang out"
       color: root.theme.foreground
       font.family: root.theme.font.family
@@ -35,6 +38,7 @@ Rectangle {
   }
 
   Row {
+    id: knockActions
     anchors.right: parent.right
     anchors.rightMargin: root.theme.spacing.md
     anchors.verticalCenter: parent.verticalCenter

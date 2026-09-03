@@ -2,6 +2,9 @@ import QtQuick
 import QtQuick.Controls
 
 Dialog {
+  TrialControlStyle { theme: root.theme; control: root }
+  Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
+  Binding on font.pixelSize { when: root.theme.terminal; value: root.theme.font.caption; restoreMode: Binding.RestoreBindingOrValue }
   id: root
   required property var bridge
   required property var theme
@@ -31,16 +34,25 @@ Dialog {
   contentItem: Column {
     spacing: root.theme.spacing.lg
     Text {
+      Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
+      Binding on font.pixelSize { when: root.theme.terminal; value: root.theme.font.body; restoreMode: Binding.RestoreBindingOrValue }
       width: parent.width; wrapMode: Text.Wrap
       text: root.creating ? "You'll own this room. Invite friends after creating it; nobody joins a call automatically."
         : "Owners manage admin access. Owners and admins can invite friends and clear the room's chat for everyone."
       color: root.theme.muted
     }
     TextField {
+      TrialControlStyle { theme: root.theme; control: nameField }
+      Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
+      Binding on font.pixelSize { when: root.theme.terminal; value: root.theme.font.body; restoreMode: Binding.RestoreBindingOrValue }
       id: nameField
       width: parent.width; visible: root.creating; enabled: !root.busy
       maximumLength: 60; placeholderText: "Room name"; placeholderTextColor: root.theme.muted; color: root.theme.foreground
-      background: Rectangle { color: root.theme.background; radius: root.theme.cornerRadius }
+      background: Rectangle {
+        color: root.theme.background; radius: root.theme.cornerRadius
+        border.width: root.theme.terminal ? 1 : 0
+        border.color: nameField.activeFocus ? root.theme.focusBorder : root.theme.separator
+      }
     }
     ScrollView {
       width: parent.width; height: root.theme.space(260); visible: !root.creating
@@ -54,6 +66,8 @@ Dialog {
             readonly property string role: root.conversation && root.conversation.member_roles ? root.conversation.member_roles[modelData.id] || "member" : "member"
             width: parent.width; spacing: root.theme.spacing.md
             Text {
+              Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
+              Binding on font.pixelSize { when: root.theme.terminal; value: root.theme.font.body; restoreMode: Binding.RestoreBindingOrValue }
               width: parent.width - roleButton.width - parent.spacing; anchors.verticalCenter: parent.verticalCenter
               text: modelData.display_name + " · " + (parent.role === "host" ? "owner" : parent.role)
               elide: Text.ElideRight; color: root.theme.foreground
@@ -66,13 +80,19 @@ Dialog {
             }
           }
         }
-        Text { visible: root.admin && root.invitees.length > 0; text: "Invite friends"; color: root.theme.muted }
+        Text {
+          Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
+          Binding on font.pixelSize { when: root.theme.terminal; value: root.theme.font.body; restoreMode: Binding.RestoreBindingOrValue }
+           visible: root.admin && root.invitees.length > 0; text: "Invite friends"; color: root.theme.muted }
         Repeater {
           model: root.admin ? root.invitees : []
           Row {
             required property var modelData
             width: parent.width; spacing: root.theme.spacing.md
-            Text { width: parent.width - inviteButton.width - parent.spacing; anchors.verticalCenter: parent.verticalCenter; text: modelData.display_name; color: root.theme.foreground }
+            Text {
+              Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
+              Binding on font.pixelSize { when: root.theme.terminal; value: root.theme.font.body; restoreMode: Binding.RestoreBindingOrValue }
+               width: parent.width - inviteButton.width - parent.spacing; anchors.verticalCenter: parent.verticalCenter; text: modelData.display_name; color: root.theme.foreground }
             ChatButton {
               id: inviteButton
               theme: root.theme; text: "Invite"; enabled: !root.busy
@@ -82,7 +102,10 @@ Dialog {
         }
       }
     }
-    Text { width: parent.width; visible: root.error !== ""; text: root.error; color: root.theme.danger; wrapMode: Text.Wrap }
+    Text {
+      Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
+      Binding on font.pixelSize { when: root.theme.terminal; value: root.theme.font.body; restoreMode: Binding.RestoreBindingOrValue }
+       width: parent.width; visible: root.error !== ""; text: root.error; color: root.theme.danger; wrapMode: Text.Wrap }
     Row {
       spacing: root.theme.spacing.lg
       ChatButton { theme: root.theme; text: root.creating ? "Cancel" : "Done"; enabled: !root.busy; onClicked: root.close() }

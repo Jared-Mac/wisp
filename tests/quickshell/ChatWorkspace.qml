@@ -7,6 +7,8 @@ ShellRoot {
   id: test
   property bool failed: false
   readonly property string mode: Quickshell.env("WISP_CHAT_FIXTURE_MODE")
+  readonly property bool compactMode: mode === "panel" || mode === "panelmedia" || mode === "panelsettings"
+  property var popupTarget: null
   function check(condition, message) { if (!condition) { failed = true; console.error("CHAT_TEST_FAILED: " + message) } }
   function findFeed(item) { return findItem(item, "messageFeed") }
   function findItem(item, name) {
@@ -18,13 +20,51 @@ ShellRoot {
     }
     return null
   }
-  Wisp.WispTheme { id: theme }
+  function findText(item, text) {
+    if (item.text === text && item.visible) return item
+    var children = item.children || []
+    for (var i = 0; i < children.length; i++) {
+      var result = findText(children[i], text)
+      if (result) return result
+    }
+    return null
+  }
+  function findObject(item, name, visited) {
+    if (!item || visited.indexOf(item) >= 0) return null
+    visited.push(item)
+    if (item.objectName === name) return item
+    var children = item.data || item.children || []
+    for (var i = 0; i < children.length; i++) {
+      var result = findObject(children[i], name, visited)
+      if (result) return result
+    }
+    return null
+  }
+  Wisp.WispTheme {
+    id: theme
+    Component.onCompleted: {
+      if ("profile" in theme) theme.profile = Quickshell.env("WISP_TEST_ADAPTER") === "omarchy" ? "legacy" : Quickshell.env("WISP_TEST_THEME") || "legacy"
+      if (Quickshell.env("WISP_TEST_ADAPTER") === "omarchy") {
+        // Representative host overrides, not Jared's settings or machine.
+        foreground = "#d8dee9"; background = "#242933"; surface = "#242933"
+        accent = "#81a1c1"; muted = "#a0a8b7"; danger = "#bf616a"
+        cornerRadius = 7; fontFamily = "DejaVu Sans"; captionSize = 13; bodySize = 15; titleSize = 19; spacingScale = 1.1
+        if ("profile" in theme) theme.profile = "legacy"
+      }
+    }
+  }
   Wisp.WispBridge {
     id: bridge
     property var sent: []
     function send(name, args) { sent.push({name:name,args:args}); requestId++; return "test-" + requestId }
+    function localPreviewUrl(stem, revision) { return String(Qt.resolvedUrl("app/assets/waveform.svg")) }
   }
-  Wisp.WispWindow { id: window; bridge: bridge; theme: theme; visible: test.mode !== "panel" }
+  Wisp.WispWindow {
+    id: window; bridge: bridge; theme: theme; visible: !test.compactMode && test.mode !== "preview"
+    implicitWidth: theme.space(Quickshell.env("WISP_TEST_CONSTRAINED") === "1" ? 840 : 1180)
+    implicitHeight: theme.space(Quickshell.env("WISP_TEST_CONSTRAINED") === "1" ? 700 : 900)
+  }
+  Wisp.WispPreviewWindow { id: preview; bridge: bridge; theme: theme; visible: test.mode === "preview" && bridge.sharing }
   Item {
     parent: window.contentItem
     Components.ClearHistoryDialog { id: clearDialog; bridge: bridge; theme: theme }
@@ -32,8 +72,9 @@ ShellRoot {
   }
   FloatingWindow {
     id: compact
-    visible: test.mode === "panel"
-    implicitWidth: 460; implicitHeight: 800
+    visible: test.compactMode
+    implicitWidth: Quickshell.env("WISP_TEST_CONSTRAINED") === "1" ? 400 : 460
+    implicitHeight: Quickshell.env("WISP_TEST_CONSTRAINED") === "1" ? 700 : 800
     Rectangle {
       id: compactSurface
       anchors.fill: parent
@@ -43,6 +84,8 @@ ShellRoot {
         anchors.fill: parent
         bridge: bridge; theme: theme; presentation: "panel"
         logoSource: Qt.resolvedUrl("app/assets/waveform.svg")
+        showAppButton: !!Quickshell.env("WISP_TEST_STRESS")
+        showCloseButton: !!Quickshell.env("WISP_TEST_STRESS")
       }
     }
   }
@@ -59,6 +102,11 @@ ShellRoot {
       {id:"friends",kind:"circle",label:"Friends",unread_count:0}
     ]
     data.friends = [{id:"jared",display_name:"Jared",online:true,presence:"open"}, {id:"charlie",display_name:"Charlie",online:false,presence:"away"}]
+    if (Quickshell.env("WISP_TEST_STRESS")) {
+      data.self.display_name = "A very long display name"
+      data.friends[0].display_name = "A friend with a long name"
+      data.spots = [{id:"porch",name:"Porch with a long room name",members:[]}]
+    }
     data.messages = [
       {id:"1",conversation_id:"porch",sender:{id:"jared",display_name:"Jared"},created_at:"2026-09-03T17:00:00Z",content_type:"text/plain",payload:"The new chat has a lot more space. Can you send that screenshot here?"},
       {id:"2",conversation_id:"porch",sender:{id:"self",display_name:"Tyler"},created_at:"2026-09-03T17:01:00Z",edited_at:"2026-09-03T17:01:30Z",content_type:"text/plain",payload:"Yep — I can paste it without leaving Wisp. The conversation stays open while I switch tabs."},
@@ -111,7 +159,7 @@ ShellRoot {
       bridge.chatImageUrls = {image:String(Qt.resolvedUrl("app/assets/waveform.svg"))}
       bridge.applySnapshot(data)
     }
-    if (test.mode === "files" || test.mode === "panel") {
+    if (test.mode === "files" || test.mode === "panel" || test.mode === "transfer") {
       data = JSON.parse(JSON.stringify(data))
       data.messages.push({id:"file",conversation_id:"porch",sender:{id:"jared",display_name:"Jared"},created_at:"2026-09-03T17:04:00Z",content_type:"application/octet-stream",payload:{file_name:"project-footage.mp4",size:6000000000,expires_at:"2026-09-04T17:04:00Z",keep:false,caption:"Here is the footage."}})
       bridge.applySnapshot(data)
@@ -120,11 +168,36 @@ ShellRoot {
       test.check(bridge.savingFiles.file, "save disables duplicate download")
       bridge.finishRequest({id:"test-" + bridge.requestId,ok:true,value:{directory_url:"file:///tmp/test-saved",url:"file:///tmp/test-saved/notes.txt"}})
       test.check(!bridge.savingFiles.file && !!bridge.savedFiles.file, "successful save offers its directory without opening the file")
+      if (test.mode === "transfer") {
+        bridge.sendingConversations = {porch:true}
+        bridge.transferProgress = {"upload:pending-file":{bytes:3000000000,total:6000000000}}
+      }
     }
+    if (["media", "panelmedia", "preview"].indexOf(test.mode) >= 0) {
+      data = JSON.parse(JSON.stringify(data))
+      data.self.hangout_id = "call"; data.self.muted = true
+      data.hangouts = [{id:"call",label:"Porch",members:[{id:"self",display_name:"Tyler"},{id:"jared",display_name:"A very long friend name"}]}]
+      data.self.media.camera.active = true; data.self.media.camera.viewers = ["Jared"]
+      data.self.media.camera.devices = [{id:"fixture",label:"Fixture camera"}]
+      data.self.media.screen_share.active = true
+      data.self.media.remote_videos = [{participant:"A friend with a long name",source:"screen",requested_quality:"high"}]
+      data.knocks = [{id:"knock",from:{id:"charlie",display_name:"Charlie with a long name"}}]
+      bridge.applySnapshot(data)
+    }
+    if (test.mode === "empty") { data = JSON.parse(JSON.stringify(data)); data.conversations = []; data.messages = []; bridge.applySnapshot(data); bridge.closeConversation() }
     bridge.notificationMuted = true
     bridge.notificationVolume = 35
     bridge.notificationSoundPath = "file:///tmp/test-custom-sound.wav"
     if (test.mode === "settings") window.contentItem.children[0].children[0].settingsOpen = true
+    if (test.mode === "panelsettings") compactContent.settingsOpen = true
+  }
+  Timer {
+    interval: 700; running: test.mode === "focus"
+    onTriggered: {
+      var button = test.findText(window.contentItem, "Chat options ▾")
+      test.check(!!button && !!button.forceActiveFocus, "focusable chat button")
+      if (button) button.forceActiveFocus(Qt.TabFocusReason)
+    }
   }
   Timer {
     interval: 650; running: ["clearroom","cleardm","roomsettings","newroom"].indexOf(test.mode) >= 0
@@ -144,9 +217,9 @@ ShellRoot {
     }
   }
   Timer {
-    interval: 400; running: test.mode !== "settings"
+    interval: 400; running: ["settings","panelsettings","preview","empty","transfer"].indexOf(test.mode) < 0
     onTriggered: {
-      var target = test.mode === "panel" ? compactSurface : window.contentItem
+      var target = test.compactMode ? compactSurface : window.contentItem
       var area = test.findItem(target, "chatDropArea")
       test.check(area && area.width > 0 && area.height > 0, "drop area covers active chat")
       if (!area) return
@@ -157,6 +230,14 @@ ShellRoot {
       test.check(bridge.sent[bridge.sent.length-1].name === "import_chat_files", "drop stages files without sending")
       bridge.finishRequest({id:"test-" + bridge.requestId,ok:false})
       test.check(!bridge.importingConversations.porch, "failed drop releases staging state")
+    }
+  }
+  Timer {
+    interval: 650; running: test.mode === "menu"
+    onTriggered: {
+      var button = test.findText(window.contentItem, "Chat options ▾")
+      test.check(!!button && !!button.clicked, "chat options button available")
+      if (button && button.clicked) button.clicked()
     }
   }
   Timer {
@@ -181,10 +262,16 @@ ShellRoot {
   Timer {
     interval: 1200; running: true
     onTriggered: {
-      test.check(window.width >= 1100, "large app default width")
-      test.check(window.height >= 850, "large app default height")
+      test.check(window.width === theme.space(Quickshell.env("WISP_TEST_CONSTRAINED") === "1" ? 840 : 1180), "app width")
+      test.check(window.height === theme.space(Quickshell.env("WISP_TEST_CONSTRAINED") === "1" ? 700 : 900), "app height")
       var path = Quickshell.env("WISP_CHAT_SCREENSHOT")
-      var target = test.mode === "panel" ? compactSurface : window.contentItem.children[0]
+      var target = test.compactMode ? compactSurface : window.contentItem.children[0]
+      if (test.mode === "preview") target = preview.contentItem.children[0]
+      if (test.mode === "menu") {
+        var menu = test.findObject(window.contentItem, "wispChatOptions", [])
+        test.check(!!menu && menu.opened, "chat options menu opened")
+        if (menu) target = menu.contentItem.parent
+      }
       if (test.mode === "clearroom" || test.mode === "cleardm") target = clearDialog.contentItem.parent
       if (test.mode === "roomsettings" || test.mode === "newroom") target = roomDialog.contentItem.parent
       if (test.mode === "edit") {

@@ -42,10 +42,12 @@ Rectangle {
   }
 
   Column {
+    id: hangoutInfo
     anchors.left: parent.left
     anchors.leftMargin: root.theme.spacing.lg
     anchors.verticalCenter: parent.verticalCenter
     spacing: root.theme.spacing.xs
+    width: root.theme.terminal ? Math.max(0, joinButton.x - x - root.theme.spacing.lg) : implicitWidth
 
     Row {
       spacing: root.theme.spacing.xs
@@ -57,8 +59,11 @@ Rectangle {
           required property var modelData
           required property int index
           spacing: root.theme.spacing.xs
+          width: root.theme.terminal ? Math.max(0, (hangoutInfo.width - Math.max(0, (root.hangout.members || []).length - 1) * spacing) / Math.max(1, (root.hangout.members || []).length)) : implicitWidth
 
           Text {
+            width: root.theme.terminal ? Math.max(0, parent.width - mutedIcon.width - deafenedIcon.width - parent.spacing * 2) : implicitWidth
+            elide: root.theme.terminal ? Text.ElideRight : Text.ElideNone
             anchors.verticalCenter: parent.verticalCenter
             text: (index > 0 ? " + " : "")
               + (root.memberSpeaking(modelData.display_name) ? "● " : "")
@@ -71,6 +76,7 @@ Rectangle {
           }
 
           Image {
+            id: mutedIcon
             visible: root.memberMuted(modelData)
             anchors.verticalCenter: parent.verticalCenter
             width: visible ? root.theme.space(14) : 0
@@ -80,6 +86,7 @@ Rectangle {
           }
 
           Image {
+            id: deafenedIcon
             visible: root.isSelf(modelData) && !!root.bridge.selfState.deafened
             anchors.verticalCenter: parent.verticalCenter
             width: visible ? root.theme.space(14) : 0
@@ -91,6 +98,8 @@ Rectangle {
       }
     }
     Text {
+      width: root.theme.terminal ? parent.width : implicitWidth
+      elide: root.theme.terminal ? Text.ElideRight : Text.ElideNone
       text: root.hangout.label || "Room"
       color: root.theme.muted
       font.family: root.theme.font.family
@@ -99,6 +108,7 @@ Rectangle {
   }
 
   Rectangle {
+    id: joinButton
     anchors.right: parent.right
     anchors.rightMargin: root.theme.spacing.md
     anchors.verticalCenter: parent.verticalCenter

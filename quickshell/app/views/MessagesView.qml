@@ -28,10 +28,23 @@ Column {
       theme: root.theme; text: "···"; implicitWidth: root.theme.space(28)
       onClicked: optionsMenu.open()
       Menu {
+        TrialControlStyle { theme: root.theme; control: optionsMenu }
+        Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
+        Binding on font.pixelSize { when: root.theme.terminal; value: root.theme.font.caption; restoreMode: Binding.RestoreBindingOrValue }
         id: optionsMenu
         palette.window: root.theme.surface; palette.text: root.theme.foreground
-        MenuItem { text: "Clear Chat History…"; onTriggered: clearDialog.confirm(root.bridge.activeConversationId) }
-        MenuItem { text: "Room settings…"; visible: !!(root.bridge.activeConversation && root.bridge.activeConversation.spot_id); height: visible ? implicitHeight : 0; onTriggered: roomManager.manage(root.bridge.activeConversationId) }
+        MenuItem {
+          id: trialControl0
+          TrialControlStyle { theme: root.theme; control: trialControl0 }
+          Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
+          Binding on font.pixelSize { when: root.theme.terminal; value: root.theme.font.caption; restoreMode: Binding.RestoreBindingOrValue }
+           text: "Clear Chat History…"; onTriggered: clearDialog.confirm(root.bridge.activeConversationId) }
+        MenuItem {
+          id: trialControl1
+          TrialControlStyle { theme: root.theme; control: trialControl1 }
+          Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
+          Binding on font.pixelSize { when: root.theme.terminal; value: root.theme.font.caption; restoreMode: Binding.RestoreBindingOrValue }
+           text: "Room settings…"; visible: !!(root.bridge.activeConversation && root.bridge.activeConversation.spot_id); height: visible ? implicitHeight : 0; onTriggered: roomManager.manage(root.bridge.activeConversationId) }
       }
     }
     ChatButton {
@@ -44,6 +57,7 @@ Column {
     }
   }
   Text {
+    Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
     visible: !root.bridge.activeConversation && root.bridge.conversations.length === 0
     text: "Start a private message from a friend row."
     color: root.theme.muted; font.pixelSize: root.theme.font.body
@@ -60,10 +74,12 @@ Column {
         anchors.leftMargin: root.theme.spacing.lg; anchors.rightMargin: root.theme.spacing.md
         anchors.verticalCenter: parent.verticalCenter
         Text {
+          Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
           text: root.conversationLabel(modelData)
           color: root.theme.foreground; font.pixelSize: root.theme.font.body; font.bold: true
         }
         Text {
+          Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
           width: parent.width; elide: Text.ElideRight
           text: modelData.last_message
             ? modelData.last_message.sender.display_name + ": " + (modelData.last_message.content_type === "image/png" ? "Image" : modelData.last_message.content_type === "application/octet-stream" ? String(modelData.last_message.payload.file_name || "File") : String(modelData.last_message.payload || ""))
@@ -72,6 +88,7 @@ Column {
         }
       }
       Text {
+        Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
         id: unreadLabel
         anchors.right: parent.right; anchors.rightMargin: root.theme.spacing.lg; anchors.verticalCenter: parent.verticalCenter
         visible: Number(modelData.unread_count || 0) > 0
