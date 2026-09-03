@@ -38,6 +38,7 @@ Item {
         "microphone_published": false,
         "received_audio_frames": 0,
         "remote_audio_participants": [],
+        "remote_video_participants": [],
         "active_speakers": [],
         "received_video_frames": 0,
         "rendered_video_frames": 0,
@@ -88,6 +89,9 @@ Item {
   readonly property bool effectiveMuted: !!selfState.muted || !!selfState.deafened
     || (!!pushToTalkState.enabled && !pushToTalkState.active)
   readonly property var activeSpeakers: mediaState.active_speakers || []
+  readonly property var remoteVideoParticipants: mediaState.remote_video_participants || []
+  readonly property bool remoteVideoAvailable: remoteVideoParticipants.length > 0
+  readonly property string remoteVideoLabel: remoteVideoParticipants.join(" + ")
   readonly property var audioState: mediaState.audio || ({
     "input_devices": [],
     "output_devices": [],
@@ -201,6 +205,7 @@ Item {
     if (hasError) return errorMessage
     var parts = ["Wisp"]
     if (sharing) parts.push("Sharing " + String(screenShareState.source || "screen"))
+    if (remoteVideoAvailable) parts.push(remoteVideoLabel + " is sharing")
     if (selfState.deafened) parts.push("Deafened")
     else if (effectiveMuted) parts.push("Microphone muted")
     else parts.push("Audio ready")

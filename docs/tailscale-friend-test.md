@@ -101,7 +101,9 @@ actually active, not merely requested.
    and confirm the settings page reports `deepfilternet` active (or `rnnoise`
    only if the fallback was needed).
 6. Share one monitor, then one window; confirm video reaches every friend and
-   the cyan tray/bar badge clears after **Stop share**.
+   no viewer window opens automatically. Each friend clicks **Watch &lt;name&gt;**,
+   confirms the colors are correct, and verifies the cyan tray/bar badge clears
+   after **Stop share**.
 7. Leave and rejoin once.
 8. Unplug/reconnect one USB or Bluetooth audio device if convenient.
 9. Record subjective notes about echo, keyboard noise, clipping, latency, and

@@ -35,8 +35,10 @@ Pending incoming knocks are included in the snapshot's `knocks` array with the
 sender and expiration time. Joining a friend in Knock presence returns a
 `knock_sent` result instead of treating the request as an error.
 
-The snapshot's media state includes `remote_audio_participants`, receive/render
-counters, native-surface state, and optional `error_code`/`error` fields. Error
+The snapshot's media state includes `remote_audio_participants`,
+`remote_video_participants`, receive/render counters, native-surface state, and
+optional `error_code`/`error` fields. A remote video subscription makes Watch
+available but does not open the native surface. Error
 codes are stable machine-readable categories; `error` remains suitable for
 direct display. Its nested `audio` object contains input/output inventories,
 selected device IDs, the processing preset, and an integer `input_level` from

@@ -79,7 +79,9 @@ back to RNNoise and reports that backend under **Settings → Audio** and in
 
 During a hangout, **Share screen** opens the standard XDG desktop portal picker
 for a monitor or individual window. Wisp captures the authorized PipeWire
-stream at up to 1080p/30 fps and publishes it as a LiveKit screen-share track.
+stream at up to 1080p/30 fps and publishes VP8 with a 6 Mbps bitrate ceiling as
+a LiveKit screen-share track. Viewers get a **Watch &lt;name&gt;** control; receiving
+a share never opens a window until they click it.
 The tray and Omarchy center-bar icon show the same cyan sharing badge; stopping
 from either UI revokes the portal session and unpublishes the track.
 
@@ -146,11 +148,11 @@ cargo run -p wispctl -- status
 ```
 
 The status output reports the selected microphone/speaker and a growing
-`received_audio_frames` counter. Synthetic video opens a GPU-rendered native
-Wayland window with app ID `dev.wisp.surface`; `wispctl surface close` and
-`wispctl surface open` destroy and recreate that window without leaving the
-LiveKit room. `wispctl mute`, `unmute`, `deafen`, `undeafen`, and `leave` operate
-on the LiveKit session.
+`received_audio_frames` counter. Synthetic video appears as an available share;
+the UI's **Watch Tyler** button or `wispctl surface open` opens a GPU-rendered
+native Wayland window with app ID `dev.wisp.surface`. `wispctl surface close`
+destroys that window without leaving the LiveKit room. `wispctl mute`, `unmute`,
+`deafen`, `undeafen`, and `leave` operate on the LiveKit session.
 
 Audio devices and processing are available in both Quickshell frontends and
 from the CLI:
@@ -217,8 +219,9 @@ the full app and compact panel lifecycles, daemon status, anchoring, and clean
 shutdown. `just bootstrap` installs
 the pinned, checksum-verified LiveKit development
 binary into `.tools/`, and `just dev` starts it on loopback. `just test-media`
-tests real local LiveKit audio/video, surface close/reopen independence, and SFU
-reconnection. `just test-reliability` runs the shorter Voice MVP gate: four
+tests real local LiveKit audio/video, explicit Watch behavior, surface
+close/reopen independence, and SFU reconnection. `just test-reliability` runs
+the shorter Voice MVP gate: four
 users, repeated leave/rejoin, real Quickshell IPC process restarts, SFU failure
 and recovery, clear connection errors, and bounded RSS growth. The cycle count
 and memory allowance can be adjusted with `WISP_RELIABILITY_CYCLES` and

@@ -1165,6 +1165,7 @@ async fn synchronize_media_events(
             | MediaEvent::InputLevel { generation, .. }
             | MediaEvent::ActiveSpeakers { generation, .. }
             | MediaEvent::VideoSubscribed { generation, .. }
+            | MediaEvent::VideoUnsubscribed { generation, .. }
             | MediaEvent::VideoFrames { generation, .. }
             | MediaEvent::ScreenShareFrames { generation, .. }
             | MediaEvent::ScreenShareStopped { generation, .. } => Some(*generation),
@@ -1211,6 +1212,7 @@ async fn synchronize_media_events(
             | MediaEvent::InputLevel { .. }
             | MediaEvent::ActiveSpeakers { .. }
             | MediaEvent::VideoSubscribed { .. }
+            | MediaEvent::VideoUnsubscribed { .. }
             | MediaEvent::VideoFrames { .. }
             | MediaEvent::ScreenShareFrames { .. }) => {
                 synchronize_track_event(&daemon, track_event).await;
@@ -1246,6 +1248,7 @@ async fn synchronize_media_events(
                         |media| {
                             media.livekit_connected = false;
                             media.remote_audio_participants.clear();
+                            media.remote_video_participants.clear();
                             media.active_speakers.clear();
                             media.audio.input_level = 0;
                             media.error_code = Some("livekit_disconnected".into());
@@ -1322,11 +1325,48 @@ async fn synchronize_track_event(daemon: &Daemon, event: MediaEvent) {
                 })
                 .await;
         }
+        video_event @ (MediaEvent::VideoSubscribed { .. }
+        | MediaEvent::VideoUnsubscribed { .. }
+        | MediaEvent::VideoFrames { .. }) => {
+            synchronize_video_track_event(daemon, video_event).await;
+        }
+        MediaEvent::ScreenShareFrames { total, .. } => {
+            daemon
+                .update_media_state(None, "screen_share_frame_published", |media| {
+                    media.screen_share.published_frames = total;
+                })
+                .await;
+        }
+        _ => unreachable!("only remote track events are dispatched here"),
+    }
+}
+
+async fn synchronize_video_track_event(daemon: &Daemon, event: MediaEvent) {
+    match event {
         MediaEvent::VideoSubscribed { participant, .. } => {
             info!(%participant, "subscribed to remote video");
             daemon
                 .update_media_state(None, "remote_video_subscribed", |media| {
-                    media.last_video_from = Some(participant);
+                    media.last_video_from = Some(participant.clone());
+                    if !media.remote_video_participants.contains(&participant) {
+                        media.remote_video_participants.push(participant);
+                        media.remote_video_participants.sort();
+                    }
+                })
+                .await;
+        }
+        MediaEvent::VideoUnsubscribed { participant, .. } => {
+            info!(%participant, "unsubscribed from remote video");
+            daemon
+                .update_media_state(None, "remote_video_unsubscribed", |media| {
+                    media
+                        .remote_video_participants
+                        .retain(|name| name != &participant);
+                    if media.remote_video_participants.is_empty() {
+                        media.last_video_from = None;
+                        media.video_width = None;
+                        media.video_height = None;
+                    }
                 })
                 .await;
         }
@@ -1346,14 +1386,7 @@ async fn synchronize_track_event(daemon: &Daemon, event: MediaEvent) {
                 })
                 .await;
         }
-        MediaEvent::ScreenShareFrames { total, .. } => {
-            daemon
-                .update_media_state(None, "screen_share_frame_published", |media| {
-                    media.screen_share.published_frames = total;
-                })
-                .await;
-        }
-        _ => unreachable!("only remote track events are dispatched here"),
+        _ => unreachable!("only remote video events are dispatched here"),
     }
 }
 

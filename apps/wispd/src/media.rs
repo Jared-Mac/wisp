@@ -13,7 +13,7 @@ use gstreamer::prelude::*;
 use gstreamer_app as gst_app;
 use gstreamer_video as gst_video;
 use livekit::{
-    options::{TrackPublishOptions, VideoCodec},
+    options::{TrackPublishOptions, VideoCodec, VideoEncoding},
     prelude::{
         AudioProcessingOptions, LocalAudioTrack, LocalTrack, LocalVideoTrack, Participant,
         PlatformAudio, PlayoutDeviceInfo, RecordingDeviceInfo, RemoteAudioTrack, RemoteTrack,
@@ -57,6 +57,8 @@ const AUDIO_SAMPLE_RATE: u32 = 48_000;
 const AUDIO_FRAME_SAMPLES: usize = 480;
 const DEEPFILTER_LATENCY_MS: u16 = 30;
 const RNNOISE_LATENCY_MS: u16 = 10;
+const SCREEN_SHARE_FPS: u32 = 30;
+const SCREEN_SHARE_MAX_BITRATE: u64 = 6_000_000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
@@ -264,6 +266,10 @@ pub(crate) enum MediaEvent {
         generation: u64,
         participant: String,
     },
+    VideoUnsubscribed {
+        generation: u64,
+        participant: String,
+    },
     VideoFrames {
         generation: u64,
         participant: String,
@@ -319,10 +325,11 @@ struct MediaSession {
     hangout_id: HangoutId,
     room: Arc<Room>,
     microphone: LocalAudioTrack,
-    raw_microphone: LocalAudioTrack,
+    microphone_capture: gst::Pipeline,
+    microphone_frames: mpsc::UnboundedSender<Vec<i16>>,
     microphone_task: JoinHandle<()>,
     screen_share: Option<ScreenShareSession>,
-    platform_audio: PlatformAudio,
+    _platform_audio: PlatformAudio,
     remote_audio: Arc<Mutex<HashMap<String, RemoteAudioTrack>>>,
     event_task: JoinHandle<()>,
 }
@@ -407,7 +414,14 @@ impl MediaManager {
             .lock()
             .expect("platform audio lock poisoned");
         if audio.is_none() {
-            *audio = Some(PlatformAudio::new().context("initialize microphone and speaker")?);
+            let platform = PlatformAudio::new().context("initialize microphone and speaker")?;
+            // Microphone samples are supplied through GStreamer's PipeWire source. Leaving
+            // WebRTC's separate PulseAudio recorder enabled creates an unused capture thread
+            // and can race the audio transport teardown during a LiveKit reconnect.
+            LkRuntime::instance()
+                .pc_factory()
+                .set_adm_recording_enabled(false);
+            *audio = Some(platform);
         }
         Ok(audio
             .as_ref()
@@ -440,8 +454,20 @@ impl MediaManager {
             .find(|device| recording_device_id(device) == id)
             .with_context(|| format!("microphone is no longer available: {id}"))?;
         let active = self.is_active().await;
-        select_recording_device(&audio, &device, active)
-            .with_context(|| format!("select microphone {}", device.name))?;
+        if active {
+            let mut session = self.session.lock().await;
+            if let Some(session) = session.as_mut() {
+                let replacement = create_microphone_capture_pipeline(
+                    &device.name,
+                    session.microphone_frames.clone(),
+                )?;
+                replacement
+                    .set_state(gst::State::Playing)
+                    .context("start the replacement microphone capture pipeline")?;
+                let previous = std::mem::replace(&mut session.microphone_capture, replacement);
+                let _ = previous.set_state(gst::State::Null);
+            }
+        }
         {
             let mut preferences = self
                 .audio_preferences
@@ -545,21 +571,8 @@ impl MediaManager {
 
         if let Some(id) = &next_input
             && (force_selection || input_changed)
-            && let Some(device) = recording_devices
-                .iter()
-                .find(|device| recording_device_id(device) == *id)
         {
-            let result = select_recording_device(audio, device, active);
-            match result {
-                Ok(()) => preferences.selected_input_id.clone_from(&next_input),
-                Err(error) => {
-                    errors.push(format!("select microphone {}: {error}", device.name));
-                    preferences.selected_input_id = preferences
-                        .selected_input_id
-                        .take()
-                        .filter(|id| input_devices.iter().any(|device| &device.id == id));
-                }
-            }
+            preferences.selected_input_id = Some(id.clone());
         }
         if let Some(id) = &next_output
             && (force_selection || output_changed)
@@ -677,11 +690,6 @@ impl MediaManager {
                 .await
                 .with_context(|| format!("connect to LiveKit room {}", credentials.room))?;
         let room = Arc::new(room);
-        let raw_microphone =
-            LocalAudioTrack::create_audio_track("microphone-capture", platform_audio.rtc_source());
-        platform_audio
-            .start_recording()
-            .context("start microphone capture for neural processing")?;
         let microphone_source = NativeAudioSource::new(AudioSourceOptions::default(), 48_000, 1, 0);
         let microphone_track = LocalAudioTrack::create_audio_track(
             "microphone",
@@ -689,8 +697,10 @@ impl MediaManager {
         );
         if muted {
             microphone_track.mute();
-            raw_microphone.disable();
         }
+        let (microphone_frames, captured_frames) = mpsc::unbounded_channel();
+        let microphone_capture =
+            create_microphone_capture_pipeline(&microphone, microphone_frames.clone())?;
         if let Err(error) = room
             .local_participant()
             .publish_track(
@@ -702,18 +712,26 @@ impl MediaManager {
             )
             .await
         {
-            let _ = platform_audio.stop_recording();
             let _ = room.close().await;
             return Err(error).context("publish microphone to LiveKit");
         }
-        let microphone_task = tokio::spawn(run_microphone_pipeline(
-            raw_microphone.clone(),
-            microphone_source,
-            self.neural_denoiser_enabled.clone(),
-            self.denoiser.clone(),
-        ));
+        if let Err(error) = microphone_capture.set_state(gst::State::Playing) {
+            let _ = room.close().await;
+            return Err(error).context("start microphone capture");
+        }
 
         let generation = self.generation.fetch_add(1, Ordering::AcqRel) + 1;
+        let microphone_task = tokio::spawn(run_microphone_pipeline(
+            captured_frames,
+            microphone_source,
+            microphone_track.clone(),
+            self.neural_denoiser_enabled.clone(),
+            self.denoiser.clone(),
+            self.input_level.clone(),
+            self.event_tx.clone(),
+            generation,
+        ));
+
         self.received_frames.store(0, Ordering::Release);
         self.received_video_frames.store(0, Ordering::Release);
         self.input_level.store(0, Ordering::Release);
@@ -728,7 +746,6 @@ impl MediaManager {
                 remote_audio: remote_audio.clone(),
                 received_frames: self.received_frames.clone(),
                 received_video_frames: self.received_video_frames.clone(),
-                input_level: self.input_level.clone(),
                 connected: self.connected.clone(),
                 deafened: self.deafened.clone(),
                 surface: self.surface.clone(),
@@ -738,10 +755,11 @@ impl MediaManager {
             hangout_id,
             room,
             microphone: microphone_track,
-            raw_microphone,
+            microphone_capture,
+            microphone_frames,
             microphone_task,
             screen_share: None,
-            platform_audio,
+            _platform_audio: platform_audio,
             remote_audio,
             event_task,
         });
@@ -774,10 +792,7 @@ impl MediaManager {
         let Some(session) = self.session.lock().await.take() else {
             return;
         };
-        session.raw_microphone.disable();
-        if let Err(error) = session.platform_audio.stop_recording() {
-            debug!(%error, "microphone capture was already stopped");
-        }
+        let _ = session.microphone_capture.set_state(gst::State::Null);
         session.microphone_task.abort();
         let _ = session.microphone_task.await;
         if let Some(screen_share) = session.screen_share {
@@ -795,14 +810,12 @@ impl MediaManager {
         if let Some(session) = self.session.lock().await.as_ref() {
             if muted {
                 session.microphone.mute();
-                session.raw_microphone.disable();
                 self.input_level.store(0, Ordering::Release);
                 let _ = self.event_tx.send(MediaEvent::InputLevel {
                     generation: self.generation(),
                     level: 0,
                 });
             } else {
-                session.raw_microphone.enable();
                 session.microphone.unmute();
             }
         }
@@ -894,7 +907,6 @@ struct RoomEventContext {
     remote_audio: Arc<Mutex<HashMap<String, RemoteAudioTrack>>>,
     received_frames: Arc<AtomicU64>,
     received_video_frames: Arc<AtomicU64>,
-    input_level: Arc<AtomicU8>,
     connected: Arc<AtomicBool>,
     deafened: Arc<AtomicBool>,
     surface: Option<SurfaceController>,
@@ -914,21 +926,6 @@ impl RoomEventContext {
             let _ = self.event_tx.send(MediaEvent::ActiveSpeakers {
                 generation: self.generation,
                 speakers: next_speakers,
-            });
-        }
-
-        let level = speakers
-            .iter()
-            .find_map(|participant| match participant {
-                Participant::Local(_) => Some(audio_level_percent(participant.audio_level())),
-                Participant::Remote(_) => None,
-            })
-            .unwrap_or(0);
-        let previous = self.input_level.swap(level, Ordering::AcqRel);
-        if previous.abs_diff(level) >= 2 || (previous != 0 && level == 0) {
-            let _ = self.event_tx.send(MediaEvent::InputLevel {
-                generation: self.generation,
-                level,
             });
         }
     }
@@ -972,13 +969,6 @@ impl RoomEventContext {
             generation: self.generation,
             participant: participant.clone(),
         });
-        if let Some(surface) = &self.surface
-            && let Err(error) = surface.open()
-        {
-            let _ = self.event_tx.send(MediaEvent::SurfaceError {
-                message: error.to_string(),
-            });
-        }
         track_tasks.spawn(receive_video_frames(
             self.generation,
             participant,
@@ -1029,11 +1019,16 @@ async fn run_room_events(
             }
             RoomEvent::TrackUnsubscribed {
                 track: RemoteTrack::Video(_),
+                participant,
                 ..
             } => {
                 if let Some(surface) = &context.surface {
                     let _ = surface.close();
                 }
+                let _ = context.event_tx.send(MediaEvent::VideoUnsubscribed {
+                    generation: context.generation,
+                    participant: participant.name(),
+                });
             }
             RoomEvent::ActiveSpeakersChanged { speakers } => {
                 context.active_speakers_changed(&speakers, &mut active_speakers);
@@ -1132,39 +1127,6 @@ fn selected_device_name(devices: &[AudioDevice], selected_id: Option<&str>) -> O
     })
 }
 
-fn select_recording_device(
-    audio: &PlatformAudio,
-    device: &RecordingDeviceInfo,
-    active: bool,
-) -> anyhow::Result<()> {
-    if !device.id.as_str().is_empty() {
-        return if active {
-            audio.switch_recording_device(&device.id)
-        } else {
-            audio.set_recording_device(&device.id)
-        }
-        .map_err(Into::into);
-    }
-
-    let runtime = LkRuntime::instance();
-    let factory = runtime.pc_factory();
-    let index = u16::try_from(device.index).context("microphone index is out of range")?;
-    let was_initialized = factory.recording_is_initialized();
-    if active && was_initialized && !factory.stop_recording() {
-        bail!("stop microphone before switching");
-    }
-    if !factory.set_recording_device(index) {
-        if active && was_initialized {
-            let _ = factory.init_recording() && factory.start_recording();
-        }
-        bail!("select microphone by index {index}");
-    }
-    if active && (!factory.init_recording() || !factory.start_recording()) {
-        bail!("restart microphone after switching");
-    }
-    Ok(())
-}
-
 fn select_playout_device(
     audio: &PlatformAudio,
     device: &PlayoutDeviceInfo,
@@ -1198,36 +1160,153 @@ fn select_playout_device(
     Ok(())
 }
 
+fn create_microphone_capture_pipeline(
+    microphone: &str,
+    frames: mpsc::UnboundedSender<Vec<i16>>,
+) -> anyhow::Result<gst::Pipeline> {
+    gst::init().context("initialize GStreamer for microphone capture")?;
+    let source = if std::env::var_os("WISP_TEST_MICROPHONE_TONE").is_some() {
+        gst::ElementFactory::make("audiotestsrc")
+            .property("is-live", true)
+            .property("volume", 0.12_f64)
+            .build()
+            .context("the GStreamer audio test source is not installed")?
+    } else {
+        microphone_capture_source(microphone)?
+    };
+    let caps = gst::Caps::builder("audio/x-raw")
+        .field("format", "S16LE")
+        .field("layout", "interleaved")
+        .field(
+            "rate",
+            i32::try_from(AUDIO_SAMPLE_RATE).expect("audio rate fits i32"),
+        )
+        .field("channels", 1_i32)
+        .build();
+    let app_sink = gst_app::AppSink::builder()
+        .caps(&caps)
+        .max_buffers(8)
+        .drop(true)
+        .sync(false)
+        .enable_last_sample(false)
+        .callbacks(
+            gst_app::AppSinkCallbacks::builder()
+                .new_sample(move |sink| {
+                    let samples = capture_microphone_sample(sink).map_err(|error| {
+                        warn!(%error, "microphone capture failed");
+                        gst::FlowError::Error
+                    })?;
+                    frames.send(samples).map_err(|_| gst::FlowError::Eos)?;
+                    Ok(gst::FlowSuccess::Ok)
+                })
+                .build(),
+        )
+        .build();
+    let convert = gst::ElementFactory::make("audioconvert")
+        .build()
+        .context("the GStreamer audio converter is not installed")?;
+    let resample = gst::ElementFactory::make("audioresample")
+        .build()
+        .context("the GStreamer audio resampler is not installed")?;
+    let pipeline = gst::Pipeline::default();
+    pipeline
+        .add_many([&source, &convert, &resample, app_sink.upcast_ref()])
+        .context("build the microphone capture pipeline")?;
+    gst::Element::link_many([&source, &convert, &resample, app_sink.upcast_ref()])
+        .context("link the microphone capture pipeline")?;
+    Ok(pipeline)
+}
+
+fn microphone_capture_source(microphone: &str) -> anyhow::Result<gst::Element> {
+    let device_name = microphone.strip_prefix("default: ").unwrap_or(microphone);
+    let monitor = gst::DeviceMonitor::new();
+    monitor
+        .add_filter(Some("Audio/Source"), None)
+        .context("add the microphone device filter")?;
+    monitor.start().context("start microphone discovery")?;
+    let device = monitor
+        .devices()
+        .iter()
+        .filter(|device| device.display_name() == device_name)
+        .max_by_key(|device| {
+            device
+                .properties()
+                .is_some_and(|properties| properties.has_field("node.name"))
+        })
+        .cloned();
+    monitor.stop();
+    let device = device.with_context(|| format!("GStreamer cannot capture {microphone}"))?;
+    device
+        .create_element(Some("wisp-microphone-source"))
+        .with_context(|| format!("create the {microphone} capture source"))
+}
+
+fn capture_microphone_sample(sink: &gst_app::AppSink) -> anyhow::Result<Vec<i16>> {
+    let sample = sink.pull_sample().context("read a microphone frame")?;
+    let buffer = sample
+        .buffer()
+        .context("captured microphone sample has no buffer")?;
+    let map = buffer
+        .map_readable()
+        .context("map the captured microphone buffer")?;
+    let bytes = map.as_slice();
+    if !bytes.len().is_multiple_of(2) {
+        bail!("captured microphone buffer has an incomplete sample");
+    }
+    Ok(bytes
+        .chunks_exact(2)
+        .map(|sample| i16::from_le_bytes([sample[0], sample[1]]))
+        .collect())
+}
+
+#[allow(clippy::too_many_arguments)]
 async fn run_microphone_pipeline(
-    capture_track: LocalAudioTrack,
+    mut captured_frames: mpsc::UnboundedReceiver<Vec<i16>>,
     publish_source: NativeAudioSource,
+    publish_track: LocalAudioTrack,
     neural_enabled: Arc<AtomicBool>,
     denoiser: Arc<DenoiserService>,
+    input_level: Arc<AtomicU8>,
+    event_tx: mpsc::UnboundedSender<MediaEvent>,
+    generation: u64,
 ) {
     const CHANNELS: u32 = 1;
 
-    let mut stream = NativeAudioStream::new(
-        capture_track.rtc_track(),
-        i32::try_from(AUDIO_SAMPLE_RATE).expect("audio sample rate fits i32"),
-        1,
-    );
     let mut pending = std::collections::VecDeque::<i16>::with_capacity(AUDIO_FRAME_SAMPLES * 2);
+    let mut meter_frames = 0_u8;
+    let mut meter_peak = 0_u8;
 
-    while let Some(frame) = stream.next().await {
-        pending.extend(frame.data.iter().copied());
+    while let Some(samples) = captured_frames.recv().await {
+        pending.extend(samples);
         while pending.len() >= AUDIO_FRAME_SAMPLES {
             let input = pending.drain(..AUDIO_FRAME_SAMPLES).collect::<Vec<_>>();
-            // Keep the model warm while another preset is selected. This makes switching
-            // back to Clear immediate and keeps DeepFilterNet's lookahead aligned.
             let neural = neural_enabled.load(Ordering::Acquire);
-            let output = match denoiser.process(input.clone()).await {
-                Ok(processed) if neural => processed,
-                Ok(_) => input,
-                Err(error) => {
-                    warn!(%error, "neural denoiser worker stopped; publishing raw audio");
-                    input
+            let output = if neural {
+                match denoiser.process(input.clone()).await {
+                    Ok(processed) => processed,
+                    Err(error) => {
+                        warn!(%error, "neural denoiser worker stopped; publishing raw audio");
+                        input
+                    }
                 }
+            } else {
+                input
             };
+            meter_peak = meter_peak.max(pcm_level_percent(&output));
+            meter_frames += 1;
+            if meter_frames == 10 {
+                let level = if publish_track.is_muted() {
+                    0
+                } else {
+                    meter_peak
+                };
+                let previous = input_level.swap(level, Ordering::AcqRel);
+                if previous.abs_diff(level) >= 2 || (previous != 0 && level == 0) {
+                    let _ = event_tx.send(MediaEvent::InputLevel { generation, level });
+                }
+                meter_frames = 0;
+                meter_peak = 0;
+            }
             let frame = AudioFrame {
                 data: Cow::Owned(output),
                 sample_rate: AUDIO_SAMPLE_RATE,
@@ -1403,7 +1482,10 @@ async fn create_screen_share(
             "height",
             i32::try_from(height).context("screen height is too large")?,
         )
-        .field("framerate", gst::Fraction::new(30, 1))
+        .field(
+            "framerate",
+            gst::Fraction::new(i32::try_from(SCREEN_SHARE_FPS)?, 1),
+        )
         .build();
     let published_frames = Arc::new(AtomicU64::new(0));
     let callback_failed = Arc::new(AtomicBool::new(false));
@@ -1476,6 +1558,10 @@ async fn create_screen_share(
             TrackPublishOptions {
                 source: TrackSource::Screenshare,
                 video_codec: VideoCodec::VP8,
+                video_encoding: Some(VideoEncoding {
+                    max_bitrate: SCREEN_SHARE_MAX_BITRATE,
+                    max_framerate: f64::from(SCREEN_SHARE_FPS),
+                }),
                 simulcast: false,
                 ..Default::default()
             },
@@ -1505,14 +1591,15 @@ async fn create_screen_share(
         source: Some(source_name.into()),
         width: Some(width),
         height: Some(height),
-        fps: Some(30),
+        fps: Some(SCREEN_SHARE_FPS),
         ..ScreenShareState::default()
     };
     info!(
         source = source_name,
         width,
         height,
-        fps = 30,
+        fps = SCREEN_SHARE_FPS,
+        max_bitrate = SCREEN_SHARE_MAX_BITRATE,
         "screen share published"
     );
     Ok((
@@ -1657,8 +1744,21 @@ fn processing_options(preset: AudioPreset) -> AudioProcessingOptions {
 }
 
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-fn audio_level_percent(level: f32) -> u8 {
-    (level.clamp(0.0, 1.0) * 100.0).round() as u8
+fn pcm_level_percent(samples: &[i16]) -> u8 {
+    if samples.is_empty() {
+        return 0;
+    }
+    let mean_square = samples
+        .iter()
+        .map(|sample| f64::from(*sample).powi(2))
+        .sum::<f64>()
+        / f64::from(u32::try_from(samples.len()).expect("audio frame length fits u32"));
+    if mean_square < 1.0 {
+        return 0;
+    }
+    let full_scale_square = f64::from(i16::MAX).powi(2);
+    let dbfs = 10.0 * (mean_square / full_scale_square).log10();
+    (((dbfs + 60.0) / 60.0).clamp(0.0, 1.0) * 100.0).round() as u8
 }
 
 async fn receive_video_frames(
@@ -1690,8 +1790,8 @@ async fn receive_video_frames(
             continue;
         };
         let mut rgba = vec![0; byte_len];
-        frame.buffer.to_i420().to_argb(
-            VideoFormatType::RGBA,
+        i420_to_rgba_texture(
+            &frame.buffer.to_i420(),
             &mut rgba,
             width.saturating_mul(4),
             dst_width,
@@ -1721,6 +1821,18 @@ async fn receive_video_frames(
     }
 }
 
+fn i420_to_rgba_texture(
+    buffer: &I420Buffer,
+    destination: &mut [u8],
+    stride: u32,
+    width: i32,
+    height: i32,
+) {
+    // libyuv format names describe register order. On little-endian Linux its
+    // ABGR conversion produces RGBA bytes, which is what the wgpu texture uses.
+    buffer.to_argb(VideoFormatType::ABGR, destination, stride, width, height);
+}
+
 async fn count_audio_frames(
     generation: u64,
     participant: String,
@@ -1744,10 +1856,11 @@ async fn count_audio_frames(
 #[cfg(test)]
 mod tests {
     use super::{
-        AUDIO_FRAME_SAMPLES, audio_level_percent, create_deepfilter_model, deepfilter_frame,
-        preferred_or_first, processing_options, public_device_id, same_logical_device,
-        screen_share_resolution,
+        AUDIO_FRAME_SAMPLES, create_deepfilter_model, deepfilter_frame, i420_to_rgba_texture,
+        pcm_level_percent, preferred_or_first, processing_options, public_device_id,
+        same_logical_device, screen_share_resolution,
     };
+    use livekit::webrtc::video_frame::I420Buffer;
     use wisp_protocol::{AudioDevice, AudioPreset};
 
     fn device(id: &str) -> AudioDevice {
@@ -1827,9 +1940,28 @@ mod tests {
     }
 
     #[test]
-    fn input_level_is_clamped_to_a_percentage() {
-        assert_eq!(audio_level_percent(-1.0), 0);
-        assert_eq!(audio_level_percent(0.426), 43);
-        assert_eq!(audio_level_percent(2.0), 100);
+    fn remote_video_conversion_matches_rgba_texture_order() {
+        let mut frame = I420Buffer::new(2, 2);
+        let (luma, chroma_u, chroma_v) = frame.data_mut();
+        luma.fill(82);
+        chroma_u.fill(90);
+        chroma_v.fill(240);
+
+        let mut rgba = [0_u8; 16];
+        i420_to_rgba_texture(&frame, &mut rgba, 8, 2, 2);
+
+        for pixel in rgba.chunks_exact(4) {
+            assert!(pixel[0] > 240, "red channel should be dominant: {pixel:?}");
+            assert!(pixel[1] < 16, "green channel should be low: {pixel:?}");
+            assert!(pixel[2] < 16, "blue channel should be low: {pixel:?}");
+            assert_eq!(pixel[3], 255, "alpha channel should be opaque");
+        }
+    }
+
+    #[test]
+    fn input_level_uses_a_readable_dbfs_scale() {
+        assert_eq!(pcm_level_percent(&[0; AUDIO_FRAME_SAMPLES]), 0);
+        assert_eq!(pcm_level_percent(&[i16::MAX; AUDIO_FRAME_SAMPLES]), 100);
+        assert!((65..=68).contains(&pcm_level_percent(&[3277; AUDIO_FRAME_SAMPLES])));
     }
 }

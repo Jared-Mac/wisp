@@ -353,8 +353,16 @@ async fn log_room_events(mut events: tokio::sync::mpsc::UnboundedReceiver<RoomEv
                 debug!(%participant, "simulator subscribed to audio");
                 tokio::spawn(async move {
                     let mut stream = NativeAudioStream::new(track.rtc_track(), 48_000, 1);
-                    if stream.next().await.is_some() {
-                        info!(%participant, "simulator received remote audio frames");
+                    let mut received_frame = false;
+                    while let Some(frame) = stream.next().await {
+                        if !received_frame {
+                            info!(%participant, "simulator received remote audio frames");
+                            received_frame = true;
+                        }
+                        if frame.data.iter().any(|sample| *sample != 0) {
+                            info!(%participant, "simulator received nonzero remote audio");
+                            break;
+                        }
                     }
                 });
             }

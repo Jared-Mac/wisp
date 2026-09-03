@@ -78,7 +78,8 @@ curl --silent --fail "http://127.0.0.1:$server_port/healthz" >/dev/null
 WISP_SERVER_URL="http://127.0.0.1:$server_port" RUST_LOG=info \
   target/debug/wisp-sim --profile Tyler --publish-tone --publish-video >"$test_dir/sim.log" 2>&1 &
 sim_pid=$!
-WISP_SERVER_URL="http://127.0.0.1:$server_port" WISP_PTT_LEASE_MS=400 RUST_LOG=info \
+WISP_SERVER_URL="http://127.0.0.1:$server_port" WISP_PTT_LEASE_MS=400 \
+  WISP_TEST_MICROPHONE_TONE=1 RUST_LOG=info \
   target/debug/wispd --profile Jared --socket "$test_dir/wispd.sock" \
   >"$test_dir/daemon.log" 2>&1 &
 daemon_pid=$!
@@ -100,8 +101,9 @@ for _ in $(seq 1 100); do
     .self.media.received_audio_frames > 0 and
     .self.media.last_audio_from == "Tyler" and
     .self.media.received_video_frames > 0 and
-    .self.media.rendered_video_frames > 0 and
-    .self.media.surface_open == true and
+    .self.media.rendered_video_frames == 0 and
+    .self.media.surface_open == false and
+    .self.media.remote_video_participants == ["Tyler"] and
     .self.media.last_video_from == "Tyler" and
     .self.media.video_width == 640 and
     .self.media.video_height == 360 and
@@ -116,7 +118,7 @@ for _ in $(seq 1 100); do
     .self.media.audio.denoiser_active == true and
     .self.media.audio.denoiser == "deepfilternet" and
     .self.media.audio.processing_latency_ms == 30 and
-    .self.media.audio.input_level >= 0 and
+    .self.media.audio.input_level > 0 and
     .self.media.audio.input_level <= 100
   ' <<<"$status_json" >/dev/null; then
     break
@@ -130,8 +132,9 @@ jq -e '
   .self.media.received_audio_frames > 0 and
   .self.media.last_audio_from == "Tyler" and
   .self.media.received_video_frames > 0 and
-  .self.media.rendered_video_frames > 0 and
-  .self.media.surface_open == true and
+  .self.media.rendered_video_frames == 0 and
+  .self.media.surface_open == false and
+  .self.media.remote_video_participants == ["Tyler"] and
   .self.media.last_video_from == "Tyler" and
   .self.media.video_width == 640 and
   .self.media.video_height == 360 and
@@ -146,15 +149,44 @@ jq -e '
   .self.media.audio.denoiser_active == true and
   .self.media.audio.denoiser == "deepfilternet" and
   .self.media.audio.processing_latency_ms == 30 and
-  .self.media.audio.input_level >= 0 and
+  .self.media.audio.input_level > 0 and
   .self.media.audio.input_level <= 100
 ' <<<"$status_json" >/dev/null
+
+target/debug/wispctl --socket "$test_dir/wispd.sock" surface open \
+  | jq -e '.surface == "opening"' >/dev/null
+watched_json=""
+for _ in $(seq 1 100); do
+  watched_json=$(target/debug/wispctl --socket "$test_dir/wispd.sock" status)
+  if jq -e '
+    .self.connection == "connected" and
+    .self.media.surface_open == true and
+    .self.media.rendered_video_frames > 0 and
+    .self.media.remote_video_participants == ["Tyler"]
+  ' <<<"$watched_json" >/dev/null; then
+    break
+  fi
+  sleep 0.1
+done
+jq -e '
+  .self.connection == "connected" and
+  .self.media.surface_open == true and
+  .self.media.rendered_video_frames > 0 and
+  .self.media.remote_video_participants == ["Tyler"]
+' <<<"$watched_json" >/dev/null
+status_json=$watched_json
 
 for _ in $(seq 1 100); do
   if rg -q 'simulator received remote audio frames' "$test_dir/sim.log"; then break; fi
   sleep 0.05
 done
 rg -q 'simulator received remote audio frames' "$test_dir/sim.log"
+
+for _ in $(seq 1 100); do
+  if rg -q 'simulator received nonzero remote audio' "$test_dir/sim.log"; then break; fi
+  sleep 0.05
+done
+rg -q 'simulator received nonzero remote audio' "$test_dir/sim.log"
 
 speaker_json=""
 for _ in $(seq 1 100); do
@@ -354,7 +386,8 @@ for _ in $(seq 1 200); do
     .self.media.livekit_connected == true and
     .self.media.received_audio_frames > $before and
     .self.media.received_video_frames > $video_before and
-    .self.media.surface_open == true
+    .self.media.surface_open == false and
+    .self.media.remote_video_participants == ["Tyler"]
   ' <<<"$reconnected_json" >/dev/null; then
     break
   fi
@@ -365,7 +398,8 @@ jq -e --argjson before "$frames_before_restart" --argjson video_before "$video_f
   .self.media.livekit_connected == true and
   .self.media.received_audio_frames > $before and
   .self.media.received_video_frames > $video_before and
-  .self.media.surface_open == true
+  .self.media.surface_open == false and
+  .self.media.remote_video_participants == ["Tyler"]
 ' <<<"$reconnected_json" >/dev/null
 rg -q 'LiveKit media reconnecting' "$test_dir/daemon.log"
 rg -q 'LiveKit media reconnected' "$test_dir/daemon.log"

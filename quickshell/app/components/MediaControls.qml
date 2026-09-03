@@ -22,11 +22,19 @@ Column {
 
     Repeater {
       id: controlRepeater
-      model: [
-        { "label": root.bridge.mediaState.surface_open ? "Close video" : "Open video", "action": "video" },
-        { "label": root.bridge.shareStarting ? "Choosing…" : root.bridge.sharing ? "Stop share" : "Share screen", "action": "share" },
-        { "label": "Leave", "action": "leave" }
-      ]
+      model: root.bridge.remoteVideoAvailable || root.bridge.mediaState.surface_open ? [
+          {
+            "label": root.bridge.mediaState.surface_open
+              ? "Close video"
+              : "Watch " + root.bridge.remoteVideoLabel,
+            "action": "video"
+          },
+          { "label": root.bridge.shareStarting ? "Choosing…" : root.bridge.sharing ? "Stop share" : "Share screen", "action": "share" },
+          { "label": "Leave", "action": "leave" }
+        ] : [
+          { "label": root.bridge.shareStarting ? "Choosing…" : root.bridge.sharing ? "Stop share" : "Share screen", "action": "share" },
+          { "label": "Leave", "action": "leave" }
+        ]
       delegate: Rectangle {
         required property var modelData
         readonly property bool controlEnabled: modelData.action !== "share" || !root.bridge.shareStarting

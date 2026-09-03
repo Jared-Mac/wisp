@@ -54,15 +54,20 @@ event-loop thread owns the Wayland connection while the `dev.wisp.surface`
 window and GPU renderer can be destroyed and recreated independently. Closing
 the surface does not close the LiveKit room or interrupt audio.
 
+Remote video subscription only marks a share as available. The Quickshell
+frontends expose **Watch &lt;name&gt;**, and only that explicit action creates the
+native surface; subscription and SFU reconnection never auto-open it.
+
 Video frames use bounded/latest-frame queues on both sides of the RGBA handoff,
 so rendering delay does not create an unbounded backlog. Surface state and
 receive/render counters are exposed through the existing IPC snapshot. The
 simulator can publish a deterministic 640×360 VP8 test source with
 `--publish-video`.
 
-Remote audio subscription names are also part of the media snapshot. This makes
-multi-user reliability observable without inferring membership from a single
-last-received frame. Media startup failures carry a stable `error_code` plus a
+Remote audio and video subscription names are also part of the media snapshot.
+This makes multi-user reliability and Watch availability observable without
+inferring membership from a single last-received frame. Media startup failures
+carry a stable `error_code` plus a
 human-readable message; the panel displays the message while tests and future
 clients can branch on the code.
 

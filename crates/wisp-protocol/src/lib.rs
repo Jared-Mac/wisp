@@ -193,6 +193,8 @@ pub struct MediaState {
     #[serde(default)]
     pub remote_audio_participants: Vec<String>,
     #[serde(default)]
+    pub remote_video_participants: Vec<String>,
+    #[serde(default)]
     pub active_speakers: Vec<String>,
     #[serde(default)]
     pub received_video_frames: u64,
@@ -528,6 +530,7 @@ mod tests {
         assert!(state.livekit_connected);
         assert_eq!(state.received_audio_frames, 42);
         assert!(state.remote_audio_participants.is_empty());
+        assert!(state.remote_video_participants.is_empty());
         assert!(state.active_speakers.is_empty());
         assert_eq!(state.received_video_frames, 0);
         assert_eq!(state.rendered_video_frames, 0);
