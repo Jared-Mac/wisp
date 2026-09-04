@@ -305,23 +305,45 @@ Column {
   Rectangle {
     visible: !!root.audio.denoiser_active
     width: parent.width
-    height: root.theme.space(36)
+    height: root.theme.space(54)
     radius: root.theme.cornerRadius
     color: root.theme.alpha(root.theme.accent, 0.12)
 
-    Text {
+    Column {
       anchors.left: parent.left
       anchors.right: parent.right
       anchors.leftMargin: root.theme.spacing.lg
       anchors.rightMargin: root.theme.spacing.lg
       anchors.verticalCenter: parent.verticalCenter
-      text: "Neural denoiser active · " + String(root.audio.denoiser || "deepfilternet")
-        + " · " + String(root.audio.processing_latency_ms || 30) + " ms latency"
-      elide: Text.ElideRight
-      color: root.theme.accent
-      font.family: root.theme.font.family
-      font.pixelSize: root.theme.font.caption
-      font.weight: Font.DemiBold
+      spacing: root.theme.spacing.xs
+
+      Text {
+        width: parent.width
+        text: "Neural denoiser + adaptive gate · " + String(root.audio.denoiser || "deepfilternet")
+          + " · " + String(root.audio.processing_latency_ms || 30) + " ms latency"
+        elide: Text.ElideRight
+        color: root.theme.accent
+        font.family: root.theme.font.family
+        font.pixelSize: root.theme.font.caption
+        font.weight: Font.DemiBold
+      }
+
+      Text {
+        width: parent.width
+        readonly property real processingMs: Number(root.audio.processing_time_us || 0) / 1000
+        readonly property real queueMs: Number(root.audio.capture_queue_ms || 0)
+        readonly property bool delayed: processingMs > 10 || queueMs > 20
+        text: (root.audio.voice_gate_open ? "Voice passing" : "Background held")
+          + " · compute " + processingMs.toFixed(1) + " ms"
+          + " · queue " + queueMs.toFixed(0) + " ms"
+          + (Number(root.audio.processing_deadline_misses || 0) > 0
+            ? " · " + String(root.audio.processing_deadline_misses) + " late total"
+            : "")
+        elide: Text.ElideRight
+        color: delayed ? root.theme.warning : root.theme.muted
+        font.family: root.theme.font.family
+        font.pixelSize: root.theme.font.caption
+      }
     }
   }
 

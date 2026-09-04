@@ -41,6 +41,7 @@ install -m 0644 "$repo_dir/scripts/server-endpoint.sh" "$bin_root/wisp-server-en
 install -m 0755 "$repo_dir/scripts/configure-friend.sh" "$bin_root/wisp-friend-config"
 install -m 0755 "$repo_dir/scripts/register-friend-device.sh" "$bin_root/wisp-friend-register"
 install -m 0755 "$repo_dir/scripts/friend-tailscale.sh" "$bin_root/wisp-friend"
+install -m 0755 "$repo_dir/scripts/wisp-update.sh" "$bin_root/wisp-update"
 install -m 0755 "$repo_dir/scripts/wisp-launch.sh" "$bin_root/wisp-launch"
 install -m 0755 "$repo_dir/scripts/wisp.sh" "$bin_root/wisp"
 desktop_contents=$(<"$desktop_template")
@@ -76,3 +77,4 @@ fi
 echo "Synced standalone Wisp UI to $destination"
 echo "Installed application launcher at $bin_root/wisp"
 echo "Installed UI control helper at $bin_root/wisp-ui"
+echo "Installed prebuilt release updater at $bin_root/wisp-update"

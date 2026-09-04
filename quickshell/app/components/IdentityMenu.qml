@@ -7,13 +7,18 @@ Button {
   required property var bridge
   required property var theme
   required property url logoSource
+  property bool showWordmark: false
   property real maximumWidth: 300
+  readonly property bool useWordmark: showWordmark
   signal settingsRequested()
   signal newRoomRequested()
   function closeMenu() { menu.close() }
   implicitHeight: theme.space(42)
-  implicitWidth: Math.min(maximumWidth, Math.max(titleText.implicitWidth, statusText.implicitWidth + theme.space(12)) + theme.space(66))
-  padding: theme.spacing.sm
+  implicitWidth: Math.min(maximumWidth,
+    Math.max(useWordmark ? wordmark.implicitWidth : titleText.implicitWidth,
+             statusText.implicitWidth + theme.space(12))
+      + (logo.visible ? theme.space(66) : theme.space(34)))
+  padding: useWordmark ? theme.space(2) : theme.spacing.sm
   Accessible.name: "Wisp account menu for " + String(bridge.selfState.display_name || bridge.configuredProfile || "your profile")
   onClicked: menu.opened ? menu.close() : menu.open()
   Keys.onDownPressed: menu.open()
@@ -27,21 +32,38 @@ Button {
   contentItem: Item {
     Image {
       id: logo
-      width: root.theme.tui ? 0 : root.theme.space(30); height: width
-      visible: !root.theme.tui
+      width: visible ? root.theme.space(30) : 0; height: width
+      visible: !root.theme.tui && !root.useWordmark
       anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
       source: root.logoSource; fillMode: Image.PreserveAspectFit
     }
     Column {
-      anchors.left: logo.right; anchors.leftMargin: root.theme.spacing.md
+      anchors.left: logo.visible ? logo.right : parent.left
+      anchors.leftMargin: logo.visible ? root.theme.spacing.md : 0
       anchors.right: arrow.left; anchors.rightMargin: root.theme.spacing.md
       anchors.verticalCenter: parent.verticalCenter
-      Text {
-        id: titleText
-        text: root.theme.tui ? String(root.bridge.selfState.display_name || root.bridge.configuredProfile || "user").toLowerCase() + "@wisp:~" : "Wisp"
-        width: parent.width; elide: Text.ElideRight
-        color: root.theme.tui ? root.theme.accent : root.theme.foreground
-        font.family: root.theme.font.family; font.pixelSize: root.theme.font.title; font.weight: Font.DemiBold
+      Item {
+        width: parent.width
+        height: root.useWordmark ? wordmark.implicitHeight : titleText.implicitHeight
+        WispLogo {
+          id: wordmark
+          visible: root.useWordmark
+          anchors.left: parent.left
+          anchors.verticalCenter: parent.verticalCenter
+          width: Math.min(implicitWidth, parent.width)
+          height: implicitHeight
+          theme: root.theme
+        }
+        Text {
+          id: titleText
+          visible: !root.useWordmark
+          anchors.left: parent.left; anchors.right: parent.right
+          anchors.verticalCenter: parent.verticalCenter
+          text: root.theme.tui ? String(root.bridge.selfState.display_name || root.bridge.configuredProfile || "user").toLowerCase() + "@wisp:~" : "Wisp"
+          elide: Text.ElideRight
+          color: root.theme.tui ? root.theme.accent : root.theme.foreground
+          font.family: root.theme.font.family; font.pixelSize: root.theme.font.title; font.weight: Font.DemiBold
+        }
       }
       Item {
         width: parent.width; height: statusText.implicitHeight
@@ -54,7 +76,9 @@ Button {
         Text {
           id: statusText
           anchors.left: dot.right; anchors.leftMargin: root.theme.spacing.xs; anchors.right: parent.right
-          text: root.theme.tui ? root.bridge.selfStatusLabel.toLowerCase() + " / account" : String(root.bridge.selfState.display_name || root.bridge.configuredProfile || "Unknown profile") + " · " + root.bridge.selfStatusLabel
+          text: root.theme.tui
+            ? String(root.bridge.selfState.display_name || root.bridge.configuredProfile || "user").toLowerCase() + " · " + root.bridge.selfStatusLabel.toLowerCase()
+            : String(root.bridge.selfState.display_name || root.bridge.configuredProfile || "Unknown profile") + " · " + root.bridge.selfStatusLabel
           elide: Text.ElideRight
           color: root.bridge.hasError ? root.theme.danger : root.theme.muted
           font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption

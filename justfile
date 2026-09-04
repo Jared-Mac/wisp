@@ -90,6 +90,9 @@ test-knock:
 test-ui:
     ./scripts/test-ui.sh
 
+test-logo:
+    ./scripts/test-logo.sh
+
 test-private-alpha:
     ./scripts/test-private-alpha.sh
 

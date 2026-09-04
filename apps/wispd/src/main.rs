@@ -565,7 +565,7 @@ impl Daemon {
         }
         let Some(hangout_id) = hangout_id else {
             self.release_push_to_talk("push_to_talk_released").await;
-            let (audio, camera, video) = {
+            let (mut audio, camera, video) = {
                 let state = self.state.read().await;
                 (
                     state.self_state.media.audio.clone(),
@@ -582,6 +582,7 @@ impl Daemon {
                     state.self_state.media.video.clone(),
                 )
             };
+            clear_audio_telemetry(&mut audio);
             self.media.disconnect().await;
             self.set_media_state(
                 MediaState {
@@ -729,6 +730,12 @@ impl Daemon {
         let snapshot = {
             let mut state = self.state.write().await;
             inventory.state.input_level = state.self_state.media.audio.input_level;
+            inventory.state.voice_gate_open =
+                inventory.state.voice_gate_active && state.self_state.media.audio.voice_gate_open;
+            inventory.state.processing_time_us = state.self_state.media.audio.processing_time_us;
+            inventory.state.processing_deadline_misses =
+                state.self_state.media.audio.processing_deadline_misses;
+            inventory.state.capture_queue_ms = state.self_state.media.audio.capture_queue_ms;
             let next_error = inventory
                 .error
                 .as_ref()
@@ -1907,6 +1914,15 @@ fn clear_local_speaker(snapshot: &mut Snapshot, profile: &str) {
         .active_speakers
         .retain(|name| name != profile);
     snapshot.self_state.media.audio.input_level = 0;
+    snapshot.self_state.media.audio.voice_gate_open = false;
+}
+
+fn clear_audio_telemetry(audio: &mut wisp_protocol::AudioState) {
+    audio.input_level = 0;
+    audio.voice_gate_open = false;
+    audio.processing_time_us = 0;
+    audio.processing_deadline_misses = 0;
+    audio.capture_queue_ms = 0;
 }
 
 fn update_remote_mute_state(media: &mut MediaState, participant: &str, muted: bool) {
@@ -2118,6 +2134,7 @@ async fn synchronize_media_events(
             | MediaEvent::RemoteMuteChanged { generation, .. }
             | MediaEvent::AudioFrames { generation, .. }
             | MediaEvent::InputLevel { generation, .. }
+            | MediaEvent::AudioTelemetry { generation, .. }
             | MediaEvent::ActiveSpeakers { generation, .. }
             | MediaEvent::VideoAvailable { generation, .. }
             | MediaEvent::VideoUnavailable { generation, .. }
@@ -2151,6 +2168,7 @@ async fn synchronize_media_events(
                             media.livekit_connected = false;
                             media.active_speakers.clear();
                             media.audio.input_level = 0;
+                            media.audio.voice_gate_open = false;
                         },
                     )
                     .await;
@@ -2174,6 +2192,7 @@ async fn synchronize_media_events(
             | MediaEvent::RemoteMuteChanged { .. }
             | MediaEvent::AudioFrames { .. }
             | MediaEvent::InputLevel { .. }
+            | MediaEvent::AudioTelemetry { .. }
             | MediaEvent::ActiveSpeakers { .. }
             | MediaEvent::VideoAvailable { .. }
             | MediaEvent::VideoUnavailable { .. }
@@ -2247,6 +2266,7 @@ async fn synchronize_media_events(
                             media.remote_videos.clear();
                             media.active_speakers.clear();
                             media.audio.input_level = 0;
+                            media.audio.voice_gate_open = false;
                             media.error_code = Some("livekit_disconnected".into());
                             media.error = Some(format!("LiveKit disconnected: {reason}"));
                         },
@@ -2319,6 +2339,24 @@ async fn synchronize_track_event(daemon: &Daemon, event: MediaEvent) {
             daemon
                 .update_media_state(None, "audio_input_level_changed", |media| {
                     media.audio.input_level = level;
+                })
+                .await;
+        }
+        MediaEvent::AudioTelemetry {
+            level,
+            voice_gate_open,
+            processing_time_us,
+            processing_deadline_misses,
+            capture_queue_ms,
+            ..
+        } => {
+            daemon
+                .update_media_state(None, "audio_telemetry_changed", |media| {
+                    media.audio.input_level = level;
+                    media.audio.voice_gate_open = media.audio.voice_gate_active && voice_gate_open;
+                    media.audio.processing_time_us = processing_time_us;
+                    media.audio.processing_deadline_misses = processing_deadline_misses;
+                    media.audio.capture_queue_ms = capture_queue_ms;
                 })
                 .await;
         }
@@ -3266,10 +3304,32 @@ async fn main() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        deafen_transition, describe_media_failure, effective_muted, inactive_camera_state,
-        mute_transition, update_remote_mute_state,
+        clear_audio_telemetry, deafen_transition, describe_media_failure, effective_muted,
+        inactive_camera_state, mute_transition, update_remote_mute_state,
     };
-    use wisp_protocol::{CameraState, MediaState, PushToTalkState};
+    use wisp_protocol::{AudioState, CameraState, MediaState, PushToTalkState};
+
+    #[test]
+    fn leaving_clears_session_audio_telemetry() {
+        let mut audio = AudioState {
+            input_level: 72,
+            voice_gate_active: true,
+            voice_gate_open: true,
+            processing_time_us: 8_500,
+            processing_deadline_misses: 4,
+            capture_queue_ms: 12,
+            ..AudioState::default()
+        };
+
+        clear_audio_telemetry(&mut audio);
+
+        assert_eq!(audio.input_level, 0);
+        assert!(audio.voice_gate_active);
+        assert!(!audio.voice_gate_open);
+        assert_eq!(audio.processing_time_us, 0);
+        assert_eq!(audio.processing_deadline_misses, 0);
+        assert_eq!(audio.capture_queue_ms, 0);
+    }
 
     #[test]
     fn media_reconnect_never_preserves_camera_activation() {

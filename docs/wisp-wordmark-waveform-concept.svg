@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 360" role="img" aria-labelledby="title desc">
+  <title id="title">Wisp waveform wordmark concept</title>
+  <desc id="desc">A terminal-inspired WISP wordmark with a horizontal audio waveform inset into the letters.</desc>
+
+  <defs>
+    <linearGradient id="letterFill" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#39206f"/>
+      <stop offset="0.48" stop-color="#53369e"/>
+      <stop offset="1" stop-color="#a982bd"/>
+    </linearGradient>
+    <linearGradient id="signalFill" x1="55" y1="0" x2="735" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#35e8dc"/>
+      <stop offset="0.46" stop-color="#37c8f3"/>
+      <stop offset="0.76" stop-color="#7585ff"/>
+      <stop offset="1" stop-color="#eea7dc"/>
+    </linearGradient>
+    <filter id="signalGlow" x="-30%" y="-100%" width="160%" height="300%">
+      <feGaussianBlur stdDeviation="7" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <clipPath id="wordClip">
+      <text x="55" y="281"
+            font-family="JetBrainsMono Nerd Font, JetBrains Mono, monospace"
+            font-size="270"
+            font-weight="900"
+            letter-spacing="2">WISP</text>
+    </clipPath>
+    <pattern id="scanlines" width="8" height="8" patternUnits="userSpaceOnUse">
+      <path d="M0 7.5H8" stroke="#fff" stroke-opacity="0.025" stroke-width="1"/>
+    </pattern>
+  </defs>
+
+  <rect width="780" height="360" rx="24" fill="#111325"/>
+  <rect width="780" height="360" rx="24" fill="url(#scanlines)"/>
+
+  <text x="55" y="281"
+        fill="url(#letterFill)"
+        font-family="JetBrainsMono Nerd Font, JetBrains Mono, monospace"
+        font-size="270"
+        font-weight="900"
+        letter-spacing="2">WISP</text>
+
+  <g clip-path="url(#wordClip)">
+    <path d="M35 190
+             H90 L112 178 L132 204 L154 145 L178 245 L202 190
+             H262 L286 181 L307 200 L331 166 L354 215 L380 190
+             H444 L468 174 L490 205 L516 122 L544 258 L570 190
+             H630 L653 182 L674 198 L698 158 L722 221 L748 190
+             H812 L835 176 L858 204 L883 136 L908 238 L934 190
+             H994 L1018 183 L1040 198 L1062 168 L1085 211 L1110 190
+             H1165"
+          fill="none"
+          stroke="#111325"
+          stroke-width="42"
+          stroke-linecap="square"
+          stroke-linejoin="miter"/>
+    <path d="M35 190
+             H90 L112 178 L132 204 L154 145 L178 245 L202 190
+             H262 L286 181 L307 200 L331 166 L354 215 L380 190
+             H444 L468 174 L490 205 L516 122 L544 258 L570 190
+             H630 L653 182 L674 198 L698 158 L722 221 L748 190
+             H812 L835 176 L858 204 L883 136 L908 238 L934 190
+             H994 L1018 183 L1040 198 L1062 168 L1085 211 L1110 190
+             H1165"
+          fill="none"
+          stroke="url(#signalFill)"
+          stroke-width="12"
+          stroke-linecap="square"
+          stroke-linejoin="miter"
+          filter="url(#signalGlow)"/>
+  </g>
+</svg>

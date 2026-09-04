@@ -73,10 +73,14 @@ to the primary display's bottom-right corner.
 
 The default **Clear** audio preset publishes the microphone through the
 DeepFilterNet3 neural denoiser (48 kHz, 10 ms frames, 30 ms algorithmic
-latency). **Natural** keeps WebRTC's lighter speech cleanup, while **Studio**
-leaves the signal unprocessed. If DeepFilterNet cannot initialize, Wisp falls
-back to RNNoise and reports that backend under **Settings → Audio** and in
-`wispctl status`.
+latency), then uses an adaptive neural speech gate with hysteresis, hangover,
+and short gain ramps to turn residual background noise into true silence
+without starving the denoiser of microphone context. Opus DTX can stop sending
+those closed frames. **Natural** keeps WebRTC's lighter speech cleanup, while
+**Studio** leaves the signal unprocessed. If DeepFilterNet cannot initialize,
+Wisp falls back to RNNoise and reports that backend under **Settings → Audio**
+and in `wispctl status`. The same view reports gate state, processing time,
+deadline misses, and capture-queue depth for live diagnosis.
 
 During a hangout, **Share screen** opens the standard XDG desktop portal picker
 for a monitor or individual window, while **Camera on** publishes the selected
@@ -547,8 +551,21 @@ the no-message-content logging rule.
 GitHub Actions builds Wisp on every push to `main` and every pull request. The
 CI workflow checks formatting and Clippy, runs the Rust and headless integration
 tests, scans for obvious secrets, and produces a release-mode Linux x86_64
-archive. Archives from ordinary CI runs are available as workflow artifacts for
-14 days.
+archive. Each successful `main` build also replaces the rolling `main`
+pre-release, so enrolled Linux x86_64 clients can update without compiling Rust:
+
+```bash
+wisp-update
+```
+
+The updater works for every enrolled Linux x86_64 client; it contains no
+profile-specific host, token, or media-key settings. It verifies the published
+SHA-256 checksum, saves the prior binaries under
+`~/.local/state/wisp/backups/`, and restarts an already-running client only when
+it is not in a hangout or publishing video. It preserves each device's existing
+enrollment and audio state, and clears any room or video state that unexpectedly
+returns after restart. Archives from ordinary CI runs are available as workflow
+artifacts for 14 days.
 
 Pushing a version tag creates a GitHub release with the archive and its SHA-256
 checksum:

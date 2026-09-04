@@ -125,6 +125,21 @@ pub struct AudioState {
     /// Algorithmic frame latency introduced by the selected processor.
     #[serde(default)]
     pub processing_latency_ms: u16,
+    /// Whether the adaptive post-denoise speech gate is enabled.
+    #[serde(default)]
+    pub voice_gate_active: bool,
+    /// Whether the speech gate is currently passing microphone audio.
+    #[serde(default)]
+    pub voice_gate_open: bool,
+    /// Slowest microphone processing frame observed in the latest meter window.
+    #[serde(default)]
+    pub processing_time_us: u32,
+    /// Number of microphone frames that exceeded their 10 ms processing budget.
+    #[serde(default)]
+    pub processing_deadline_misses: u64,
+    /// Approximate amount of microphone audio waiting to be processed.
+    #[serde(default)]
+    pub capture_queue_ms: u16,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -1062,6 +1077,11 @@ mod tests {
         assert_eq!(state.rendered_video_frames, 0);
         assert!(!state.surface_open);
         assert_eq!(state.audio, AudioState::default());
+        assert!(!state.audio.voice_gate_active);
+        assert!(!state.audio.voice_gate_open);
+        assert_eq!(state.audio.processing_time_us, 0);
+        assert_eq!(state.audio.processing_deadline_misses, 0);
+        assert_eq!(state.audio.capture_queue_ms, 0);
         assert_eq!(state.surface_error, None);
         assert_eq!(state.error_code, None);
     }
