@@ -26,8 +26,8 @@ Item {
     detachedKeys.forEach(function(k) { if (result) result=Tiles.remove(result,k) })
     return result
   }
-  readonly property real gap: theme.space(10)
-  readonly property real minWidth: theme.space(280)
+  readonly property real gap: theme.space(theme.cleanTui ? 6 : 10)
+  readonly property real minWidth: theme.space(theme.cleanTui ? 360 : 280)
   readonly property real minHeight: theme.space(230)
   readonly property var minimum: dockTree ? Tiles.minimum(dockTree,gap,minWidth,minHeight) : ({width:0,height:0})
   readonly property var rectangles: dockTree ? Tiles.geometry(dockTree,canvas.contentWidth,canvas.contentHeight,gap,minWidth,minHeight) : ({})

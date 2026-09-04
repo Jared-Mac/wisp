@@ -23,21 +23,23 @@ Rectangle {
   signal tileDragged(real px, real py)
   signal tileDropped()
   signal tileDragCanceled()
-  readonly property real panelMargin: theme.space(8)
+  readonly property real panelMargin: theme.space(theme.cleanTui ? 12 : 8)
   property var tabIds: []
   property string confirmationId: ""
   readonly property string currentId: tiled ? selectedId : String(bridge.activeConversationId || "")
   readonly property var current: bridge.conversationById(currentId)
   readonly property color chatBorderColor: bridge.chatColors.colorFor(currentId, theme.conversationBorder)
-  color: theme.surface
+  color: theme.cleanTui ? theme.background : theme.surface
   radius: theme.cornerRadius
   border.width: theme.tui ? 0 : theme.terminal || tiled ? 1 : 0
   border.color: tiled && paneActive && canClosePane ? theme.alpha(theme.accent,0.65) : theme.conversationBorder
   TerminalFrame {
     objectName: "conversationColorFrame"
     anchors.fill: parent; theme: root.theme
-    title: "03: /chat/" + root.label(root.current)
-    ink: root.chatBorderColor
+    title: root.theme.cleanTui ? "03 /chat" : "03: /chat/" + root.label(root.current)
+    ink: root.theme.cleanTui
+      ? (root.paneActive ? root.theme.accent : root.theme.surfaceBorder)
+      : root.chatBorderColor
     emphasized: root.paneActive && root.tiled && root.canClosePane
   }
 
@@ -126,12 +128,12 @@ Rectangle {
         ? Math.min(availableHeaderWidth, Math.max(root.theme.space(88), Math.min(root.theme.space(260), selectorTextMetrics.advanceWidth + root.theme.space(32))))
         : availableHeaderWidth
       theme: root.theme; primary: !root.theme.tui
-      readonly property color selectorInk: root.theme.tui ? (visualFocus ? root.chatBorderColor : root.theme.foreground) : root.theme.terminal ? root.theme.accent : root.theme.accentText
+      readonly property color selectorInk: root.theme.cleanTui ? root.theme.foreground : root.theme.tui ? (visualFocus ? root.chatBorderColor : root.theme.foreground) : root.theme.terminal ? root.theme.accent : root.theme.accentText
       Binding { target: chatSelector; property: "leftPadding"; value: root.theme.space(8); when: root.theme.tui; restoreMode: Binding.RestoreBindingOrValue }
       Binding { target: chatSelector; property: "rightPadding"; value: root.theme.space(8); when: root.theme.tui; restoreMode: Binding.RestoreBindingOrValue }
-      Binding { target: chatSelector.background; property: "color"; value: root.theme.alpha(root.theme.foreground, chatSelector.down ? 0.10 : chatSelector.hovered ? 0.06 : 0.025); when: root.theme.tui; restoreMode: Binding.RestoreBindingOrValue }
-      Binding { target: chatSelector.background; property: "border.width"; value: 1; when: root.theme.tui; restoreMode: Binding.RestoreBindingOrValue }
-      Binding { target: chatSelector.background; property: "border.color"; value: chatSelector.visualFocus ? root.chatBorderColor : chatSelector.hovered ? root.theme.muted : root.theme.separator; when: root.theme.tui; restoreMode: Binding.RestoreBindingOrValue }
+      Binding { target: chatSelector.background; property: "color"; value: root.theme.alpha(root.theme.foreground, chatSelector.down ? 0.10 : chatSelector.hovered ? 0.06 : root.theme.cleanTui ? 0 : 0.025); when: root.theme.tui; restoreMode: Binding.RestoreBindingOrValue }
+      Binding { target: chatSelector.background; property: "border.width"; value: root.theme.cleanTui ? (chatSelector.visualFocus ? 1 : 0) : 1; when: root.theme.tui; restoreMode: Binding.RestoreBindingOrValue }
+      Binding { target: chatSelector.background; property: "border.color"; value: chatSelector.visualFocus ? (root.theme.cleanTui ? root.theme.accent : root.chatBorderColor) : chatSelector.hovered ? root.theme.muted : root.theme.separator; when: root.theme.tui; restoreMode: Binding.RestoreBindingOrValue }
       text: root.label(root.current) + (root.current && root.current.unread_count ? " · " + root.current.unread_count : "")
       Accessible.name: "Current chat: " + text + ". Choose conversation"
       ToolTip.visible: hovered && selectorLabel.truncated && !allMenu.opened

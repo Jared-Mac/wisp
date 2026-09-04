@@ -32,15 +32,15 @@ Rectangle {
   radius: theme.cornerRadius
   border.width: theme.tui ? 0 : theme.terminal ? 1 : 0
   border.color: theme.separator
-  color: theme.tui ? theme.background : theme.alpha(theme.foreground, 0.025)
+  color: theme.tui ? (theme.cleanTui ? "transparent" : theme.background) : theme.alpha(theme.foreground, 0.025)
   onConversationIdChanged: { messages.followBottom = true; Qt.callLater(messages.followLatest) }
   ListView {
     id: messages
     objectName: "messageList"
     anchors.fill: parent
-    anchors.margins: root.theme.space(root.theme.tui ? 6 : 16)
+    anchors.margins: root.theme.space(root.theme.cleanTui ? 12 : root.theme.tui ? 6 : 16)
     clip: true
-    spacing: root.theme.space(root.theme.tui ? 12 : 18)
+    spacing: root.theme.space(root.theme.cleanTui ? 14 : root.theme.tui ? 12 : 18)
     model: root.bridge.messagesFor(root.conversationId)
     property bool followBottom: true
     function followLatest() { if (followBottom && !moving && !messageScrollBar.pressed) positionViewAtEnd() }
@@ -65,13 +65,13 @@ Rectangle {
       Row {
         spacing: root.theme.spacing.lg
         Text {
-          text: root.theme.tui ? "<" + String(message.modelData.sender.display_name || "") + ">" : String(message.modelData.sender.display_name || "")
+          text: root.theme.cleanTui ? String(message.modelData.sender.display_name || "") : root.theme.tui ? "<" + String(message.modelData.sender.display_name || "") + ">" : String(message.modelData.sender.display_name || "")
           color: message.modelData.sender.id === root.bridge.selfState.id ? root.theme.accent : root.theme.secondaryAccent
           font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption; font.bold: true
         }
         Text {
           Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
-          text: root.theme.tui ? "[" + Qt.formatDateTime(new Date(message.modelData.created_at), "HH:mm:ss") + "]" : Qt.formatDateTime(new Date(message.modelData.created_at), "MMM d · h:mm AP")
+          text: root.theme.cleanTui ? Qt.formatDateTime(new Date(message.modelData.created_at), "HH:mm") : root.theme.tui ? "[" + Qt.formatDateTime(new Date(message.modelData.created_at), "HH:mm:ss") + "]" : Qt.formatDateTime(new Date(message.modelData.created_at), "MMM d · h:mm AP")
           color: root.theme.muted; font.pixelSize: root.theme.font.caption
         }
         Text {
@@ -247,7 +247,7 @@ Rectangle {
     Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
     anchors.centerIn: parent
     visible: messages.count === 0
-    text: root.theme.tui ? "-- beginning of chat log --" : "This is the start of your conversation."
+    text: root.theme.cleanTui ? "— beginning of chat —" : root.theme.tui ? "-- beginning of chat log --" : "This is the start of your conversation."
     color: root.theme.muted; font.pixelSize: root.theme.font.body
   }
   Dialog {

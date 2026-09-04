@@ -13,6 +13,7 @@ QtObject {
   // supply their own palette, typography, scale, and corner treatment.
   property bool tuiTreatment: false
   readonly property bool hostManaged: !!appearanceController && appearanceController.managed
+  readonly property bool cleanTui: profile === "clean_tui" || profile === "clean-tui"
   readonly property bool terminal: tui || profile === "terminal" || profile === "terminal-experimental"
   readonly property string monospaceFamily: {
     var available = Qt.fontFamilies()
@@ -33,7 +34,7 @@ QtObject {
   readonly property bool customPalette: paletteName !== "wisp"
   readonly property bool performative: paletteName === "performative"
   readonly property bool herdr: paletteName === "herdr"
-  readonly property bool tui: performative || herdr || tuiTreatment
+  readonly property bool tui: cleanTui || performative || herdr || tuiTreatment
   readonly property var colors: {
     switch (paletteName) {
     // Black terminal canvas, restrained olive accents, and ash inverse selections.
@@ -52,26 +53,26 @@ QtObject {
   property color accent: colors.accent
   property color muted: colors.muted
   readonly property color accentText: customPalette ? background : "white"
-  readonly property color selectionBackground: herdr ? "#002c38" : performative ? "#b7baad" : accent
-  readonly property color selectionText: herdr ? "#fdf5e2" : performative ? background : accentText
-  readonly property color statusBackground: herdr ? "#002c38" : performative ? "#171914" : accent
-  readonly property color statusText: herdr ? foreground : performative ? foreground : background
+  readonly property color selectionBackground: cleanTui ? alpha(accent, 0.18) : herdr ? "#002c38" : performative ? "#b7baad" : accent
+  readonly property color selectionText: cleanTui ? foreground : herdr ? "#fdf5e2" : performative ? background : accentText
+  readonly property color statusBackground: cleanTui ? surface : herdr ? "#002c38" : performative ? "#171914" : accent
+  readonly property color statusText: cleanTui ? foreground : herdr ? foreground : performative ? foreground : background
   readonly property color onlineIndicator: herdr ? "#849900" : performative ? "#79b88a" : "#4bd38a"
   property color danger: herdr ? "#db302d" : performative ? "#d56b75" : "#ff7777"
   property color warning: herdr ? "#b28500" : performative ? "#c9b458" : "#f5b94c"
   readonly property color secondaryAccent: herdr ? "#d23681" : performative ? "#a291d4" : foreground
-  readonly property color roomBorder: herdr ? "#b28500" : performative ? "#68613b" : separator
-  readonly property color conversationBorder: herdr ? "#d23681" : performative ? "#70464c" : separator
+  readonly property color roomBorder: cleanTui ? alpha(foreground, 0.18) : herdr ? "#b28500" : performative ? "#68613b" : separator
+  readonly property color conversationBorder: cleanTui ? alpha(foreground, 0.18) : herdr ? "#d23681" : performative ? "#70464c" : separator
 
-  property int cornerRadius: tui ? 0 : terminal ? 2 : 9
+  property int cornerRadius: cleanTui ? 2 : tui ? 0 : terminal ? 2 : 9
   property real spacingScale: 1.0
   property string fontFamily: terminal ? (herdr ? herdrMonospaceFamily : monospaceFamily) : "sans-serif"
   property int captionSize: 12
   property int bodySize: terminal ? 13 : 14
   property int titleSize: tui ? 14 : terminal ? 16 : 18
-  readonly property color separator: herdr ? "#23434a" : performative ? "#34382f" : alpha(foreground, 0.10)
+  readonly property color separator: cleanTui ? alpha(foreground, 0.14) : herdr ? "#23434a" : performative ? "#34382f" : alpha(foreground, 0.10)
   readonly property color focusBorder: alpha(accent, 0.85)
-  readonly property color surfaceBorder: herdr ? "#46636a" : performative ? "#505747" : alpha(muted, 0.72)
+  readonly property color surfaceBorder: cleanTui ? alpha(foreground, 0.24) : herdr ? "#46636a" : performative ? "#505747" : alpha(muted, 0.72)
 
   function space(px) {
     var value = Number(px)

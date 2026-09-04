@@ -16,10 +16,20 @@ Item {
   readonly property bool stacked: width < theme.space(600) || dock === "top" || dock === "bottom"
   readonly property bool reversed: dock === "right" || dock === "bottom"
   readonly property bool collapsed: layout.activityCollapsed
-  readonly property real handleSize: theme.space(10)
+  readonly property real handleSize: theme.space(theme.cleanTui ? 6 : 10)
   readonly property real dividerSize: collapsed ? 0 : handleSize
   readonly property real available: Math.max(1, (stacked ? height : width) - dividerSize)
-  readonly property real activitySize: collapsed ? 0 : Math.max(Math.min(available * 0.3, theme.space(stacked ? 70 : theme.tui ? 220 : 180)), Math.min(available - theme.space(stacked ? 230 : 250), available * layout.bounded(layout.activityRatio, 0.25)))
+  readonly property real activitySize: {
+    if (collapsed) return 0
+    if (theme.cleanTui && !stacked) {
+      var cleanMaximum = Math.max(1, Math.min(theme.space(360), available - theme.space(320)))
+      var cleanRequested = available * layout.bounded(layout.activityRatio, 0.25) * 0.72
+      return Math.min(cleanMaximum, Math.max(theme.space(220), cleanRequested))
+    }
+    return Math.max(
+      Math.min(available * 0.3, theme.space(stacked ? 70 : theme.tui ? 220 : 180)),
+      Math.min(available - theme.space(stacked ? 230 : 250), available * layout.bounded(layout.activityRatio, 0.25)))
+  }
 
   Item {
     id: activity
@@ -32,7 +42,7 @@ Item {
     height: root.stacked ? root.activitySize : root.height
     readonly property real available: Math.max(1, height - root.handleSize)
     readonly property real minimumPane: root.theme.space(root.stacked ? 70 : 44)
-    readonly property real frameInset: root.theme.tui ? root.theme.space(8) : 0
+    readonly property real frameInset: root.theme.tui ? root.theme.space(root.theme.cleanTui ? 10 : 8) : 0
     readonly property real frameTop: root.theme.tui ? root.theme.space(22) : 0
     readonly property real roomsSize: Math.max(Math.min(minimumPane, available / 2), Math.min(available - Math.min(minimumPane, available / 2), root.layout.roomsRatio <= 0 ? Math.min(available * 0.55, roomColumn.implicitHeight + frameTop + frameInset) : available * root.layout.bounded(root.layout.roomsRatio, 0.28)))
     Flickable {
@@ -78,12 +88,12 @@ Item {
     }
     TerminalFrame {
       width: parent.width; height: activity.roomsSize
-      theme: root.theme; title: "01: /rooms"; ink: root.theme.warning
+      theme: root.theme; title: root.theme.cleanTui ? "01 /rooms" : "01: /rooms"; ink: root.theme.cleanTui ? root.theme.muted : root.theme.warning
     }
     TerminalFrame {
       y: activity.roomsSize + root.handleSize
       width: parent.width; height: parent.height - y
-      theme: root.theme; title: "02: /friends"; ink: root.theme.secondaryAccent
+      theme: root.theme; title: root.theme.cleanTui ? "02 /friends" : "02: /friends"; ink: root.theme.cleanTui ? root.theme.muted : root.theme.secondaryAccent
     }
   }
   ResizeHandle {
@@ -95,7 +105,10 @@ Item {
     y: root.stacked ? (root.reversed ? chat.height : activity.height) + (root.dividerSize - height) / 2 : 0
     width: root.stacked ? root.width : root.handleSize
     height: root.stacked ? root.handleSize : root.height
-    onMoved: function(delta) { root.layout.activityRatio = root.layout.bounded((root.activitySize + delta * (root.reversed ? -1 : 1)) / root.available, 0.25) }
+    onMoved: function(delta) {
+      var ratio = (root.activitySize + delta * (root.reversed ? -1 : 1)) / root.available
+      root.layout.activityRatio = root.layout.bounded(root.theme.cleanTui && !root.stacked ? ratio / 0.72 : ratio, 0.25)
+    }
     onResetRequested: root.layout.activityRatio = 0.25
   }
   TiledConversations {

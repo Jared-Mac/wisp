@@ -42,7 +42,7 @@ ShellRoot {
         if (appearance.profile !== originalProfile || theme.paletteName !== (appearance.managed ? "wisp" : name)
             || popupTheme.accent !== theme.accent || theme.danger != expectedDanger)
           console.error("APPEARANCE_FAILED palette " + name)
-        if (name === "performative" && !appearance.managed
+        if (name === "performative" && !appearance.managed && !theme.cleanTui
             && (theme.background != "#000000" || theme.accent != "#a2b586"
                 || theme.foreground != "#d3d5cf" || theme.warning != "#c9b458"
                 || !theme.terminal || theme.cornerRadius !== 0 || theme.fontFamily !== theme.monospaceFamily
@@ -52,7 +52,7 @@ ShellRoot {
                 || theme.selectionBackground != "#b7baad" || theme.statusBackground != "#171914"
                 || theme.onlineIndicator != "#79b88a"))
           console.error("APPEARANCE_FAILED performative tokens")
-        if (name === "herdr" && !appearance.managed
+        if (name === "herdr" && !appearance.managed && !theme.cleanTui
             && (theme.background != "#001419" || theme.foreground != "#adb7b7"
                 || theme.accent != "#29a298" || theme.muted != "#637981"
                 || theme.selectionBackground != "#002c38" || theme.selectionText != "#fdf5e2"
@@ -61,6 +61,17 @@ ShellRoot {
                 || !theme.tui || !theme.terminal || theme.cornerRadius !== 0
                 || theme.font.family !== theme.herdrMonospaceFamily))
           console.error("APPEARANCE_FAILED herdr tokens")
+        if (originalProfile === "clean_tui" && !appearance.managed
+            && (!theme.cleanTui || !theme.tui || !theme.terminal
+                || theme.cornerRadius !== 2 || theme.titleSize !== 14
+                || theme.selectionBackground != theme.alpha(theme.accent, 0.18)
+                || theme.selectionText != theme.foreground
+                || theme.statusBackground != theme.surface
+                || theme.statusText != theme.foreground
+                || theme.roomBorder != theme.alpha(theme.foreground, 0.18)
+                || theme.conversationBorder != theme.alpha(theme.foreground, 0.18)
+                || theme.surfaceBorder != theme.alpha(theme.foreground, 0.24)))
+          console.error("APPEARANCE_FAILED clean TUI tokens with " + name)
       }
       appearance.setPalette("wisp")
       if (theme.cornerRadius !== (originalProfile === "legacy" ? 9 : 2)

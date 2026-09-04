@@ -27,7 +27,7 @@ Button {
   contentItem: Text {
     id: label
     text: root.theme.tui ? "[" + (["···", "⋯", "…"].indexOf(root.text) >= 0 ? ":" : root.text) + "]" : root.text
-    color: root.theme.tui && (root.primary || root.down) ? root.theme.selectionText : root.primary ? (root.destructive ? "#151821" : root.theme.terminal ? root.theme.accent : root.theme.accentText) : root.destructive ? root.theme.danger : root.theme.foreground
+    color: root.theme.tui && (root.primary || root.down) ? root.theme.selectionText : root.primary ? (root.destructive ? "#151821" : root.theme.terminal ? root.theme.accent : root.theme.accentText) : root.destructive ? root.theme.danger : root.theme.cleanTui ? (root.hovered ? root.theme.foreground : root.theme.muted) : root.theme.foreground
     opacity: root.theme.tui && !root.enabled ? 0.4 : 1
     font.family: root.theme.font.family
     font.pixelSize: root.theme.font.caption

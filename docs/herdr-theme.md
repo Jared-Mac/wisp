@@ -1,7 +1,7 @@
 # Herdr appearance option
 
 **Herdr** is an optional Wisp palette and TUI treatment. It does not replace
-Classic, Terminal, Wisp blue, Graphite, Violet, Ember, or Performative. Choose it
+Classic, Terminal Grid, Clean TUI, Wisp blue, Graphite, Violet, Ember, or Performative. Choose it
 under **Settings → Appearance → Color palette → Herdr**; switching away
 restores the selected base style and palette normally.
 
@@ -22,7 +22,9 @@ the prompt-style composer, square corners, and the live status line. It changes
 presentation only: conversations, drafts, room membership, permissions, and
 media state are untouched. The embedded Omarchy bar adapter shares the compact
 TUI structure but remains host-managed for colors and metrics, and ignores
-standalone palette choices.
+standalone palette choices. When paired with Clean TUI, Herdr supplies the color
+and typography while Clean TUI retains its quieter rules, subtle selections, and
+chat-forward proportions.
 
 Verification:
 

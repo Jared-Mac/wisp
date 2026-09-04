@@ -192,8 +192,8 @@ for everyone, with an irreversible-action warning, red **Yes, clear**, and norma
 saved per user on the host. Clearing overrides file Keep flags; it does not erase
 existing backups or copies already saved outside Wisp.
 
-**Settings → Appearance** selects the **Terminal** base style or
-**Classic** (the original appearance). Both themes have exactly the same features,
+**Settings → Appearance** selects **Terminal Grid**, **Clean TUI**, or
+**Classic** (the original appearance). All three interface styles have exactly the same features,
 chats, permissions, controls, and shortcuts. The choice applies immediately to
 both the tray popup and full app, is saved locally in
 `~/.config/wisp/appearance.json`, and survives restarts. Switching themes does
@@ -204,13 +204,21 @@ launches with unknown integration metadata conservatively retain Classic unless
 a theme has been explicitly chosen. Old `terminal-experimental` preferences
 continue to work as Terminal.
 
+Clean TUI is the restrained, chat-forward terminal option: it narrows the
+Rooms/Friends activity rail, replaces colorful full-pane boxes with quiet rules,
+uses neutral inactive chrome and subtle selections, and simplifies transcript
+names and timestamps. It keeps chat tiling, pop-outs, the searchable chat picker,
+keyboard controls, prompts, and the live status line. Interface style and color
+palette are independent, so Clean TUI can use Herdr, Wisp blue, or any other
+palette without changing room, message, or media state.
+
 **Performative** is the default for new desktop/CachyOS installations; saved
 appearance choices, host-managed Omarchy adapters, and unknown environments are
 preserved. A standalone window opened from Omarchy uses this same Wisp-owned
 default and can be changed independently without restyling the bar popup.
 Choose **Wisp blue**, **Graphite**, **Violet**, **Ember**, **Performative**, or
 **Herdr** independently of the
-Terminal/Classic style. Wisp blue keeps the original palette; status and warning
+Terminal Grid/Clean TUI/Classic style. Wisp blue keeps the original palette; status and warning
 colors retain their meaning across palettes. Terminal uses monospace typography,
 square-edged controls, fine keylines, and outlined selections. Herdr is an
 additional TUI treatment modeled on Jared's Herdr setup: Solarized Japan colors,

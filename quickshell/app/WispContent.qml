@@ -12,7 +12,7 @@ FocusScope {
   required property url logoSource
   property string presentation: "panel"
   property var anchorController: null
-  property int contentPadding: theme.tui ? theme.space(10) : theme.spacing.huge
+  property int contentPadding: theme.cleanTui ? theme.space(14) : theme.tui ? theme.space(10) : theme.spacing.huge
   property bool dismissOnNavigate: false
   property bool showAppButton: false
   property bool showCloseButton: false
@@ -357,7 +357,7 @@ FocusScope {
     objectName: "terminalStatusLine"
     visible: root.theme.tui
     anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
-    height: root.theme.space(24)
+    height: root.theme.space(root.theme.cleanTui ? 22 : 24)
     color: root.theme.statusBackground
     Rectangle {
       anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top

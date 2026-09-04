@@ -24,7 +24,7 @@ Item {
     settings.writeAdapter()
   }
   function setProfile(value) {
-    if (managed || (value !== "terminal" && value !== "legacy") || value === profile) return
+    if (managed || ["terminal", "legacy", "clean_tui"].indexOf(value) < 0 || value === profile) return
     error = ""
     preferences.profile = value
     settings.writeAdapter()

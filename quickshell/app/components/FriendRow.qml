@@ -47,7 +47,7 @@ Item {
     anchors.leftMargin: root.theme.spacing.md
     anchors.verticalCenter: parent.verticalCenter
     text: String(root.friend.display_name || "")
-    color: root.friend.online ? (root.theme.tui ? root.theme.accent : root.theme.foreground) : root.theme.muted
+    color: root.friend.online ? (root.theme.cleanTui ? root.theme.foreground : root.theme.tui ? root.theme.accent : root.theme.foreground) : root.theme.muted
     font.family: root.theme.font.family
     font.pixelSize: root.theme.font.body
     width: Math.min(implicitWidth, Math.max(0, statusIcon.x - x - favoriteButton.width - root.theme.spacing.md * 2))

@@ -70,9 +70,9 @@ Column {
     model: root.bridge.activeConversation ? [] : root.bridge.conversations
     delegate: Rectangle {
       required property var modelData
-      width: root.width; height: root.theme.space(48)
+      width: root.width; height: root.theme.space(root.theme.cleanTui ? 42 : 48)
       radius: root.theme.cornerRadius
-      color: conversationMouse.containsMouse ? root.theme.alpha(root.theme.foreground, 0.09) : root.theme.alpha(root.theme.foreground, 0.045)
+      color: conversationMouse.containsMouse ? root.theme.alpha(root.theme.foreground, root.theme.cleanTui ? 0.07 : 0.09) : root.theme.cleanTui ? "transparent" : root.theme.alpha(root.theme.foreground, 0.045)
       Column {
         anchors.left: parent.left; anchors.right: unreadLabel.left
         anchors.leftMargin: root.theme.spacing.lg; anchors.rightMargin: root.theme.spacing.md

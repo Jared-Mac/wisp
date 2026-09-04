@@ -5,7 +5,9 @@ standalone windows opened from Omarchy. Existing saved appearance choices,
 host-managed Omarchy adapter styling, and unknown environments stay unchanged.
 Choose **Settings → Appearance → Performative** to switch an existing
 installation. This mode enforces monospace
-type, square corners, and a flat black canvas even when the base style is Classic.
+type and a flat black canvas even when the base style is Classic. Classic and
+Terminal Grid receive its square geometry; Clean TUI retains its quieter 2px
+geometry and restrained selections while consuming the Performative colors.
 Switching to another palette restores that base style.
 It applies to the full app, tray, dialogs, and detached chat windows, without
 changing chats, room membership, media controls, or the host-managed Omarchy bar
@@ -25,6 +27,8 @@ eight assignments use distinct terminal-friendly swatches; larger histories get
 additional colors (which may be perceptually closer together). The host-managed
 Omarchy adapter shares the compact frame structure while retaining its own
 palette, typography, scaling, corners, and popup geometry.
+Clean TUI deliberately limits these assignments to message-author identity and
+the active pane marker; inactive pane rules stay neutral.
 
 The terminal treatment includes numbered curses-like panel frames, bracketed
 controls, ash-gray inverse selections, a dark status bar, a `user@wisp` identity, compact chat logs with

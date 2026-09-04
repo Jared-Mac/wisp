@@ -7,15 +7,19 @@ mkdir -p "$test_dir/config/wisp"
 cp -a "$repo_dir/quickshell/app" "$test_dir/app"
 cp "$repo_dir/tests/quickshell/Appearance.qml" "$test_dir/shell.qml"
 for environment in cachyos desktop omarchy unknown; do
-  for requested in terminal terminal-experimental classic legacy invalid missing; do
+  for requested in terminal terminal-experimental clean_tui clean-tui classic legacy invalid missing; do
     if [[ $requested == missing ]]; then
       rm -f -- "$test_dir/config/wisp/appearance.json"
     else
       jq -cn --arg profile "$requested" '{profile:$profile}' >"$test_dir/config/wisp/appearance.json"
     fi
     expected=legacy
-    if [[ $environment != omarchy && $requested != legacy && $requested != classic ]]; then
-      if [[ $environment != unknown || $requested == terminal || $requested == terminal-experimental ]]; then expected=terminal; fi
+    if [[ $environment != omarchy ]]; then
+      if [[ $requested == clean_tui || $requested == clean-tui ]]; then
+        expected=clean_tui
+      elif [[ $requested != legacy && $requested != classic ]]; then
+        if [[ $environment != unknown || $requested == terminal || $requested == terminal-experimental ]]; then expected=terminal; fi
+      fi
     fi
     expected_palette=wisp
     if [[ $environment == cachyos || $environment == desktop ]] && [[ $requested == missing || $requested == invalid ]]; then expected_palette=performative; fi
@@ -52,7 +56,7 @@ if ! rg -q APPEARANCE_SWITCH_OK "$test_dir/log" \
 fi
 jq -e '.profile == "legacy"' \
   "$test_dir/standalone-switch/wisp/appearance.json" >/dev/null
-for change in legacy terminal; do
+for change in legacy terminal clean_tui; do
   current=$(jq -r '.profile' "$test_dir/config/wisp/appearance.json" 2>/dev/null || echo missing)
   expected=terminal
   [[ $current != legacy ]] || expected=legacy

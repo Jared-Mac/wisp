@@ -71,6 +71,7 @@ ShellRoot {
     appearanceController: themeAppearance
     Component.onCompleted: {
       if ("profile" in theme) theme.profile = Quickshell.env("WISP_TEST_ADAPTER") === "omarchy" ? "legacy" : Quickshell.env("WISP_TEST_THEME") || "legacy"
+      if (test.mode === "cleantui" && "profile" in theme) theme.profile = "clean_tui"
       if (Quickshell.env("WISP_TEST_ADAPTER") === "omarchy") {
         // Representative host overrides, not Jared's settings or machine.
         tuiTreatment = true
@@ -258,6 +259,10 @@ ShellRoot {
     onTriggered: bridge.workspaceLayout.reset()
   }
   Timer {
+    interval: 300; running: test.mode === "cleantui"
+    onTriggered: bridge.workspaceLayout.reset()
+  }
+  Timer {
     interval: 400; running: test.mode === "presence" || test.mode === "panelpresence"
     onTriggered: if (bridge.friendPreferences.collapsed) bridge.friendPreferences.toggleCollapsed()
   }
@@ -276,15 +281,22 @@ ShellRoot {
   Timer {
     interval: 900; running: test.mode === "themes"
     onTriggered: {
+      var before = bridge.sent.length
+      var draft = bridge.draftFor("porch")
       var terminal = test.findItem(window.contentItem, "theme-terminal")
       test.check(!!terminal && terminal.enabled, "Terminal remains available in Classic")
       if (terminal) terminal.clicked()
       test.check(theme.profile === "terminal", "Settings restores Terminal live")
       test.check(bridge.draftFor("dm") === "", "chat state remains unchanged")
+      var clean = test.findItem(window.contentItem, "theme-clean_tui")
+      test.check(!!clean && clean.enabled, "Clean TUI is available beside Terminal and Classic")
+      if (clean) clean.clicked()
+      test.check(theme.profile === "clean_tui" && theme.cleanTui && theme.tui,
+        "Settings selects the independent Clean TUI interface live")
+      test.check(bridge.sent.length === before && bridge.draftFor("porch") === draft,
+        "Clean TUI switching preserves drafts and sends no commands")
       var performative = test.findItem(window.contentItem, "palette-performative")
       test.check(!!performative && performative.enabled, "Performative palette is available in Settings")
-      var before = bridge.sent.length
-      var draft = bridge.draftFor("porch")
       if (performative) performative.clicked()
       test.check(theme.paletteName === "performative" && theme.background == "#000000", "Settings selects Performative live")
       test.check(bridge.sent.length === before && bridge.draftFor("porch") === draft, "palette switching preserves drafts and sends no commands")
@@ -1148,6 +1160,31 @@ ShellRoot {
       if (test.mode === "media" || test.mode === "panelmedia") {
         var room = test.findItem(surface, "roomCard")
         test.check(!!room && room.height === theme.space(theme.tui ? 42 : 48), "occupied room cards use compact height")
+      }
+      if (test.mode === "cleantui") {
+        var cleanWorkspace = test.findObject(surface, "mainWorkspace", [])
+        var cleanActivity = test.findObject(surface, "activityPane", [])
+        var cleanChat = test.findObject(surface, "conversationPane", [])
+        var cleanFrame = test.findObject(surface, "conversationColorFrame", [])
+        var cleanSelector = test.findObject(surface, "compactChatSelector", [])
+        test.check(theme.cleanTui && theme.tui && theme.terminal,
+          "Clean TUI is a distinct terminal interface profile")
+        test.check(!!cleanWorkspace && !!cleanActivity && !!cleanChat
+          && cleanWorkspace.visible && cleanActivity.visible && cleanChat.visible,
+          "Clean TUI keeps the activity and chat workspace")
+        test.check(cleanActivity && cleanActivity.width >= theme.space(219),
+          "Clean TUI activity rail keeps a usable minimum width")
+        test.check(cleanActivity && cleanActivity.width <= theme.space(360),
+          "Clean TUI activity rail stays narrow")
+        test.check(cleanActivity && cleanChat && cleanChat.width > cleanActivity.width,
+          "Clean TUI gives chat more width than activity")
+        test.check(cleanFrame && cleanFrame.quiet,
+          "Clean TUI replaces full pane boxes with quiet section rules")
+        test.check(cleanSelector && cleanSelector.background.border.width === 0,
+          "Clean TUI removes the idle selector box")
+        test.check(theme.statusBackground == theme.surface
+          && theme.selectionBackground == theme.alpha(theme.accent, 0.18),
+          "Clean TUI uses restrained status and selection surfaces")
       }
       test.check(window.width === theme.space(test.testWidth), "app width")
       test.check(window.height === theme.space(test.testHeight), "app height")

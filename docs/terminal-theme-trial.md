@@ -11,6 +11,8 @@ which would also remove subsequently added UI features such as the selector.
 **Later policy update:** the embedded Omarchy bar popup remains host-managed,
 but the standalone resizable Wisp window is now Wisp-owned and offers the same
 appearance choices and Performative default as other known desktop launches.
+Clean TUI was subsequently added as a third, optional interface profile; this
+document otherwise remains a historical record of the original Terminal trial.
 
 ## Starting point and scope
 
