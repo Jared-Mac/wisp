@@ -9,10 +9,32 @@ Item {
 
   property string clientName: "quickshell"
   readonly property alias workspaceLayout: workspaceLayout
-  WispWorkspaceLayout { id: workspaceLayout }
+  WispWorkspaceLayout { id: workspaceLayout; onStreamPreferenceSaved: root.settingsSaved() }
   readonly property alias chatColors: chatColors
   WispChatColors { id: chatColors; conversations: root.conversations }
   readonly property alias friendPreferences: friendPreferences
+  readonly property alias participantVolumes: participantVolumes
+  WispParticipantVolumes {
+    id: participantVolumes
+    account: String(root.selfState.id || root.configuredProfile || "")
+    onVolumesChanged: root.applyParticipantVolumes()
+    onReadyChanged: root.applyParticipantVolumes()
+    onSaved: root.settingsSaved()
+  }
+  property string lastAppliedVolumes: ""
+  onDaemonConnectedChanged: { lastAppliedVolumes = ""; if (daemonConnected) applyParticipantVolumes() }
+  onFriendsChanged: applyParticipantVolumes()
+  onHangoutsChanged: applyParticipantVolumes()
+  function applyParticipantVolumes() {
+    if (!daemonConnected || !participantVolumes.ready) return
+    var people = friends.slice(), values = ({})
+    hangouts.forEach(function(room) { people = people.concat(room.members || []) })
+    people.forEach(function(person) {
+      if (person.id !== root.selfState.id) values[String(person.display_name)] = participantVolumes.volumeFor(person) / 100
+    })
+    var serialized = JSON.stringify(values)
+    if (serialized !== lastAppliedVolumes && send("set_participant_volumes", {volumes: values})) lastAppliedVolumes = serialized
+  }
   WispFriendPreferences {
     id: friendPreferences
     account: String(root.selfState.id || root.configuredProfile || root.selfState.display_name || "")
@@ -21,6 +43,13 @@ Item {
   property bool notificationSoundsEnabled: false
   property bool appFocused: false
   property bool detachedChatFocused: false
+  property bool mainWindowOpen: false
+  property var mediaTileHost: null
+  property bool delegateMediaToDesktop: false
+  signal desktopWatchRequested(string participant, string source, bool open)
+  property var watchedMedia: ({})
+  signal mediaWatchReady(var video)
+  readonly property string videoSocketPath: socketPath.replace(/\.[^/.]+$/, "") + ".video"
   property int imageViewerSerial: 0
   property var imageViewerFocus: ({})
   readonly property bool imageViewerFocused: Object.keys(imageViewerFocus).length > 0
@@ -28,11 +57,34 @@ Item {
     imageViewerFocus = replaceEntry(imageViewerFocus, id, active ? true : undefined)
   }
   property bool chatVisible: false
+  property int chatFocusSerial: 0
+  property var focusedChats: ({})
+  readonly property string focusedConversationId: {
+    var keys = Object.keys(focusedChats)
+    return keys.length ? String(focusedChats[keys[keys.length - 1]]) : ""
+  }
+  function setChatFocus(key, id) { focusedChats = replaceEntry(focusedChats, key, id || undefined) }
+  onFocusedConversationIdChanged: markVisibleConversationRead()
   property bool receivedSnapshot: false
   property string lastReadMessageId: ""
   property alias notificationMuted: notificationSettings.muted
   property alias notificationVolume: notificationSettings.volume
   property alias notificationSoundPath: notificationSettings.soundPath
+  property alias notificationPolicy: notificationSettings.policy
+  property alias roomNotificationSounds: notificationSettings.roomSounds
+  property alias selfRoomNotificationSounds: notificationSettings.selfRoomSounds
+  readonly property var eventSoundPaths: notificationSettings.eventSounds
+  property var soundQueue: []
+  property bool soundPlaybackBusy: false
+  function setEventSound(kind,path) { notificationSettings.eventSounds = replaceEntry(notificationSettings.eventSounds,kind,String(path)) }
+  readonly property var mutedNotificationChats: JSON.parse(JSON.stringify(notificationSettings.mutedChats))
+  function chatNotificationsMuted(id) { return mutedNotificationChats.indexOf(String(id)) >= 0 }
+  function toggleChatNotifications(id) {
+    if (!id) return
+    notificationSettings.mutedChats = chatNotificationsMuted(id)
+      ? mutedNotificationChats.filter(function(value) { return value !== String(id) })
+      : mutedNotificationChats.concat([String(id)])
+  }
   property string notificationError: ""
   property var drafts: ({})
   property var pendingAttachments: ({})
@@ -166,6 +218,16 @@ Item {
   readonly property var devices: snapshot.devices || []
   readonly property var lastInvite: snapshot.last_invite || null
   property string activeConversationId: ""
+  property string lastConversationId: ""
+  property string previousActiveId: ""
+  onActiveConversationIdChanged: {
+    if (previousActiveId && previousActiveId !== activeConversationId) lastConversationId = previousActiveId
+    previousActiveId = activeConversationId
+  }
+  readonly property var lastConversation: lastConversationId !== activeConversationId ? conversationById(lastConversationId) : null
+  readonly property var unreadConversations: conversations.filter(function(c) {
+    return Number(c.unread_count || 0) > 0 && String(c.id) !== activeConversationId
+  })
   property string pendingDirectName: ""
   readonly property var activeConversation: conversationById(activeConversationId)
   readonly property var activeMessages: messagesFor(activeConversationId)
@@ -180,7 +242,45 @@ Item {
   })
   readonly property bool effectiveMuted: !!selfState.muted || !!selfState.deafened
     || (!!pushToTalkState.enabled && !pushToTalkState.active)
-  readonly property var activeSpeakers: mediaState.active_speakers || []
+  readonly property var rawSpeakers: {
+    var names = (mediaState.active_speakers || []).slice(), levels = mediaState.remote_audio_levels || ({})
+    Object.keys(levels).forEach(function(name) {
+      if (Number(levels[name]) >= 25 && (root.mediaState.remote_audio_participants || []).indexOf(name) >= 0 && names.indexOf(name) < 0) names.push(name)
+    })
+    if (Number(mediaState.audio && mediaState.audio.input_level || 0) >= 25 && !effectiveMuted && names.indexOf(selfState.display_name) < 0) names.push(selfState.display_name)
+    return names
+  }
+  property var speakerReleaseTimes: ({})
+  property double speakerClock: Date.now()
+  // A short release hold bridges VAD gaps between syllables. Muting/leaving
+  // always wins, and steady activity never expires on an arbitrary timeout.
+  readonly property var activeSpeakers: {
+    if (!selfState.hangout_id) return []
+    var names = rawSpeakers.slice()
+    Object.keys(speakerReleaseTimes).forEach(function(name) {
+      if (speakerReleaseTimes[name] > speakerClock && names.indexOf(name) < 0) names.push(name)
+    })
+    return names.filter(function(name) {
+      return name === root.selfState.display_name ? !root.effectiveMuted : root.remoteMutedParticipants.indexOf(name) < 0
+    })
+  }
+  property var previousSpeakers: []
+  onRawSpeakersChanged: {
+    var now = Date.now(), next = Object.assign({}, speakerReleaseTimes)
+    previousSpeakers.forEach(function(name) { if (root.rawSpeakers.indexOf(name) < 0) next[name] = now + 700 })
+    rawSpeakers.forEach(function(name) { delete next[name] })
+    previousSpeakers = rawSpeakers.slice(); speakerReleaseTimes = next; speakerClock = now
+  }
+  Timer {
+    interval: 100; repeat: true; running: Object.keys(root.speakerReleaseTimes).length > 0
+    onTriggered: {
+      var now = Date.now(), next = ({})
+      Object.keys(root.speakerReleaseTimes).forEach(function(name) {
+        if (root.selfState.hangout_id && root.speakerReleaseTimes[name] > now) next[name] = root.speakerReleaseTimes[name]
+      })
+      root.speakerClock = now; root.speakerReleaseTimes = next
+    }
+  }
   readonly property var remoteMutedParticipants: mediaState.remote_muted_participants || []
   readonly property var remoteVideos: mediaState.remote_videos || []
   readonly property var remoteVideoParticipants: mediaState.remote_video_participants || []
@@ -292,6 +392,11 @@ Item {
       property bool muted: false
       property int volume: 50
       property string soundPath: ""
+      property string policy: "other_chats"
+      property var mutedChats: []
+      property bool roomSounds: true
+      property bool selfRoomSounds: true
+      property var eventSounds: ({})
     }
   }
 
@@ -299,13 +404,26 @@ Item {
     id: notificationPlayer
     onExited: function(exitCode, exitStatus) {
       if (exitCode !== 0) root.notificationError = "Could not play this sound. Choose a readable audio file and check that pw-play is installed."
+      if (root.soundQueue.length) {
+        var next=root.soundQueue[0]; root.soundQueue=root.soundQueue.slice(1)
+        Qt.callLater(function() { root.soundPlaybackBusy = false; root.playNotificationSound(next) })
+      } else root.soundPlaybackBusy = false
     }
   }
 
-  function playNotificationSound() {
-    if (notificationMuted || notificationVolume <= 0 || notificationPlayer.running) return
+  function playNotificationSound(kind) {
+    kind = kind || "message"
+    if (notificationMuted || notificationVolume <= 0) return
+    if (kind.indexOf("self_") === 0 && !selfRoomNotificationSounds) return
+    if (kind.indexOf("member_") === 0 && !roomNotificationSounds) return
+    if (soundPlaybackBusy) {
+      if (soundQueue.length < 6 && soundQueue.indexOf(kind) < 0) soundQueue = soundQueue.concat([kind])
+      return
+    }
     notificationError = ""
-    var path = String(notificationSoundPath || Qt.resolvedUrl("assets/message.wav"))
+    // Process arguments need a real path, not Quickshell's virtual qs: URL.
+    var soundDirectory = Quickshell.env("WISP_SOUND_DIR") || configHome + "/quickshell/wisp/assets"
+    var path = String((kind === "message" ? notificationSoundPath : eventSoundPaths[kind]) || soundDirectory + "/" + kind + ".wav")
     if (path.indexOf("file://") === 0) path = decodeURIComponent(path.slice(7))
     if (path.charAt(0) !== "/") {
       notificationError = "Choose an absolute path to a local audio file."
@@ -313,6 +431,7 @@ Item {
     }
     notificationPlayer.command = ["pw-play", "--volume",
       String(Math.max(0, Math.min(100, notificationVolume)) / 100), path]
+    soundPlaybackBusy = true
     notificationPlayer.running = true
   }
 
@@ -412,11 +531,15 @@ Item {
 
   function applySnapshot(next, eventName) {
     if (!next) return
-    var incoming = ChatLogic.hasIncomingMessage(receivedSnapshot ? snapshot : null, next, eventName)
+    var incoming = ChatLogic.incomingConversationIds(receivedSnapshot ? snapshot : null, next, eventName)
+    var roomEvents = ChatLogic.roomSoundEvents(receivedSnapshot ? snapshot : null, next, eventName)
     snapshot = next
     receivedSnapshot = true
-    if (notificationSoundsEnabled && ChatLogic.shouldPlaySound(incoming,
-        appFocused, notificationMuted, notificationVolume)) playNotificationSound()
+    if (notificationSoundsEnabled) roomEvents.forEach(function(kind) { root.playNotificationSound(kind) })
+    if (notificationSoundsEnabled && incoming.some(function(id) {
+      return ChatLogic.shouldNotifyChat(id, root.focusedConversationId, root.appFocused,
+        root.notificationPolicy, root.mutedNotificationChats, root.notificationMuted, root.notificationVolume)
+    })) playNotificationSound()
     var nextSelf = next["self"] || ({})
     var nextMedia = nextSelf.media || ({})
     var nextShare = nextMedia.screen_share || ({})
@@ -440,8 +563,8 @@ Item {
   }
 
   function markVisibleConversationRead() {
-    var c = activeConversation
-    if (!appFocused || !chatVisible || !c || !c.last_message || !c.unread_count) return
+    var c = conversationById(focusedConversationId)
+    if (!c || !c.last_message || !c.unread_count) return
     var id = String(c.last_message.id)
     if (lastReadMessageId === id) return
     lastReadMessageId = id
@@ -620,6 +743,11 @@ Item {
     var conversationId = action.conversationId
     if (action.kind === "copyImage") {
       imageCopyFinished(String(message.id),!!message.ok,message.error ? String(message.error.message || "Could not copy image") : "")
+    } else if (action.kind === "watchVideo") {
+      if (message.ok && action.open) {
+        watchedMedia = replaceEntry(watchedMedia, action.key, action.video)
+        mediaWatchReady(action.video)
+      } else if (!action.open || !message.ok) watchedMedia = replaceEntry(watchedMedia, action.key, undefined)
     } else if (action.kind === "setting") {
       if (message.ok) settingsSaved()
       else settingsSaveFailed()
@@ -755,11 +883,16 @@ Item {
   function toggleSurface() { mediaState.surface_open ? closeSurface() : openSurface() }
   function watchVideo(video, open) {
     if (!video) return
-    send("watch_video", {
+    if (delegateMediaToDesktop) { desktopWatchRequested(String(video.participant),String(video.source),open); return }
+    var key = JSON.stringify([String(video.participant), String(video.source)])
+    var id = send("watch_video", {
       "participant": String(video.participant || ""),
       "source": String(video.source || "screen_share"),
+      "hosted": !!mediaTileHost,
       "open": open
     })
+    if (id && mediaTileHost) requests[id] = {kind: "watchVideo", key: key, video: video, open: open}
+    if (!open) watchedMedia = replaceEntry(watchedMedia, key, undefined)
   }
   function leave() { send("leave", {}) }
   function toggleShare() {

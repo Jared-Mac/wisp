@@ -47,6 +47,10 @@ for binary in wispd wispctl wisp-server; do
 done
 
 cp -a "$repo_dir/quickshell" "$package_dir/quickshell"
+bash "$repo_dir/scripts/build-video-ui.sh"
+mkdir -p "$package_dir/quickshell/app/native/WispVideo"
+install -m 0755 "$repo_dir/target/video-ui/libwispvideo.so" "$package_dir/quickshell/app/native/WispVideo/"
+install -m 0644 "$repo_dir/target/video-ui/qmldir" "$package_dir/quickshell/app/native/WispVideo/"
 for script in \
   app-sync.sh \
   backup-database.sh \
@@ -73,6 +77,9 @@ done
 install -m 0600 "$repo_dir/infra/local/server.env.example" "$package_dir/infra/local/server.env.example"
 install -m 0755 "$repo_dir/scripts/install-release.sh" "$package_dir/install.sh"
 install -m 0644 "$repo_dir/LICENSE" "$repo_dir/README.md" "$package_dir/"
+mkdir -p "$package_dir/licenses"
+install -m 0644 "$repo_dir/third_party/LICENSE-APACHE" "$package_dir/licenses/"
+install -m 0644 "$repo_dir/third_party/webrtc-sys/NOTICE.md" "$package_dir/licenses/WebRTC-NOTICE.md"
 
 mkdir -p "$dist_dir"
 archive="$dist_dir/$package_name.tar.gz"

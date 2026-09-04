@@ -65,6 +65,8 @@ jobs:
             pulseaudio \
             pulseaudio-utils \
             pkg-config \
+            qt6-base-dev \
+            qt6-declarative-dev \
             ripgrep \
             sqlite3
 

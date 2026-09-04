@@ -6,6 +6,8 @@ Rectangle {
   required property var bridge
   required property var theme
   signal joined()
+  TapHandler { acceptedButtons: Qt.RightButton; onTapped: volumeMenu.open() }
+  ParticipantVolumeMenu { id: volumeMenu; bridge: root.bridge; theme: root.theme; people: root.hangout.members || [] }
 
   objectName: "roomCard"
   implicitHeight: root.theme.space(root.theme.performative ? 42 : 48)

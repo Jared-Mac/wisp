@@ -230,6 +230,7 @@ ShellRoot {
     bridge.notificationVolume = 35
     bridge.notificationSoundPath = "file:///tmp/test-custom-sound.wav"
     if (test.mode === "settings" || test.mode === "themes" || test.mode === "saved") test.findItem(window.contentItem, "wispContent").toggleSettings()
+    if (test.mode === "themes") test.findItem(window.contentItem, "settingsTab-appearance").clicked()
     if (test.mode === "panelsettings") compactContent.toggleSettings()
   }
   Timer {

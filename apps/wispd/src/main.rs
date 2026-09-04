@@ -4,6 +4,7 @@ mod media;
 mod shortcut;
 mod surface;
 mod tray;
+mod video_bridge;
 
 use anyhow::{Context, anyhow, bail};
 use base64::Engine as _;
@@ -975,6 +976,17 @@ impl Daemon {
         match command.name.as_str() {
             "hello" => Ok(None),
             "status" => Ok(Some(serde_json::to_value(self.state.read().await.clone())?)),
+            "set_participant_volumes" => {
+                let volumes = serde_json::from_value(
+                    command
+                        .args
+                        .get("volumes")
+                        .cloned()
+                        .context("missing volumes")?,
+                )?;
+                self.media.set_participant_volumes(volumes).await?;
+                Ok(None)
+            }
             "set_muted" => {
                 let muted = boolean_arg(&command.args, "muted")?;
                 Ok(Some(self.update_manual_mute(Some(muted)).await))
@@ -1614,7 +1626,16 @@ impl Daemon {
             participant,
             source,
         };
-        self.set_video_watched(target.clone(), open).await?;
+        let hosted = args.get("hosted").and_then(Value::as_bool).unwrap_or(false);
+        if open && hosted {
+            self.media.video_bridge.open(target.clone());
+        }
+        if let Err(error) = self.set_video_watched(target.clone(), open).await {
+            if hosted {
+                self.media.video_bridge.close(&target);
+            }
+            return Err(error);
+        }
         Ok(Some(json!({
             "participant": target.participant,
             "source": target.source,
@@ -2044,6 +2065,7 @@ async fn synchronize_media_events(
                         |media| {
                             media.livekit_connected = false;
                             media.remote_audio_participants.clear();
+                            media.remote_audio_levels.clear();
                             media.remote_muted_participants.clear();
                             media.remote_video_participants.clear();
                             media.remote_videos.clear();
@@ -2082,6 +2104,7 @@ async fn synchronize_track_event(daemon: &Daemon, event: MediaEvent) {
             info!(%participant, "unsubscribed from remote audio");
             daemon
                 .update_media_state(None, "remote_audio_unsubscribed", |media| {
+                    media.remote_audio_levels.remove(&participant);
                     media
                         .remote_audio_participants
                         .retain(|name| name != &participant);
@@ -2103,11 +2126,15 @@ async fn synchronize_track_event(daemon: &Daemon, event: MediaEvent) {
                 .await;
         }
         MediaEvent::AudioFrames {
-            participant, total, ..
+            participant,
+            total,
+            level,
+            ..
         } => {
             daemon
                 .update_media_state(None, "remote_audio_received", |media| {
                     media.received_audio_frames = total;
+                    media.remote_audio_levels.insert(participant.clone(), level);
                     media.last_audio_from = Some(participant);
                 })
                 .await;
@@ -2964,6 +2991,18 @@ async fn main() -> anyhow::Result<()> {
         connecting_audio_changed.then_some(connecting_audio_state),
     )
     .await;
+    let video_listener = bind_socket(&socket_path.with_extension("video")).await?;
+    let video_daemon = daemon.clone();
+    tokio::spawn(async move {
+        while let Ok((stream, _)) = video_listener.accept().await {
+            let daemon = video_daemon.clone();
+            tokio::spawn(async move {
+                if let Err(error) = video_bridge::serve(stream, daemon).await {
+                    debug!(%error, "local video consumer disconnected");
+                }
+            });
+        }
+    });
 
     let initial_tray_state = {
         let state = daemon.state.read().await;

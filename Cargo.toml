@@ -7,6 +7,12 @@ members = [
   "tools/wisp-sim",
 ]
 resolver = "2"
+exclude = ["third_party/libwebrtc", "third_party/webrtc-sys"]
+
+# Narrow local extension: expose WebRTC's existing per-track output gain.
+[patch.crates-io]
+libwebrtc = { path = "third_party/libwebrtc" }
+webrtc-sys = { path = "third_party/webrtc-sys" }
 
 [workspace.package]
 version = "0.1.0"

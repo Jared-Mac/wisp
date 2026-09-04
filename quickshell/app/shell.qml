@@ -116,6 +116,15 @@ ShellRoot {
   property bool trayBottom: true
   property int trayVerticalInset: appTheme.space(52)
   property bool localPreviewsPoppedOut: false
+  property var pendingMedia: []
+  Timer {
+    interval: 100; repeat: true
+    running: app.pendingMedia.length > 0 && bridge.daemonConnected && !!bridge.mediaTileHost
+    onTriggered: {
+      var pending=app.pendingMedia; app.pendingMedia=[]
+      pending.forEach(function(video) { bridge.watchVideo(video,true) })
+    }
+  }
   readonly property string resolvedAnchor: appSettings.anchor === "auto"
     ? autoAnchor : appSettings.anchor
   readonly property var selectedPanelScreen: panelScreen()
@@ -148,6 +157,7 @@ ShellRoot {
     id: bridge
     clientName: "quickshell-desktop"
     notificationSoundsEnabled: true
+    mainWindowOpen: appWindow.visible && !appWindow.minimized
     appFocused: (appWindow.visible && appWindow.contentItem.Window.active)
       || detachedChatFocused || imageViewerFocused
       || (panelWindow.visible && panelWindow.contentItem.Window.active)
@@ -156,6 +166,16 @@ ShellRoot {
   }
 
   // Compatibility endpoint: direct Wisp launches now mean the full app.
+  IpcHandler {
+    target: "dev.wisp.media"
+    function open(participant: string, source: string): void {
+      app.pendingMedia=app.pendingMedia.concat([{participant:participant,source:source}])
+    }
+    function close(participant: string, source: string): void {
+      app.pendingMedia=app.pendingMedia.filter(function(v) { return v.participant!==participant || v.source!==source })
+      bridge.watchVideo({participant:participant,source:source},false)
+    }
+  }
   IpcHandler {
     target: "dev.wisp"
     function open(): void { app.openApp() }

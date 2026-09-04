@@ -213,7 +213,7 @@ Rectangle {
     visible: root.awayFromLatest
     anchors.right: messages.right; anchors.bottom: messages.bottom
     anchors.margins: root.theme.space(8)
-    width: root.theme.space(34); height: width
+    width: root.theme.space(root.theme.performative ? 46 : 34); height: root.theme.space(34)
     z: 2
     Accessible.name: "Scroll to latest messages"
     ToolTip.visible: hovered; ToolTip.text: "Latest messages"
@@ -229,7 +229,16 @@ Rectangle {
       }
     }
     contentItem: Item {
+      Text {
+        anchors.centerIn: parent
+        visible: root.theme.performative
+        text: "[vv]"
+        color: root.theme.foreground
+        font.family: root.theme.font.family
+        font.pixelSize: root.theme.font.body
+      }
       Canvas {
+        visible: !root.theme.performative
         anchors.centerIn: parent; width: root.theme.space(18); height: width
         property color ink: root.theme.foreground
         onInkChanged: requestPaint()

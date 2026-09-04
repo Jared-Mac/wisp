@@ -280,6 +280,7 @@ pub(crate) enum MediaEvent {
         generation: u64,
         participant: String,
         total: u64,
+        level: u8,
     },
     InputLevel {
         generation: u64,
@@ -417,7 +418,7 @@ struct MediaSession {
     screen_share: Option<ScreenShareSession>,
     camera: Option<CameraSession>,
     _platform_audio: PlatformAudio,
-    remote_audio: Arc<Mutex<HashMap<String, RemoteAudioTrack>>>,
+    remote_audio: Arc<Mutex<HashMap<String, (String, RemoteAudioTrack)>>>,
     remote_video: Arc<Mutex<HashMap<RemoteVideoTarget, RemoteTrackPublication>>>,
     desired_video: Arc<Mutex<HashSet<RemoteVideoTarget>>>,
     event_task: JoinHandle<()>,
@@ -440,6 +441,7 @@ struct CameraSession {
 }
 
 pub(crate) struct MediaManager {
+    pub(crate) video_bridge: crate::video_bridge::VideoBridge,
     operation: AsyncMutex<()>,
     session: AsyncMutex<Option<MediaSession>>,
     generation: AtomicU64,
@@ -450,6 +452,7 @@ pub(crate) struct MediaManager {
     input_level: Arc<AtomicU8>,
     platform_audio: Mutex<Option<PlatformAudio>>,
     audio_preferences: Mutex<AudioPreferences>,
+    participant_volumes: Arc<Mutex<HashMap<String, f64>>>,
     video_preferences: Mutex<VideoPreferences>,
     neural_denoiser_enabled: Arc<AtomicBool>,
     denoiser_backend: Arc<AtomicU8>,
@@ -490,6 +493,7 @@ impl MediaManager {
         };
         (
             Self {
+                video_bridge: crate::video_bridge::VideoBridge::default(),
                 operation: AsyncMutex::new(()),
                 session: AsyncMutex::new(None),
                 generation: AtomicU64::new(0),
@@ -500,6 +504,7 @@ impl MediaManager {
                 input_level: Arc::new(AtomicU8::new(0)),
                 platform_audio: Mutex::new(None),
                 audio_preferences: Mutex::new(AudioPreferences::default()),
+                participant_volumes: Arc::new(Mutex::new(HashMap::new())),
                 video_preferences: Mutex::new(VideoPreferences::default()),
                 neural_denoiser_enabled: Arc::new(AtomicBool::new(true)),
                 denoiser_backend,
@@ -970,12 +975,14 @@ impl MediaManager {
         let remote_video = Arc::new(Mutex::new(HashMap::new()));
         let desired_video = Arc::new(Mutex::new(HashSet::new()));
         let event_context = RoomEventContext {
+            video_bridge: self.video_bridge.clone(),
             generation,
             event_tx: self.event_tx.clone(),
             room: room.clone(),
             local_name: self.local_name.clone(),
             local_identity: room.local_participant().identity().to_string(),
             remote_audio: remote_audio.clone(),
+            participant_volumes: self.participant_volumes.clone(),
             remote_video: remote_video.clone(),
             desired_video: desired_video.clone(),
             received_frames: self.received_frames.clone(),
@@ -1077,6 +1084,7 @@ impl MediaManager {
     }
 
     async fn disconnect_session(&self) {
+        self.video_bridge.clear();
         self.connected.store(false, Ordering::Release);
         self.input_level.store(0, Ordering::Release);
         self.generation.fetch_add(1, Ordering::AcqRel);
@@ -1136,7 +1144,7 @@ impl MediaManager {
             .as_ref()
             .map(|session| session.remote_audio.clone());
         if let Some(remote_audio) = remote_audio {
-            for track in remote_audio
+            for (_, track) in remote_audio
                 .lock()
                 .expect("remote audio lock poisoned")
                 .values()
@@ -1148,6 +1156,36 @@ impl MediaManager {
                 }
             }
         }
+    }
+
+    pub(crate) async fn set_participant_volumes(
+        &self,
+        volumes: HashMap<String, f64>,
+    ) -> anyhow::Result<()> {
+        if volumes
+            .values()
+            .any(|v| !v.is_finite() || !(0.0..=2.0).contains(v))
+        {
+            bail!("participant volumes must be between 0 and 200 percent");
+        }
+        self.participant_volumes
+            .lock()
+            .expect("volume lock poisoned")
+            .clone_from(&volumes);
+        let session = self.session.lock().await;
+        if let Some(session) = session.as_ref() {
+            for (name, track) in session
+                .remote_audio
+                .lock()
+                .expect("remote audio lock poisoned")
+                .values()
+            {
+                track
+                    .rtc_track()
+                    .set_playout_volume(*volumes.get(name).unwrap_or(&1.0));
+            }
+        }
+        Ok(())
     }
 
     pub(crate) async fn start_screen_share(&self) -> anyhow::Result<ScreenShareInfo> {
@@ -1272,7 +1310,8 @@ impl MediaManager {
         // request High when it is tiled or fullscreen at a larger size.
         publication.set_video_quality(VideoQuality::Medium);
         publication.set_subscribed(true);
-        if let Some(surface) = &self.surface
+        if !self.video_bridge.contains(&target)
+            && let Some(surface) = &self.surface
             && let Err(error) = surface.open(target.clone())
         {
             desired_video
@@ -1292,6 +1331,7 @@ impl MediaManager {
     }
 
     pub(crate) async fn close_surface(&self, target: RemoteVideoTarget) -> anyhow::Result<()> {
+        self.video_bridge.close(&target);
         let (publication, desired_video) = self.remote_video_entry(&target).await?;
         desired_video
             .lock()
@@ -1449,12 +1489,14 @@ fn spawn_video_watch_signal(room: Arc<Room>, target: RemoteVideoTarget, watching
 }
 
 struct RoomEventContext {
+    video_bridge: crate::video_bridge::VideoBridge,
     generation: u64,
     event_tx: mpsc::UnboundedSender<MediaEvent>,
     room: Arc<Room>,
     local_name: String,
     local_identity: String,
-    remote_audio: Arc<Mutex<HashMap<String, RemoteAudioTrack>>>,
+    remote_audio: Arc<Mutex<HashMap<String, (String, RemoteAudioTrack)>>>,
+    participant_volumes: Arc<Mutex<HashMap<String, f64>>>,
     remote_video: Arc<Mutex<HashMap<RemoteVideoTarget, RemoteTrackPublication>>>,
     desired_video: Arc<Mutex<HashSet<RemoteVideoTarget>>>,
     received_frames: Arc<AtomicU64>,
@@ -1533,6 +1575,14 @@ impl RoomEventContext {
         track_tasks: &mut JoinSet<()>,
     ) {
         let sid = track.sid().to_string();
+        track.rtc_track().set_playout_volume(
+            *self
+                .participant_volumes
+                .lock()
+                .expect("volume lock poisoned")
+                .get(&participant)
+                .unwrap_or(&1.0),
+        );
         if self.deafened.load(Ordering::Acquire) {
             track.disable();
         } else {
@@ -1541,7 +1591,7 @@ impl RoomEventContext {
         self.remote_audio
             .lock()
             .expect("remote audio lock poisoned")
-            .insert(sid, track.clone());
+            .insert(sid, (participant.clone(), track.clone()));
         let _ = self.event_tx.send(MediaEvent::AudioSubscribed {
             generation: self.generation,
             participant: participant.clone(),
@@ -1576,6 +1626,7 @@ impl RoomEventContext {
             track,
             self.received_video_frames.clone(),
             self.surface.clone(),
+            self.video_bridge.clone(),
             self.event_tx.clone(),
         ));
         Some(target)
@@ -3160,6 +3211,7 @@ async fn receive_video_frames(
     track: RemoteVideoTrack,
     received_frames: Arc<AtomicU64>,
     surface: Option<SurfaceController>,
+    video_bridge: crate::video_bridge::VideoBridge,
     event_tx: mpsc::UnboundedSender<MediaEvent>,
 ) {
     let mut stream = NativeVideoStream::new(track.rtc_track());
@@ -3179,6 +3231,10 @@ async fn receive_video_frames(
             warn!(width, "remote video frame is too wide");
             continue;
         };
+        if byte_len > 128 * 1024 * 1024 || width > 16384 || height > 16384 {
+            warn!(width, height, "remote video frame exceeds renderer limits");
+            continue;
+        }
         let Ok(dst_height) = i32::try_from(height) else {
             warn!(height, "remote video frame is too tall");
             continue;
@@ -3191,7 +3247,16 @@ async fn receive_video_frames(
             dst_width,
             dst_height,
         );
-        if let Some(surface) = &surface
+        if video_bridge.contains(&target) {
+            video_bridge.send(
+                &target,
+                RgbaFrame {
+                    width,
+                    height,
+                    data: rgba,
+                },
+            );
+        } else if let Some(surface) = &surface
             && let Err(error) = surface.send_frame(
                 &target,
                 RgbaFrame {
@@ -3241,14 +3306,21 @@ async fn count_audio_frames(
     event_tx: mpsc::UnboundedSender<MediaEvent>,
 ) {
     let mut stream = NativeAudioStream::new(track.rtc_track(), 48_000, 1);
-    while stream.next().await.is_some() {
+    let mut meter_frames = 0_u8;
+    let mut meter_peak = 0_u8;
+    while let Some(frame) = stream.next().await {
+        meter_peak = meter_peak.max(pcm_level_percent(&frame.data));
+        meter_frames += 1;
         let total = received_frames.fetch_add(1, Ordering::AcqRel) + 1;
-        if total == 1 || total.is_multiple_of(100) {
+        if meter_frames == 10 {
             let _ = event_tx.send(MediaEvent::AudioFrames {
                 generation,
                 participant: participant.clone(),
                 total,
+                level: meter_peak,
             });
+            meter_frames = 0;
+            meter_peak = 0;
         }
     }
 }

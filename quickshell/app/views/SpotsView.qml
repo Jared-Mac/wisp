@@ -1,4 +1,5 @@
 import QtQuick
+import "../components"
 
 Column {
   id: root
@@ -26,6 +27,8 @@ Column {
     delegate: Rectangle {
       objectName: "availableRoomCard"
       required property var modelData
+      TapHandler { acceptedButtons: Qt.RightButton; onTapped: volumeMenu.open() }
+      ParticipantVolumeMenu { id: volumeMenu; bridge: root.bridge; theme: root.theme; people: modelData.members || [] }
       width: root.width
       height: root.theme.space(44)
       radius: root.theme.cornerRadius

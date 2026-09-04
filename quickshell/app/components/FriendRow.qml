@@ -16,6 +16,8 @@ Item {
 
   // Observe the entire row, including child buttons, without intercepting clicks.
   HoverHandler { id: rowHover }
+  TapHandler { acceptedButtons: Qt.RightButton; onTapped: volumeMenu.open() }
+  ParticipantVolumeMenu { id: volumeMenu; bridge: root.bridge; theme: root.theme; people: [root.friend] }
 
   Rectangle {
     anchors.fill: parent

@@ -12,8 +12,12 @@ Item {
   property alias roomsRatio: preferences.roomsRatio
   property alias trayRoomsCollapsed: preferences.trayRoomsCollapsed
   property alias chatTiles: preferences.chatTiles
+  property alias streamsAsTiles: preferences.streamsAsTiles
   signal settingsSaved()
   signal settingsSaveFailed()
+  signal streamPreferenceSaved()
+  property bool savingStreamPreference: false
+  function setStreamsAsTiles(value) { savingStreamPreference = true; streamsAsTiles = value }
   signal resetRequested()
   property string error: ""
   function reset() {
@@ -30,7 +34,7 @@ Item {
     onLoaded: Qt.callLater(function() { root.ready = true })
     onLoadFailed: Qt.callLater(function() { root.ready = true })
     onAdapterUpdated: { root.error = ""; if (root.ready) saveDelay.restart() }
-    onSaved: root.settingsSaved()
+    onSaved: { root.settingsSaved(); if (root.savingStreamPreference) { root.savingStreamPreference = false; root.streamPreferenceSaved() } }
     onSaveFailed: { root.error = "Couldn't save the main window layout."; root.settingsSaveFailed() }
     JsonAdapter {
       id: preferences
@@ -40,6 +44,7 @@ Item {
       property real roomsRatio: 0 // Fit the room list until its divider is moved.
       property bool trayRoomsCollapsed: false
       property string chatTiles: "" // Main-window split tree; no message content.
+      property bool streamsAsTiles: true
     }
   }
 }

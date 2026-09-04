@@ -66,9 +66,13 @@ fi
 
 if [[ -n ${WISP_QUICKSHELL_PATH:-} ]]; then
   selector=(--path "$WISP_QUICKSHELL_PATH")
+  video_import_root="$WISP_QUICKSHELL_PATH/native"
 else
   selector=(--config "${WISP_QUICKSHELL_CONFIG:-wisp}")
+  video_import_root="${XDG_CONFIG_HOME:-$HOME/.config}/quickshell/${WISP_QUICKSHELL_CONFIG:-wisp}/native"
 fi
+export QML_IMPORT_PATH="$video_import_root${QML_IMPORT_PATH:+:$QML_IMPORT_PATH}"
+export WISP_SOUND_DIR="${video_import_root%/native}/assets"
 
 start_ui() {
   qs "${selector[@]}" --daemonize >/dev/null 2>&1
@@ -112,6 +116,13 @@ call_or_start() {
 
 surface=${1:-app}
 case "$surface" in
+  media)
+    case "${2:-}" in
+      watch) call_or_start dev.wisp.media open "${3:?participant required}" "${4:?source required}" ;;
+      stop) call_or_start dev.wisp.media close "${3:?participant required}" "${4:?source required}" ;;
+      *) echo "usage: wisp-ui media {watch|stop} PARTICIPANT SOURCE" >&2; exit 2 ;;
+    esac
+    ;;
   app|panel)
     action=${2:-open}
     shift $(( $# > 0 ? 1 : 0 ))

@@ -10,8 +10,16 @@ Column {
   property real availableHeight: 0
   width: parent ? parent.width : 0
   spacing: theme.spacing.sm
+  property string focusKey: ""
+  readonly property bool chatHasFocus: visible && !!root.Window.active && !!bridge.activeConversation
+  function updateChatFocus() { if (focusKey) bridge.setChatFocus(focusKey, chatHasFocus ? bridge.activeConversationId : "") }
+  onChatHasFocusChanged: updateChatFocus()
+  Connections { target: root.bridge; function onActiveConversationIdChanged() { root.updateChatFocus() } }
+  Component.onCompleted: { focusKey = "tray-" + (++bridge.chatFocusSerial); updateChatFocus() }
+  Component.onDestruction: bridge.setChatFocus(focusKey, "")
 
   function conversationLabel(c) { return c.label === "Hangout" ? "Room" : c.label }
+  readonly property color chatColor: root.bridge.chatColors.colorFor(root.bridge.activeConversationId, root.theme.muted)
   Item {
     id: messageHeader
     width: parent.width; height: root.theme.space(30)
@@ -19,8 +27,9 @@ Column {
       anchors.left: parent.left; anchors.right: chatOptions.left
       anchors.rightMargin: root.theme.spacing.md; anchors.verticalCenter: parent.verticalCenter
       elide: Text.ElideRight
-      text: root.theme.performative ? "┌─ 03: /chat" : root.bridge.activeConversation ? "MESSAGES · " + root.conversationLabel(root.bridge.activeConversation) : "MESSAGES"
-      color: root.theme.muted; font.family: root.theme.font.family
+      objectName: "trayChatHeading"
+      text: (root.theme.performative ? "┌─ 03: /chat" : "MESSAGES") + (root.bridge.activeConversation ? (root.theme.performative ? "/" : " · ") + root.conversationLabel(root.bridge.activeConversation) : "")
+      color: root.bridge.activeConversation ? root.chatColor : root.theme.muted; font.family: root.theme.font.family
       font.pixelSize: root.theme.font.caption; font.bold: true
       font.letterSpacing: root.theme.terminal ? 1 : 0
     }
@@ -37,6 +46,12 @@ Column {
         Binding on font.pixelSize { when: root.theme.terminal; value: root.theme.font.caption; restoreMode: Binding.RestoreBindingOrValue }
         id: optionsMenu
         palette.window: root.theme.surface; palette.text: root.theme.foreground
+        MenuItem {
+          id: muteChat
+          text: root.bridge.chatNotificationsMuted(root.bridge.activeConversationId) ? "Unmute chat notifications" : "Mute chat notifications"
+          onTriggered: root.bridge.toggleChatNotifications(root.bridge.activeConversationId)
+          ThemeControlStyle { theme: root.theme; control: muteChat }
+        }
         MenuItem {
           id: trialControl0
           ThemeControlStyle { theme: root.theme; control: trialControl0 }
@@ -57,7 +72,36 @@ Column {
       visible: !!root.bridge.activeConversation
       text: (root.theme.performative ? "chats" : "All conversations") + (root.bridge.unreadMessages > 0 ? " · " + root.bridge.unreadMessages : "")
       theme: root.theme
+      primary: root.bridge.unreadMessages > 0
       onClicked: root.bridge.closeConversation()
+    }
+  }
+  Flow {
+    id: navigation
+    width: parent.width
+    spacing: root.theme.spacing.sm
+    visible: root.bridge.unreadConversations.length > 0 || !!root.bridge.lastConversation
+    height: visible ? implicitHeight : 0
+    Repeater {
+      model: root.bridge.unreadConversations
+      ChatButton {
+        required property var modelData
+        objectName: "unreadChat-" + modelData.id
+        theme: root.theme; primary: true
+        width: Math.min(implicitWidth, navigation.width)
+        text: String(modelData.unread_count) + " • " + root.conversationLabel(modelData)
+        Accessible.name: modelData.unread_count + " unread messages in " + root.conversationLabel(modelData)
+        onClicked: root.bridge.selectConversation(modelData.id)
+      }
+    }
+    ChatButton {
+      objectName: "returnLastChat"
+      visible: !!root.bridge.lastConversation
+      width: Math.min(implicitWidth, navigation.width)
+      theme: root.theme
+      text: "↶ " + (root.bridge.lastConversation ? root.conversationLabel(root.bridge.lastConversation) : "")
+      Accessible.name: "Return to " + (root.bridge.lastConversation ? root.conversationLabel(root.bridge.lastConversation) : "last chat")
+      onClicked: root.bridge.selectConversation(root.bridge.lastConversationId)
     }
   }
   Text {
@@ -74,7 +118,7 @@ Column {
       radius: root.theme.cornerRadius
       color: conversationMouse.containsMouse ? root.theme.alpha(root.theme.foreground, 0.09) : root.theme.alpha(root.theme.foreground, 0.045)
       Column {
-        anchors.left: parent.left; anchors.right: unreadLabel.left
+        anchors.left: parent.left; anchors.right: unreadBadge.left
         anchors.leftMargin: root.theme.spacing.lg; anchors.rightMargin: root.theme.spacing.md
         anchors.verticalCenter: parent.verticalCenter
         Text {
@@ -91,13 +135,19 @@ Column {
           color: root.theme.muted; font.pixelSize: root.theme.font.caption
         }
       }
-      Text {
-        Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
-        id: unreadLabel
+      Rectangle {
+        id: unreadBadge
         anchors.right: parent.right; anchors.rightMargin: root.theme.spacing.lg; anchors.verticalCenter: parent.verticalCenter
         visible: Number(modelData.unread_count || 0) > 0
+        width: unreadLabel.implicitWidth + root.theme.space(14); height: root.theme.space(24)
+        radius: root.theme.cornerRadius; color: root.theme.accent
+        Text {
+        Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
+        id: unreadLabel
+        anchors.centerIn: parent
         text: String(modelData.unread_count)
-        color: root.theme.accent; font.pixelSize: root.theme.font.caption; font.bold: true
+        color: root.theme.accentText; font.pixelSize: root.theme.font.caption; font.bold: true
+        }
       }
       MouseArea {
         id: conversationMouse
@@ -118,7 +168,7 @@ Column {
       MessageFeed {
         width: parent.width
         height: root.availableHeight > 0
-          ? Math.max(root.theme.space(140), root.availableHeight - messageHeader.height - composer.implicitHeight - root.spacing * 2)
+          ? Math.max(root.theme.space(140), root.availableHeight - messageHeader.height - navigation.height - composer.implicitHeight - root.spacing * (navigation.visible ? 3 : 2))
           : root.theme.space(140)
         bridge: root.bridge; theme: root.theme; conversationId: root.bridge.activeConversationId
       }

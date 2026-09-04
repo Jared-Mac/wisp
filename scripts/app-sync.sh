@@ -20,10 +20,20 @@ fi
 
 mkdir -p "$destination" "$bin_root" "$desktop_root" "$icon_root" "$service_root"
 
+if [[ -d "$repo_dir/native/video" ]]; then
+  bash "$repo_dir/scripts/build-video-ui.sh"
+fi
+
 if command -v rsync >/dev/null 2>&1; then
   rsync --archive --delete "$source_dir" "$destination/"
 else
   cp -a "$source_dir". "$destination/"
+fi
+
+if [[ -f "$repo_dir/target/video-ui/libwispvideo.so" ]]; then
+  mkdir -p "$destination/native/WispVideo"
+  install -m 0755 "$repo_dir/target/video-ui/libwispvideo.so" "$destination/native/WispVideo/"
+  install -m 0644 "$repo_dir/target/video-ui/qmldir" "$destination/native/WispVideo/"
 fi
 
 install -m 0755 "$repo_dir/scripts/wisp-ui.sh" "$bin_root/wisp-ui"

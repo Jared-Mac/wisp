@@ -32,6 +32,32 @@ Item {
   readonly property var minimum: dockTree ? Tiles.minimum(dockTree,gap,minWidth,minHeight) : ({width:0,height:0})
   readonly property var rectangles: dockTree ? Tiles.geometry(dockTree,canvas.contentWidth,canvas.contentHeight,gap,minWidth,minHeight) : ({})
   readonly property int paneCount: panes.count
+  Binding { target: root.bridge; property: "mediaTileHost"; value: root }
+  function videoFor(id) {
+    if (String(id).indexOf("video:") !== 0) return null
+    try { return JSON.parse(String(id).slice(6)) } catch (_) { return null }
+  }
+  function openVideo(video) {
+    var id = "video:" + JSON.stringify({participant:String(video.participant),source:String(video.source)})
+    var existing = Tiles.leaves(tree).filter(function(n) { return n.id === id })[0]
+    if (existing) return
+    if (paneCount >= 16) { bridge.lastError = "Close a tile before watching another stream."; bridge.watchVideo(video,false); return }
+    // Streaming leaves are ephemeral and never automatically re-watch on launch.
+    var leaf = {key:key(),id:id}
+    commit(Tiles.insert(Tiles.copy(tree), activeKey, leaf, "right", key()))
+    if (!bridge.mainWindowOpen || !bridge.workspaceLayout.streamsAsTiles || paneCount > 8) detach(leaf.key)
+  }
+  function syncVideos() {
+    var next = Tiles.copy(tree)
+    Tiles.leaves(tree).forEach(function(n) {
+      var video = root.videoFor(n.id)
+      if (!video) return
+      var present = root.bridge.remoteVideos.some(function(v) { return v.participant === video.participant && v.source === video.source && (v.subscribed || v.surface_open) })
+      if (!present) next = Tiles.remove(next, n.key)
+    })
+    if (!next) next = {key:key(),id:""}
+    if (JSON.stringify(next) !== JSON.stringify(tree)) commit(next)
+  }
   Binding { target: root.bridge; property: "detachedChatFocused"; value: Object.keys(root.popoutFocus).some(function(k) { return root.popoutFocus[k] }) }
   function detach(nodeKey) {
     if (detachedKeys.indexOf(nodeKey)<0) detachedKeys=detachedKeys.concat([nodeKey])
@@ -59,8 +85,13 @@ Item {
   function commit(next) {
     tree=next
     reconcile(panes,Tiles.leaves(tree)); reconcile(dividers,Tiles.splits(tree))
+    detachedKeys=detachedKeys.filter(function(k) { return !!Tiles.find(root.tree,k) })
     if (!Tiles.find(tree,activeKey)) activeKey=Tiles.leaves(tree)[0].key
-    if (loaded) bridge.workspaceLayout.chatTiles=JSON.stringify(tree)
+    if (loaded) {
+      var saved = Tiles.copy(tree)
+      Tiles.leaves(tree).forEach(function(n) { if (root.videoFor(n.id)) saved = saved ? Tiles.remove(saved,n.key) : null })
+      bridge.workspaceLayout.chatTiles=JSON.stringify(saved || {key:"pane-0",id:""})
+    }
   }
   function initialize() {
     if (loaded || !bridge.workspaceLayout.ready || bridge.conversations.length===0) return
@@ -76,6 +107,7 @@ Item {
     var open=bridge.conversations.filter(function(c) { return !c.tab_closed })
     var next=Tiles.copy(tree), used=Tiles.leaves(next).map(function(n) { return n.id })
     Tiles.leaves(next).forEach(function(n) {
+      if (root.videoFor(n.id)) return
       var c=bridge.conversationById(n.id)
       if (!c || c.tab_closed) {
         var candidate=open.filter(function(c) { return used.indexOf(String(c.id))<0 })[0]
@@ -89,6 +121,7 @@ Item {
     var node=Tiles.find(tree,nodeKey)
     if (!node || node.a) return
     activeKey=nodeKey
+    if (videoFor(node.id)) return
     routing=true
     var conversation=bridge.conversationById(node.id)
     if (node.id && (bridge.activeConversationId!==node.id || (conversation && conversation.tab_closed))) bridge.selectConversation(node.id)
@@ -97,6 +130,7 @@ Item {
   function choose(nodeKey,id) {
     var next=Tiles.copy(tree), node=Tiles.find(next,nodeKey)
     if (!node) return
+    if (videoFor(node.id)) { addConversation(nodeKey,id); return }
     node.id=String(id); commit(next); activate(nodeKey)
   }
   function route(id) {
@@ -113,6 +147,11 @@ Item {
     }
     else {
       var next=Tiles.copy(tree)
+      if (videoFor(Tiles.find(next,activeKey).id)) {
+        var chat=Tiles.leaves(next).filter(function(n) { return !root.videoFor(n.id) })[0]
+        if (!chat) { addConversation(activeKey,id); return }
+        activeKey=chat.key
+      }
       Tiles.find(next,activeKey).id=String(id); commit(next)
     }
   }
@@ -133,8 +172,10 @@ Item {
     activate(leaf.key)
   }
   function closePane(nodeKey) {
-    if (panes.count<=1) return
-    commit(Tiles.remove(Tiles.copy(tree),nodeKey))
+    var node = Tiles.find(tree,nodeKey), video = node ? videoFor(node.id) : null
+    if (panes.count<=1 && !video) return
+    if (video) bridge.watchVideo(video,false)
+    commit(Tiles.remove(Tiles.copy(tree),nodeKey) || {key:key(),id:""})
     activate(activeKey) // Closing a tile never closes/deletes the conversation.
   }
   function resize(nodeKey,delta) {
@@ -159,6 +200,7 @@ Item {
     target: root.bridge.workspaceLayout
     function onReadyChanged() { root.initialize() }
     function onResetRequested() {
+      Tiles.leaves(root.tree).forEach(function(n) { var video=root.videoFor(n.id); if(video) root.bridge.watchVideo(video,false) })
       root.detachedKeys=[]
       root.commit({key:root.key(),id:String(root.bridge.activeConversationId || "")})
       root.syncConversations()
@@ -168,6 +210,11 @@ Item {
     target: root.bridge
     function onConversationsChanged() { root.syncConversations() }
     function onActiveConversationIdChanged() { root.route(root.bridge.activeConversationId) }
+    function onMediaWatchReady(video) { root.openVideo(video) }
+    function onRemoteVideosChanged() { root.syncVideos() }
+    function onMainWindowOpenChanged() {
+      if (!root.bridge.mainWindowOpen) Tiles.leaves(root.tree).forEach(function(n) { if (root.videoFor(n.id)) root.detach(n.key) })
+    }
   }
   ListModel { id: panes }
   ListModel { id: dividers }
@@ -186,6 +233,8 @@ Item {
         id: tileHost
         required property string nodeKey
         required property int index
+        readonly property string contentId: { var node=Tiles.find(root.tree,nodeKey); return node ? node.id : "" }
+        readonly property var video: root.videoFor(contentId)
         readonly property var rect: root.rectangles[nodeKey] || ({x:0,y:0,width:0,height:0})
         readonly property bool detached: root.detachedKeys.indexOf(nodeKey)>=0
         readonly property bool popoutActive: detached && popout.contentItem.Window.active
@@ -199,7 +248,7 @@ Item {
           id: popout
           objectName: "chatPopout-" + tileHost.nodeKey
           visible: tileHost.detached
-          title: (workspace.current ? workspace.label(workspace.current) : "Chat") + " — Wisp"
+          title: (tileHost.video ? tileHost.video.participant + " · " + tileHost.video.source : workspace.current ? workspace.label(workspace.current) : "Chat") + " — Wisp"
           implicitWidth: root.theme.space(640); implicitHeight: root.theme.space(720)
           minimumSize: Qt.size(root.minWidth,root.minHeight)
           color: root.theme.background
@@ -212,6 +261,7 @@ Item {
         }
         ConversationWorkspace {
         id: workspace
+        visible: !tileHost.video
         objectName: "chatTile-" + tileHost.nodeKey
         parent: tileHost.detached ? popout.contentItem : tileHost
         anchors.fill: parent
@@ -231,6 +281,20 @@ Item {
         onTileDragged: function(px,py) { var p=mapToItem(root,px,py); root.dragAt(tileHost.nodeKey,p.x,p.y) }
         onTileDropped: root.finishDrag()
         onTileDragCanceled: root.cancelDrag()
+        }
+        Loader {
+          active: !!tileHost.video
+          parent: tileHost.detached ? popout.contentItem : tileHost
+          anchors.fill: parent
+          sourceComponent: RemoteVideoTile {
+            bridge: root.bridge; theme: root.theme; video: tileHost.video; detached: tileHost.detached
+            onPopOutRequested: root.detach(tileHost.nodeKey)
+            onDockRequested: root.attach(tileHost.nodeKey)
+            onCloseRequested: root.closePane(tileHost.nodeKey)
+            onTileDragged: function(px,py) { var p=mapToItem(root,px,py); root.dragAt(tileHost.nodeKey,p.x,p.y) }
+            onTileDropped: root.finishDrag()
+            onTileDragCanceled: root.cancelDrag()
+          }
         }
       }
     }

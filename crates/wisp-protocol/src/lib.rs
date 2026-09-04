@@ -442,6 +442,9 @@ pub struct MediaState {
     pub remote_video_participants: Vec<String>,
     #[serde(default)]
     pub active_speakers: Vec<String>,
+    /// Receiver-local, pre-volume audio levels; never affects transmitted audio.
+    #[serde(default)]
+    pub remote_audio_levels: std::collections::BTreeMap<String, u8>,
     #[serde(default)]
     pub received_video_frames: u64,
     #[serde(default)]

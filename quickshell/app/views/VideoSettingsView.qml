@@ -1,4 +1,6 @@
 import QtQuick
+import QtQuick.Controls
+import "../components"
 
 Column {
   id: root
@@ -10,6 +12,19 @@ Column {
   readonly property var camera: root.bridge.cameraState
   readonly property var video: root.bridge.videoSettings
   readonly property bool publishing: root.bridge.sharing || root.bridge.cameraActive
+  CheckBox {
+    id: tilePreference
+    width: parent.width
+    text: "Open watched streams as tiles when the main window is open"
+    checked: root.bridge.workspaceLayout.streamsAsTiles
+    onToggled: root.bridge.workspaceLayout.setStreamsAsTiles(checked)
+    ThemeControlStyle { theme: root.theme; control: tilePreference }
+    contentItem: Text {
+      text: tilePreference.text; wrapMode: Text.Wrap
+      leftPadding: tilePreference.indicator.width + tilePreference.spacing
+      color: root.theme.foreground; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
+    }
+  }
 
   Item {
     width: parent.width

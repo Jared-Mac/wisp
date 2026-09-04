@@ -28,6 +28,12 @@ Rectangle {
   property string confirmationId: ""
   readonly property string currentId: tiled ? selectedId : String(bridge.activeConversationId || "")
   readonly property var current: bridge.conversationById(currentId)
+  property string focusKey: ""
+  readonly property bool chatHasFocus: visible && !!root.Window.active && (!tiled || paneActive) && !!current
+  function updateChatFocus() { if (focusKey) bridge.setChatFocus(focusKey, chatHasFocus ? currentId : "") }
+  onChatHasFocusChanged: updateChatFocus()
+  onCurrentIdChanged: updateChatFocus()
+  Component.onDestruction: bridge.setChatFocus(focusKey, "")
   readonly property color chatBorderColor: bridge.chatColors.colorFor(currentId, theme.conversationBorder)
   color: theme.surface
   radius: theme.cornerRadius
@@ -52,7 +58,7 @@ Rectangle {
       bridge.selectConversation(tabIds[0])
     else if (current && current.tab_closed && tabIds.length === 0) bridge.closeConversation()
   }
-  Component.onCompleted: syncTabs()
+  Component.onCompleted: { focusKey = "tile-" + (++bridge.chatFocusSerial); syncTabs(); updateChatFocus() }
   onVisibleChanged: if (visible) syncTabs()
   Connections { target: root.bridge; function onConversationsChanged() { root.syncTabs() } }
 
@@ -196,6 +202,14 @@ Rectangle {
       Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
       Binding on font.pixelSize { when: root.theme.terminal; value: root.theme.font.caption; restoreMode: Binding.RestoreBindingOrValue }
        text: "Room settings…"; visible: !!(root.current && root.current.spot_id); height: visible ? implicitHeight : 0; onTriggered: roomManager.manage(root.currentId) }
+    MenuItem {
+      id: muteChat
+      objectName: "muteChatNotifications"
+      text: root.bridge.chatNotificationsMuted(root.currentId) ? "Unmute chat notifications" : "Mute chat notifications"
+      enabled: !!root.currentId
+      onTriggered: root.bridge.toggleChatNotifications(root.currentId)
+      ThemeControlStyle { theme: root.theme; control: muteChat }
+    }
     MenuSeparator {}
     MenuItem {
       id: trialControl3

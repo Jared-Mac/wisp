@@ -1,7 +1,10 @@
 import QtQuick
+import "../components"
 
 Column {
   id: root
+  objectName: "settingsMenu"
+  property string section: "media"
 
   required property var bridge
   required property var theme
@@ -32,7 +35,24 @@ Column {
     }
   }
 
+  Flow {
+    width: parent.width
+    spacing: root.theme.spacing.sm
+    Repeater {
+      model: [{id:"media",label:"Audio / Video"},{id:"appearance",label:"Appearance"},{id:"notifications",label:"Notifications & Chat"},{id:"devices",label:"Devices & Privacy"}]
+      ChatButton {
+        required property var modelData
+        theme: root.theme; text: modelData.label
+        objectName: "settingsTab-" + modelData.id
+        primary: root.section === modelData.id
+        onClicked: root.section = modelData.id
+      }
+    }
+  }
+
   Rectangle {
+    // Tab content stays instantiated so changing tabs never resets controls.
+    visible: root.section === "appearance"
     width: parent.width
     height: appearanceSettings.implicitHeight + root.theme.spacing.xxl * 2
     radius: root.theme.cornerRadius
@@ -48,6 +68,7 @@ Column {
   }
 
   Rectangle {
+    visible: root.section === "notifications"
     width: parent.width
     height: notificationSettings.implicitHeight + root.theme.spacing.xxl * 2
     radius: root.theme.cornerRadius
@@ -66,6 +87,7 @@ Column {
   }
 
   Rectangle {
+    visible: root.section === "devices"
     width: parent.width
     height: deviceSettings.implicitHeight + root.theme.spacing.xxl * 2
     radius: root.theme.cornerRadius
@@ -85,6 +107,7 @@ Column {
   }
 
   Rectangle {
+    visible: root.section === "media"
     width: parent.width
     height: videoSettings.implicitHeight + root.theme.spacing.xxl * 2
     radius: root.theme.cornerRadius
@@ -104,6 +127,7 @@ Column {
   }
 
   Rectangle {
+    visible: root.section === "media"
     width: parent.width
     height: audioSettings.implicitHeight + root.theme.spacing.xxl * 2
     radius: root.theme.cornerRadius
@@ -123,7 +147,7 @@ Column {
   }
 
   Rectangle {
-    visible: !!root.anchorController
+    visible: root.section === "appearance" && !!root.anchorController
     width: parent.width
     height: visible ? desktopSettings.implicitHeight + root.theme.spacing.xxl * 2 : 0
     radius: root.theme.cornerRadius
