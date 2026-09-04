@@ -55,7 +55,9 @@ ShellRoot {
       if (!editor) { Qt.quit(); return }
       test.originalCaret = editor.cursorDelegate
       editor.text = "This is a chat draft, not a command."
-      appearance.palette = "performative"
+      appearance.palette = "ash_olive"
+      test.check(!theme.tui && theme.cornerRadius === 9, "palette alone keeps Classic structure")
+      theme.profile = "performative"
       editor.forceActiveFocus()
     }
   }
@@ -63,7 +65,7 @@ ShellRoot {
     interval: 350; running: true
     onTriggered: {
       var editor = test.find(composer, "mainComposerEditor")
-      test.check(theme.terminal && theme.cornerRadius === 0, "Performative overrides Classic styling")
+      test.check(theme.terminal && theme.cornerRadius === 0, "Performative appearance selects its structure")
       test.check(button.contentItem.text === "[Settings]", "controls use brackets")
       test.check(button.background.color == "#b7baad" && button.contentItem.color == "#000000", "selection uses legible ash inverse, not mint")
       test.check(theme.statusBackground != theme.accent && theme.statusText == theme.foreground, "status bar uses a neutral dark surface")
@@ -78,6 +80,8 @@ ShellRoot {
       test.check(editor.activeFocus, "editor remains focusable")
       test.check(bridge.commandCount === 0, "appearance sends no commands")
       appearance.palette = "wisp"
+      test.check(theme.performative && theme.cornerRadius === 0, "Performative stays selected with Wisp colors")
+      theme.profile = "legacy"
     }
   }
   Timer {

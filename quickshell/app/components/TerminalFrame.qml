@@ -7,6 +7,7 @@ Item {
   required property var theme
   property string title: ""
   property color ink: theme.surfaceBorder
+  property color titleInk: ink
   property bool emphasized: false
   readonly property bool quiet: theme.cleanTui
   visible: theme.tui
@@ -39,7 +40,7 @@ Item {
       anchors.fill: parent
       text: root.quiet ? root.title : "─ " + root.title + " ─"
       elide: Text.ElideRight
-      color: root.ink
+      color: root.titleInk
       font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
     }
   }

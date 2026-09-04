@@ -20,7 +20,7 @@ Column {
     Text {
     anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
     text: "ROOMS"
-    color: root.theme.tui ? root.theme.warning : root.theme.muted
+    color: root.theme.roomSectionColor
     font.family: root.theme.font.family
     font.pixelSize: root.theme.font.caption
     font.weight: Font.Bold

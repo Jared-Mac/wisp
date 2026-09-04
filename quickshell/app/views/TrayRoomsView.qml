@@ -26,7 +26,7 @@ Column {
     contentItem: Item {
       Text {
         anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
-        text: root.theme.tui ? "┌─ 01: /rooms" : "ROOMS"; color: root.theme.tui ? root.theme.warning : root.theme.muted
+        text: root.theme.tui ? "┌─ 01: /rooms" : "ROOMS"; color: root.theme.roomSectionColor
         font.family: root.theme.font.family
         font.pixelSize: root.theme.font.caption; font.weight: Font.Bold
         font.letterSpacing: root.theme.terminal ? 1 : 0

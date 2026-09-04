@@ -31,7 +31,7 @@ ShellRoot {
     bridge.snapshot=next
   }
   Wisp.WispAppearance { id: appearance; environment: "desktop"; Component.onCompleted: setPalette("performative") }
-  Wisp.WispTheme { id: theme; profile: "terminal"; appearanceController: appearance }
+  Wisp.WispTheme { id: theme; profile: "performative"; appearanceController: appearance }
   Wisp.WispBridge {
     id: bridge
     mainWindowOpen: true

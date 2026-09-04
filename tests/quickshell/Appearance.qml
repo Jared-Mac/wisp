@@ -3,91 +3,52 @@ import Quickshell
 import "app" as Wisp
 
 ShellRoot {
-  Wisp.WispAppearance {
-    id: appearance
-    managed: Quickshell.env("WISP_TEST_UNMANAGED") === "1"
-      ? false : environment === "omarchy"
-  }
+  id: test
+  function check(ok, message) { if (!ok) console.error("APPEARANCE_FAILED " + message) }
+  Wisp.WispAppearance { id: appearance; managed: Quickshell.env("WISP_TEST_MANAGED") === "1" }
   Wisp.WispTheme { id: theme; profile: appearance.profile; appearanceController: appearance }
-  Wisp.WispTheme { id: popupTheme; profile: appearance.profile; appearanceController: appearance }
+  Wisp.WispTheme { id: popup; profile: appearance.profile; appearanceController: appearance }
   Timer {
-    running: true; interval: 200
+    running: true; interval: 150
     onTriggered: {
-      if (Quickshell.env("WISP_PALETTE_PERSIST")) {
-        var color = Quickshell.env("WISP_PALETTE_PERSIST")
-        if (Quickshell.env("WISP_PALETTE_RELOAD") === "1") {
-          if (appearance.palette !== color || popupTheme.paletteName !== color)
-            console.error("APPEARANCE_FAILED palette reload")
-        } else appearance.setPalette(color)
-        console.log("PALETTE_PERSIST_OK")
-        Qt.quit()
-        return
-      }
       var expected = Quickshell.env("WISP_EXPECT_APPEARANCE")
-      var defaultPerformative = Quickshell.env("WISP_EXPECT_PALETTE") === "performative"
-      if (theme.profile !== expected || theme.paletteName !== (defaultPerformative ? "performative" : "wisp")
-          || theme.background != (defaultPerformative ? "#000000" : "#151821") || theme.accent != (defaultPerformative ? "#a2b586" : "#2f8cff")
-          || theme.cornerRadius !== (defaultPerformative ? 0 : expected === "legacy" ? 9 : 2)
-          || theme.bodySize !== (expected === "legacy" ? 14 : 13))
-        console.error("APPEARANCE_FAILED profile=" + theme.profile
-          + " palette=" + theme.paletteName + " managed=" + appearance.managed
-          + " environment=" + appearance.environment)
-      else console.log("APPEARANCE_OK " + theme.profile + " " + theme.font.family)
-      var originalProfile = appearance.profile
-      for (var i = 0; i < 6; i++) {
-        var name = ["wisp", "graphite", "violet", "ember", "performative", "herdr"][i]
-        appearance.setPalette(name)
-        var expectedDanger = name === "performative" && !appearance.managed ? "#d56b75"
-          : name === "herdr" && !appearance.managed ? "#db302d" : "#ff7777"
-        if (appearance.profile !== originalProfile || theme.paletteName !== (appearance.managed ? "wisp" : name)
-            || popupTheme.accent !== theme.accent || theme.danger != expectedDanger)
-          console.error("APPEARANCE_FAILED palette " + name)
-        if (name === "performative" && !appearance.managed && !theme.cleanTui
-            && (theme.background != "#000000" || theme.accent != "#a2b586"
-                || theme.foreground != "#d3d5cf" || theme.warning != "#c9b458"
-                || !theme.terminal || theme.cornerRadius !== 0 || theme.fontFamily !== theme.monospaceFamily
-                || theme.surface != "#000000" || theme.titleSize !== 14
-                || theme.roomBorder != "#68613b" || theme.conversationBorder != "#70464c"
-                || theme.secondaryAccent != "#a291d4" || popupTheme.surfaceBorder != "#505747"
-                || theme.selectionBackground != "#b7baad" || theme.statusBackground != "#171914"
-                || theme.onlineIndicator != "#79b88a"))
-          console.error("APPEARANCE_FAILED performative tokens")
-        if (name === "herdr" && !appearance.managed && !theme.cleanTui
-            && (theme.background != "#001419" || theme.foreground != "#adb7b7"
-                || theme.accent != "#29a298" || theme.muted != "#637981"
-                || theme.selectionBackground != "#002c38" || theme.selectionText != "#fdf5e2"
-                || theme.onlineIndicator != "#849900" || theme.warning != "#b28500"
-                || theme.secondaryAccent != "#d23681" || theme.surfaceBorder != "#46636a"
-                || !theme.tui || !theme.terminal || theme.cornerRadius !== 0
-                || theme.font.family !== theme.herdrMonospaceFamily))
-          console.error("APPEARANCE_FAILED herdr tokens")
-        if (originalProfile === "clean_tui" && !appearance.managed
-            && (!theme.cleanTui || !theme.tui || !theme.terminal
-                || theme.cornerRadius !== 2 || theme.titleSize !== 14
-                || theme.selectionBackground != theme.alpha(theme.accent, 0.18)
-                || theme.selectionText != theme.foreground
-                || theme.statusBackground != theme.surface
-                || theme.statusText != theme.foreground
-                || theme.roomBorder != theme.alpha(theme.foreground, 0.18)
-                || theme.conversationBorder != theme.alpha(theme.foreground, 0.18)
-                || theme.surfaceBorder != theme.alpha(theme.foreground, 0.24)))
-          console.error("APPEARANCE_FAILED clean TUI tokens with " + name)
+      test.check(appearance.profile === expected, "migration profile " + appearance.profile + " expected " + expected)
+      test.check(appearance.palette === Quickshell.env("WISP_EXPECT_PALETTE"), "migration palette " + appearance.palette)
+      if (Quickshell.env("WISP_TEST_RELOAD") === "1") {
+        test.check(appearance.colorOptions.chatBorders && !appearance.colorOptions.chatHeadings
+          && !appearance.colorOptions.roomSections && !appearance.colorOptions.friendSections
+          && !appearance.colorOptions.friendNames && !appearance.colorOptions.senderNames, "color preferences persisted")
+      } else {
+        var profiles = ["performative","clean_tui","herdr","terminal","legacy"]
+        var palettes = ["ash_olive","herdr","wisp","graphite","violet","ember"]
+        profiles.forEach(function(style) {
+          appearance.setProfile(style)
+          var geometry = [theme.cornerRadius,theme.fontFamily,theme.bodySize,theme.titleSize,theme.tui,theme.cleanTui,theme.performative].join("|")
+          palettes.forEach(function(palette) {
+            appearance.setPalette(palette)
+            test.check(theme.profile === (appearance.managed ? "legacy" : style), "independent profile " + style + "/" + palette)
+            test.check(theme.paletteName === (appearance.managed ? "wisp" : palette), "independent palette " + palette)
+            test.check([theme.cornerRadius,theme.fontFamily,theme.bodySize,theme.titleSize,theme.tui,theme.cleanTui,theme.performative].join("|") === geometry, "palette must not change structure or font")
+            test.check(popup.background === theme.background && popup.profile === theme.profile, "both surfaces agree")
+            if (!appearance.managed && palette === "ash_olive") test.check(theme.background == "#000000" && theme.foreground == "#d3d5cf" && theme.accent == "#a2b586", "original colors retained")
+          })
+        })
+        appearance.setProfile("clean_tui"); appearance.setPalette("ash_olive")
+        var keys = ["chatBorders","chatHeadings","roomSections","friendSections","friendNames","senderNames"]
+        if (!appearance.managed) {
+          keys.forEach(function(key) { appearance.setColorOption(key,false) })
+          test.check(!theme.chatBordersColored && !theme.chatHeadingsColored && theme.roomSectionColor === theme.muted && theme.friendSectionColor === theme.muted, "all neutral")
+          keys.forEach(function(key) {
+            appearance.setColorOption(key,true)
+            keys.forEach(function(other) { test.check(theme.colorEnabled(other) === (other === key), "independent color toggle " + key + "/" + other) })
+            appearance.setColorOption(key,false)
+          })
+          appearance.setColorOption("chatBorders",true)
+          test.check(theme.cleanTui && theme.chatBordersColored && !theme.chatHeadingsColored && theme.roomSectionColor === theme.muted && theme.friendSectionColor === theme.muted, "Clean TUI supports chat-only colors")
+        }
       }
-      appearance.setPalette("wisp")
-      if (theme.cornerRadius !== (originalProfile === "legacy" ? 9 : 2)
-          || theme.terminal !== (originalProfile !== "legacy"))
-        console.error("APPEARANCE_FAILED base style restoration")
-      if (Quickshell.env("WISP_TEST_CHANGE")) appearance.setProfile(Quickshell.env("WISP_TEST_CHANGE"))
-      else Qt.quit()
-    }
-  }
-  Timer {
-    running: !!Quickshell.env("WISP_TEST_CHANGE"); interval: 450
-    onTriggered: {
-      var expected = Quickshell.env("WISP_EXPECT_CHANGED")
-      if (theme.profile !== expected || popupTheme.profile !== expected || appearance.error !== "")
-        console.error("APPEARANCE_FAILED switch " + theme.profile + " " + appearance.error)
-      else console.log("APPEARANCE_SWITCH_OK")
+      test.check(appearance.error === "", "preferences saved")
+      console.log("APPEARANCE_OK")
       Qt.quit()
     }
   }

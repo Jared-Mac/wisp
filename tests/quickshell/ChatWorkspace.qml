@@ -254,6 +254,32 @@ ShellRoot {
     if (test.mode === "settings" || test.mode === "themes" || test.mode === "saved") test.findItem(window.contentItem, "wispContent").toggleSettings()
     if (test.mode === "themes") test.findItem(window.contentItem, "settingsTab-appearance").clicked()
     if (test.mode === "panelsettings") compactContent.toggleSettings()
+    if (Quickshell.env("WISP_TEST_APPEARANCE_SETTINGS") === "1") {
+      test.findItem(test.compactMode ? compactSurface : window.contentItem, "settingsTab-appearance").clicked()
+    }
+  }
+  Timer {
+    interval: 250; running: !!Quickshell.env("WISP_TEST_COLOR_MODE")
+    onTriggered: {
+      themeAppearance.setPalette(Quickshell.env("WISP_TEST_PALETTE") || "ash_olive")
+      var mode = Quickshell.env("WISP_TEST_COLOR_MODE")
+      ;["chatBorders","chatHeadings","roomSections","friendSections","friendNames","senderNames"].forEach(function(key) {
+        themeAppearance.setColorOption(key, mode === "all" || mode === "chat-only" && (key === "chatBorders" || key === "chatHeadings"))
+      })
+    }
+  }
+  Timer {
+    interval: 1100; running: !!Quickshell.env("WISP_TEST_COLOR_MODE")
+    onTriggered: {
+      var surface = test.compactMode ? compactSurface : window.contentItem
+      var frame = test.findObject(surface, "conversationColorFrame", [])
+      if (frame) {
+        if (!theme.chatHeadingsColored) test.check(frame.titleInk === theme.muted, "neutral chat caption is wired to color setting")
+        else test.check(frame.titleInk === frame.parent.chatHeadingColor, "chat caption uses its assigned color")
+        if (theme.chatBordersColored) test.check(frame.ink === frame.parent.chatBorderColor, "chat rule uses its assigned color even in Clean TUI")
+      }
+      if (Quickshell.env("WISP_TEST_COLOR_MODE") === "chat-only") test.check(theme.chatBordersColored && theme.chatHeadingsColored && theme.roomSectionColor === theme.muted && theme.friendSectionColor === theme.muted, "chat-only colors leave activity sections neutral")
+    }
   }
   Timer {
     interval: 300; running: test.mode === "workspace"
@@ -296,10 +322,10 @@ ShellRoot {
         "Settings selects the independent Clean TUI interface live")
       test.check(bridge.sent.length === before && bridge.draftFor("porch") === draft,
         "Clean TUI switching preserves drafts and sends no commands")
-      var performative = test.findItem(window.contentItem, "palette-performative")
-      test.check(!!performative && performative.enabled, "Performative palette is available in Settings")
+      var performative = test.findItem(window.contentItem, "palette-ash_olive")
+      test.check(!!performative && performative.enabled, "Ash & Olive palette is available in Settings")
       if (performative) performative.clicked()
-      test.check(theme.paletteName === "performative" && theme.background == "#000000", "Settings selects Performative live")
+      test.check(theme.paletteName === "ash_olive" && theme.background == "#000000" && theme.cleanTui, "Ash & Olive preserves Clean TUI")
       test.check(bridge.sent.length === before && bridge.draftFor("porch") === draft, "palette switching preserves drafts and sends no commands")
       var herdr = test.findItem(window.contentItem, "palette-herdr")
       test.check(!!herdr && herdr.enabled, "Herdr palette is available in Settings")
@@ -307,6 +333,14 @@ ShellRoot {
       test.check(theme.paletteName === "herdr" && theme.background == "#001419"
         && theme.accent == "#29a298" && theme.tui, "Settings selects Herdr live")
       test.check(bridge.sent.length === before && bridge.draftFor("porch") === draft, "Herdr switching preserves drafts and sends no commands")
+      test.findItem(window.contentItem, "theme-performative").clicked()
+      test.check(theme.performative && theme.paletteName === "herdr", "Performative appearance supports Solarized Japan")
+      test.findItem(window.contentItem, "theme-herdr").clicked()
+      test.check(theme.herdr, "Herdr appearance retained")
+      var colored = theme.colorEnabled("roomSections")
+      test.findItem(window.contentItem, "color-option-roomSections").clicked()
+      test.check(theme.colorEnabled("roomSections") !== colored, "Settings toggles room accents independently")
+      test.findItem(window.contentItem, "color-option-roomSections").clicked()
       themeAppearance.setPalette(Quickshell.env("WISP_TEST_PALETTE") || "wisp")
     }
   }

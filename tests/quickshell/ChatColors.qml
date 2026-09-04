@@ -24,8 +24,8 @@ ShellRoot {
     property int sent: 0
     function send(name, args) { sent++; return "fixture" }
   }
-  QtObject { id: appearance; property string palette: "performative"; property bool managed: false }
-  Wisp.WispTheme { id: theme; profile: "terminal"; appearanceController: appearance }
+  QtObject { id: appearance; property string palette: "ash_olive"; property bool managed: false }
+  Wisp.WispTheme { id: theme; profile: "performative"; appearanceController: appearance }
   FloatingWindow {
     id: window
     visible: true; implicitWidth: 1000; implicitHeight: 600
@@ -73,6 +73,8 @@ ShellRoot {
       selector.forceActiveFocus(Qt.TabFocusReason)
       test.check(selector.background.border.color === first.chatBorderColor, "keyboard focus uses the conversation color")
       appearance.palette = "wisp"
+      test.check(theme.performative, "changing palette keeps Performative appearance")
+      theme.profile = "terminal"
     }
   }
   Timer {
@@ -80,7 +82,7 @@ ShellRoot {
     onTriggered: {
       test.check(!bridge.chatColors.error && bridge.sent === 0, "local save, no chat/media commands")
       var selector = test.find(first, "compactChatSelector")
-      test.check(selector.primary && selector.width === selector.availableHeaderWidth, "other palettes retain the full-width primary selector")
+      test.check(selector.width === selector.availableHeaderWidth && selector.selectorInk === first.chatHeadingColor, "Terminal Grid keeps full-width selector with configurable heading color")
       if (!test.failed) console.log("CHAT_COLORS_OK")
       Qt.quit()
     }

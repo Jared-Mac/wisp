@@ -32,13 +32,24 @@ QtObject {
 
   readonly property string paletteName: appearanceController ? appearanceController.palette : "wisp"
   readonly property bool customPalette: paletteName !== "wisp"
-  readonly property bool performative: paletteName === "performative"
-  readonly property bool herdr: paletteName === "herdr"
+  readonly property bool performative: profile === "performative"
+  readonly property bool herdr: profile === "herdr"
+  readonly property bool olivePalette: paletteName === "ash_olive" || paletteName === "performative"
+  readonly property bool herdrPalette: paletteName === "herdr"
+  function colorEnabled(key) {
+    return appearanceController && "colorOptions" in appearanceController
+      ? appearanceController.colorOptions[key] : key === "senderNames" || !cleanTui
+  }
+  readonly property bool chatBordersColored: colorEnabled("chatBorders")
+  readonly property bool chatHeadingsColored: colorEnabled("chatHeadings")
+  readonly property color roomSectionColor: colorEnabled("roomSections") ? warning : muted
+  readonly property color friendSectionColor: colorEnabled("friendSections") ? secondaryAccent : muted
   readonly property bool tui: cleanTui || performative || herdr || tuiTreatment
   readonly property var colors: {
     switch (paletteName) {
     // Black terminal canvas, restrained olive accents, and ash inverse selections.
-    case "performative": return {background:"#000000", surface:"#000000", accent:"#a2b586", muted:"#92988f"}
+    case "performative":
+    case "ash_olive": return {background:"#000000", surface:"#000000", accent:"#a2b586", muted:"#92988f"}
     // Herdr's Terminal theme over Jared's current Solarized Japan palette.
     case "herdr": return {background:"#001419", surface:"#001419", accent:"#29a298", muted:"#637981"}
     case "graphite": return {background:"#191b20", surface:"#23262d", accent:"#9bb9df", muted:"#a1a8b4"}
@@ -47,22 +58,22 @@ QtObject {
     default: return {background:"#151821", surface:"#1c202b", accent:"#2f8cff", muted:"#8d96a8"}
     }
   }
-  property color foreground: herdr ? "#adb7b7" : performative ? "#d3d5cf" : "#e8ecf3"
+  property color foreground: herdrPalette ? "#adb7b7" : olivePalette ? "#d3d5cf" : "#e8ecf3"
   property color background: colors.background
   property color surface: colors.surface
   property color accent: colors.accent
   property color muted: colors.muted
   readonly property color accentText: customPalette ? background : "white"
-  readonly property color selectionBackground: cleanTui ? alpha(accent, 0.18) : herdr ? "#002c38" : performative ? "#b7baad" : accent
-  readonly property color selectionText: cleanTui ? foreground : herdr ? "#fdf5e2" : performative ? background : accentText
-  readonly property color statusBackground: cleanTui ? surface : herdr ? "#002c38" : performative ? "#171914" : accent
-  readonly property color statusText: cleanTui ? foreground : herdr ? foreground : performative ? foreground : background
-  readonly property color onlineIndicator: herdr ? "#849900" : performative ? "#79b88a" : "#4bd38a"
-  property color danger: herdr ? "#db302d" : performative ? "#d56b75" : "#ff7777"
-  property color warning: herdr ? "#b28500" : performative ? "#c9b458" : "#f5b94c"
-  readonly property color secondaryAccent: herdr ? "#d23681" : performative ? "#a291d4" : foreground
-  readonly property color roomBorder: cleanTui ? alpha(foreground, 0.18) : herdr ? "#b28500" : performative ? "#68613b" : separator
-  readonly property color conversationBorder: cleanTui ? alpha(foreground, 0.18) : herdr ? "#d23681" : performative ? "#70464c" : separator
+  readonly property color selectionBackground: cleanTui ? alpha(accent, 0.18) : herdrPalette ? "#002c38" : olivePalette ? "#b7baad" : accent
+  readonly property color selectionText: cleanTui ? foreground : herdrPalette ? "#fdf5e2" : olivePalette ? background : accentText
+  readonly property color statusBackground: cleanTui ? surface : herdrPalette ? "#002c38" : olivePalette ? "#171914" : accent
+  readonly property color statusText: cleanTui || herdrPalette || olivePalette ? foreground : background
+  readonly property color onlineIndicator: herdrPalette ? "#849900" : olivePalette ? "#79b88a" : "#4bd38a"
+  property color danger: herdrPalette ? "#db302d" : olivePalette ? "#d56b75" : "#ff7777"
+  property color warning: herdrPalette ? "#b28500" : olivePalette ? "#c9b458" : "#f5b94c"
+  readonly property color secondaryAccent: herdrPalette ? "#d23681" : olivePalette ? "#a291d4" : foreground
+  readonly property color roomBorder: !colorEnabled("roomSections") ? separator : herdrPalette ? "#b28500" : olivePalette ? "#68613b" : separator
+  readonly property color conversationBorder: !chatBordersColored ? separator : herdrPalette ? "#d23681" : olivePalette ? "#70464c" : separator
 
   property int cornerRadius: cleanTui ? 2 : tui ? 0 : terminal ? 2 : 9
   property real spacingScale: 1.0
@@ -70,9 +81,9 @@ QtObject {
   property int captionSize: 12
   property int bodySize: terminal ? 13 : 14
   property int titleSize: tui ? 14 : terminal ? 16 : 18
-  readonly property color separator: cleanTui ? alpha(foreground, 0.14) : herdr ? "#23434a" : performative ? "#34382f" : alpha(foreground, 0.10)
+  readonly property color separator: cleanTui ? alpha(foreground, 0.14) : herdrPalette ? "#23434a" : olivePalette ? "#34382f" : alpha(foreground, 0.10)
   readonly property color focusBorder: alpha(accent, 0.85)
-  readonly property color surfaceBorder: cleanTui ? alpha(foreground, 0.24) : herdr ? "#46636a" : performative ? "#505747" : alpha(muted, 0.72)
+  readonly property color surfaceBorder: cleanTui ? alpha(foreground, 0.24) : herdrPalette ? "#46636a" : olivePalette ? "#505747" : alpha(muted, 0.72)
 
   function space(px) {
     var value = Number(px)

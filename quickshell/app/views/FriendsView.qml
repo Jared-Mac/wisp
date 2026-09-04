@@ -32,7 +32,7 @@ Column {
       Text {
         anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
         text: (root.theme.tui ? "┌─ 02: /friends" : "FRIENDS") + (root.collapsible ? " · " + root.bridge.friends.length : "")
-        color: root.theme.tui ? root.theme.secondaryAccent : root.theme.muted
+        color: root.theme.friendSectionColor
         font.family: root.theme.font.family
         font.pixelSize: root.theme.font.caption; font.weight: Font.Bold
         font.letterSpacing: root.theme.terminal ? 1 : 0

@@ -88,12 +88,12 @@ Item {
     }
     TerminalFrame {
       width: parent.width; height: activity.roomsSize
-      theme: root.theme; title: root.theme.cleanTui ? "01 /rooms" : "01: /rooms"; ink: root.theme.cleanTui ? root.theme.muted : root.theme.warning
+      theme: root.theme; title: root.theme.cleanTui ? "01 /rooms" : "01: /rooms"; ink: root.theme.roomSectionColor
     }
     TerminalFrame {
       y: activity.roomsSize + root.handleSize
       width: parent.width; height: parent.height - y
-      theme: root.theme; title: root.theme.cleanTui ? "02 /friends" : "02: /friends"; ink: root.theme.cleanTui ? root.theme.muted : root.theme.secondaryAccent
+      theme: root.theme; title: root.theme.cleanTui ? "02 /friends" : "02: /friends"; ink: root.theme.friendSectionColor
     }
   }
   ResizeHandle {

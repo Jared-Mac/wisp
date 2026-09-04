@@ -2,7 +2,7 @@
 
 **Clean TUI** is an optional Wisp interface profile inspired by the restraint of
 Herdr without copying its layout or requiring its palette. Select it under
-**Settings → Appearance → Clean TUI · focused**. Terminal Grid and Classic remain
+**Settings → Appearance → Clean TUI**. Performative, Herdr, Terminal Grid and Classic remain
 available unchanged.
 
 The profile treats terminal character as rhythm rather than decoration:
@@ -18,8 +18,10 @@ The profile treats terminal character as rhythm rather than decoration:
 
 Clean TUI changes presentation only. Existing tiles, drafts, conversations,
 permissions, calls, and media state are retained when switching to or from it.
-Color palettes remain independent: Herdr, Performative, Wisp blue, Graphite,
-Violet, and Ember can all be paired with Clean TUI.
+Color palettes remain independent: Solarized Japan, Ash & Olive, Wisp blue,
+Graphite, Violet, and Ember can all be paired with Clean TUI. Color accent toggles
+allow distinct chat rules/headings with neutral room/friends sections, or any
+other combination, without changing the layout.
 
 The embedded Omarchy panel remains host-managed. It uses its compact adapter
 treatment and Omarchy's colors and metrics rather than inheriting the standalone

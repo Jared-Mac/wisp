@@ -122,7 +122,9 @@ presentations over one bridge: a compositor-managed `FloatingWindow` app and a
 compact layer-shell `PanelWindow` for the generic system tray. The shared
 content switches between one and two columns as the application window changes
 size. Wisp-owned windows persist an interface profile independently from their
-color palette: Classic, Terminal Grid, or the restrained, narrow-rail Clean TUI.
+color palette: Classic, Terminal Grid, Performative, Herdr, or the restrained,
+narrow-rail Clean TUI. Palette selection never changes style metrics; independent
+color-accent preferences control chat rules/headings, activity sections and names.
 All profiles consume the same bridge state and expose the same actions.
 `quickshell/Panel.qml` is a thin optional Omarchy adapter that embeds the
 same compact presentation in Omarchy's native anchored popup. It opts into the

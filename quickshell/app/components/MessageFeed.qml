@@ -66,7 +66,7 @@ Rectangle {
         spacing: root.theme.spacing.lg
         Text {
           text: root.theme.cleanTui ? String(message.modelData.sender.display_name || "") : root.theme.tui ? "<" + String(message.modelData.sender.display_name || "") + ">" : String(message.modelData.sender.display_name || "")
-          color: message.modelData.sender.id === root.bridge.selfState.id ? root.theme.accent : root.theme.secondaryAccent
+          color: !root.theme.colorEnabled("senderNames") ? root.theme.foreground : message.modelData.sender.id === root.bridge.selfState.id ? root.theme.accent : root.theme.secondaryAccent
           font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption; font.bold: true
         }
         Text {

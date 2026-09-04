@@ -192,8 +192,8 @@ for everyone, with an irreversible-action warning, red **Yes, clear**, and norma
 saved per user on the host. Clearing overrides file Keep flags; it does not erase
 existing backups or copies already saved outside Wisp.
 
-**Settings → Appearance** selects **Terminal Grid**, **Clean TUI**, or
-**Classic** (the original appearance). All three interface styles have exactly the same features,
+**Settings → Appearance** selects **Performative**, **Clean TUI**, **Herdr**,
+**Terminal Grid**, or **Classic** (the original appearance). All interface styles have exactly the same features,
 chats, permissions, controls, and shortcuts. The choice applies immediately to
 both the tray popup and full app, is saved locally in
 `~/.config/wisp/appearance.json`, and survives restarts. Switching themes does
@@ -209,21 +209,20 @@ Rooms/Friends activity rail, replaces colorful full-pane boxes with quiet rules,
 uses neutral inactive chrome and subtle selections, and simplifies transcript
 names and timestamps. It keeps chat tiling, pop-outs, the searchable chat picker,
 keyboard controls, prompts, and the live status line. Interface style and color
-palette are independent, so Clean TUI can use Herdr, Wisp blue, or any other
+palette are independent, so Clean TUI can use Ash & Olive, Solarized Japan, Wisp blue, or any other
 palette without changing room, message, or media state.
 
 **Performative** is the default for new desktop/CachyOS installations; saved
 appearance choices, host-managed Omarchy adapters, and unknown environments are
 preserved. A standalone window opened from Omarchy uses this same Wisp-owned
 default and can be changed independently without restyling the bar popup.
-Choose **Wisp blue**, **Graphite**, **Violet**, **Ember**, **Performative**, or
-**Herdr** independently of the
-Terminal Grid/Clean TUI/Classic style. Wisp blue keeps the original palette; status and warning
-colors retain their meaning across palettes. Terminal uses monospace typography,
-square-edged controls, fine keylines, and outlined selections. Herdr is an
-additional TUI treatment modeled on Jared's Herdr setup: Solarized Japan colors,
-cyan focus, deep blue-green selection, soft pane borders, and JetBrains Mono.
-Selecting it does not replace or modify any other appearance option.
+Choose **Wisp blue**, **Graphite**, **Violet**, **Ember**, **Ash & Olive** (formerly
+Performative colors), or **Solarized Japan** (formerly Herdr colors) independently
+of the appearance. Palettes never change typography or geometry. Six independent
+toggles control chat borders/rules, chat headings, room sections, friends sections,
+online friend names, and message sender names. Clean TUI can use colored chat
+rules while rooms/friends remain neutral. Color identity assignments survive
+turning accents off and on. See [appearance and palettes](docs/appearance-and-palettes.md).
 
 Presence choices, microphone mute, and deafen stay pinned in the header in
 both windows, including outside a room and while scrolling. Room-specific camera,

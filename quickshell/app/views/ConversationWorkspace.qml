@@ -34,18 +34,18 @@ Rectangle {
   onChatHasFocusChanged: updateChatFocus()
   onCurrentIdChanged: updateChatFocus()
   Component.onDestruction: bridge.setChatFocus(focusKey, "")
-  readonly property color chatBorderColor: bridge.chatColors.colorFor(currentId, theme.conversationBorder)
+  readonly property color chatBorderColor: theme.chatBordersColored ? bridge.chatColors.colorFor(currentId, theme.conversationBorder) : theme.surfaceBorder
+  readonly property color chatHeadingColor: theme.chatHeadingsColored ? bridge.chatColors.colorFor(currentId, theme.muted) : theme.muted
   color: theme.cleanTui ? theme.background : theme.surface
   radius: theme.cornerRadius
   border.width: theme.tui ? 0 : theme.terminal || tiled ? 1 : 0
-  border.color: tiled && paneActive && canClosePane ? theme.alpha(theme.accent,0.65) : theme.conversationBorder
+  border.color: theme.chatBordersColored ? chatBorderColor : tiled && paneActive && canClosePane ? theme.alpha(theme.accent,0.65) : theme.conversationBorder
   TerminalFrame {
     objectName: "conversationColorFrame"
     anchors.fill: parent; theme: root.theme
     title: root.theme.cleanTui ? "03 /chat" : "03: /chat/" + root.label(root.current)
-    ink: root.theme.cleanTui
-      ? (root.paneActive ? root.theme.accent : root.theme.surfaceBorder)
-      : root.chatBorderColor
+    ink: root.theme.chatBordersColored ? root.chatBorderColor : root.paneActive ? root.theme.accent : root.theme.surfaceBorder
+    titleInk: root.chatHeadingColor
     emphasized: root.paneActive && root.tiled && root.canClosePane
   }
 
@@ -133,8 +133,8 @@ Rectangle {
       width: root.theme.tui
         ? Math.min(availableHeaderWidth, Math.max(root.theme.space(88), Math.min(root.theme.space(260), selectorTextMetrics.advanceWidth + root.theme.space(32))))
         : availableHeaderWidth
-      theme: root.theme; primary: !root.theme.tui
-      readonly property color selectorInk: root.theme.cleanTui ? root.theme.foreground : root.theme.tui ? (visualFocus ? root.chatBorderColor : root.theme.foreground) : root.theme.terminal ? root.theme.accent : root.theme.accentText
+      theme: root.theme; primary: !root.theme.tui && !root.theme.chatHeadingsColored
+      readonly property color selectorInk: !root.theme.tui && root.theme.chatHeadingsColored ? root.chatHeadingColor : root.theme.cleanTui ? root.theme.foreground : root.theme.tui ? (visualFocus ? root.chatBorderColor : root.theme.foreground) : root.theme.terminal ? root.theme.accent : root.theme.accentText
       Binding { target: chatSelector; property: "leftPadding"; value: root.theme.space(8); when: root.theme.tui; restoreMode: Binding.RestoreBindingOrValue }
       Binding { target: chatSelector; property: "rightPadding"; value: root.theme.space(8); when: root.theme.tui; restoreMode: Binding.RestoreBindingOrValue }
       Binding { target: chatSelector.background; property: "color"; value: root.theme.alpha(root.theme.foreground, chatSelector.down ? 0.10 : chatSelector.hovered ? 0.06 : root.theme.cleanTui ? 0 : 0.025); when: root.theme.tui; restoreMode: Binding.RestoreBindingOrValue }

@@ -19,7 +19,7 @@ Column {
   Component.onDestruction: bridge.setChatFocus(focusKey, "")
 
   function conversationLabel(c) { return c.label === "Hangout" ? "Room" : c.label }
-  readonly property color chatColor: root.bridge.chatColors.colorFor(root.bridge.activeConversationId, root.theme.muted)
+  readonly property color chatColor: root.theme.chatHeadingsColored ? root.bridge.chatColors.colorFor(root.bridge.activeConversationId, root.theme.muted) : root.theme.muted
   Item {
     id: messageHeader
     width: parent.width; height: root.theme.space(30)
