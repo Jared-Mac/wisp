@@ -165,8 +165,7 @@ for _ in $(seq 1 200); do
     .self.media.audio.denoiser_active == true and
     .self.media.audio.denoiser == "deepfilternet" and
     .self.media.audio.processing_latency_ms == 30 and
-    .self.media.audio.voice_gate_active == true and
-    (.self.media.audio.voice_gate_open | type) == "boolean" and
+    .self.media.audio.deepfilter_strength == 100 and
     (.self.media.audio.processing_time_us | type) == "number" and
     (.self.media.audio.processing_deadline_misses | type) == "number" and
     (.self.media.audio.capture_queue_ms | type) == "number" and
@@ -205,8 +204,7 @@ jq -e --argjson expect_input_level "$expect_input_level" '
   .self.media.audio.denoiser_active == true and
   .self.media.audio.denoiser == "deepfilternet" and
   .self.media.audio.processing_latency_ms == 30 and
-  .self.media.audio.voice_gate_active == true and
-  (.self.media.audio.voice_gate_open | type) == "boolean" and
+  .self.media.audio.deepfilter_strength == 100 and
   (.self.media.audio.processing_time_us | type) == "number" and
   (.self.media.audio.processing_deadline_misses | type) == "number" and
   (.self.media.audio.capture_queue_ms | type) == "number" and
@@ -398,8 +396,7 @@ target/debug/wispctl --socket "$test_dir/wispd.sock" audio preset studio \
     .denoiser_active == false and
     .denoiser == null and
     .processing_latency_ms == 0 and
-    .voice_gate_active == false and
-    .voice_gate_open == false
+    .deepfilter_strength == 100
   ' >/dev/null
 target/debug/wispctl --socket "$test_dir/wispd.sock" audio preset clear \
   | jq -e '
@@ -407,7 +404,13 @@ target/debug/wispctl --socket "$test_dir/wispd.sock" audio preset clear \
     .denoiser_active == true and
     .denoiser == "deepfilternet" and
     .processing_latency_ms == 30 and
-    .voice_gate_active == true
+    .deepfilter_strength == 100
+  ' >/dev/null
+target/debug/wispctl --socket "$test_dir/wispd.sock" audio strength 25 \
+  | jq -e '
+    .preset == "clear" and
+    .deepfilter_strength == 25 and
+    .denoiser_active == true
   ' >/dev/null
 
 target/debug/wispctl --socket "$test_dir/wispd.sock" ptt enable \

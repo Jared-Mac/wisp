@@ -124,10 +124,11 @@ automatically.
 6. Test mute, deafen, and push-to-talk.
 7. Select **Clear**, compare keyboard/fan/air-conditioner noise with **Studio**,
    and confirm the settings page reports `deepfilternet` active (or `rnnoise`
-   only if the fallback was needed). While nobody speaks, confirm it says
-   **Background held**, the queue remains near zero, and the late-frame counter
-   does not increase. Quiet speech should switch it to **Voice passing** without
-   clipping the first or last syllable.
+   only if the fallback was needed). Move the strength slider while speaking
+   and confirm the change applies without reconnecting. Start near 25%, then
+   raise it only as far as needed for the room noise. The queue should remain
+   near zero, the late-frame counter should not steadily increase, and quiet
+   speech should not lose its first or last syllable.
 8. Share one monitor, then one window; confirm both friends see a Watch control
    while no video window opens and no video is decoded automatically.
 9. Turn the camera on while sharing. Each friend opens both Watch controls and

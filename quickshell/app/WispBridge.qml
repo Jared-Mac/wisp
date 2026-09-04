@@ -173,8 +173,7 @@ Item {
           "denoiser_active": true,
           "denoiser": "deepfilternet",
           "processing_latency_ms": 30,
-          "voice_gate_active": true,
-          "voice_gate_open": false,
+          "deepfilter_strength": 100,
           "processing_time_us": 0,
           "processing_deadline_misses": 0,
           "capture_queue_ms": 0
@@ -305,9 +304,7 @@ Item {
     Object.keys(levels).forEach(function(name) {
       if (Number(levels[name]) >= 25 && (root.mediaState.remote_audio_participants || []).indexOf(name) >= 0 && names.indexOf(name) < 0) names.push(name)
     })
-    var localAudio = mediaState.audio || ({}), localSpeaking = !!localAudio.voice_gate_active
-      ? !!localAudio.voice_gate_open
-      : Number(localAudio.input_level || 0) >= 25
+    var localAudio = mediaState.audio || ({}), localSpeaking = Number(localAudio.input_level || 0) >= 25
     if (localSpeaking && !effectiveMuted && names.indexOf(selfState.display_name) < 0) names.push(selfState.display_name)
     return names
   }
@@ -358,8 +355,7 @@ Item {
     "denoiser_active": true,
     "denoiser": "deepfilternet",
     "processing_latency_ms": 30,
-    "voice_gate_active": true,
-    "voice_gate_open": false,
+    "deepfilter_strength": 100,
     "processing_time_us": 0,
     "processing_deadline_misses": 0,
     "capture_queue_ms": 0
@@ -968,6 +964,9 @@ Item {
   function setInputDevice(id) { saveSetting("set_input_device", { "id": id }) }
   function setOutputDevice(id) { saveSetting("set_output_device", { "id": id }) }
   function setAudioPreset(preset) { saveSetting("set_audio_preset", { "preset": preset }) }
+  function setDeepfilterStrength(strength) {
+    saveSetting("set_deepfilter_strength", { "strength": Math.max(0, Math.min(100, Math.round(strength))) })
+  }
   function refreshVideoDevices() { send("refresh_video_devices", {}) }
   function setCameraDevice(id) { saveSetting("set_camera_device", { "id": id }) }
   function setVideoQuality(quality) { saveSetting("set_video_quality", { "quality": quality }) }

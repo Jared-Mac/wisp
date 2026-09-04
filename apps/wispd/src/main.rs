@@ -730,8 +730,6 @@ impl Daemon {
         let snapshot = {
             let mut state = self.state.write().await;
             inventory.state.input_level = state.self_state.media.audio.input_level;
-            inventory.state.voice_gate_open =
-                inventory.state.voice_gate_active && state.self_state.media.audio.voice_gate_open;
             inventory.state.processing_time_us = state.self_state.media.audio.processing_time_us;
             inventory.state.processing_deadline_misses =
                 state.self_state.media.audio.processing_deadline_misses;
@@ -1085,7 +1083,8 @@ impl Daemon {
             "refresh_audio_devices"
             | "set_input_device"
             | "set_output_device"
-            | "set_audio_preset" => self.audio_command(command).await,
+            | "set_audio_preset"
+            | "set_deepfilter_strength" => self.audio_command(command).await,
             "refresh_video_devices"
             | "set_camera_device"
             | "set_video_quality"
@@ -1538,6 +1537,13 @@ impl Daemon {
                     "audio_preset_changed",
                 )
             }
+            "set_deepfilter_strength" => {
+                let strength = u8_arg(&command.args, "strength")?;
+                (
+                    self.media.set_deepfilter_strength(strength).await?,
+                    "deepfilter_strength_changed",
+                )
+            }
             _ => unreachable!("only audio commands are dispatched here"),
         };
         let audio = self.apply_audio_inventory(inventory, event_name).await;
@@ -1875,6 +1881,13 @@ fn boolean_arg(args: &Value, name: &str) -> anyhow::Result<bool> {
         .with_context(|| format!("{name} must be a boolean"))
 }
 
+fn u8_arg(args: &Value, name: &str) -> anyhow::Result<u8> {
+    args.get(name)
+        .and_then(Value::as_u64)
+        .and_then(|value| u8::try_from(value).ok())
+        .with_context(|| format!("{name} must be an integer between 0 and 255"))
+}
+
 fn string_arg(args: &Value, name: &str) -> anyhow::Result<String> {
     args.get(name)
         .and_then(Value::as_str)
@@ -1914,12 +1927,10 @@ fn clear_local_speaker(snapshot: &mut Snapshot, profile: &str) {
         .active_speakers
         .retain(|name| name != profile);
     snapshot.self_state.media.audio.input_level = 0;
-    snapshot.self_state.media.audio.voice_gate_open = false;
 }
 
 fn clear_audio_telemetry(audio: &mut wisp_protocol::AudioState) {
     audio.input_level = 0;
-    audio.voice_gate_open = false;
     audio.processing_time_us = 0;
     audio.processing_deadline_misses = 0;
     audio.capture_queue_ms = 0;
@@ -2168,7 +2179,6 @@ async fn synchronize_media_events(
                             media.livekit_connected = false;
                             media.active_speakers.clear();
                             media.audio.input_level = 0;
-                            media.audio.voice_gate_open = false;
                         },
                     )
                     .await;
@@ -2266,7 +2276,6 @@ async fn synchronize_media_events(
                             media.remote_videos.clear();
                             media.active_speakers.clear();
                             media.audio.input_level = 0;
-                            media.audio.voice_gate_open = false;
                             media.error_code = Some("livekit_disconnected".into());
                             media.error = Some(format!("LiveKit disconnected: {reason}"));
                         },
@@ -2344,7 +2353,6 @@ async fn synchronize_track_event(daemon: &Daemon, event: MediaEvent) {
         }
         MediaEvent::AudioTelemetry {
             level,
-            voice_gate_open,
             processing_time_us,
             processing_deadline_misses,
             capture_queue_ms,
@@ -2353,7 +2361,6 @@ async fn synchronize_track_event(daemon: &Daemon, event: MediaEvent) {
             daemon
                 .update_media_state(None, "audio_telemetry_changed", |media| {
                     media.audio.input_level = level;
-                    media.audio.voice_gate_open = media.audio.voice_gate_active && voice_gate_open;
                     media.audio.processing_time_us = processing_time_us;
                     media.audio.processing_deadline_misses = processing_deadline_misses;
                     media.audio.capture_queue_ms = capture_queue_ms;
@@ -3313,8 +3320,6 @@ mod tests {
     fn leaving_clears_session_audio_telemetry() {
         let mut audio = AudioState {
             input_level: 72,
-            voice_gate_active: true,
-            voice_gate_open: true,
             processing_time_us: 8_500,
             processing_deadline_misses: 4,
             capture_queue_ms: 12,
@@ -3324,8 +3329,6 @@ mod tests {
         clear_audio_telemetry(&mut audio);
 
         assert_eq!(audio.input_level, 0);
-        assert!(audio.voice_gate_active);
-        assert!(!audio.voice_gate_open);
         assert_eq!(audio.processing_time_us, 0);
         assert_eq!(audio.processing_deadline_misses, 0);
         assert_eq!(audio.capture_queue_ms, 0);

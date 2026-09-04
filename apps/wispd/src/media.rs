@@ -59,9 +59,9 @@ use tokio::{
 };
 use tracing::{debug, info, warn};
 use wisp_protocol::{
-    AudioDevice, AudioPreset, AudioState, CameraState, HangoutId, LiveKitTokenResponse,
-    RemoteVideoState, RemoteVideoTarget, ScreenShareState, VideoCodecPreference, VideoDevice,
-    VideoQualityPreset, VideoSettings, VideoSource,
+    AudioDevice, AudioPreset, AudioState, CameraState, DEFAULT_DEEPFILTER_STRENGTH, HangoutId,
+    LiveKitTokenResponse, RemoteVideoState, RemoteVideoTarget, ScreenShareState,
+    VideoCodecPreference, VideoDevice, VideoQualityPreset, VideoSettings, VideoSource,
 };
 
 use crate::surface::{RgbaFrame, SurfaceController};
@@ -71,16 +71,6 @@ const AUDIO_FRAME_SAMPLES: usize = 480;
 const DEEPFILTER_LATENCY_MS: u16 = 30;
 const RNNOISE_LATENCY_MS: u16 = 10;
 const AUDIO_FRAME_BUDGET_US: u32 = 10_000;
-const VOICE_GATE_OPEN_PROBABILITY: f32 = 0.58;
-const VOICE_GATE_HOLD_PROBABILITY: f32 = 0.28;
-const VOICE_GATE_OPEN_MARGIN_DB: f32 = 8.0;
-const VOICE_GATE_HOLD_MARGIN_DB: f32 = 3.0;
-const VOICE_GATE_MIN_OPEN_DBFS: f32 = -52.0;
-const VOICE_GATE_MIN_HOLD_DBFS: f32 = -56.0;
-const VOICE_GATE_STRONG_SIGNAL_DBFS: f32 = -18.0;
-const VOICE_GATE_HANGOVER_FRAMES: u16 = 25;
-const VOICE_GATE_ATTACK_FRAMES: u8 = 2;
-const VOICE_GATE_GAIN_STEP: f32 = 0.5;
 const VIDEO_WATCH_TOPIC: &str = "wisp.video-watch.v1";
 const PREVIEW_MAX_WIDTH: u32 = 480;
 const PREVIEW_MAX_HEIGHT: u32 = 270;
@@ -158,125 +148,12 @@ impl NeuralDenoiser {
             Self::Rnnoise { state, first_frame } => Ok(rnnoise_frame(state, input, first_frame)),
         }
     }
-}
 
-struct VoiceGate {
-    detector: Box<DenoiseState<'static>>,
-    noise_floor_dbfs: f32,
-    candidate_frames: u8,
-    hangover_frames: u16,
-    gain: f32,
-    open: bool,
-}
-
-struct GatedFrame {
-    samples: Vec<i16>,
-    open: bool,
-}
-
-impl VoiceGate {
-    fn new() -> Self {
-        Self {
-            detector: DenoiseState::new(),
-            noise_floor_dbfs: -60.0,
-            candidate_frames: 0,
-            hangover_frames: 0,
-            gain: 0.0,
-            open: false,
-        }
-    }
-
-    fn reset(&mut self) {
-        *self = Self::new();
-    }
-
-    fn process(&mut self, detector_input: &[i16], denoised: Vec<i16>) -> GatedFrame {
-        let input = detector_input
-            .iter()
-            .map(|sample| f32::from(*sample))
-            .collect::<Vec<_>>();
-        let mut detector_output = [0.0_f32; DenoiseState::FRAME_SIZE];
-        let speech_probability = self.detector.process_frame(&mut detector_output, &input);
-        self.process_with_probability(detector_input, denoised, speech_probability)
-    }
-
-    #[allow(
-        clippy::cast_possible_truncation,
-        clippy::cast_precision_loss,
-        clippy::cast_sign_loss
-    )]
-    fn process_with_probability(
-        &mut self,
-        detector_input: &[i16],
-        mut denoised: Vec<i16>,
-        speech_probability: f32,
-    ) -> GatedFrame {
-        let input_dbfs = pcm_dbfs(detector_input);
-        if !self.open {
-            let alpha = if input_dbfs > self.noise_floor_dbfs {
-                0.08
-            } else {
-                0.015
-            };
-            self.noise_floor_dbfs += alpha * (input_dbfs - self.noise_floor_dbfs);
-            self.noise_floor_dbfs = self.noise_floor_dbfs.clamp(-90.0, -20.0);
-        }
-
-        let open_threshold =
-            (self.noise_floor_dbfs + VOICE_GATE_OPEN_MARGIN_DB).max(VOICE_GATE_MIN_OPEN_DBFS);
-        let hold_threshold =
-            (self.noise_floor_dbfs + VOICE_GATE_HOLD_MARGIN_DB).max(VOICE_GATE_MIN_HOLD_DBFS);
-        let strong_signal = input_dbfs >= VOICE_GATE_STRONG_SIGNAL_DBFS;
-        let open_candidate = strong_signal
-            || (speech_probability >= VOICE_GATE_OPEN_PROBABILITY && input_dbfs >= open_threshold);
-
-        if self.open {
-            let sustain = strong_signal
-                || (speech_probability >= VOICE_GATE_HOLD_PROBABILITY
-                    && input_dbfs >= hold_threshold);
-            if sustain {
-                self.hangover_frames = VOICE_GATE_HANGOVER_FRAMES;
-            } else if self.hangover_frames > 0 {
-                self.hangover_frames -= 1;
-            } else {
-                self.open = false;
-            }
-        } else if open_candidate {
-            self.candidate_frames = self.candidate_frames.saturating_add(1);
-            if self.candidate_frames >= VOICE_GATE_ATTACK_FRAMES {
-                self.open = true;
-                self.hangover_frames = VOICE_GATE_HANGOVER_FRAMES;
-                self.candidate_frames = 0;
-            }
-        } else {
-            self.candidate_frames = 0;
-        }
-
-        let target_gain = if self.open { 1.0 } else { 0.0 };
-        let start_gain = self.gain;
-        if self.gain < target_gain {
-            self.gain = (self.gain + VOICE_GATE_GAIN_STEP).min(target_gain);
-        } else if self.gain > target_gain {
-            self.gain = (self.gain - VOICE_GATE_GAIN_STEP).max(target_gain);
-        }
-        let end_gain = self.gain;
-        if start_gain <= f32::EPSILON && end_gain <= f32::EPSILON {
-            denoised.fill(0);
-        } else if start_gain < 1.0 - f32::EPSILON || end_gain < 1.0 - f32::EPSILON {
-            let denominator = denoised.len().saturating_sub(1).max(1) as f32;
-            for (index, sample) in denoised.iter_mut().enumerate() {
-                let position = index as f32 / denominator;
-                let gain = start_gain + (end_gain - start_gain) * position;
-                *sample = (f32::from(*sample) * gain)
-                    .round()
-                    .clamp(f32::from(i16::MIN), f32::from(i16::MAX))
-                    as i16;
-            }
-        }
-
-        GatedFrame {
-            samples: denoised,
-            open: self.open || start_gain > 0.0 || self.gain > 0.0,
+    fn set_strength(&mut self, strength: u8) {
+        if let Self::DeepFilterNet(model) = self {
+            // DeepFilterNet defines 0 dB as bypass and 100 dB as unlimited
+            // attenuation, which maps directly to Wisp's 0–100 strength scale.
+            model.set_atten_lim(f32::from(strength));
         }
     }
 }
@@ -297,13 +174,15 @@ struct DenoiserService {
 }
 
 impl DenoiserService {
-    fn spawn(backend_state: Arc<AtomicU8>) -> anyhow::Result<Self> {
+    fn spawn(backend_state: Arc<AtomicU8>, strength: Arc<AtomicU8>) -> anyhow::Result<Self> {
         let (requests, mut request_rx) = mpsc::channel::<DenoiserRequest>(2);
         let worker = std::thread::Builder::new()
             .name("wisp-denoiser".into())
             .spawn(move || {
                 let mut denoiser = preferred_neural_denoiser();
                 let mut session_processed_audio = false;
+                let mut applied_strength = strength.load(Ordering::Acquire);
+                denoiser.set_strength(applied_strength);
                 backend_state.store(denoiser.backend() as u8, Ordering::Release);
 
                 while let Some(request) = request_rx.blocking_recv() {
@@ -311,6 +190,8 @@ impl DenoiserService {
                         DenoiserRequest::StartSession { response } => {
                             if session_processed_audio {
                                 denoiser = preferred_neural_denoiser();
+                                applied_strength = strength.load(Ordering::Acquire);
+                                denoiser.set_strength(applied_strength);
                                 backend_state
                                     .store(denoiser.backend() as u8, Ordering::Release);
                             }
@@ -318,6 +199,11 @@ impl DenoiserService {
                             let _ = response.send(denoiser.backend());
                         }
                         DenoiserRequest::Process { input, response } => {
+                            let requested_strength = strength.load(Ordering::Acquire);
+                            if requested_strength != applied_strength {
+                                denoiser.set_strength(requested_strength);
+                                applied_strength = requested_strength;
+                            }
                             session_processed_audio = true;
                             let output = match denoiser.process_frame(&input) {
                                 Ok(output) => output,
@@ -422,7 +308,6 @@ pub(crate) enum MediaEvent {
     AudioTelemetry {
         generation: u64,
         level: u8,
-        voice_gate_open: bool,
         processing_time_us: u32,
         processing_deadline_misses: u64,
         capture_queue_ms: u16,
@@ -533,13 +418,27 @@ pub(crate) struct CameraInfo {
     pub state: CameraState,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct AudioPreferences {
     preferred_input_id: Option<String>,
     preferred_output_id: Option<String>,
     selected_input_id: Option<String>,
     selected_output_id: Option<String>,
     preset: AudioPreset,
+    deepfilter_strength: u8,
+}
+
+impl Default for AudioPreferences {
+    fn default() -> Self {
+        Self {
+            preferred_input_id: None,
+            preferred_output_id: None,
+            selected_input_id: None,
+            selected_output_id: None,
+            preset: AudioPreset::default(),
+            deepfilter_strength: DEFAULT_DEEPFILTER_STRENGTH,
+        }
+    }
 }
 
 #[derive(Debug, Default)]
@@ -598,6 +497,7 @@ pub(crate) struct MediaManager {
     participant_volumes: Arc<Mutex<HashMap<String, f64>>>,
     video_preferences: Mutex<VideoPreferences>,
     neural_denoiser_enabled: Arc<AtomicBool>,
+    deepfilter_strength: Arc<AtomicU8>,
     denoiser_backend: Arc<AtomicU8>,
     denoiser: Arc<DenoiserService>,
     surface: Option<SurfaceController>,
@@ -620,8 +520,9 @@ impl MediaManager {
         remove_local_preview(VideoSource::ScreenShare);
         let (event_tx, event_rx) = mpsc::unbounded_channel();
         let denoiser_backend = Arc::new(AtomicU8::new(DenoiserBackend::DeepFilterNet as u8));
+        let deepfilter_strength = Arc::new(AtomicU8::new(DEFAULT_DEEPFILTER_STRENGTH));
         let denoiser = Arc::new(
-            DenoiserService::spawn(denoiser_backend.clone())
+            DenoiserService::spawn(denoiser_backend.clone(), deepfilter_strength.clone())
                 .expect("start neural denoiser service"),
         );
         let surface = if surface_enabled {
@@ -655,6 +556,7 @@ impl MediaManager {
                 participant_volumes: Arc::new(Mutex::new(HashMap::new())),
                 video_preferences: Mutex::new(VideoPreferences::default()),
                 neural_denoiser_enabled: Arc::new(AtomicBool::new(true)),
+                deepfilter_strength,
                 denoiser_backend,
                 denoiser,
                 surface,
@@ -786,6 +688,23 @@ impl MediaManager {
         Ok(self.reconcile_audio_devices(&audio, self.is_active().await, false))
     }
 
+    pub(crate) async fn set_deepfilter_strength(
+        &self,
+        strength: u8,
+    ) -> anyhow::Result<AudioInventory> {
+        if strength > 100 {
+            bail!("DeepFilterNet strength must be between 0 and 100");
+        }
+        let _operation = self.operation.lock().await;
+        self.deepfilter_strength.store(strength, Ordering::Release);
+        self.audio_preferences
+            .lock()
+            .expect("audio preferences lock poisoned")
+            .deepfilter_strength = strength;
+        let audio = self.platform_audio()?;
+        Ok(self.reconcile_audio_devices(&audio, self.is_active().await, false))
+    }
+
     pub(crate) fn video_settings(&self) -> VideoSettings {
         let preferences = self
             .video_preferences
@@ -890,13 +809,13 @@ impl MediaManager {
     }
 
     fn unavailable_audio_inventory(&self, error: String) -> AudioInventory {
-        let preset = self
+        let preferences = self
             .audio_preferences
             .lock()
-            .expect("audio preferences lock poisoned")
-            .preset;
+            .expect("audio preferences lock poisoned");
         let mut state = AudioState {
-            preset,
+            preset: preferences.preset,
+            deepfilter_strength: preferences.deepfilter_strength,
             ..AudioState::default()
         };
         apply_denoiser_state(&mut state, self.denoiser_backend());
@@ -1003,8 +922,7 @@ impl MediaManager {
             denoiser_active: false,
             denoiser: None,
             processing_latency_ms: 0,
-            voice_gate_active: false,
-            voice_gate_open: false,
+            deepfilter_strength: preferences.deepfilter_strength,
             processing_time_us: 0,
             processing_deadline_misses: 0,
             capture_queue_ms: 0,
@@ -2538,8 +2456,6 @@ async fn run_microphone_pipeline(
     let mut meter_peak = 0_u8;
     let mut processing_peak_us = 0_u32;
     let mut processing_deadline_misses = 0_u64;
-    let mut voice_gate = VoiceGate::new();
-    let mut gate_was_enabled = false;
 
     while let Some(samples) = captured_frames.recv().await {
         atomic_saturating_sub(&capture_queue_samples, samples.len() as u64);
@@ -2548,9 +2464,6 @@ async fn run_microphone_pipeline(
             let processing_started = Instant::now();
             let input = pending.drain(..AUDIO_FRAME_SAMPLES).collect::<Vec<_>>();
             let neural = neural_enabled.load(Ordering::Acquire);
-            if neural && !gate_was_enabled {
-                voice_gate.reset();
-            }
             let processed_samples = if neural {
                 match denoiser.process(input.clone()).await {
                     Ok(processed) => processed,
@@ -2562,19 +2475,9 @@ async fn run_microphone_pipeline(
             } else {
                 input.clone()
             };
-            let gated = if neural {
-                voice_gate.process(&input, processed_samples)
-            } else {
-                if gate_was_enabled {
-                    voice_gate.reset();
-                }
-                GatedFrame {
-                    samples: processed_samples,
-                    open: false,
-                }
-            };
-            gate_was_enabled = neural;
-            let output = gated.samples;
+            // Clear publishes DeepFilterNet directly. No secondary detector,
+            // gate, or gain stage is allowed to reshape the processed signal.
+            let output = processed_samples;
             meter_peak = meter_peak.max(pcm_level_percent(&output));
             meter_frames += 1;
             let frame = AudioFrame {
@@ -2603,7 +2506,6 @@ async fn run_microphone_pipeline(
                 let _ = event_tx.send(MediaEvent::AudioTelemetry {
                     generation,
                     level,
-                    voice_gate_open: neural && gated.open && !muted,
                     processing_time_us: processing_peak_us,
                     processing_deadline_misses,
                     capture_queue_ms,
@@ -2710,10 +2612,6 @@ fn rnnoise_frame(
 fn apply_denoiser_state(state: &mut AudioState, backend: DenoiserBackend) {
     state.denoiser_active = state.preset == AudioPreset::Clear;
     state.denoiser = state.denoiser_active.then(|| backend.name().to_owned());
-    state.voice_gate_active = state.denoiser_active;
-    if !state.voice_gate_active {
-        state.voice_gate_open = false;
-    }
     state.processing_latency_ms = if state.denoiser_active {
         backend.latency_ms()
     } else {
@@ -3601,11 +3499,11 @@ mod tests {
     }
 
     use super::{
-        AUDIO_FRAME_SAMPLES, VOICE_GATE_HANGOVER_FRAMES, VideoWatchSignal, VoiceGate,
-        create_deepfilter_model, deepfilter_frame, i420_to_rgba_texture, pcm_level_percent,
-        preferred_or_first, processing_options, public_device_id, publishing_video_encoder,
-        same_logical_device, screen_share_resolution, source_processing_options, surface_quality,
-        video_profile, video_watch_targets_local,
+        AUDIO_FRAME_SAMPLES, NeuralDenoiser, VideoWatchSignal, create_deepfilter_model,
+        deepfilter_frame, i420_to_rgba_texture, pcm_level_percent, preferred_or_first,
+        processing_options, public_device_id, publishing_video_encoder, same_logical_device,
+        screen_share_resolution, source_processing_options, surface_quality, video_profile,
+        video_watch_targets_local,
     };
     use livekit::options::VideoEncoderBackend;
     use livekit::track::VideoQuality;
@@ -3705,42 +3603,6 @@ mod tests {
     }
 
     #[test]
-    fn voice_gate_silences_loud_non_speech_residue() {
-        let mut gate = VoiceGate::new();
-        let residue = vec![2_000; AUDIO_FRAME_SAMPLES];
-
-        for _ in 0..100 {
-            let frame = gate.process_with_probability(&residue, residue.clone(), 0.05);
-            assert!(!frame.open);
-            assert!(frame.samples.iter().all(|sample| *sample == 0));
-        }
-    }
-
-    #[test]
-    fn voice_gate_opens_for_speech_then_releases_smoothly() {
-        let mut gate = VoiceGate::new();
-        let speech = vec![8_000; AUDIO_FRAME_SAMPLES];
-        let background = vec![1_000; AUDIO_FRAME_SAMPLES];
-
-        let first = gate.process_with_probability(&speech, speech.clone(), 0.95);
-        assert!(!first.open);
-        let second = gate.process_with_probability(&speech, speech.clone(), 0.95);
-        assert!(second.open);
-        assert!(second.samples.iter().any(|sample| *sample != 0));
-
-        for _ in 0..=VOICE_GATE_HANGOVER_FRAMES {
-            let frame = gate.process_with_probability(&background, background.clone(), 0.01);
-            assert!(frame.open);
-        }
-        let fade = gate.process_with_probability(&background, background.clone(), 0.01);
-        assert!(fade.open);
-        assert!(fade.samples.iter().any(|sample| *sample != 0));
-        let closed = gate.process_with_probability(&background, background.clone(), 0.01);
-        assert!(!closed.open);
-        assert!(closed.samples.iter().all(|sample| *sample == 0));
-    }
-
-    #[test]
     fn deepfilternet_processes_real_ten_millisecond_frames() {
         let mut denoiser = create_deepfilter_model().expect("embedded model should load");
         let mut output = Vec::new();
@@ -3759,6 +3621,28 @@ mod tests {
         }
         assert_eq!(output.len(), AUDIO_FRAME_SAMPLES);
         assert_ne!(output, input);
+    }
+
+    #[test]
+    fn deepfilternet_strength_zero_bypasses_noise_reduction() {
+        let model = create_deepfilter_model().expect("embedded model should load");
+        let mut denoiser = NeuralDenoiser::deepfilternet(model);
+        denoiser.set_strength(0);
+        let input = (0..AUDIO_FRAME_SAMPLES)
+            .map(|index| {
+                if index.is_multiple_of(2) {
+                    8_000
+                } else {
+                    -8_000
+                }
+            })
+            .collect::<Vec<_>>();
+
+        let output = denoiser
+            .process_frame(&input)
+            .expect("frame should process");
+
+        assert_eq!(output, input);
     }
 
     #[test]

@@ -138,8 +138,7 @@ wait_for_status '
   .self.media.audio.denoiser_active == true and
   .self.media.audio.denoiser == "deepfilternet" and
   .self.media.audio.processing_latency_ms == 30 and
-  .self.media.audio.voice_gate_active == true and
-  (.self.media.audio.voice_gate_open | type) == "boolean" and
+  .self.media.audio.deepfilter_strength == 100 and
   (.self.media.audio.processing_time_us | type) == "number" and
   (.self.media.audio.processing_deadline_misses | type) == "number" and
   (.self.media.audio.capture_queue_ms | type) == "number"
