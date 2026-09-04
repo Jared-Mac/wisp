@@ -79,7 +79,7 @@ XDG_BIN_HOME="$mock_bin" \
 WISP_TEST_STATE_DIR="$state_dir" \
 WISP_UPDATE_TAG=test \
 WISP_UPDATE_BASE_URL="file://$release_dir" \
-  "$repo_dir/scripts/wisp-update.sh" >/dev/null
+  bash "$repo_dir/scripts/wisp-update.sh" >/dev/null
 
 for marker in installed restarted left share-stopped camera-stopped muted; do
   [[ -e "$state_dir/$marker" ]] || {
