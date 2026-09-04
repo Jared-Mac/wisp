@@ -53,13 +53,8 @@ pub(super) async fn begin(
 ) -> Result<Json<FileUploadStatus>, ApiError> {
     let user = authenticate_headers(&state, &headers).await?;
     ensure_conversation_member(&state.pool, &request.conversation_id, user).await?;
-    if !wisp_protocol::valid_chat_file_name(&request.file_name)
-        || request.caption.chars().count() > 4000
-    {
-        return Err(ApiError::bad_request(
-            "invalid_file",
-            "Invalid filename or caption",
-        ));
+    if !wisp_protocol::valid_chat_file_name(&request.file_name) {
+        return Err(ApiError::bad_request("invalid_file", "Invalid filename"));
     }
     let size = i64::try_from(request.size).map_err(|_| {
         ApiError::bad_request("invalid_size", "File size cannot be represented by storage")

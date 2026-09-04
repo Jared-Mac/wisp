@@ -26,6 +26,7 @@ pub(super) struct TrayState {
     sharing: bool,
     camera: bool,
     unread_messages: u64,
+    room_invitations: u64,
 }
 
 impl TrayState {
@@ -35,7 +36,12 @@ impl TrayState {
             sharing: video.0,
             camera: video.1,
             unread_messages,
+            room_invitations: 0,
         }
+    }
+    pub(super) fn with_room_invitations(mut self, count: u64) -> Self {
+        self.room_invitations = count;
+        self
     }
 }
 
@@ -112,6 +118,11 @@ impl ksni::Tray for WispTray {
         if let Some(unread) = unread.as_deref() {
             states.push(unread);
         }
+        let invitations = (self.state.room_invitations > 0)
+            .then(|| format!("{} voice invite(s)", self.state.room_invitations));
+        if let Some(invitations) = invitations.as_deref() {
+            states.push(invitations);
+        }
         if states.is_empty() {
             "Wisp".into()
         } else {
@@ -120,7 +131,7 @@ impl ksni::Tray for WispTray {
     }
 
     fn status(&self) -> Status {
-        if self.state.unread_messages > 0 {
+        if self.state.unread_messages > 0 || self.state.room_invitations > 0 {
             Status::NeedsAttention
         } else {
             Status::Active
@@ -138,8 +149,12 @@ impl ksni::Tray for WispTray {
             self.state.sharing,
             self.state.camera,
         );
-        if self.state.unread_messages > 0 {
-            draw_unread_badge(&mut icon.data, 32, self.state.unread_messages);
+        if self.state.unread_messages > 0 || self.state.room_invitations > 0 {
+            draw_unread_badge(
+                &mut icon.data,
+                32,
+                self.state.unread_messages.max(self.state.room_invitations),
+            );
         }
         vec![icon]
     }
@@ -476,6 +491,23 @@ mod tests {
         tray.state.unread_messages = 0;
         assert_eq!(tray.status(), ksni::Status::Active);
         assert_eq!(read_icon, tray.icon_pixmap().remove(0).data);
+    }
+
+    #[test]
+    fn voice_invitations_request_attention_even_when_chat_was_read() {
+        use ksni::Tray;
+        let (actions, _) = tokio::sync::mpsc::unbounded_channel();
+        let mut tray = WispTray {
+            actions,
+            state: TrayState::new((false, false), (false, false), 0),
+        };
+        let icon = tray.icon_pixmap().remove(0).data;
+        tray.state = tray.state.with_room_invitations(1);
+        assert_eq!(tray.status(), ksni::Status::NeedsAttention);
+        assert!(tray.title().contains("voice invite"));
+        assert_ne!(icon, tray.icon_pixmap().remove(0).data);
+        tray.state = tray.state.with_room_invitations(0);
+        assert_eq!(tray.status(), ksni::Status::Active);
     }
 
     #[test]

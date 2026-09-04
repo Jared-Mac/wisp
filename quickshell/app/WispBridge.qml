@@ -212,6 +212,37 @@ Item {
   readonly property var sortedFriends: FriendLogic.sorted(friends, friendPreferences.favorites)
   readonly property var hangouts: snapshot.hangouts || []
   readonly property var knocks: snapshot.knocks || []
+  property double invitationClock: Date.now()
+  property var invitationRequests: ({})
+  property string invitationFeedback: ""
+  readonly property var roomInvitations: (snapshot.room_invitations || []).filter(function(i) { return Date.parse(i.expires_at) > root.invitationClock })
+  readonly property var currentVoiceRoom: hangouts.filter(function(h) { return h.id === root.selfState.hangout_id })[0] || null
+  Timer { interval: 1000; repeat: true; running: true; onTriggered: root.invitationClock = Date.now() }
+  Timer { id: invitationFeedbackTimer; interval: 3000; onTriggered: root.invitationFeedback = "" }
+
+  function inviteToRoom(friend) {
+    if (!currentVoiceRoom || invitationRequests[friend.id]) return
+    var id = send("send_voice_invite", {hangout_id:currentVoiceRoom.id, user_id:friend.id})
+    if (id) {
+      invitationRequests = replaceEntry(invitationRequests, friend.id, true)
+      requests[id] = {kind:"roomInvite", key:friend.id, name:friend.display_name}
+    }
+  }
+  function respondRoomInvitation(invitation, accept) {
+    var key = String(invitation.invitation_id || invitation.id)
+    if (invitationRequests[key]) return
+    var id = send("respond_room_invitation", {id:key, accept:accept})
+    if (id) {
+      invitationRequests = replaceEntry(invitationRequests, key, true)
+      requests[id] = {kind:"roomInviteResponse", key:key}
+    }
+  }
+  function openRoomChat(room, persistent) {
+    var spot = persistent ? room : spots.filter(function(s) { return s.active_hangout_id === room.id })[0]
+    var id = spot ? "spot:" + spot.id : "hangout:" + room.id
+    if (conversationById(id)) selectConversation(id)
+    else lastError = "Join this room or ask an administrator for access to its chat."
+  }
   readonly property var conversations: ChatLogic.visibleConversations(
     snapshot.conversations || [], snapshot.hangouts || [])
   readonly property var messages: snapshot.messages || []
@@ -456,6 +487,7 @@ Item {
 
   function buildBarText() {
     if (!daemonConnected) return "󰍬  disconnected"
+    if (roomInvitations.length) return "Voice invite · " + roomInvitations[0].from.display_name
     if (knocks.length > 0) return "󰍬  " + String(knocks[0].from.display_name || "Friend") + " knocked"
     if (unreadMessages > 0 && !inHangout) return "󰍩  " + String(unreadMessages) + " unread"
     var names = []
@@ -534,6 +566,10 @@ Item {
     if (!next) return
     var incoming = ChatLogic.incomingConversationIds(receivedSnapshot ? snapshot : null, next, eventName)
     var roomEvents = ChatLogic.roomSoundEvents(receivedSnapshot ? snapshot : null, next, eventName)
+    var knownInvites = (snapshot.room_invitations || []).map(function(i) { return i.id })
+    var newInvite = receivedSnapshot && (next.room_invitations || []).some(function(i) {
+      return Date.parse(i.expires_at) > Date.now() && knownInvites.indexOf(i.id) < 0
+    })
     snapshot = next
     if (activeConversationId) {
       var nextVisibleConversations = ChatLogic.visibleConversations(
@@ -544,6 +580,7 @@ Item {
       if (!activeStillVisible) activeConversationId = ""
     }
     receivedSnapshot = true
+    if (notificationSoundsEnabled && newInvite) playNotificationSound("room_invite")
     if (notificationSoundsEnabled) roomEvents.forEach(function(kind) { root.playNotificationSound(kind) })
     if (notificationSoundsEnabled && incoming.some(function(id) {
       return ChatLogic.shouldNotifyChat(id, root.focusedConversationId, root.appFocused,
@@ -750,7 +787,14 @@ Item {
     delete requests[message.id]
     var value = message.value || ({})
     var conversationId = action.conversationId
-    if (action.kind === "copyImage") {
+    if (action.kind === "roomInvite" || action.kind === "roomInviteResponse") {
+      invitationRequests = replaceEntry(invitationRequests, action.key, undefined)
+      if (message.ok && action.kind === "roomInvite") {
+        invitationFeedback = value.already_pending ? "Invitation already pending" : "Voice invite sent to " + action.name
+        invitationFeedbackTimer.restart()
+        if (value.conversation_id) selectConversation(String(value.conversation_id))
+      }
+    } else if (action.kind === "copyImage") {
       imageCopyFinished(String(message.id),!!message.ok,message.error ? String(message.error.message || "Could not copy image") : "")
     } else if (action.kind === "watchVideo") {
       if (message.ok && action.open) {
@@ -932,6 +976,7 @@ Item {
         } else {
           root.receivedSnapshot = false
           root.requests = ({})
+          root.invitationRequests = ({})
           root.sendingConversations = ({})
           root.importingConversations = ({})
           root.savingFiles = ({})

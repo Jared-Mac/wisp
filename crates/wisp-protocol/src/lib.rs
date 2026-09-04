@@ -507,6 +507,8 @@ pub struct Snapshot {
     #[serde(default)]
     pub knocks: Vec<KnockRequestView>,
     #[serde(default)]
+    pub room_invitations: Vec<RoomInvitation>,
+    #[serde(default)]
     pub conversations: Vec<ConversationView>,
     #[serde(default)]
     pub messages: Vec<Message>,
@@ -516,6 +518,27 @@ pub struct Snapshot {
     pub devices: Vec<DeviceView>,
     #[serde(default)]
     pub last_invite: Option<DeviceInvite>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoomInvitation {
+    pub id: Uuid,
+    pub conversation_id: String,
+    pub hangout_id: HangoutId,
+    pub room_label: String,
+    pub from: UserSummary,
+    pub expires_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RespondRoomInvitation {
+    pub accept: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InviteToRoom {
+    pub hangout_id: HangoutId,
+    pub user_id: UserId,
 }
 
 impl Snapshot {

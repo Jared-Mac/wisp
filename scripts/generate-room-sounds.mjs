@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 const destination=path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../quickshell/app/assets');
-const voices={member_join:[620,830],member_leave:[520,390],self_join:[440,660,880],self_leave:[660,440,330]};
+const voices={member_join:[620,830],member_leave:[520,390],self_join:[440,660,880],self_leave:[660,440,330],room_invite:[740,555,990]};
 for(const [name,notes] of Object.entries(voices)) {
   const rate=48000,noteLength=0.115,total=Math.ceil((notes.length*noteLength+0.08)*rate);
   const wav=Buffer.alloc(44+total*2);

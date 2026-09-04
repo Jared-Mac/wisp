@@ -81,6 +81,14 @@ ShellRoot {
         }
         var share = test.find(column, "mediaAction-share")
         var camera = test.find(column, "mediaAction-camera")
+        var invite = test.find(column, "mediaAction-invite")
+        test.check(!!invite && invite.modelData.label === "+", "compact invite action exists")
+        if (invite) {
+          var inviteLabel = invite.children.find(function(child) { return child.text === "[+]" })
+          test.check(!!inviteLabel && inviteLabel.width >= inviteLabel.implicitWidth && inviteLabel.lineCount === 1, "invite brackets never wrap")
+          test.check(invite.parent.children.indexOf(invite) > invite.parent.children.indexOf(camera), "invite follows camera")
+          test.check(invite.parent.children.indexOf(invite) < invite.parent.children.indexOf(test.find(column, "mediaAction-leave")), "invite precedes leave")
+        }
         test.check(share.publishing && camera.publishing && share.border.width === 1 && camera.border.width === 1, "both live controls highlighted")
         test.check(share.controlEnabled && camera.controlEnabled, "stop actions stay enabled")
         test.check(share.modelData.label === "Stop sharing screen" && camera.modelData.label === "Stop camera", "explicit stop labels")

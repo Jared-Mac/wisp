@@ -41,7 +41,7 @@ Column {
         anchors.left: parent.left
         anchors.leftMargin: root.theme.spacing.lg
         anchors.verticalCenter: parent.verticalCenter
-        Binding on width { when: root.theme.terminal; value: Math.max(0, joinButton.x - spotInfo.x - root.theme.spacing.lg); restoreMode: Binding.RestoreBindingOrValue }
+        width: Math.max(0, chatButton.x - spotInfo.x - root.theme.spacing.sm)
 
         Text {
           Binding on width { when: root.theme.terminal; value: spotInfo.width; restoreMode: Binding.RestoreBindingOrValue }
@@ -96,6 +96,14 @@ Column {
             root.joined()
           }
         }
+      }
+      ChatButton {
+        id: chatButton; objectName: "openSpotChat"
+        theme: root.theme; text: "Chat"
+        anchors.right: joinButton.left; anchors.rightMargin: root.theme.spacing.sm
+        anchors.verticalCenter: joinButton.verticalCenter
+        Accessible.name: "Open " + String(modelData.name || "room") + " text chat"
+        onClicked: root.bridge.openRoomChat(modelData, true)
       }
     }
   }

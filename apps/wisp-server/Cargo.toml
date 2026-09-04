@@ -25,5 +25,8 @@ tracing-subscriber.workspace = true
 uuid.workspace = true
 wisp-protocol.workspace = true
 
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+
 [lints]
 workspace = true

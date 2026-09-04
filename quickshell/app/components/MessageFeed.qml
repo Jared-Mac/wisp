@@ -58,6 +58,7 @@ Rectangle {
       required property var modelData
       readonly property bool isImage: modelData.content_type === "image/png"
       readonly property bool isFile: modelData.content_type === "application/octet-stream"
+      readonly property bool isInvitation: modelData.content_type === "application/vnd.wisp.room-invitation+json"
       readonly property string imageUrl: root.bridge.chatImageUrls[String(modelData.id)] || ""
       width: messages.width
       spacing: root.theme.tui ? root.theme.space(2) : root.theme.spacing.md
@@ -98,6 +99,7 @@ Rectangle {
               ThemeControlStyle { theme: root.theme; control: trialControl0 }
               Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
               Binding on font.pixelSize { when: root.theme.terminal; value: root.theme.font.caption; restoreMode: Binding.RestoreBindingOrValue }
+               visible: !message.isInvitation; height: visible ? implicitHeight : 0
                text: message.isImage || message.isFile ? "Edit caption…" : "Edit message…"; onTriggered: root.beginEdit(message.modelData) }
             MenuItem {
               id: trialControl1
@@ -196,12 +198,17 @@ Rectangle {
       TextEdit {
         width: parent.width
         text: message.isImage || message.isFile ? String(message.modelData.payload.caption || "") : String(message.modelData.payload || "")
-        visible: text !== ""
+        visible: !message.isInvitation && text !== ""
         color: root.theme.foreground
         readOnly: true; selectByMouse: true
         textFormat: TextEdit.PlainText
         wrapMode: TextEdit.Wrap
         font.family: root.theme.font.family; font.pixelSize: root.theme.font.body
+      }
+      Loader {
+        width: parent.width
+        active: message.isInvitation
+        sourceComponent: RoomInvitationCard { bridge: root.bridge; theme: root.theme; invitation: message.modelData.payload; outgoing: message.modelData.sender.id === root.bridge.selfState.id }
       }
     }
   }

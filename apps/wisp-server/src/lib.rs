@@ -1,16 +1,20 @@
 mod attachments;
 mod groups;
+mod invitations;
 mod rooms;
+#[cfg(test)]
+mod text_tests;
 
 use axum::{
     Json, Router,
     extract::{
-        DefaultBodyLimit, Path, Query, State, WebSocketUpgrade,
+        DefaultBodyLimit, Path, Query, Request, State, WebSocketUpgrade,
         ws::{Message as WsMessage, WebSocket},
     },
     http::{HeaderMap, StatusCode},
+    middleware::{self, Next},
     response::{IntoResponse, Response},
-    routing::{delete, get, patch, post, put},
+    routing::{MethodRouter, delete, get, patch, post, put},
 };
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{Duration as ChronoDuration, Utc};
@@ -296,6 +300,7 @@ impl AppState {
             friends,
             hangouts,
             knocks,
+            room_invitations: invitations::load(&self.pool, self_id).await?,
             conversations,
             messages,
             spots,
@@ -389,6 +394,27 @@ impl AppState {
     }
 }
 
+// Text has no product-level character/byte cap. Authenticate before collecting
+// JSON so unauthenticated callers cannot feed unbounded bodies to these routes.
+// Leave all non-text endpoints (especially file chunks) at their existing limits.
+fn text_body(route: MethodRouter<AppState>, state: &AppState) -> MethodRouter<AppState> {
+    route
+        .layer(DefaultBodyLimit::disable())
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            authenticate_text_body,
+        ))
+}
+
+async fn authenticate_text_body(
+    State(state): State<AppState>,
+    request: Request,
+    next: Next,
+) -> Result<Response, ApiError> {
+    authenticate_headers(&state, request.headers()).await?;
+    Ok(next.run(request).await)
+}
+
 pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/healthz", get(health))
@@ -411,18 +437,24 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/rooms/invite", post(rooms::invite))
         .route("/v1/rooms/admin", post(rooms::set_admin))
         .route("/v1/livekit/token", post(livekit_token))
-        .route("/v1/messages", get(list_messages).post(send_message))
+        .route(
+            "/v1/messages",
+            get(list_messages).merge(text_body(post(send_message), &state)),
+        )
         .route(
             "/v1/messages/image",
-            post(send_image_message).layer(DefaultBodyLimit::max(18 * 1024 * 1024)),
+            text_body(post(send_image_message), &state),
         )
         .route("/v1/messages/{id}/image", get(get_chat_image))
         .route(
             "/v1/messages/file",
-            post(send_file_message).layer(DefaultBodyLimit::max(36 * 1024 * 1024)),
+            text_body(post(send_file_message), &state),
         )
         .route("/v1/messages/{id}/file", get(get_chat_file))
-        .route("/v1/file-uploads", post(attachments::begin))
+        .route(
+            "/v1/file-uploads",
+            text_body(post(attachments::begin), &state),
+        )
         .route(
             "/v1/file-uploads/{id}/chunks/{index}",
             put(attachments::chunk)
@@ -435,10 +467,15 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/messages/{id}/retention", patch(attachments::retention))
         .route(
             "/v1/messages/{id}",
-            patch(edit_message).delete(delete_message),
+            text_body(patch(edit_message), &state).delete(delete_message),
         )
         .route("/v1/conversations/direct", post(create_direct_conversation))
         .route("/v1/conversations/group", post(groups::create))
+        .route("/v1/room-invitations", post(invitations::create))
+        .route(
+            "/v1/room-invitations/{id}/respond",
+            post(invitations::respond),
+        )
         .route("/v1/conversations/read", post(mark_conversation_read))
         .route("/v1/conversations/tab", post(set_conversation_tab))
         .route("/v1/conversations/clear", post(clear_conversation_history))
@@ -1256,12 +1293,10 @@ async fn send_image_message(
 ) -> Result<Json<Message>, ApiError> {
     let sender_id = authenticate_headers(&state, &headers).await?;
     ensure_conversation_member(&state.pool, &request.conversation_id, sender_id).await?;
-    if request.caption.chars().count() > 4000
-        || request.png_base64.len() > wisp_protocol::MAX_CHAT_IMAGE_BYTES * 4 / 3 + 4
-    {
+    if request.png_base64.len() > wisp_protocol::MAX_CHAT_IMAGE_BYTES * 4 / 3 + 4 {
         return Err(ApiError::bad_request(
             "image_too_large",
-            "Use an image under 12 MB and a caption under 4000 characters",
+            "Images must be 12 MB or smaller",
         ));
     }
     let bytes = base64::engine::general_purpose::STANDARD
@@ -1298,12 +1333,10 @@ async fn send_file_message(
             "Use a filename of 1–200 bytes without path separators or control characters",
         ));
     }
-    if request.caption.chars().count() > 4000
-        || request.data_base64.len() > wisp_protocol::MAX_CHAT_FILE_BYTES.div_ceil(3) * 4
-    {
+    if request.data_base64.len() > wisp_protocol::MAX_CHAT_FILE_BYTES.div_ceil(3) * 4 {
         return Err(ApiError::bad_request(
             "file_too_large",
-            "Files must be 25 MB or smaller and captions at most 4000 characters",
+            "Files must be 25 MB or smaller",
         ));
     }
     let bytes = base64::engine::general_purpose::STANDARD
@@ -1396,15 +1429,21 @@ async fn edit_message(
 ) -> Result<Json<Value>, ApiError> {
     let user_id = authenticate_headers(&state, &headers).await?;
     let row = own_message(&state.pool, user_id, id).await?;
+    if row.get::<String, _>("content_type") == "application/vnd.wisp.room-invitation+json" {
+        return Err(ApiError::bad_request(
+            "invitation_not_editable",
+            "Voice invitations cannot be edited",
+        ));
+    }
     let text = request.text.trim();
     let is_attachment = matches!(
         row.get::<String, _>("content_type").as_str(),
         "image/png" | "application/octet-stream"
     );
-    if text.chars().count() > 4000 || (!is_attachment && text.is_empty()) {
+    if !is_attachment && text.is_empty() {
         return Err(ApiError::bad_request(
             "invalid_message",
-            "Text must contain 1–4000 characters; attachment captions may be empty",
+            "Message text must not be empty; attachment captions may be empty",
         ));
     }
     let original: Value =
@@ -1742,6 +1781,10 @@ async fn cleanup_expired_messages(pool: &SqlitePool) -> anyhow::Result<()> {
 async fn cleanup_expired_data(pool: &SqlitePool) -> anyhow::Result<()> {
     let now = Utc::now().to_rfc3339();
     cleanup_expired_messages(pool).await?;
+    sqlx::query("DELETE FROM room_invitations WHERE expires_at <= ?")
+        .bind(&now)
+        .execute(pool)
+        .await?;
     sqlx::query("DELETE FROM sessions WHERE expires_at <= ? OR revoked_at IS NOT NULL")
         .bind(&now)
         .execute(pool)
@@ -1908,11 +1951,10 @@ fn validate_message(request: &SendMessageRequest) -> Result<(), ApiError> {
         .payload
         .as_str()
         .ok_or_else(|| ApiError::bad_request("invalid_message", "message payload must be text"))?;
-    let length = text.trim().chars().count();
-    if length == 0 || length > 4_000 {
+    if text.trim().is_empty() {
         return Err(ApiError::bad_request(
             "invalid_message",
-            "message must contain 1–4000 characters",
+            "Message text must not be empty",
         ));
     }
     if request.encryption_version < 0 {
@@ -1952,12 +1994,23 @@ async fn find_or_create_direct(
     self_id: UserId,
     friend_id: UserId,
 ) -> Result<String, ApiError> {
+    let mut tx = pool.begin().await.map_err(ApiError::internal)?;
+    let id = find_or_create_direct_tx(&mut tx, self_id, friend_id).await?;
+    tx.commit().await.map_err(ApiError::internal)?;
+    Ok(id)
+}
+
+async fn find_or_create_direct_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    self_id: UserId,
+    friend_id: UserId,
+) -> Result<String, ApiError> {
     if let Some(id) = sqlx::query_scalar::<_, String>(
         "SELECT c.id FROM conversations c WHERE c.kind = 'direct' AND (SELECT COUNT(*) FROM conversation_members cm WHERE cm.conversation_id = c.id) = 2 AND EXISTS (SELECT 1 FROM conversation_members cm WHERE cm.conversation_id = c.id AND cm.user_id = ?) AND EXISTS (SELECT 1 FROM conversation_members cm WHERE cm.conversation_id = c.id AND cm.user_id = ?) LIMIT 1",
     )
     .bind(self_id.to_string())
     .bind(friend_id.to_string())
-    .fetch_optional(pool)
+    .fetch_optional(&mut **tx)
     .await
     .map_err(ApiError::internal)?
     {
@@ -1972,13 +2025,12 @@ async fn find_or_create_direct(
     };
     let id = format!("dm:{first}:{second}");
     let now = Utc::now().to_rfc3339();
-    let mut tx = pool.begin().await.map_err(ApiError::internal)?;
     sqlx::query(
         "INSERT OR IGNORE INTO conversations(id, kind, label, created_at) VALUES (?, 'direct', 'Direct message', ?)",
     )
     .bind(&id)
     .bind(&now)
-    .execute(&mut *tx)
+    .execute(&mut **tx)
     .await
     .map_err(ApiError::internal)?;
     for user_id in [self_id, friend_id] {
@@ -1988,11 +2040,10 @@ async fn find_or_create_direct(
         .bind(&id)
         .bind(user_id.to_string())
         .bind(&now)
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await
         .map_err(ApiError::internal)?;
     }
-    tx.commit().await.map_err(ApiError::internal)?;
     Ok(id)
 }
 

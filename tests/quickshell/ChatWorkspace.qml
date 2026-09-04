@@ -11,7 +11,7 @@ ShellRoot {
   readonly property string mode: Quickshell.env("WISP_CHAT_FIXTURE_MODE")
   readonly property real testWidth: Number(Quickshell.env("WISP_TEST_WIDTH")) || (Quickshell.env("WISP_TEST_CONSTRAINED") === "1" ? 840 : 1180)
   readonly property real testHeight: Number(Quickshell.env("WISP_TEST_HEIGHT")) || (Quickshell.env("WISP_TEST_CONSTRAINED") === "1" ? 700 : 900)
-  readonly property bool compactMode: mode === "returnchat" || mode === "panelimagegeometry" || mode === "panellatest" || mode === "panelaudiotooltips" || mode === "panelpresence" || mode === "traycollapse" || mode === "panel" || mode === "panelmedia" || mode === "panelsettings" || mode === "friends" || mode === "panelidentity" || mode === "panelidentityactions"
+  readonly property bool compactMode: mode === "panelinvites" || mode === "returnchat" || mode === "panelimagegeometry" || mode === "panellatest" || mode === "panelaudiotooltips" || mode === "panelpresence" || mode === "traycollapse" || mode === "panel" || mode === "panelmedia" || mode === "panelsettings" || mode === "friends" || mode === "panelidentity" || mode === "panelidentityactions"
   function setImageFixture(w,h) {
     var data=JSON.parse(JSON.stringify(bridge.snapshot))
     bridge.chatImageUrls={"geometry":"data:image/svg+xml,"+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="'+w+'" height="'+h+'"><rect width="'+w+'" height="'+h+'" fill="#254261"/><circle cx="40" cy="40" r="25" fill="#e6b75b"/><path d="M0 0L'+w+' '+h+'" stroke="#74c9d6" stroke-width="5"/></svg>')}
@@ -1156,6 +1156,61 @@ ShellRoot {
   Timer {
     interval: 3650; running: test.mode === "saved"
     onTriggered: test.check(!test.findObject(window.contentItem, "settingsSavedNotice", []).shown, "saved notice disappears after 2.5 seconds")
+  }
+  Timer {
+    interval: 400; running: test.mode === "invites" || test.mode === "panelinvites"
+    onTriggered: {
+      var data = JSON.parse(JSON.stringify(bridge.snapshot))
+      data.self.hangout_id = "own-room"
+      data.hangouts = [{id:"own-room",label:"Porch",members:[{id:"self",display_name:"Tyler"}]}]
+      data.spots = [{id:"porch",name:"Porch",active_hangout_id:"own-room",members:[]},{id:"empty",name:"Empty Room",active_hangout_id:null,members:[]}]
+      data.conversations[0].id = "spot:porch"
+      data.conversations.push({id:"spot:empty",label:"Empty Room",kind:"hangout",spot_id:"empty",members:[],unread_count:0})
+      data.room_invitations = [{id:"invite-1",conversation_id:"dm",hangout_id:"friend-room",room_label:"A friend's voice room",from:{id:"jared",display_name:"Jared"},expires_at:new Date(Date.now()+300000).toISOString()}]
+      data.messages = [{id:"invite-message",conversation_id:"dm",sender:{id:"jared",display_name:"Jared"},created_at:new Date().toISOString(),content_type:"application/vnd.wisp.room-invitation+json",payload:{invitation_id:"invite-1",hangout_id:"friend-room",room_label:"A friend's voice room",status:"pending",expires_at:data.room_invitations[0].expires_at}}]
+      var before = bridge.sent.length
+      bridge.applySnapshot(data,"room_invited")
+      test.check(!bridge.sent.slice(before).some(function(c) { return c.name === "respond_room_invitation" || c.name === "join_hangout" || c.name === "camera" }),"receiving an invite never joins or starts media")
+      bridge.selectConversation("dm")
+    }
+  }
+  Timer {
+    interval: 700; running: test.mode === "invites" || test.mode === "panelinvites"
+    onTriggered: {
+      var surface = test.compactMode ? compactSurface : window.contentItem
+      var card = test.findItem(surface,"roomInvitationCard")
+      test.check(!!card && card.pending,"voice invitation renders inside DM")
+      if (card) {
+        test.check(card.width > 0 && card.width <= surface.width,"invite card fits chat")
+        var accept = test.findItem(card,"acceptVoiceInvite")
+        var dismiss = test.findItem(card,"dismissVoiceInvite")
+        test.check(!!accept && !!dismiss,"quick accept and dismiss available")
+        dismiss.clicked()
+        var command = bridge.sent[bridge.sent.length-1]
+        test.check(command.name === "respond_room_invitation" && command.args.accept === false,"dismiss is not acceptance")
+        bridge.finishRequest({id:"test-"+bridge.requestId,ok:false})
+        accept.clicked()
+        command = bridge.sent[bridge.sent.length-1]
+        test.check(command.name === "respond_room_invitation" && command.args.id === "invite-1" && command.args.accept === true,"explicit accept targets the invitation")
+        bridge.finishRequest({id:"test-"+bridge.requestId,ok:false})
+      }
+      var before = bridge.sent.length
+      var roomChat = test.findItem(surface,"openRoomChat")
+      test.check(!!roomChat,"occupied room exposes Chat action")
+      if (roomChat) roomChat.clicked()
+      test.check(bridge.activeConversationId === "spot:porch","occupied persistent room opens correct text chat")
+      var emptyChat = test.findItem(surface,"openSpotChat")
+      test.check(!!emptyChat,"empty room exposes Chat action")
+      if (emptyChat) emptyChat.clicked()
+      test.check(bridge.activeConversationId === "spot:empty","empty room text chat is accessible")
+      test.check(!bridge.sent.slice(before).some(function(c) { return c.name === "join_hangout" || c.name === "join_spot" }),"room Chat buttons never join voice")
+      bridge.inviteToRoom({id:"jared",display_name:"Jared"})
+      var outgoing = bridge.sent[bridge.sent.length-1]
+      test.check(outgoing.name === "send_voice_invite" && outgoing.args.hangout_id === "own-room", "invitation targets current voice room")
+      bridge.finishRequest({id:"test-"+bridge.requestId,ok:true,value:{conversation_id:"dm"}})
+      test.check(bridge.activeConversationId === "dm" && bridge.invitationFeedback.length > 0,"sending returns to DM with feedback")
+      bridge.invitationFeedback = ""
+    }
   }
   Timer {
     interval: test.mode === "saved" ? 3800 : 1200; running: true

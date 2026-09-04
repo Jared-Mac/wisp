@@ -393,9 +393,17 @@ mute, volume, and a custom local sound file; these settings live only on this
 device in `~/.config/wisp/notifications.json`. Playback uses PipeWire's `pw-play`.
 The explicit **Test sound** button works while Settings is focused.
 
-Deploy the updated host and clients together: database migrations 0004–0010 add
+Invite friends into your current voice room with **[+]** beside Camera/Leave or the
+friend's right-click menu. An invitation card appears in your DM; **Accept & Join
+Voice** joins the named room using the recipient's existing mute/deafen settings,
+with camera and screen sharing off. Invites expire after five minutes or when the
+sender leaves. A distinct sound (customizable in Notifications) and tray alert
+make pending invites noticeable. **Chat** on a room card opens its text chat
+without joining voice.
+
+Deploy the updated host and clients together: database migrations 0004–0011 add
 per-user conversation preferences, authenticated attachment storage, edit timestamps,
-chunked uploads, and persistent room membership/roles. Existing
+chunked uploads, persistent room membership/roles, and voice invitations. Existing
 messages and conversations are preserved. Images, like text, are server-readable
 in this alpha; media-call E2EE does not apply to chat attachments.
 

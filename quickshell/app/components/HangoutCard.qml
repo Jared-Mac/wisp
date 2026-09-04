@@ -115,7 +115,7 @@ Rectangle {
       }
     }
     Text {
-      width: Math.max(0, hangoutInfo.width - joinButton.width - root.theme.spacing.sm)
+      width: Math.max(0, hangoutInfo.width - joinButton.width - chatButton.width - root.theme.spacing.sm * 2)
       height: Math.max(implicitHeight, joinButton.height)
       verticalAlignment: Text.AlignVCenter
       elide: Text.ElideRight
@@ -156,5 +156,14 @@ Rectangle {
         root.joined()
       }
     }
+  }
+  ChatButton {
+    id: chatButton
+    objectName: "openRoomChat"
+    theme: root.theme; text: "Chat"
+    anchors.right: joinButton.left; anchors.rightMargin: root.theme.spacing.sm
+    anchors.verticalCenter: joinButton.verticalCenter
+    Accessible.name: "Open " + (root.hangout.label || "room") + " text chat"
+    onClicked: root.bridge.openRoomChat(root.hangout, false)
   }
 }

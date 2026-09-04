@@ -16,6 +16,12 @@ Popup {
   contentItem: Column {
     spacing: root.theme.spacing.md
     Text { text: "Volume · only for you"; color: root.theme.foreground; font.family: root.theme.font.family; font.pixelSize: root.theme.font.body; font.bold: true }
+    ChatButton {
+      theme: root.theme; text: "Invite to your voice room"
+      width: parent.width
+      visible: root.participants.length === 1 && !!root.bridge.currentVoiceRoom
+      onClicked: { root.bridge.inviteToRoom(root.participants[0]); root.close() }
+    }
     Repeater {
       model: root.participants
       Column {

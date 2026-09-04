@@ -1094,6 +1094,50 @@ impl Daemon {
                 }
                 Ok(None)
             }
+            "send_voice_invite" => {
+                let request: wisp_protocol::InviteToRoom =
+                    serde_json::from_value(command.args.clone())?;
+                let result: Value = decode(
+                    self.api
+                        .request(reqwest::Method::POST, "/v1/room-invitations")
+                        .json(&request)
+                        .send()
+                        .await?,
+                )
+                .await?;
+                self.refresh("room_invited").await?;
+                Ok(Some(result))
+            }
+            "respond_room_invitation" => {
+                let id: uuid::Uuid = string_arg(&command.args, "id")?.parse()?;
+                let accept = command
+                    .args
+                    .get("accept")
+                    .and_then(Value::as_bool)
+                    .context("accept is required")?;
+                // Explicit acceptance may switch rooms. Stop video before the
+                // server can announce the new membership to our event loop.
+                if accept && self.media_enabled {
+                    self.screen_share_command(&json!({"enabled":false})).await?;
+                    self.camera_command(&json!({"enabled":false})).await?;
+                }
+                let result: Value = decode(
+                    self.api
+                        .request(
+                            reqwest::Method::POST,
+                            &format!("/v1/room-invitations/{id}/respond"),
+                        )
+                        .json(&wisp_protocol::RespondRoomInvitation { accept })
+                        .send()
+                        .await?,
+                )
+                .await?;
+                self.refresh("room_invitation_responded").await?;
+                if accept {
+                    self.reconcile_media().await?;
+                }
+                Ok(Some(result))
+            }
             "paste_clipboard" => Ok(Some(self.chat_images.paste().await?)),
             "import_chat_files" => {
                 let urls: Vec<String> = serde_json::from_value(
@@ -2655,6 +2699,15 @@ async fn synchronize_tray_state(daemon: Arc<Daemon>, handle: ksni::Handle<tray::
                     .map(|conversation| conversation.unread_count)
                     .sum(),
             )
+            .with_room_invitations(
+                state
+                    .room_invitations
+                    .iter()
+                    .filter(|i| {
+                        std::time::SystemTime::from(i.expires_at) > std::time::SystemTime::now()
+                    })
+                    .count() as u64,
+            )
         };
         if previous != Some(current) {
             if handle
@@ -2666,9 +2719,9 @@ async fn synchronize_tray_state(daemon: Arc<Daemon>, handle: ksni::Handle<tray::
             }
             previous = Some(current);
         }
-        match events.recv().await {
-            Ok(_) | Err(broadcast::error::RecvError::Lagged(_)) => {}
-            Err(broadcast::error::RecvError::Closed) => return,
+        match tokio::time::timeout(Duration::from_secs(10), events.recv()).await {
+            Ok(Ok(_) | Err(broadcast::error::RecvError::Lagged(_))) | Err(_) => {}
+            Ok(Err(broadcast::error::RecvError::Closed)) => return,
         }
     }
 }
@@ -3017,6 +3070,15 @@ async fn main() -> anyhow::Result<()> {
                 .iter()
                 .map(|conversation| conversation.unread_count)
                 .sum(),
+        )
+        .with_room_invitations(
+            state
+                .room_invitations
+                .iter()
+                .filter(|i| {
+                    std::time::SystemTime::from(i.expires_at) > std::time::SystemTime::now()
+                })
+                .count() as u64,
         )
     };
     if let Some(handle) = tray_handle.as_ref() {

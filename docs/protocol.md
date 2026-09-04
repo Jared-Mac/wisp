@@ -4,10 +4,22 @@ Local IPC is newline-delimited JSON on `$XDG_RUNTIME_DIR/wisp/wispd.sock`.
 
 ### Chat workspace commands
 
+Message text and attachment captions have no fixed character limit, including
+edits. Their HTTP routes accept large JSON bodies after authenticating the
+request headers. File chunk bounds, image validation, filename bounds, and
+nonempty text-message validation remain enforced. Actual message capacity still
+depends on available client/server memory, storage, and any reverse-proxy limits;
+JSON and history snapshots are currently buffered, not streamed message text.
+Servers predating this change reject text/captions above 4,000 characters and
+must be updated; changing the desktop client alone does not remove that limit.
+
 - `set_conversation_tab`: `{conversation_id, closed}` persists only that user's tab visibility.
 - `clear_chat_history`: `{conversation_id,for_everyone:false}` hides prior history for that user; two DM participants clearing removes their common cleared prefix from storage. Explicit `for_everyone:true` requires a room owner/admin and deletes room history for all members. The UI requires confirmation, including an irreversible/all-users warning for rooms. Cached images are purged.
 - `create_room`: `{name}` creates a private persistent room with the creator as owner; returns a conversation without joining a call.
 - `invite_to_room`: `{conversation_id,user_id}` adds a circle friend as a member; caller must be owner/admin. Never autojoins a call.
+- `send_voice_invite`: `{hangout_id,user_id}` invites a friend to the caller's current voice room (`POST /v1/room-invitations`). Creates a server-authored DM card with a five-minute lifetime and reopens the DM. It does not join the recipient. Room owners/admins can invite friends without existing room access; other members can invite friends who already have access.
+- `respond_room_invitation`: `{id,accept}` (`POST /v1/room-invitations/{id}/respond`) accepts or dismisses a received invite. Only explicit acceptance joins voice, rechecking the inviter's presence and access. Camera/share stop before accepting; microphone mute/deafen preferences remain unchanged. Retries do not rejoin after leaving. Expired invites cannot be accepted. Pending invitations appear in the recipient's `room_invitations` snapshot field; older clients ignore it.
+- Voice invitations use server-authored `application/vnd.wisp.room-invitation+json` message cards, with room, expiry, and accepted/dismissed state. They cannot be edited or forged using the text endpoint. Deleting their message also revokes the invitation. A distinct, locally customizable cue and tray attention alert accompany new invites, without joining automatically or replaying sounds on reconnect. The room list's **Chat** action opens text only.
 - `set_room_admin`: `{conversation_id,user_id,admin}` grants/revokes a member's admin role; only the room owner may call it. Owners cannot be demoted.
 - `paste_clipboard`: explicitly reads the local clipboard and returns `{token, url}` for a staged PNG, or `{text}`. It does not upload anything.
 - `discard_image_draft`: `{token}` removes a staged local image.

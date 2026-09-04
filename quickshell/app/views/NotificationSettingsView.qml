@@ -122,7 +122,7 @@ Column {
     }
   }
   Repeater {
-    model: [{id:"member_join",label:"Someone joins your room"},{id:"member_leave",label:"Someone leaves your room"},{id:"self_join",label:"You join a room"},{id:"self_leave",label:"You leave a room"}]
+    model: [{id:"room_invite",label:"Voice room invitation"},{id:"member_join",label:"Someone joins your room"},{id:"member_leave",label:"Someone leaves your room"},{id:"self_join",label:"You join a room"},{id:"self_leave",label:"You leave a room"}]
     Column {
       id: eventSoundRow
       required property var modelData
@@ -138,7 +138,7 @@ Column {
         ChatButton { theme: root.theme; text: "Choose sound…"; onClicked: { root.selectedSoundEvent=eventSoundRow.modelData.id; soundPicker.title=eventSoundRow.modelData.label; soundPicker.open() } }
         ChatButton {
           theme: root.theme; text: "Test"
-          enabled: !root.bridge.notificationMuted && root.bridge.notificationVolume > 0 && (eventSoundRow.modelData.id.indexOf("self_") === 0 ? root.bridge.selfRoomNotificationSounds : root.bridge.roomNotificationSounds)
+          enabled: !root.bridge.notificationMuted && root.bridge.notificationVolume > 0 && (eventSoundRow.modelData.id === "room_invite" || (eventSoundRow.modelData.id.indexOf("self_") === 0 ? root.bridge.selfRoomNotificationSounds : root.bridge.roomNotificationSounds))
           onClicked: root.bridge.playNotificationSound(eventSoundRow.modelData.id)
         }
         ChatButton { theme: root.theme; text: "Restore default"; onClicked: root.bridge.setEventSound(eventSoundRow.modelData.id, "") }

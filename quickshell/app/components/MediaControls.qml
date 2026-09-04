@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls
 
 Column {
   id: root
@@ -7,6 +8,7 @@ Column {
   signal leaveRequested()
   signal cameraRequested()
   spacing: root.theme.spacing.sm
+  RoomInvitePicker { id: invitePicker; bridge: root.bridge; theme: root.theme }
 
   Flow {
     id: controls
@@ -20,17 +22,24 @@ Column {
       model: [
         { "label": root.bridge.sharing ? "Stop sharing screen" : root.bridge.shareStarting ? "Choosing…" : "Share screen", "action": "share" },
         { "label": root.bridge.cameraActive ? "Stop camera" : root.bridge.cameraStarting ? "Starting…" : "Camera on", "action": "camera" },
+        { "label": "+", "action": "invite" },
         { "label": "Leave", "action": "leave" }
       ]
       delegate: Rectangle {
         required property var modelData
         objectName: "mediaAction-" + modelData.action
+        Accessible.name: modelData.action === "invite" ? "Invite friends to voice" : modelData.label
+        ToolTip {
+          visible: modelData.action === "invite" && controlMouse.containsMouse
+          text: "Invite friends to voice"
+          y: parent.height + root.theme.spacing.sm
+        }
         readonly property bool publishing: (modelData.action === "share" && root.bridge.sharing)
           || (modelData.action === "camera" && root.bridge.cameraActive)
         readonly property bool controlEnabled: publishing || ((modelData.action !== "share" || !root.bridge.shareStarting)
           && (modelData.action !== "camera" || (!root.bridge.cameraStarting
             && root.bridge.cameraState.devices.length > 0)))
-        width: Math.min(root.width, root.theme.tui ? controlLabel.implicitWidth + root.theme.space(16) : Math.max(controlLabel.implicitWidth + root.theme.space(20), (root.width
+        width: modelData.action === "invite" ? controlLabel.implicitWidth + root.theme.space(16) : Math.min(root.width, root.theme.tui ? controlLabel.implicitWidth + root.theme.space(16) : Math.max(controlLabel.implicitWidth + root.theme.space(20), (root.width
           - controls.spacing * (controlRepeater.count - 1))
           / Math.max(1, controlRepeater.count)))
         height: Math.max(root.theme.space(root.theme.tui ? 28 : 34), controlLabel.implicitHeight + root.theme.space(10))
@@ -47,9 +56,9 @@ Column {
           id: controlLabel
           anchors.centerIn: parent
           width: Math.min(implicitWidth, parent.width - root.theme.space(16))
-          wrapMode: Text.Wrap
+          wrapMode: modelData.action === "invite" ? Text.NoWrap : Text.Wrap
           horizontalAlignment: Text.AlignHCenter
-          text: root.theme.tui ? "[" + modelData.label.toLowerCase() + "]" : modelData.label
+          text: modelData.action === "invite" ? "[+]" : root.theme.tui ? "[" + modelData.label.toLowerCase() + "]" : modelData.label
           color: parent.publishing || modelData.action === "leave" ? root.theme.danger : root.theme.foreground
           font.weight: parent.publishing ? Font.Bold : Font.Normal
           font.family: root.theme.font.family
@@ -64,6 +73,7 @@ Column {
           onClicked: {
             if (modelData.action === "share") root.bridge.toggleShare()
             else if (modelData.action === "camera") root.cameraRequested()
+            else if (modelData.action === "invite") invitePicker.open()
             else { root.bridge.leave(); root.leaveRequested() }
           }
         }

@@ -332,11 +332,33 @@ FocusScope {
       }
 
       SettingsMenu {
+        // Incoming invites remain reachable even when Activity is collapsed.
         visible: root.settingsOpen
         width: parent.width
         bridge: root.bridge
         theme: root.theme
         anchorController: root.anchorController
+      }
+
+      Flow {
+        width: parent.width; spacing: root.theme.spacing.sm
+        visible: (root.bridge.roomInvitations || []).length > 0
+        Repeater {
+          model: root.bridge.roomInvitations || []
+          ChatButton {
+            required property var modelData
+            theme: root.theme; primary: true
+            text: "Voice invite · " + modelData.from.display_name
+            width: Math.min(implicitWidth, parent.width)
+            onClicked: { root.currentPage = "chats"; root.bridge.selectConversation(modelData.conversation_id) }
+          }
+        }
+      }
+      Text {
+        width: parent.width; wrapMode: Text.Wrap
+        visible: !!root.bridge.invitationFeedback
+        text: root.bridge.invitationFeedback || ""
+        color: root.theme.accent; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
       }
 
       Loader {
