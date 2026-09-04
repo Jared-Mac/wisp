@@ -30,6 +30,9 @@ struct Args {
     /// One-time administrator enrollment secret. Keep this outside the repository.
     #[arg(long, env = "WISP_BOOTSTRAP_TOKEN")]
     bootstrap_token: Option<String>,
+    /// Refuse plaintext chat writes. Enable only after the coordinated cutover.
+    #[arg(long, env = "WISP_REQUIRE_CHAT_E2EE", default_value_t = false)]
+    require_chat_e2ee: bool,
 }
 
 fn default_database_url() -> anyhow::Result<String> {
@@ -60,6 +63,27 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let args = Args::parse();
+    if args.require_chat_e2ee {
+        anyhow::ensure!(
+            args.allow_dev_sessions == Some(false),
+            "Private hosting requires WISP_ALLOW_DEV_SESSIONS=false explicitly"
+        );
+        anyhow::ensure!(
+            args.livekit_url.starts_with("wss://"),
+            "Private hosting requires a TLS LiveKit URL (wss://)"
+        );
+        anyhow::ensure!(
+            args.livekit_api_key != "devkey"
+                && args.livekit_api_secret.len() >= 32
+                && args.livekit_api_secret != "wisp-local-development-secret-32"
+                && !args.livekit_api_secret.starts_with("replace-"),
+            "Private hosting requires fresh LiveKit service credentials"
+        );
+        anyhow::ensure!(
+            std::env::var_os("WISP_E2EE_KEY").is_none(),
+            "Client media encryption keys must never be installed on the server"
+        );
+    }
     let config = AppConfig {
         database_url: args.database_url.map_or_else(default_database_url, Ok)?,
         livekit_url: args.livekit_url,
@@ -70,6 +94,7 @@ async fn main() -> anyhow::Result<()> {
             .allow_dev_sessions
             .unwrap_or_else(|| args.addr.ip().is_loopback()),
         bootstrap_token: args.bootstrap_token,
+        require_chat_e2ee: args.require_chat_e2ee,
     };
     let state = AppState::new(config).await?;
     let maintenance = tokio::spawn(state.clone().maintain_attachments());

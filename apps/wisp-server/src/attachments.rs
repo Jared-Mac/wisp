@@ -52,6 +52,7 @@ pub(super) async fn begin(
     Json(request): Json<BeginFileUpload>,
 ) -> Result<Json<FileUploadStatus>, ApiError> {
     let user = authenticate_headers(&state, &headers).await?;
+    super::privacy::require_legacy_allowed(&state)?;
     ensure_conversation_member(&state.pool, &request.conversation_id, user).await?;
     if !wisp_protocol::valid_chat_file_name(&request.file_name) {
         return Err(ApiError::bad_request("invalid_file", "Invalid filename"));
@@ -65,6 +66,7 @@ pub(super) async fn begin(
         .execute(&state.pool).await.map_err(ApiError::internal)?;
     let row = owned(&state, user, request.id).await?;
     if row.get::<String, _>("conversation_id") != request.conversation_id
+        || row.get::<i64, _>("encryption_version") != 0
         || row.get::<String, _>("file_name") != request.file_name
         || row.get::<i64, _>("size") != size
     {
@@ -87,7 +89,10 @@ pub(super) async fn chunk(
     bytes: Bytes,
 ) -> Result<Json<FileUploadStatus>, ApiError> {
     let user = authenticate_headers(&state, &headers).await?;
-    owned(&state, user, id).await?;
+    let upload = owned(&state, user, id).await?;
+    if upload.get::<i64, _>("encryption_version") == 0 {
+        super::privacy::require_legacy_allowed(&state)?;
+    }
     if bytes.is_empty() || bytes.len() > CHAT_FILE_CHUNK_BYTES {
         return Err(ApiError::bad_request(
             "invalid_chunk",
@@ -170,6 +175,9 @@ pub(super) async fn complete(
 ) -> Result<Json<Message>, ApiError> {
     let user = authenticate_headers(&state, &headers).await?;
     let row = owned(&state, user, id).await?;
+    if row.get::<i64, _>("encryption_version") == 0 {
+        super::privacy::require_legacy_allowed(&state)?;
+    }
     if let Some(message_id) = row.get::<Option<String>, _>("message_id") {
         let message = sqlx::query("SELECT m.*, u.display_name FROM messages m JOIN users u ON u.id = m.sender_id WHERE m.id = ?")
             .bind(message_id).fetch_one(&state.pool).await.map_err(ApiError::internal)?;
@@ -184,10 +192,16 @@ pub(super) async fn complete(
     }
     let keep: bool = row.get("keep");
     let expires = deadline(
-        u64::try_from(size).map_err(ApiError::internal)?,
+        u64::try_from(row.get::<Option<i64>, _>("plaintext_size").unwrap_or(size))
+            .map_err(ApiError::internal)?,
         Utc::now(),
         keep,
     );
+    if row.get::<i64, _>("encryption_version") == 1 {
+        return super::privacy::complete_upload(&state, user, &row, id, expires)
+            .await
+            .map(Json);
+    }
     persist_message(&state, user, SendMessageRequest {
         conversation_id: row.get("conversation_id"), content_type: "application/octet-stream".into(), encryption_version: 0,
         payload: json!({"file_name":row.get::<String,_>("file_name"), "size":size, "caption":row.get::<String,_>("caption"), "keep":keep, "expires_at":expires, "expired":false}),
@@ -276,8 +290,15 @@ pub(super) async fn retention(
     let created = DateTime::parse_from_rfc3339(&row.get::<String, _>("created_at"))
         .map_err(ApiError::internal)?
         .with_timezone(&Utc);
-    let expires = deadline(payload["size"].as_u64().unwrap_or(0), created, request.keep)
-        .map(|date| date.to_rfc3339());
+    let expires = deadline(
+        payload["retention_size"]
+            .as_u64()
+            .or_else(|| payload["size"].as_u64())
+            .unwrap_or(0),
+        created,
+        request.keep,
+    )
+    .map(|date| date.to_rfc3339());
     sqlx::query("UPDATE messages SET payload = json_set(payload, '$.keep', json(?), '$.expires_at', ?) WHERE id = ?")
         .bind(if request.keep { "true" } else { "false" }).bind(expires).bind(id.to_string()).execute(&mut *tx).await.map_err(ApiError::internal)?;
     tx.commit().await.map_err(ApiError::internal)?;
@@ -292,12 +313,12 @@ pub(super) async fn retention(
 
 pub(super) async fn cleanup(pool: &SqlitePool, now: DateTime<Utc>) -> anyhow::Result<u64> {
     let mut tx = pool.begin().await?;
-    let changed = sqlx::query("UPDATE messages SET payload = json_set(payload, '$.expired', json('true')) WHERE content_type = 'application/octet-stream' AND json_extract(payload, '$.keep') IS NOT 1 AND json_extract(payload, '$.expired') IS NOT 1 AND julianday(json_extract(payload, '$.expires_at')) <= julianday(?)")
+    let changed = sqlx::query("UPDATE messages SET payload = json_set(payload, '$.expired', json('true')) WHERE content_type IN ('application/octet-stream', 'application/vnd.wisp.encrypted+json') AND json_extract(payload, '$.keep') IS NOT 1 AND json_extract(payload, '$.expired') IS NOT 1 AND julianday(json_extract(payload, '$.expires_at')) <= julianday(?)")
         .bind(now.to_rfc3339()).execute(&mut *tx).await?.rows_affected();
     // Removing chunks and legacy bytes leaves a visible 'expired' marker in chat.
-    sqlx::query("DELETE FROM file_uploads WHERE message_id IN (SELECT id FROM messages WHERE content_type = 'application/octet-stream' AND json_extract(payload, '$.expired') = 1) OR (message_id IS NULL AND last_activity_at < ?)")
+    sqlx::query("DELETE FROM file_uploads WHERE message_id IN (SELECT id FROM messages WHERE content_type IN ('application/octet-stream', 'application/vnd.wisp.encrypted+json') AND json_extract(payload, '$.expired') = 1) OR (message_id IS NULL AND last_activity_at < ?)")
         .bind((now - ChronoDuration::hours(24)).to_rfc3339()).execute(&mut *tx).await?;
-    sqlx::query("DELETE FROM chat_files WHERE message_id IN (SELECT id FROM messages WHERE content_type = 'application/octet-stream' AND json_extract(payload, '$.expired') = 1)").execute(&mut *tx).await?;
+    sqlx::query("DELETE FROM chat_files WHERE message_id IN (SELECT id FROM messages WHERE content_type IN ('application/octet-stream', 'application/vnd.wisp.encrypted+json') AND json_extract(payload, '$.expired') = 1)").execute(&mut *tx).await?;
     tx.commit().await?;
     Ok(changed)
 }

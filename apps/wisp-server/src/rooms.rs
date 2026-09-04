@@ -62,6 +62,7 @@ pub(super) async fn invite(
 ) -> Result<Json<Value>, ApiError> {
     let user = authenticate_headers(&state, &headers).await?;
     let actor_role = role(&state.pool, user, &request.conversation_id).await?;
+    super::privacy::require_unsigned_room(&state.pool, &request.conversation_id).await?;
     if !matches!(actor_role.as_str(), "host" | "admin") {
         return Err(ApiError::forbidden(
             "Only room owners and admins can invite friends",
@@ -90,6 +91,7 @@ pub(super) async fn set_admin(
             "Only the room owner can manage admin access",
         ));
     }
+    super::privacy::require_unsigned_room(&state.pool, &request.conversation_id).await?;
     if role(&state.pool, request.user_id, &request.conversation_id).await? == "host" {
         return Err(ApiError::forbidden("The owner cannot be demoted"));
     }

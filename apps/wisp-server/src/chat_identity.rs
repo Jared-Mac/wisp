@@ -1,0 +1,243 @@
+//! Public-only directory and signed membership relay. No private keys exist in
+//! this module. Clients independently pin keys and verify the complete chain.
+use super::{
+    ApiError, AppState, HeaderMap, Json, Row, State, Uuid, Value, authenticate_headers,
+    ensure_conversation_member,
+};
+use serde::Deserialize;
+use serde_json::json;
+use std::collections::BTreeMap;
+use wisp_crypto::{
+    PublicIdentity,
+    roster::{Role, SignedRoster},
+};
+
+pub(super) async fn network(state: &AppState) -> Result<Uuid, ApiError> {
+    sqlx::query_scalar::<_, String>("SELECT network_id FROM chat_network WHERE id=1")
+        .fetch_one(&state.pool)
+        .await
+        .map_err(ApiError::internal)?
+        .parse()
+        .map_err(ApiError::internal)
+}
+
+pub(super) async fn directory(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, ApiError> {
+    let user = authenticate_headers(&state, &headers).await?;
+    let identities=sqlx::query("SELECT user_id,public_identity FROM chat_identities WHERE user_id=? OR user_id IN (SELECT b.user_id FROM circle_members a JOIN circle_members b ON a.circle_id=b.circle_id WHERE a.user_id=?)")
+        .bind(user.to_string()).bind(user.to_string()).fetch_all(&state.pool).await.map_err(ApiError::internal)?;
+    let mut keys = BTreeMap::<String, Value>::new();
+    for row in identities {
+        keys.insert(
+            row.get("user_id"),
+            serde_json::from_str(&row.get::<String, _>("public_identity"))
+                .map_err(ApiError::internal)?,
+        );
+    }
+    let rows=sqlx::query("SELECT cr.conversation_id,cr.signed_roster FROM chat_rosters cr JOIN conversation_members cm ON cm.conversation_id=cr.conversation_id AND cm.user_id=? ORDER BY cr.conversation_id,cr.revision")
+        .bind(user.to_string()).fetch_all(&state.pool).await.map_err(ApiError::internal)?;
+    let mut rosters = BTreeMap::<String, Vec<Value>>::new();
+    for row in rows {
+        rosters.entry(row.get("conversation_id")).or_default().push(
+            serde_json::from_str(&row.get::<String, _>("signed_roster"))
+                .map_err(ApiError::internal)?,
+        );
+    }
+    Ok(Json(
+        json!({"network":network(&state).await?,"required":state.config.require_chat_e2ee,"identities":keys,"rosters":rosters}),
+    ))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct PublishIdentity {
+    identity: PublicIdentity,
+    signature: String,
+}
+
+pub(super) async fn publish(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<PublishIdentity>,
+) -> Result<Json<Value>, ApiError> {
+    let user = authenticate_headers(&state, &headers).await?;
+    request
+        .identity
+        .validate()
+        .map_err(|_| ApiError::bad_request("invalid_identity", "Invalid public identity"))?;
+    let statement = serde_json::to_vec(&(network(&state).await?, user, &request.identity))
+        .map_err(ApiError::internal)?;
+    request
+        .identity
+        .verify_statement("wisp-account-key-v1", &statement, &request.signature)
+        .map_err(|_| ApiError::bad_request("invalid_identity", "Public identity proof failed"))?;
+    let identity = serde_json::to_string(&request.identity).map_err(ApiError::internal)?;
+    sqlx::query("INSERT OR IGNORE INTO chat_identities(user_id,public_identity) VALUES (?,?)")
+        .bind(user.to_string())
+        .bind(&identity)
+        .execute(&state.pool)
+        .await
+        .map_err(ApiError::internal)?;
+    let existing: String =
+        sqlx::query_scalar("SELECT public_identity FROM chat_identities WHERE user_id=?")
+            .bind(user.to_string())
+            .fetch_one(&state.pool)
+            .await
+            .map_err(ApiError::internal)?;
+    if existing != identity {
+        return Err(ApiError::conflict(
+            "identity_changed",
+            "This account already has a different encryption identity; restore its recovery key",
+        ));
+    }
+    state
+        .emit("chat_identity_changed", json!({"changed":true}))
+        .await;
+    Ok(Json(json!({"ok":true})))
+}
+
+pub(super) async fn update_roster(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<SignedRoster>,
+) -> Result<Json<Value>, ApiError> {
+    let user = authenticate_headers(&state, &headers).await?;
+    let network = network(&state).await?;
+    ensure_conversation_member(&state.pool, &request.roster.conversation, user).await?;
+    let mut tx = state.pool.begin().await.map_err(ApiError::internal)?;
+    apply_roster(&mut tx, network, user, &request).await?;
+    tx.commit().await.map_err(ApiError::internal)?;
+    state
+        .emit("chat_roster_changed", json!({"changed":true}))
+        .await;
+    Ok(Json(json!({"ok":true})))
+}
+
+#[allow(clippy::too_many_lines)]
+pub(super) async fn apply_roster(
+    tx: &mut sqlx::SqliteConnection,
+    network: Uuid,
+    user: Uuid,
+    request: &SignedRoster,
+) -> Result<(), ApiError> {
+    let roster = &request.roster;
+    if roster.actor != user || roster.network != network {
+        return Err(ApiError::forbidden("Invalid room change identity"));
+    }
+    // Acquire write lock before checking the predecessor, preventing forks.
+    sqlx::query("UPDATE conversations SET label=label WHERE id=?")
+        .bind(&roster.conversation)
+        .execute(&mut *tx)
+        .await
+        .map_err(ApiError::internal)?;
+    let previous:Option<String>=sqlx::query_scalar("SELECT signed_roster FROM chat_rosters WHERE conversation_id=? ORDER BY revision DESC LIMIT 1").bind(&roster.conversation).fetch_optional(&mut *tx).await.map_err(ApiError::internal)?;
+    if let Some(previous) = previous {
+        let previous: SignedRoster = serde_json::from_str(&previous).map_err(ApiError::internal)?;
+        if &previous == request {
+            return Ok(());
+        }
+        request.verify_successor(&previous).map_err(|_| {
+            ApiError::conflict(
+                "invalid_room_transition",
+                "Room membership update is not authorized by its predecessor",
+            )
+        })?;
+    } else {
+        request.verify_genesis().map_err(|_| {
+            ApiError::bad_request("invalid_room_identity", "Invalid initial room signature")
+        })?;
+        let members =
+            sqlx::query("SELECT user_id,role FROM conversation_members WHERE conversation_id=?")
+                .bind(&roster.conversation)
+                .fetch_all(&mut *tx)
+                .await
+                .map_err(ApiError::internal)?;
+        if members.len() != roster.members.len() {
+            return Err(ApiError::conflict(
+                "room_changed",
+                "Initial membership does not match",
+            ));
+        }
+        for row in members {
+            let id: Uuid = row
+                .get::<String, _>("user_id")
+                .parse()
+                .map_err(ApiError::internal)?;
+            let role = row.get::<String, _>("role");
+            if roster
+                .members
+                .get(&id)
+                .is_none_or(|m| role_name(&m.role) != role)
+            {
+                return Err(ApiError::conflict(
+                    "room_changed",
+                    "Initial membership does not match",
+                ));
+            }
+        }
+    }
+    for (id, member) in &roster.members {
+        let key: Option<String> =
+            sqlx::query_scalar("SELECT public_identity FROM chat_identities WHERE user_id=?")
+                .bind(id.to_string())
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(ApiError::internal)?;
+        let key: PublicIdentity = serde_json::from_str(&key.ok_or_else(|| {
+            ApiError::conflict(
+                "missing_identity",
+                "Every participant must enable encryption first",
+            )
+        })?)
+        .map_err(ApiError::internal)?;
+        if key != member.identity {
+            return Err(ApiError::conflict(
+                "identity_changed",
+                "Participant encryption identity does not match",
+            ));
+        }
+        let friend:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM circle_members a JOIN circle_members b ON a.circle_id=b.circle_id WHERE a.user_id=? AND b.user_id=?)").bind(user.to_string()).bind(id.to_string()).fetch_one(&mut *tx).await.map_err(ApiError::internal)?;
+        if !friend {
+            return Err(ApiError::forbidden("Only friends can be added to a room"));
+        }
+    }
+    // Retain read markers/history state for existing members.
+    let current: Vec<String> =
+        sqlx::query_scalar("SELECT user_id FROM conversation_members WHERE conversation_id=?")
+            .bind(&roster.conversation)
+            .fetch_all(&mut *tx)
+            .await
+            .map_err(ApiError::internal)?;
+    for id in current {
+        if !roster.members.keys().any(|member| member.to_string() == id) {
+            sqlx::query("DELETE FROM conversation_members WHERE conversation_id=? AND user_id=?")
+                .bind(&roster.conversation)
+                .bind(id)
+                .execute(&mut *tx)
+                .await
+                .map_err(ApiError::internal)?;
+        }
+    }
+    for (id, member) in &roster.members {
+        sqlx::query("INSERT INTO conversation_members(conversation_id,user_id,role,joined_at,history_cleared_at) VALUES (?,?,?,?,?) ON CONFLICT(conversation_id,user_id) DO UPDATE SET role=excluded.role")
+        .bind(&roster.conversation).bind(id.to_string()).bind(role_name(&member.role)).bind(chrono::Utc::now().to_rfc3339()).bind(chrono::Utc::now().to_rfc3339()).execute(&mut *tx).await.map_err(ApiError::internal)?;
+    }
+    sqlx::query("INSERT INTO chat_rosters(conversation_id,revision,signed_roster) VALUES (?,?,?)")
+        .bind(&roster.conversation)
+        .bind(i64::try_from(roster.revision).map_err(ApiError::internal)?)
+        .bind(serde_json::to_string(&request).map_err(ApiError::internal)?)
+        .execute(&mut *tx)
+        .await
+        .map_err(ApiError::internal)?;
+    Ok(())
+}
+
+fn role_name(role: &Role) -> &'static str {
+    match role {
+        Role::Host => "host",
+        Role::Admin => "admin",
+        Role::Member => "member",
+    }
+}

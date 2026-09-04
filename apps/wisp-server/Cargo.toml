@@ -24,6 +24,7 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 uuid.workspace = true
 wisp-protocol.workspace = true
+wisp-crypto = { path = "../../crates/wisp-crypto" }
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }

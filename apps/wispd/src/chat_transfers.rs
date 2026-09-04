@@ -19,7 +19,13 @@ impl Drop for PartialDownload {
 }
 
 impl Daemon {
-    fn transfer_progress(&self, id: uuid::Uuid, direction: &str, bytes: u64, total: u64) {
+    pub(super) fn transfer_progress(
+        &self,
+        id: uuid::Uuid,
+        direction: &str,
+        bytes: u64,
+        total: u64,
+    ) {
         self.emit(
             "file_transfer_progress",
             json!({"id":id,"direction":direction,"bytes":bytes,"total":total}),
@@ -107,6 +113,9 @@ impl Daemon {
             .context("File is not in your visible chat history")?;
         if message.payload["expired"] == true {
             bail!("This file has expired");
+        }
+        if message.encryption_version == 1 {
+            return self.save_encrypted_file(&message).await;
         }
         let name = message.payload["file_name"]
             .as_str()

@@ -8,12 +8,8 @@ if [[ -z "$host" || -z "$profile" ]]; then
   echo "usage: just friend-config <tailscale-host-or-ip> <Tyler|Jack|Charlie>" >&2
   exit 2
 fi
-if [[ ! "$host" =~ ^[A-Za-z0-9.-]+$ ]]; then
-  echo "host must be a Tailscale DNS name or IP address" >&2
-  exit 2
-fi
 case "$profile" in
-  Tyler|Jack|Charlie) ;;
+  Jared|Tyler|Jack|Charlie) ;;
   *)
     echo "profile must be Tyler, Jack, or Charlie; each friend needs a unique profile" >&2
     exit 2

@@ -37,6 +37,7 @@ if [[ -f "$repo_dir/target/video-ui/libwispvideo.so" ]]; then
 fi
 
 install -m 0755 "$repo_dir/scripts/wisp-ui.sh" "$bin_root/wisp-ui"
+install -m 0644 "$repo_dir/scripts/server-endpoint.sh" "$bin_root/wisp-server-endpoint"
 install -m 0755 "$repo_dir/scripts/configure-friend.sh" "$bin_root/wisp-friend-config"
 install -m 0755 "$repo_dir/scripts/register-friend-device.sh" "$bin_root/wisp-friend-register"
 install -m 0755 "$repo_dir/scripts/friend-tailscale.sh" "$bin_root/wisp-friend"

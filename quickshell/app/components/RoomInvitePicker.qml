@@ -25,7 +25,8 @@ Popup {
           required property var modelData
           theme: root.theme; width: parent.width
           text: modelData.display_name
-          enabled: !!root.bridge.currentVoiceRoom && !(root.bridge.currentVoiceRoom.members || []).some(function(p) { return p.id === modelData.id }) && !(root.bridge.invitationRequests || {})[modelData.id]
+          enabled: !!root.bridge.currentVoiceRoom && (!(root.bridge.currentVoiceRoom.members || []).some(function(p) { return p.id === modelData.id })
+            || (typeof root.bridge.needsEncryptedRoomAccess === "function" && root.bridge.needsEncryptedRoomAccess(modelData))) && !(root.bridge.invitationRequests || {})[modelData.id]
           onClicked: { root.bridge.inviteToRoom(modelData); root.close() }
         }
       }

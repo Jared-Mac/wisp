@@ -39,8 +39,8 @@ Column {
     width: parent.width
     spacing: root.theme.spacing.sm
     Repeater {
-      model: [{id:"media",label:"Audio / Video"},{id:"appearance",label:"Appearance"},{id:"notifications",label:"Notifications & Chat"},{id:"devices",label:"Devices & Privacy"}]
-      ChatButton {
+      model: [{id:"media",label:"Audio / Video"},{id:"appearance",label:"Appearance"},{id:"notifications",label:"Notifications & Chat"},{id:"privacy",label:"Privacy"},{id:"devices",label:"Devices"}]
+      SettingsTab {
         required property var modelData
         theme: root.theme; text: modelData.label
         objectName: "settingsTab-" + modelData.id
@@ -64,6 +64,21 @@ Column {
       anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
       anchors.margins: root.theme.spacing.xxl
       theme: root.theme
+    }
+  }
+
+  Rectangle {
+    visible: root.section === "privacy"
+    width: parent.width
+    height: privacySettings.implicitHeight + root.theme.spacing.xxl * 2
+    radius: root.theme.cornerRadius
+    color: root.theme.tui ? root.theme.background : root.theme.alpha(root.theme.foreground, 0.035)
+    border.width: 1; border.color: root.theme.separator
+    PrivacySettingsView {
+      id: privacySettings
+      anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
+      anchors.margins: root.theme.spacing.xxl
+      bridge: root.bridge; theme: root.theme
     }
   }
 

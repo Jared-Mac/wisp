@@ -158,6 +158,12 @@ async fn uncapped_text_routes_authenticate_before_reading_the_body() {
         ("POST", "/v1/messages/image"),
         ("POST", "/v1/messages/file"),
         ("POST", "/v1/file-uploads"),
+        ("POST", "/v1/e2ee/messages"),
+        ("POST", "/v1/e2ee/file-uploads"),
+        (
+            "PUT",
+            "/v1/e2ee/messages/00000000-0000-0000-0000-000000000001",
+        ),
         ("PATCH", "/v1/messages/00000000-0000-0000-0000-000000000001"),
     ] {
         let body = Body::from_stream(futures_util::stream::poll_fn(

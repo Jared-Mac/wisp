@@ -22,6 +22,12 @@ pub(crate) struct AttachmentDraft {
 }
 
 impl AttachmentDraft {
+    pub(crate) fn reader(self) -> DraftReader {
+        DraftReader {
+            draft: self,
+            offset: 0,
+        }
+    }
     pub(crate) async fn chunk(&self, offset: u64) -> anyhow::Result<Vec<u8>> {
         let length = usize::try_from(
             self.size
@@ -55,6 +61,42 @@ impl AttachmentDraft {
                 .context("Invalid attachment offset")?
                 .to_vec())
         }
+    }
+}
+
+pub(crate) struct DraftReader {
+    draft: AttachmentDraft,
+    offset: u64,
+}
+impl Read for DraftReader {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        let length = buffer.len().min(
+            usize::try_from(self.draft.size.saturating_sub(self.offset)).unwrap_or(usize::MAX),
+        );
+        if let Some(file) = &self.draft.source {
+            let metadata = file.metadata()?;
+            if metadata.len() != self.draft.size || metadata.modified().ok() != self.draft.modified
+            {
+                return Err(std::io::Error::other(
+                    "Attachment changed during encryption",
+                ));
+            }
+            std::os::unix::fs::FileExt::read_exact_at(
+                file.as_ref(),
+                &mut buffer[..length],
+                self.offset,
+            )?;
+        } else {
+            let offset = usize::try_from(self.offset).map_err(std::io::Error::other)?;
+            let bytes = self
+                .draft
+                .bytes
+                .get(offset..offset + length)
+                .ok_or_else(|| std::io::Error::other("Invalid attachment length"))?;
+            buffer[..length].copy_from_slice(bytes);
+        }
+        self.offset += length as u64;
+        Ok(length)
     }
 }
 

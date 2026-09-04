@@ -8,12 +8,15 @@ if [[ -z "$host" || -z "$profile" ]]; then
   echo "usage: just friend-register <tailscale-host-or-ip> <Tyler|Jack|Charlie>" >&2
   exit 2
 fi
-if [[ ! "$host" =~ ^[A-Za-z0-9.-]+$ ]]; then
-  echo "host must be a Tailscale DNS name or IP address" >&2
-  exit 2
-fi
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+endpoint_helper="$script_dir/server-endpoint.sh"
+[[ -f "$endpoint_helper" ]] || endpoint_helper="$script_dir/wisp-server-endpoint"
+source "$endpoint_helper"
+wisp_resolve_endpoint "$host"
+server_url=$WISP_SELECTED_SERVER_URL
+host=$WISP_SELECTED_SERVER_HOST
 case "$profile" in
-  Tyler|Jack|Charlie) ;;
+  Jared|Tyler|Jack|Charlie) ;;
   *) echo "profile must be Tyler, Jack, or Charlie" >&2; exit 2 ;;
 esac
 for command_name in curl jq; do
@@ -30,27 +33,29 @@ if [[ -z "$invite_code" ]]; then
 fi
 e2ee_key=${WISP_E2EE_KEY:-}
 if [[ -z "$e2ee_key" ]]; then
-  read -rsp "Private media key: " e2ee_key
+  if [[ "$server_url" == https://* ]]; then
+    read -rsp "Private media key (Enter to configure encrypted chat first; voice stays blocked): " e2ee_key
+  else
+    read -rsp "Private media key: " e2ee_key
+  fi
   echo
 fi
-if (( ${#e2ee_key} < 16 )); then
+if [[ -z "$e2ee_key" && "$server_url" != https://* ]]; then
   echo "private media key must contain at least 16 characters" >&2
   exit 2
 fi
-if [[ ! "$e2ee_key" =~ ^[A-Za-z0-9_-]{16,128}$ ]]; then
+if [[ -n "$e2ee_key" && ! "$e2ee_key" =~ ^[A-Za-z0-9_-]{16,128}$ ]]; then
   echo "private media key must use 16–128 letters, digits, '_' or '-'" >&2
   exit 2
 fi
 
 device_name=${HOSTNAME:-CachyOS device}
-response=$(jq -n \
-  --arg invite "$invite_code" \
-  --arg device "$device_name" \
-  '{invite_code:$invite, device_name:$device, protocol_version:1}' \
+response=$(printf '%s\n%s' "$invite_code" "$device_name" | jq -Rs \
+  'split("\n") | {invite_code:.[0], device_name:.[1], protocol_version:1}' \
   | curl --silent --show-error --fail-with-body \
       -H 'content-type: application/json' \
       --data-binary @- \
-      "http://$host:8787/v1/devices/register")
+      "$server_url/v1/devices/register")
 
 device_id=$(jq -er '.device_id' <<<"$response")
 device_token=$(jq -er '.device_token' <<<"$response")
@@ -66,8 +71,8 @@ mkdir -p "$config_dir"
 temporary=$(mktemp "$config_dir/friend.env.XXXXXX")
 trap 'rm -f -- "$temporary"' EXIT
 chmod 0600 "$temporary"
-printf 'WISP_FRIEND_HOST=%s\nWISP_PROFILE=%s\nWISP_DEVICE_ID=%s\nWISP_DEVICE_TOKEN=%s\nWISP_E2EE_KEY=%s\n' \
-  "$host" "$profile" "$device_id" "$device_token" "$e2ee_key" >"$temporary"
+printf 'WISP_FRIEND_HOST=%s\nWISP_SERVER_URL=%s\nWISP_PROFILE=%s\nWISP_DEVICE_ID=%s\nWISP_DEVICE_TOKEN=%s\nWISP_E2EE_KEY=%s\n' \
+  "$host" "$server_url" "$profile" "$device_id" "$device_token" "$e2ee_key" >"$temporary"
 mv -f -- "$temporary" "$config_file"
 trap - EXIT
 

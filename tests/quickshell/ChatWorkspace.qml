@@ -11,7 +11,7 @@ ShellRoot {
   readonly property string mode: Quickshell.env("WISP_CHAT_FIXTURE_MODE")
   readonly property real testWidth: Number(Quickshell.env("WISP_TEST_WIDTH")) || (Quickshell.env("WISP_TEST_CONSTRAINED") === "1" ? 840 : 1180)
   readonly property real testHeight: Number(Quickshell.env("WISP_TEST_HEIGHT")) || (Quickshell.env("WISP_TEST_CONSTRAINED") === "1" ? 700 : 900)
-  readonly property bool compactMode: mode === "panelinvites" || mode === "returnchat" || mode === "panelimagegeometry" || mode === "panellatest" || mode === "panelaudiotooltips" || mode === "panelpresence" || mode === "traycollapse" || mode === "panel" || mode === "panelmedia" || mode === "panelsettings" || mode === "friends" || mode === "panelidentity" || mode === "panelidentityactions"
+  readonly property bool compactMode: mode === "panelprivacy" || mode === "panelinvites" || mode === "returnchat" || mode === "panelimagegeometry" || mode === "panellatest" || mode === "panelaudiotooltips" || mode === "panelpresence" || mode === "traycollapse" || mode === "panel" || mode === "panelmedia" || mode === "panelsettings" || mode === "friends" || mode === "panelidentity" || mode === "panelidentityactions"
   function setImageFixture(w,h) {
     var data=JSON.parse(JSON.stringify(bridge.snapshot))
     bridge.chatImageUrls={"geometry":"data:image/svg+xml,"+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="'+w+'" height="'+h+'"><rect width="'+w+'" height="'+h+'" fill="#254261"/><circle cx="40" cy="40" r="25" fill="#e6b75b"/><path d="M0 0L'+w+' '+h+'" stroke="#74c9d6" stroke-width="5"/></svg>')}
@@ -251,9 +251,12 @@ ShellRoot {
     bridge.notificationMuted = true
     bridge.notificationVolume = 35
     bridge.notificationSoundPath = "file:///tmp/test-custom-sound.wav"
-    if (test.mode === "settings" || test.mode === "themes" || test.mode === "saved") test.findItem(window.contentItem, "wispContent").toggleSettings()
+    if (test.mode === "privacy" || test.mode === "settings" || test.mode === "themes" || test.mode === "saved") test.findItem(window.contentItem, "wispContent").toggleSettings()
     if (test.mode === "themes") test.findItem(window.contentItem, "settingsTab-appearance").clicked()
-    if (test.mode === "panelsettings") compactContent.toggleSettings()
+    if (test.mode === "panelsettings" || test.mode === "panelprivacy") compactContent.toggleSettings()
+    if (test.mode === "privacy" || test.mode === "panelprivacy") {
+      test.findItem(test.compactMode ? compactSurface : window.contentItem, "settingsTab-privacy").clicked()
+    }
     if (Quickshell.env("WISP_TEST_APPEARANCE_SETTINGS") === "1") {
       test.findItem(test.compactMode ? compactSurface : window.contentItem, "settingsTab-appearance").clicked()
     }
@@ -395,7 +398,7 @@ ShellRoot {
     }
   }
   Timer {
-    interval: 400; running: ["settings","themes","panelsettings","preview","empty","transfer","saved"].indexOf(test.mode) < 0
+    interval: 400; running: ["privacy","panelprivacy","settings","themes","panelsettings","preview","empty","transfer","saved"].indexOf(test.mode) < 0
     onTriggered: {
       var target = test.compactMode ? compactSurface : window.contentItem
       var area = test.findItem(target, "chatDropArea")
@@ -1301,6 +1304,17 @@ ShellRoot {
         test.check(theme.statusBackground == theme.surface
           && theme.selectionBackground == theme.alpha(theme.accent, 0.18),
           "Clean TUI uses restrained status and selection surfaces")
+      }
+      if (test.mode === "privacy" || test.mode === "panelprivacy") {
+        var settingsSurface = test.compactMode ? compactSurface : window.contentItem
+        var privacyTab = test.findItem(settingsSurface, "settingsTab-privacy")
+        test.check(privacyTab && privacyTab.primary, "Privacy tab has a distinct selected state")
+        var firstTab = test.findItem(settingsSurface, "settingsTab-media")
+        test.check(firstTab && !firstTab.primary, "Other settings tabs are not selected")
+        var privacyView = test.findItem(settingsSurface, "privacySettingsView")
+        test.check(privacyView && privacyView.visible, "Privacy settings are visible")
+        test.check(!!test.findText(settingsSurface, "Not configured. Chat encryption is separate from voice/video encryption."), "Unconfigured encryption is never described as protected")
+        test.check(!bridge.sent.some(function(command) { return command.name === "privacy_enable" || command.name === "privacy_export" }), "Opening Privacy never creates or exports keys")
       }
       test.check(window.width === theme.space(test.testWidth), "app width")
       test.check(window.height === theme.space(test.testHeight), "app height")

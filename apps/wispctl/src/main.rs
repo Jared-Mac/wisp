@@ -23,6 +23,10 @@ struct Args {
 #[derive(Debug, Subcommand)]
 enum Command {
     Status,
+    Privacy {
+        #[command(subcommand)]
+        command: PrivacyCommand,
+    },
     Presence {
         state: Presence,
     },
@@ -107,6 +111,21 @@ enum SurfaceCommand {
 }
 
 #[derive(Debug, Subcommand)]
+enum PrivacyCommand {
+    Status,
+    Enable {
+        #[arg(long)]
+        backup_file: PathBuf,
+        #[arg(long)]
+        recovery_file: Option<PathBuf>,
+    },
+    Export {
+        #[arg(long)]
+        backup_file: PathBuf,
+    },
+}
+
+#[derive(Debug, Subcommand)]
 enum AudioCommand {
     Devices,
     Refresh,
@@ -151,6 +170,19 @@ impl Command {
     fn envelope(&self) -> CommandEnvelope {
         let (name, args) = match self {
             Self::Status => ("status", json!({})),
+            Self::Privacy { command } => match command {
+                PrivacyCommand::Status => ("privacy_status", json!({})),
+                PrivacyCommand::Enable {
+                    backup_file,
+                    recovery_file,
+                } => (
+                    "privacy_enable",
+                    json!({"backup_file":backup_file,"recovery_file":recovery_file}),
+                ),
+                PrivacyCommand::Export { backup_file } => {
+                    ("privacy_export", json!({"backup_file":backup_file}))
+                }
+            },
             Self::Presence { state } => ("set_presence", json!({"presence": state})),
             Self::Join { friend } => ("join_friend", json!({"friend": friend})),
             Self::JoinHangout { id } => ("join_hangout", json!({"hangout_id": id})),

@@ -106,6 +106,8 @@ jobs:
           ./scripts/test-knock.sh
           ./scripts/test-media.sh
           ./scripts/test-private-alpha.sh
+          bash scripts/test-server-endpoint.sh
+          bash scripts/test-private-host.sh
 
       - name: Scan tracked source for secrets
         run: ./scripts/scan-secrets.sh

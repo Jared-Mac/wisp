@@ -1,0 +1,24 @@
+[package]
+name = "wisp-crypto"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+age = { version = "0.11.3", default-features = false }
+anyhow.workspace = true
+base64.workspace = true
+ed25519-dalek = { version = "2.2", features = ["zeroize"] }
+getrandom = "0.2"
+libc.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+zeroize = { version = "1.8", features = ["derive"] }
+uuid.workspace = true
+tempfile = "3"
+
+
+[lints]
+workspace = true

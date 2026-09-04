@@ -464,6 +464,10 @@ pub(crate) struct MediaManager {
 }
 
 impl MediaManager {
+    pub(crate) fn encryption_configured(&self) -> bool {
+        self.e2ee_key.as_ref().is_some_and(|key| key.len() >= 16)
+    }
+
     pub(crate) fn new(
         surface_enabled: bool,
         e2ee_key: Option<String>,

@@ -15,7 +15,7 @@ Column {
       width: parent.width - refreshButton.width
 
       Text {
-        text: "Devices & privacy"
+        text: "Devices"
         color: root.theme.foreground
         font.family: root.theme.font.family
         font.pixelSize: root.theme.font.body

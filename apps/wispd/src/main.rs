@@ -1,6 +1,8 @@
 mod chat_images;
 mod chat_transfers;
 mod media;
+mod privacy;
+mod privacy_transfers;
 mod shortcut;
 mod surface;
 mod tray;
@@ -392,6 +394,7 @@ async fn ensure_ok(response: reqwest::Response) -> anyhow::Result<()> {
 }
 
 struct Daemon {
+    privacy: privacy::Privacy,
     chat_images: chat_images::ImageStore,
     profile: String,
     api: ServerApi,
@@ -422,6 +425,7 @@ impl Daemon {
         let (events, _) = broadcast::channel(256);
         let (ptt_lease_tx, _) = watch::channel::<Option<Instant>>(None);
         Self {
+            privacy: privacy::Privacy::new(&api.base_url, snapshot.self_state.user.id),
             chat_images: chat_images::ImageStore::default(),
             profile,
             api,
@@ -447,6 +451,12 @@ impl Daemon {
     }
 
     async fn merge_server_snapshot(&self, mut incoming: Snapshot, event_name: &str) {
+        if std::env::var("WISP_REQUIRE_CHAT_E2EE").as_deref() == Ok("true") {
+            incoming.chat_encryption_required = true;
+        }
+        self.privacy
+            .decrypt_snapshot(&self.api, &mut incoming)
+            .await;
         let _cache_operation = self.chat_images.cache_operation.lock().await;
         {
             let current = self.state.read().await;
@@ -588,6 +598,17 @@ impl Daemon {
         };
         if self.media.is_connected_to(hangout_id).await {
             return Ok(());
+        }
+
+        if (self.state.read().await.chat_encryption_required
+            || self.privacy.active()?.is_some()
+            || std::env::var("WISP_REQUIRE_MEDIA_E2EE").as_deref() == Ok("true"))
+            && !self.media.encryption_configured()
+        {
+            self.media.disconnect().await;
+            bail!(
+                "This private server requires a client-held media key; voice/video publication is blocked until it is configured"
+            );
         }
 
         self.release_push_to_talk("push_to_talk_released").await;
@@ -973,9 +994,50 @@ impl Daemon {
 
     #[allow(clippy::too_many_lines)]
     async fn run_command(&self, command: &CommandEnvelope) -> anyhow::Result<Option<Value>> {
+        if matches!(
+            command.name.as_str(),
+            "send_message"
+                | "send_direct"
+                | "send_image_message"
+                | "send_attachment_message"
+                | "edit_message"
+        ) {
+            let encryption = self.privacy.active()?;
+            if encryption.is_none() && self.state.read().await.chat_encryption_required {
+                bail!(
+                    "This server requires encrypted chat. Set it up in Settings → Privacy before sending."
+                );
+            }
+        }
         match command.name.as_str() {
             "hello" => Ok(None),
             "status" => Ok(Some(serde_json::to_value(self.state.read().await.clone())?)),
+            "privacy_status" => Ok(Some(self.privacy.status())),
+            "privacy_enable" => {
+                let backup = privacy::local_path(&string_arg(&command.args, "backup_file")?)?;
+                let recovery = command
+                    .args
+                    .get("recovery_file")
+                    .and_then(Value::as_str)
+                    .filter(|s| !s.is_empty())
+                    .map(privacy::local_path)
+                    .transpose()?;
+                let result = self
+                    .privacy
+                    .enable(&self.api, &backup, recovery.as_deref())
+                    .await?;
+                self.refresh("privacy_changed").await?;
+                Ok(Some(result))
+            }
+            "privacy_export" => {
+                let backup = privacy::local_path(&string_arg(&command.args, "backup_file")?)?;
+                self.privacy
+                    .active()?
+                    .context("Chat encryption is not configured")?
+                    .ring
+                    .export_recovery(&backup)?;
+                Ok(Some(json!({"saved":true})))
+            }
             "set_participant_volumes" => {
                 let volumes = serde_json::from_value(
                     command
@@ -1041,6 +1103,18 @@ impl Daemon {
                 Ok(Some(serde_json::to_value(conversation)?))
             }
             "create_group" => {
+                if let Some(vault) = self.privacy.active()? {
+                    let directory = self.privacy.directory(&self.api, &vault).await?;
+                    let members: Vec<uuid::Uuid> =
+                        serde_json::from_value(command.args["members"].clone())?;
+                    for id in members {
+                        if !directory.identities.contains_key(&id) {
+                            bail!(
+                                "Every selected friend needs to enable encrypted chat before creating this group"
+                            );
+                        }
+                    }
+                }
                 let response = self
                     .api
                     .request(reqwest::Method::POST, "/v1/conversations/group")
@@ -1053,12 +1127,20 @@ impl Daemon {
                     );
                 }
                 let conversation: wisp_protocol::ConversationView = decode(response).await?;
+                if self.privacy.active()?.is_some() {
+                    self.privacy.recipients(&self.api, &conversation).await?;
+                }
                 if let Err(error) = self.refresh("conversation_changed").await {
                     warn!(%error, "group created but snapshot refresh failed");
                 }
                 Ok(Some(serde_json::to_value(conversation)?))
             }
             "create_room" | "invite_to_room" | "set_room_admin" => {
+                if command.name != "create_room" && self.privacy.active()?.is_some() {
+                    self.change_encrypted_room(command).await?;
+                    self.refresh("room_changed").await?;
+                    return Ok(None);
+                }
                 let endpoint = match command.name.as_str() {
                     "create_room" => "/v1/rooms",
                     "invite_to_room" => "/v1/rooms/invite",
@@ -1072,6 +1154,10 @@ impl Daemon {
                         .await?,
                 )
                 .await?;
+                if command.name == "create_room" && self.privacy.active()?.is_some() {
+                    let conversation = serde_json::from_value(value.clone())?;
+                    self.privacy.recipients(&self.api, &conversation).await?;
+                }
                 if let Err(error) = self.refresh("room_changed").await {
                     warn!(%error, "room changed but snapshot refresh failed");
                 }
@@ -1081,22 +1167,43 @@ impl Daemon {
                 let friend = string_arg(&command.args, "friend")?;
                 let text = string_arg(&command.args, "text")?;
                 let conversation = self.api.create_direct(friend).await?;
-                self.api.send_message(conversation.id.clone(), text).await?;
+                self.send_chat_text(conversation.id.clone(), text).await?;
                 self.refresh("message_created").await?;
                 Ok(Some(json!({"conversation_id": conversation.id})))
             }
             "send_message" => {
                 let conversation_id = string_arg(&command.args, "conversation_id")?;
                 let text = string_arg(&command.args, "text")?;
-                self.api.send_message(conversation_id, text).await?;
+                self.send_chat_text(conversation_id, text).await?;
                 if let Err(error) = self.refresh("message_created").await {
                     warn!(%error, "message sent but snapshot refresh failed");
                 }
                 Ok(None)
             }
             "send_voice_invite" => {
-                let request: wisp_protocol::InviteToRoom =
+                let mut request: wisp_protocol::InviteToRoom =
                     serde_json::from_value(command.args.clone())?;
+                request.encrypted_membership = None;
+                if self.privacy.active()?.is_some() {
+                    let snapshot = self.api.snapshot().await?;
+                    let id = snapshot
+                        .spots
+                        .iter()
+                        .find(|s| s.active_hangout_id == Some(request.hangout_id))
+                        .map_or_else(
+                            || format!("hangout:{}", request.hangout_id),
+                            |s| format!("spot:{}", s.id),
+                        );
+                    let conversation = snapshot
+                        .conversations
+                        .iter()
+                        .find(|c| c.id == id)
+                        .context("Room chat is unavailable")?;
+                    request.encrypted_membership = self
+                        .privacy
+                        .invite_member(&self.api, conversation, request.user_id)
+                        .await?;
+                }
                 let result: Value = decode(
                     self.api
                         .request(reqwest::Method::POST, "/v1/room-invitations")
@@ -1152,6 +1259,12 @@ impl Daemon {
             "edit_message" | "delete_message" => {
                 let id: uuid::Uuid = string_arg(&command.args, "message_id")?.parse()?;
                 let editing = command.name == "edit_message";
+                if editing && self.privacy.active()?.is_some() {
+                    self.edit_encrypted_message(id, opaque_string_arg(&command.args, "text")?)
+                        .await?;
+                    self.refresh("message_updated").await?;
+                    return Ok(None);
+                }
                 let mut request = self.api.request(
                     if editing {
                         reqwest::Method::PATCH
@@ -1195,6 +1308,21 @@ impl Daemon {
                     .to_owned();
                 if command.name == "send_image_message" && !draft.is_image {
                     bail!("This attachment is not an image");
+                }
+                if self.privacy.active()?.is_some() {
+                    return self
+                        .send_encrypted_attachment(
+                            token,
+                            draft,
+                            conversation_id,
+                            caption,
+                            command
+                                .args
+                                .get("keep")
+                                .and_then(Value::as_bool)
+                                .unwrap_or(false),
+                        )
+                        .await;
                 }
                 if !draft.is_image {
                     return self
@@ -1253,16 +1381,20 @@ impl Daemon {
             "load_chat_image" | "copy_chat_image" => {
                 let _cache_operation = self.chat_images.cache_operation.lock().await;
                 let id: uuid::Uuid = string_arg(&command.args, "message_id")?.parse()?;
-                let conversation_id = self
+                let message = self
                     .state
                     .read()
                     .await
                     .messages
                     .iter()
                     .find(|m| m.id == id && m.content_type == "image/png")
-                    .map(|m| m.conversation_id.clone())
+                    .cloned()
                     .context("Image is not in your visible chat history")?;
+                let conversation_id = message.conversation_id.clone();
                 let path = chat_images::cache_path(id, Some(&conversation_id))?;
+                if message.encryption_version == 1 && !path.is_file() {
+                    self.cache_encrypted_image(id, &path).await?;
+                }
                 if !path.is_file() {
                     let mut response = self
                         .api
@@ -2960,6 +3092,12 @@ async fn start_connected_daemon(
         Duration::from_millis(args.ptt_lease_ms.max(100)),
         shortcut,
     ));
+    // Never expose the raw encrypted snapshot to IPC/notification consumers,
+    // even briefly while waiting for the first server event.
+    let initial = daemon.state.read().await.clone();
+    daemon
+        .merge_server_snapshot(initial, "privacy_initialized")
+        .await;
     tokio::spawn(synchronize_server(daemon.clone()));
     tokio::spawn(synchronize_media_events(daemon.clone(), media_events));
     tokio::spawn(synchronize_audio_devices(daemon.clone()));

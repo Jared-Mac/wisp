@@ -499,6 +499,8 @@ pub struct SelfState {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Snapshot {
+    #[serde(default)]
+    pub chat_encryption_required: bool,
     pub seq: u64,
     #[serde(rename = "self")]
     pub self_state: SelfState,
@@ -539,6 +541,8 @@ pub struct RespondRoomInvitation {
 pub struct InviteToRoom {
     pub hangout_id: HangoutId,
     pub user_id: UserId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub encrypted_membership: Option<Value>,
 }
 
 impl Snapshot {
@@ -828,6 +832,27 @@ pub struct Message {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EditMessageRequest {
     pub text: String,
+}
+
+/// An opaque, client-encrypted message. Content type, filenames, captions and
+/// attachment hashes belong inside ciphertext, not in this routing envelope.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EncryptedMessageRequest {
+    pub id: MessageId,
+    pub conversation_id: String,
+    pub ciphertext: String,
+    #[serde(default)]
+    pub roster_hash: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BeginEncryptedUpload {
+    pub upload_id: Uuid,
+    pub size: u64,
+    #[serde(default)]
+    pub plaintext_size: Option<u64>,
+    pub keep: bool,
+    pub message: EncryptedMessageRequest,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

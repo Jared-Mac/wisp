@@ -82,9 +82,9 @@ ShellRoot {
         var share = test.find(column, "mediaAction-share")
         var camera = test.find(column, "mediaAction-camera")
         var invite = test.find(column, "mediaAction-invite")
-        test.check(!!invite && invite.modelData.label === "+", "compact invite action exists")
+        test.check(!!invite && invite.modelData.label === "inv", "compact invite action exists")
         if (invite) {
-          var inviteLabel = invite.children.find(function(child) { return child.text === "[+]" })
+          var inviteLabel = invite.children.find(function(child) { return child.text === "[inv]" })
           test.check(!!inviteLabel && inviteLabel.width >= inviteLabel.implicitWidth && inviteLabel.lineCount === 1, "invite brackets never wrap")
           test.check(invite.parent.children.indexOf(invite) > invite.parent.children.indexOf(camera), "invite follows camera")
           test.check(invite.parent.children.indexOf(invite) < invite.parent.children.indexOf(test.find(column, "mediaAction-leave")), "invite precedes leave")

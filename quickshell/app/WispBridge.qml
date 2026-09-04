@@ -22,7 +22,7 @@ Item {
     onSaved: root.settingsSaved()
   }
   property string lastAppliedVolumes: ""
-  onDaemonConnectedChanged: { lastAppliedVolumes = ""; if (daemonConnected) applyParticipantVolumes() }
+  onDaemonConnectedChanged: { lastAppliedVolumes = ""; if (daemonConnected) { applyParticipantVolumes(); refreshPrivacy() } }
   onFriendsChanged: applyParticipantVolumes()
   onHangoutsChanged: applyParticipantVolumes()
   function applyParticipantVolumes() {
@@ -97,6 +97,21 @@ Item {
   property var imageErrors: ({})
   property var imageRequests: ({})
   property var requests: ({})
+  property var privacyStatus: ({configured:false})
+  property bool privacyBusy: false
+  property string privacyFeedback: ""
+  function refreshPrivacy() {
+    var id = send("privacy_status", {})
+    if (id) requests[id] = {kind:"privacyStatus"}
+  }
+  function configurePrivacy(backup, recovery) {
+    var id = send("privacy_enable", {backup_file:String(backup),recovery_file:String(recovery || "")})
+    if (id) { requests[id] = {kind:"privacySetup"}; privacyBusy = true; privacyFeedback = "" }
+  }
+  function exportPrivacy(backup) {
+    var id = send("privacy_export", {backup_file:String(backup)})
+    if (id) { requests[id] = {kind:"privacyExport"}; privacyBusy = true; privacyFeedback = "" }
+  }
   signal clipboardTextReady(string conversationId, string value)
   signal messageMutationFinished(string messageId, string action, bool success, string error)
   signal historyClearFinished(string conversationId, bool success, string error)
@@ -227,6 +242,12 @@ Item {
       invitationRequests = replaceEntry(invitationRequests, friend.id, true)
       requests[id] = {kind:"roomInvite", key:friend.id, name:friend.display_name}
     }
+  }
+  function needsEncryptedRoomAccess(friend) {
+    if (!currentVoiceRoom || !(privacyStatus.configured || snapshot.chat_encryption_required)) return false
+    var spot = spots.filter(function(s) { return s.active_hangout_id === root.currentVoiceRoom.id })[0]
+    var conversation = conversationById(spot ? "spot:" + spot.id : "hangout:" + currentVoiceRoom.id)
+    return !conversation || !(conversation.members || []).some(function(p) { return p.id === friend.id })
   }
   function respondRoomInvitation(invitation, accept) {
     var key = String(invitation.invitation_id || invitation.id)
@@ -787,7 +808,14 @@ Item {
     delete requests[message.id]
     var value = message.value || ({})
     var conversationId = action.conversationId
-    if (action.kind === "roomInvite" || action.kind === "roomInviteResponse") {
+    if (action.kind === "privacyStatus" || action.kind === "privacySetup" || action.kind === "privacyExport") {
+      if (message.ok) {
+        if (action.kind !== "privacyExport") privacyStatus = value
+        if (action.kind === "privacySetup") { privacyFeedback = "Encryption configured; recovery file saved locally."; settingsSaved() }
+        if (action.kind === "privacyExport") privacyFeedback = "Recovery file saved locally. Keep it private."
+      } else privacyFeedback = message.error ? String(message.error.message) : "Privacy operation failed"
+      privacyBusy = false
+    } else if (action.kind === "roomInvite" || action.kind === "roomInviteResponse") {
       invitationRequests = replaceEntry(invitationRequests, action.key, undefined)
       if (message.ok && action.kind === "roomInvite") {
         invitationFeedback = value.already_pending ? "Invitation already pending" : "Voice invite sent to " + action.name

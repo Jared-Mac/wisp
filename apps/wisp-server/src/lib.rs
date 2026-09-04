@@ -1,6 +1,11 @@
 mod attachments;
+mod chat_identity;
 mod groups;
+mod invitation_privacy;
 mod invitations;
+mod privacy;
+#[cfg(test)]
+mod privacy_tests;
 mod rooms;
 #[cfg(test)]
 mod text_tests;
@@ -64,6 +69,7 @@ pub struct AppConfig {
     pub knock_ttl: Duration,
     pub allow_dev_sessions: bool,
     pub bootstrap_token: Option<String>,
+    pub require_chat_e2ee: bool,
 }
 
 #[derive(Clone)]
@@ -193,6 +199,13 @@ impl AppState {
             .connect_with(options)
             .await?;
         sqlx::migrate!("../../migrations").run(&pool).await?;
+        sqlx::query("INSERT OR IGNORE INTO chat_network(id,network_id) VALUES (1,?)")
+            .bind(Uuid::new_v4().to_string())
+            .execute(&pool)
+            .await?;
+        if config.require_chat_e2ee {
+            privacy::ensure_ciphertext_storage(&pool).await?;
+        }
         cleanup_stale_sessions(&pool).await?;
         seed_development_users(&pool).await?;
         cleanup_expired_data(&pool).await?;
@@ -281,6 +294,7 @@ impl AppState {
         let spots = load_spots(&self.pool, self_id).await?;
         let devices = load_devices(&self.pool, self_id).await?;
         Ok(Snapshot {
+            chat_encryption_required: self.config.require_chat_e2ee,
             seq,
             self_state: wisp_protocol::SelfState {
                 user: self_user,
@@ -437,6 +451,18 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/rooms/invite", post(rooms::invite))
         .route("/v1/rooms/admin", post(rooms::set_admin))
         .route("/v1/livekit/token", post(livekit_token))
+        .route("/v1/e2ee/messages", text_body(post(privacy::send), &state))
+        .route("/v1/e2ee/state", get(chat_identity::directory))
+        .route("/v1/e2ee/identity", post(chat_identity::publish))
+        .route("/v1/e2ee/roster", post(chat_identity::update_roster))
+        .route(
+            "/v1/e2ee/messages/{id}",
+            text_body(put(privacy::edit), &state),
+        )
+        .route(
+            "/v1/e2ee/file-uploads",
+            text_body(post(privacy::begin_upload), &state),
+        )
         .route(
             "/v1/messages",
             get(list_messages).merge(text_body(post(send_message), &state)),
@@ -1156,6 +1182,7 @@ async fn send_message(
     Json(request): Json<SendMessageRequest>,
 ) -> Result<Json<Message>, ApiError> {
     let sender_id = authenticate_headers(&state, &headers).await?;
+    privacy::require_legacy_allowed(&state)?;
     ensure_conversation_member(&state.pool, &request.conversation_id, sender_id).await?;
     validate_message(&request)?;
     persist_message(&state, sender_id, request, None)
@@ -1169,6 +1196,7 @@ enum StoredAttachment {
     Upload(Uuid),
 }
 
+#[allow(clippy::too_many_lines)] // One transaction owns message, attachment, and roster validation.
 async fn persist_message(
     state: &AppState,
     sender_id: UserId,
@@ -1177,7 +1205,16 @@ async fn persist_message(
 ) -> Result<Message, ApiError> {
     let sender = find_user(&state.pool, &sender_id.to_string()).await?;
     let message = Message {
-        id: Uuid::new_v4(),
+        id: if request.encryption_version == 1 {
+            request.payload["id"]
+                .as_str()
+                .and_then(|s| s.parse().ok())
+                .ok_or_else(|| {
+                    ApiError::bad_request("invalid_envelope", "Missing encrypted message ID")
+                })?
+        } else {
+            Uuid::new_v4()
+        },
         conversation_id: request.conversation_id,
         sender,
         created_at: Utc::now(),
@@ -1187,11 +1224,38 @@ async fn persist_message(
         edited_at: None,
     };
     let mut tx = state.pool.begin().await.map_err(ApiError::internal)?;
-    sqlx::query("INSERT INTO messages(id, conversation_id, sender_id, created_at, content_type, payload, encryption_version) VALUES (?, ?, ?, ?, ?, ?, ?)")
+    let inserted = sqlx::query("INSERT INTO messages(id, conversation_id, sender_id, created_at, content_type, payload, encryption_version) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING")
         .bind(message.id.to_string()).bind(&message.conversation_id).bind(sender_id.to_string())
         .bind(message.created_at.to_rfc3339()).bind(&message.content_type)
         .bind(serde_json::to_string(&message.payload).map_err(ApiError::internal)?)
         .bind(message.encryption_version).execute(&mut *tx).await.map_err(ApiError::internal)?;
+    if inserted.rows_affected() == 0 {
+        let existing = sqlx::query("SELECT m.*, u.display_name FROM messages m JOIN users u ON u.id=m.sender_id WHERE m.id=?")
+            .bind(message.id.to_string()).fetch_one(&mut *tx).await.map_err(ApiError::internal)?;
+        let existing = message_from_row(&existing)?;
+        if attachment.is_none()
+            && existing.sender.id == sender_id
+            && existing.conversation_id == message.conversation_id
+            && existing.content_type == message.content_type
+            && existing.encryption_version == message.encryption_version
+            && existing.payload == message.payload
+        {
+            return Ok(existing);
+        }
+        return Err(ApiError::conflict(
+            "message_id_used",
+            "Message ID already used; retry with the original message",
+        ));
+    }
+    if message.encryption_version == 1 {
+        privacy::validate_roster(
+            &mut tx,
+            &message.conversation_id,
+            sender_id,
+            message.payload["roster_hash"].as_str().unwrap_or_default(),
+        )
+        .await?;
+    }
     if let Some(StoredAttachment::Upload(upload_id)) = attachment {
         let changed = sqlx::query("UPDATE file_uploads SET message_id = ? WHERE id = ? AND owner_id = ? AND conversation_id = ? AND message_id IS NULL AND received_bytes = size")
             .bind(message.id.to_string()).bind(upload_id.to_string()).bind(sender_id.to_string())
@@ -1292,6 +1356,7 @@ async fn send_image_message(
     Json(request): Json<wisp_protocol::SendImageMessageRequest>,
 ) -> Result<Json<Message>, ApiError> {
     let sender_id = authenticate_headers(&state, &headers).await?;
+    privacy::require_legacy_allowed(&state)?;
     ensure_conversation_member(&state.pool, &request.conversation_id, sender_id).await?;
     if request.png_base64.len() > wisp_protocol::MAX_CHAT_IMAGE_BYTES * 4 / 3 + 4 {
         return Err(ApiError::bad_request(
@@ -1326,6 +1391,7 @@ async fn send_file_message(
     Json(request): Json<wisp_protocol::SendFileMessageRequest>,
 ) -> Result<Json<Message>, ApiError> {
     let sender_id = authenticate_headers(&state, &headers).await?;
+    privacy::require_legacy_allowed(&state)?;
     ensure_conversation_member(&state.pool, &request.conversation_id, sender_id).await?;
     if !wisp_protocol::valid_chat_file_name(&request.file_name) {
         return Err(ApiError::bad_request(
@@ -1405,7 +1471,7 @@ async fn get_chat_image(
 
 async fn own_message(pool: &SqlitePool, user_id: UserId, id: Uuid) -> Result<SqliteRow, ApiError> {
     let row = sqlx::query(
-        "SELECT sender_id, conversation_id, content_type, payload FROM messages WHERE id = ?",
+        "SELECT sender_id, conversation_id, content_type, payload, encryption_version FROM messages WHERE id = ?",
     )
     .bind(id.to_string())
     .fetch_optional(pool)
@@ -1429,6 +1495,13 @@ async fn edit_message(
 ) -> Result<Json<Value>, ApiError> {
     let user_id = authenticate_headers(&state, &headers).await?;
     let row = own_message(&state.pool, user_id, id).await?;
+    privacy::require_legacy_allowed(&state)?;
+    if row.get::<i64, _>("encryption_version") != 0 {
+        return Err(ApiError::bad_request(
+            "encrypted_edit_required",
+            "Use the encrypted edit endpoint",
+        ));
+    }
     if row.get::<String, _>("content_type") == "application/vnd.wisp.room-invitation+json" {
         return Err(ApiError::bad_request(
             "invitation_not_editable",
@@ -1746,10 +1819,11 @@ async fn seed_development_users(pool: &SqlitePool) -> anyhow::Result<()> {
             .bind(id)
             .execute(&mut *tx)
             .await?;
-        sqlx::query("INSERT OR IGNORE INTO conversation_members(conversation_id, user_id, joined_at) VALUES (?, ?, ?)")
+        sqlx::query("INSERT OR IGNORE INTO conversation_members(conversation_id, user_id, joined_at) SELECT ?, ?, ? WHERE NOT EXISTS(SELECT 1 FROM chat_rosters WHERE conversation_id=?)")
             .bind(CIRCLE_CONVERSATION_ID)
             .bind(id)
             .bind(Utc::now().to_rfc3339())
+            .bind(CIRCLE_CONVERSATION_ID)
             .execute(&mut *tx)
             .await?;
     }
@@ -1759,7 +1833,7 @@ async fn seed_development_users(pool: &SqlitePool) -> anyhow::Result<()> {
         .execute(&mut *tx)
         .await?;
     ensure_spot_conversation(&mut tx, PORCH_ID, "Porch").await?;
-    sqlx::query("UPDATE conversation_members SET role = CASE WHEN conversation_id = ? THEN 'host' ELSE 'admin' END WHERE user_id = ? AND conversation_id IN (?, ?)")
+    sqlx::query("UPDATE conversation_members SET role = CASE WHEN conversation_id = ? THEN 'host' ELSE 'admin' END WHERE user_id = ? AND conversation_id IN (?, ?) AND NOT EXISTS(SELECT 1 FROM chat_rosters cr WHERE cr.conversation_id=conversation_members.conversation_id)")
         .bind(format!("spot:{PORCH_ID}")).bind(JARED_ID).bind(format!("spot:{PORCH_ID}")).bind(CIRCLE_CONVERSATION_ID)
         .execute(&mut *tx).await?;
     tx.commit().await?;
@@ -1957,10 +2031,10 @@ fn validate_message(request: &SendMessageRequest) -> Result<(), ApiError> {
             "Message text must not be empty",
         ));
     }
-    if request.encryption_version < 0 {
+    if request.encryption_version != 0 {
         return Err(ApiError::bad_request(
             "invalid_encryption_version",
-            "encryption version cannot be negative",
+            "Use the encrypted endpoint for encrypted messages",
         ));
     }
     Ok(())
@@ -2345,7 +2419,7 @@ async fn add_member(
             .map_err(ApiError::internal)?;
     }
     sqlx::query(
-        "INSERT OR IGNORE INTO conversation_members(conversation_id, user_id, joined_at) SELECT id, ?, ? FROM conversations WHERE hangout_id = ?",
+        "INSERT OR IGNORE INTO conversation_members(conversation_id, user_id, joined_at) SELECT id, ?, ? FROM conversations WHERE hangout_id = ? AND NOT EXISTS(SELECT 1 FROM chat_rosters cr WHERE cr.conversation_id=conversations.id)",
     )
     .bind(user_id.to_string())
     .bind(Utc::now().to_rfc3339())
@@ -2391,11 +2465,12 @@ async fn ensure_spot_conversation(
     .execute(&mut **tx)
     .await?;
     sqlx::query(
-        "INSERT OR IGNORE INTO conversation_members(conversation_id, user_id, joined_at) SELECT ?, user_id, ? FROM circle_members WHERE EXISTS(SELECT 1 FROM spots WHERE id = ? AND private = 0)",
+        "INSERT OR IGNORE INTO conversation_members(conversation_id, user_id, joined_at) SELECT ?, user_id, ? FROM circle_members WHERE EXISTS(SELECT 1 FROM spots WHERE id = ? AND private = 0) AND NOT EXISTS(SELECT 1 FROM chat_rosters WHERE conversation_id=?)",
     )
     .bind(&conversation_id)
     .bind(&now)
     .bind(spot_id)
+    .bind(&conversation_id)
     .execute(&mut **tx)
     .await?;
     Ok(conversation_id)
@@ -2483,6 +2558,7 @@ mod tests {
             livekit_api_secret: "wisp-local-development-secret-32".into(),
             knock_ttl: Duration::from_secs(30),
             allow_dev_sessions: true,
+            require_chat_e2ee: false,
             bootstrap_token: Some("test-bootstrap-token".into()),
         }
     }

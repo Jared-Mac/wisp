@@ -1,6 +1,7 @@
 [workspace]
 members = [
   "crates/wisp-protocol",
+  "crates/wisp-crypto",
   "apps/wispd",
   "apps/wisp-server",
   "apps/wispctl",

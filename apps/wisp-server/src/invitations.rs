@@ -1,3 +1,4 @@
+use super::invitation_privacy::membership_offer;
 use super::{
     ApiError, AppState, ChronoDuration, HangoutId, HeaderMap, Json, Path, Row, SqlitePool, State,
     UserId, UserSummary, Utc, Uuid, Value, active_hangout_for_tx, add_member, authenticate_headers,
@@ -55,6 +56,7 @@ pub(super) async fn create(
     Json(request): Json<InviteToRoom>,
 ) -> Result<Json<Value>, ApiError> {
     let actor = authenticate_headers(&state, &headers).await?;
+    let network = super::chat_identity::network(&state).await?;
     let now = Utc::now();
     let mut tx = state.pool.begin().await.map_err(ApiError::internal)?;
     sqlx::query("DELETE FROM room_invitations WHERE expires_at <= ?")
@@ -63,7 +65,10 @@ pub(super) async fn create(
         .await
         .map_err(ApiError::internal)?;
     authorize(&mut tx, actor, request.user_id, request.hangout_id).await?;
-    if active_hangout_for_tx(&mut tx, request.user_id).await? == Some(request.hangout_id) {
+    let membership = membership_offer(&mut tx, network, actor, &request).await?;
+    if active_hangout_for_tx(&mut tx, request.user_id).await? == Some(request.hangout_id)
+        && membership.is_none()
+    {
         return Err(ApiError::conflict(
             "already_in_room",
             "Your friend is already in this room",
@@ -71,6 +76,9 @@ pub(super) async fn create(
     }
     if let Some(id) = sqlx::query_scalar::<_, String>("SELECT id FROM room_invitations WHERE hangout_id = ? AND recipient_id = ? AND status = 'pending'")
         .bind(request.hangout_id.to_string()).bind(request.user_id.to_string()).fetch_optional(&mut *tx).await.map_err(ApiError::internal)? {
+        sqlx::query("UPDATE room_invitations SET encrypted_membership=? WHERE id=?")
+            .bind(&membership).bind(&id).execute(&mut *tx).await.map_err(ApiError::internal)?;
+        tx.commit().await.map_err(ApiError::internal)?;
         return Ok(Json(json!({"id":id,"already_pending":true})));
     }
     let recent: i64 = sqlx::query_scalar(
@@ -103,9 +111,9 @@ pub(super) async fn create(
         .execute(&mut *tx)
         .await
         .map_err(ApiError::internal)?;
-    sqlx::query("INSERT INTO room_invitations(id, message_id, hangout_id, sender_id, recipient_id, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+    sqlx::query("INSERT INTO room_invitations(id, message_id, hangout_id, sender_id, recipient_id, created_at, expires_at, encrypted_membership) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
         .bind(id.to_string()).bind(message_id.to_string()).bind(request.hangout_id.to_string()).bind(actor.to_string()).bind(request.user_id.to_string())
-        .bind(now.to_rfc3339()).bind((now + ChronoDuration::minutes(5)).to_rfc3339()).execute(&mut *tx).await.map_err(ApiError::internal)?;
+        .bind(now.to_rfc3339()).bind((now + ChronoDuration::minutes(5)).to_rfc3339()).bind(membership).execute(&mut *tx).await.map_err(ApiError::internal)?;
     tx.commit().await.map_err(ApiError::internal)?;
     state.emit("room_invited", json!({"changed":true})).await;
     Ok(Json(
@@ -146,6 +154,7 @@ pub(super) async fn respond(
     Json(request): Json<RespondRoomInvitation>,
 ) -> Result<Json<Value>, ApiError> {
     let user = authenticate_headers(&state, &headers).await?;
+    let network = super::chat_identity::network(&state).await?;
     let now = Utc::now().to_rfc3339();
     let mut tx = state.pool.begin().await.map_err(ApiError::internal)?;
     sqlx::query("UPDATE room_invitations SET status = status WHERE id = ? AND recipient_id = ?")
@@ -154,7 +163,7 @@ pub(super) async fn respond(
         .execute(&mut *tx)
         .await
         .map_err(ApiError::internal)?;
-    let row = sqlx::query("SELECT hangout_id, sender_id, status, message_id FROM room_invitations WHERE id = ? AND recipient_id = ? AND expires_at > ?")
+    let row = sqlx::query("SELECT hangout_id, sender_id, status, message_id, encrypted_membership FROM room_invitations WHERE id = ? AND recipient_id = ? AND expires_at > ?")
         .bind(id.to_string()).bind(user.to_string()).bind(&now).fetch_optional(&mut *tx).await.map_err(ApiError::internal)?
         .ok_or_else(|| ApiError::not_found("Invitation expired or unavailable"))?;
     let hangout = parse_uuid(&row.get::<String, _>("hangout_id"))?;
@@ -175,14 +184,33 @@ pub(super) async fn respond(
         return Ok(Json(json!({"already_handled":true})));
     }
     if request.accept {
-        if let Some(conversation) = authorize(
+        let conversation = authorize(
             &mut tx,
             parse_uuid(&row.get::<String, _>("sender_id"))?,
             user,
             hangout,
         )
-        .await?
-        {
+        .await?;
+        if let Some(encoded) = row.get::<Option<String>, _>("encrypted_membership") {
+            let signed: wisp_crypto::roster::SignedRoster =
+                serde_json::from_str(&encoded).map_err(ApiError::internal)?;
+            super::chat_identity::apply_roster(
+                &mut tx,
+                network,
+                parse_uuid(&row.get::<String, _>("sender_id"))?,
+                &signed,
+            )
+            .await?;
+        }
+        if let Some(conversation) = conversation {
+            let needs_signature: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM chat_rosters WHERE conversation_id=?) AND NOT EXISTS(SELECT 1 FROM conversation_members WHERE conversation_id=? AND user_id=?)")
+                .bind(&conversation).bind(&conversation).bind(user.to_string()).fetch_one(&mut *tx).await.map_err(ApiError::internal)?;
+            if needs_signature {
+                return Err(ApiError::conflict(
+                    "signed_membership_required",
+                    "Ask the room owner to add you to encrypted room membership before accepting this voice invite",
+                ));
+            }
             sqlx::query("INSERT INTO conversation_members(conversation_id, user_id, joined_at, role) VALUES (?, ?, ?, 'member') ON CONFLICT(conversation_id, user_id) DO NOTHING")
                 .bind(conversation).bind(user.to_string()).bind(&now).execute(&mut *tx).await.map_err(ApiError::internal)?;
         }

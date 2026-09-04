@@ -22,7 +22,7 @@ Column {
       model: [
         { "label": root.bridge.sharing ? "Stop sharing screen" : root.bridge.shareStarting ? "Choosing…" : "Share screen", "action": "share" },
         { "label": root.bridge.cameraActive ? "Stop camera" : root.bridge.cameraStarting ? "Starting…" : "Camera on", "action": "camera" },
-        { "label": "+", "action": "invite" },
+        { "label": "inv", "action": "invite" },
         { "label": "Leave", "action": "leave" }
       ]
       delegate: Rectangle {
@@ -58,7 +58,7 @@ Column {
           width: Math.min(implicitWidth, parent.width - root.theme.space(16))
           wrapMode: modelData.action === "invite" ? Text.NoWrap : Text.Wrap
           horizontalAlignment: Text.AlignHCenter
-          text: modelData.action === "invite" ? "[+]" : root.theme.tui ? "[" + modelData.label.toLowerCase() + "]" : modelData.label
+          text: modelData.action === "invite" ? "[inv]" : root.theme.tui ? "[" + modelData.label.toLowerCase() + "]" : modelData.label
           color: parent.publishing || modelData.action === "leave" ? root.theme.danger : root.theme.foreground
           font.weight: parent.publishing ? Font.Bold : Font.Normal
           font.family: root.theme.font.family

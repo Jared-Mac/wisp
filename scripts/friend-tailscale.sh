@@ -33,7 +33,7 @@ if [[ -z "$host" || -z "$profile" ]]; then
   exit 2
 fi
 case "$profile" in
-  Tyler|Jack|Charlie) ;;
+  Jared|Tyler|Jack|Charlie) ;;
   *)
     echo "profile must be Tyler, Jack, or Charlie; each friend needs a unique profile" >&2
     exit 2
@@ -41,7 +41,20 @@ case "$profile" in
 esac
 export WISP_PROFILE="$profile"
 
-if [[ -z "$device_id" || -z "$device_token" || -z "$e2ee_key" ]]; then
+endpoint_helper="$script_dir/server-endpoint.sh"
+[[ -f "$endpoint_helper" ]] || endpoint_helper="$script_dir/wisp-server-endpoint"
+source "$endpoint_helper"
+server_url=${WISP_SERVER_URL:-$(saved_setting WISP_SERVER_URL)}
+if [[ -n "$explicit_host" || -z "$server_url" ]]; then server_url=$host; fi
+if [[ "$server_url" == "http://$host:8787" ]]; then server_url=$host; fi
+wisp_resolve_endpoint "$server_url"
+server_url=$WISP_SELECTED_SERVER_URL
+if [[ "$server_url" == https://* ]]; then
+  export WISP_REQUIRE_MEDIA_E2EE=true
+  export WISP_REQUIRE_CHAT_E2EE=true
+fi
+
+if [[ -z "$device_id" || -z "$device_token" ]] || [[ -z "$e2ee_key" && "$server_url" != https://* ]]; then
   echo "This device has not been enrolled for private-alpha access." >&2
   echo "Ask the host for a one-use invite and private media key, then run:" >&2
   echo "  just friend-register $host $profile" >&2
@@ -58,7 +71,6 @@ for command_name in wispd wisp-ui; do
   fi
 done
 
-server_url="http://$host:8787"
 daemon_pid=""
 cleanup() {
   trap - EXIT INT TERM
