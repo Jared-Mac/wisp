@@ -551,8 +551,21 @@ the no-message-content logging rule.
 GitHub Actions builds Wisp on every push to `main` and every pull request. The
 CI workflow checks formatting and Clippy, runs the Rust and headless integration
 tests, scans for obvious secrets, and produces a release-mode Linux x86_64
-archive. Archives from ordinary CI runs are available as workflow artifacts for
-14 days.
+archive. Each successful `main` build also replaces the rolling `main`
+pre-release, so enrolled Linux x86_64 clients can update without compiling Rust:
+
+```bash
+wisp-update
+```
+
+The updater works for every enrolled Linux x86_64 client; it contains no
+profile-specific host, token, or media-key settings. It verifies the published
+SHA-256 checksum, saves the prior binaries under
+`~/.local/state/wisp/backups/`, and restarts an already-running client only when
+it is not in a hangout or publishing video. It preserves each device's existing
+enrollment and audio state, and clears any room or video state that unexpectedly
+returns after restart. Archives from ordinary CI runs are available as workflow
+artifacts for 14 days.
 
 Pushing a version tag creates a GitHub release with the archive and its SHA-256
 checksum:
