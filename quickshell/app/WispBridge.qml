@@ -21,6 +21,12 @@ Item {
   property bool notificationSoundsEnabled: false
   property bool appFocused: false
   property bool detachedChatFocused: false
+  property int imageViewerSerial: 0
+  property var imageViewerFocus: ({})
+  readonly property bool imageViewerFocused: Object.keys(imageViewerFocus).length > 0
+  function setImageViewerFocus(id, active) {
+    imageViewerFocus = replaceEntry(imageViewerFocus, id, active ? true : undefined)
+  }
   property bool chatVisible: false
   property bool receivedSnapshot: false
   property string lastReadMessageId: ""
@@ -44,6 +50,7 @@ Item {
   signal historyClearFinished(string conversationId, bool success, string error)
   signal roomActionFinished(string action, bool success, string error)
   signal chatCreationFinished(string requestId, bool success, string conversationId, string error)
+  signal imageCopyFinished(string requestId, bool success, string error)
   signal settingsSaved()
   signal settingsSaveFailed()
   onAppFocusedChanged: markVisibleConversationRead()
@@ -600,13 +607,20 @@ Item {
       requests[id] = {kind: "image", messageId: messageId}
     }
   }
+  function copyChatImage(messageId) {
+    var id=send("copy_chat_image",{message_id:messageId})
+    if(id)requests[id]={kind:"copyImage"}
+    return id || ""
+  }
   function finishRequest(message) {
     var action = requests[message.id]
     if (!action) return
     delete requests[message.id]
     var value = message.value || ({})
     var conversationId = action.conversationId
-    if (action.kind === "setting") {
+    if (action.kind === "copyImage") {
+      imageCopyFinished(String(message.id),!!message.ok,message.error ? String(message.error.message || "Could not copy image") : "")
+    } else if (action.kind === "setting") {
       if (message.ok) settingsSaved()
       else settingsSaveFailed()
     } else if (action.kind === "edit" || action.kind === "delete") {

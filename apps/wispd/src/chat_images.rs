@@ -145,6 +145,30 @@ fn read_dropped_file(uri: &str) -> anyhow::Result<AttachmentDraft> {
 pub(crate) struct ImageStore {
     drafts: Mutex<HashMap<Uuid, AttachmentDraft>>,
     pub(crate) cache_operation: Mutex<()>,
+    // Linux clipboard ownership must outlive the copy request and viewer window.
+    clipboard: Arc<std::sync::Mutex<Option<arboard::Clipboard>>>,
+}
+
+fn clipboard_image(bytes: Vec<u8>) -> anyhow::Result<arboard::ImageData<'static>> {
+    if bytes.len() > MAX_CHAT_IMAGE_BYTES {
+        bail!("Image exceeds 12 MB");
+    }
+    let mut reader = image::ImageReader::with_format(Cursor::new(bytes), image::ImageFormat::Png);
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(16384);
+    limits.max_image_height = Some(16384);
+    limits.max_alloc = Some(128 * 1024 * 1024);
+    reader.limits(limits);
+    let decoded = reader.decode().context("Decode image for clipboard")?;
+    if u64::from(decoded.width()) * u64::from(decoded.height()) > MAX_CHAT_IMAGE_PIXELS {
+        bail!("Image exceeds 32 megapixels");
+    }
+    let pixels = decoded.to_rgba8();
+    Ok(arboard::ImageData {
+        width: pixels.width() as usize,
+        height: pixels.height() as usize,
+        bytes: std::borrow::Cow::Owned(pixels.into_raw()),
+    })
 }
 
 fn cache_directory(conversation_id: Option<&str>) -> anyhow::Result<PathBuf> {
@@ -205,6 +229,30 @@ pub(crate) fn file_url(path: &std::path::Path) -> anyhow::Result<String> {
 }
 
 impl ImageStore {
+    pub(crate) async fn copy_image(&self, path: PathBuf) -> anyhow::Result<()> {
+        let owner = self.clipboard.clone();
+        tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+            let mut bytes = Vec::new();
+            std::fs::File::open(path)?
+                .take(MAX_CHAT_IMAGE_BYTES as u64 + 1)
+                .read_to_end(&mut bytes)?;
+            let image = clipboard_image(bytes)?;
+            let mut clipboard = owner
+                .lock()
+                .map_err(|_| anyhow::anyhow!("Clipboard lock unavailable"))?;
+            if clipboard.is_none() {
+                *clipboard = Some(arboard::Clipboard::new().context("Open clipboard")?);
+            }
+            clipboard
+                .as_mut()
+                .context("Clipboard unavailable")?
+                .set_image(image)
+                .context("Copy image to clipboard")?;
+            Ok(())
+        })
+        .await??;
+        Ok(())
+    }
     pub(crate) async fn paste(&self) -> anyhow::Result<Value> {
         let value = tokio::task::spawn_blocking(|| -> anyhow::Result<(Option<Vec<u8>>, String)> {
             let mut clipboard = arboard::Clipboard::new().context("open clipboard")?;
@@ -356,6 +404,27 @@ mod tests {
         assert!(large.bytes.is_empty());
         assert_eq!(large.chunk(9_999_999_999).await.unwrap(), [0]);
         assert!(draft.chunk(0).await.is_err());
+    }
+
+    #[test]
+    fn clipboard_conversion_preserves_native_pixels_and_alpha() {
+        let original = image::RgbaImage::from_fn(3, 2, |x, y| {
+            image::Rgba([
+                u8::try_from(x).unwrap() * 40,
+                u8::try_from(y).unwrap() * 60,
+                123,
+                127,
+            ])
+        });
+        let mut png = Cursor::new(Vec::new());
+        original
+            .write_to(&mut png, image::ImageFormat::Png)
+            .unwrap();
+        let copied = clipboard_image(png.into_inner()).unwrap();
+        assert_eq!((copied.width, copied.height), (3, 2));
+        assert_eq!(copied.bytes.as_ref(), original.as_raw());
+        assert!(clipboard_image(b"not an image".to_vec()).is_err());
+        assert!(clipboard_image(vec![0; MAX_CHAT_IMAGE_BYTES + 1]).is_err());
     }
 
     #[test]

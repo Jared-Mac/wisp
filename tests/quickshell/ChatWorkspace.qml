@@ -11,7 +11,19 @@ ShellRoot {
   readonly property string mode: Quickshell.env("WISP_CHAT_FIXTURE_MODE")
   readonly property real testWidth: Number(Quickshell.env("WISP_TEST_WIDTH")) || (Quickshell.env("WISP_TEST_CONSTRAINED") === "1" ? 840 : 1180)
   readonly property real testHeight: Number(Quickshell.env("WISP_TEST_HEIGHT")) || (Quickshell.env("WISP_TEST_CONSTRAINED") === "1" ? 700 : 900)
-  readonly property bool compactMode: mode === "panelaudiotooltips" || mode === "panelpresence" || mode === "traycollapse" || mode === "panel" || mode === "panelmedia" || mode === "panelsettings" || mode === "friends" || mode === "panelidentity" || mode === "panelidentityactions"
+  readonly property bool compactMode: mode === "panelimagegeometry" || mode === "panellatest" || mode === "panelaudiotooltips" || mode === "panelpresence" || mode === "traycollapse" || mode === "panel" || mode === "panelmedia" || mode === "panelsettings" || mode === "friends" || mode === "panelidentity" || mode === "panelidentityactions"
+  function setImageFixture(w,h) {
+    var data=JSON.parse(JSON.stringify(bridge.snapshot))
+    bridge.chatImageUrls={"geometry":"data:image/svg+xml,"+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="'+w+'" height="'+h+'"><rect width="'+w+'" height="'+h+'" fill="#254261"/><circle cx="40" cy="40" r="25" fill="#e6b75b"/><path d="M0 0L'+w+' '+h+'" stroke="#74c9d6" stroke-width="5"/></svg>')}
+    data.messages=[{id:"geometry",conversation_id:"porch",sender:{id:"jared",display_name:"Jared"},created_at:"2026-09-03T17:04:00Z",content_type:"image/png",payload:{width:w,height:h,caption:"Original "+w+" × "+h}}]
+    bridge.snapshot=data
+  }
+  property real readingPosition: 0
+  function appendScrollFixture() {
+    var data=JSON.parse(JSON.stringify(bridge.snapshot))
+    data.messages.push({id:"scroll-"+data.messages.length,conversation_id:"porch",sender:{id:"jared",display_name:"Jared"},created_at:"2026-09-03T17:04:00Z",content_type:"text/plain",payload:"Another message in the conversation"})
+    bridge.snapshot=data
+  }
   property real trayInitialFeed: 0
   property real trayFriendsFeed: 0
   property int trayCommandCount: 0
@@ -444,6 +456,134 @@ ShellRoot {
         test.check(audio.mapToItem(compactSurface, 0, 0).y === y, "audio controls stay pinned while scrolling")
         scroll.contentY = 0
       } else test.check(false, "scroll and global audio exist")
+    }
+  }
+  Timer {
+    interval:350; running:test.mode==="imagegeometry" || test.mode==="panelimagegeometry"
+    onTriggered:test.setImageFixture(120,80)
+  }
+  Timer {
+    interval:550; running:test.mode==="imagegeometry" || test.mode==="panelimagegeometry"
+    onTriggered:{
+      var preview=test.findItem(test.compactMode?compactSurface:window.contentItem,"chatImagePreview-geometry")
+      test.check(Math.abs(preview.width*preview.pixelRatio-120)<1 && Math.abs(preview.height*preview.pixelRatio-80)<1,"small images retain native display size without upscaling")
+      test.setImageFixture(80,1600)
+    }
+  }
+  Timer {
+    interval:750; running:test.mode==="imagegeometry" || test.mode==="panelimagegeometry"
+    onTriggered:{
+      var surface=test.compactMode?compactSurface:window.contentItem
+      var preview=test.findItem(surface,"chatImagePreview-geometry"),list=test.findItem(surface,"messageList")
+      test.check(preview.height<=list.height+1 && Math.abs(preview.width/preview.height-0.05)<0.001,"tall preview shrinks uniformly to fit chat height")
+      test.setImageFixture(2400,600)
+    }
+  }
+  Timer {
+    interval:900; running:test.mode==="imagegeometry" || test.mode==="panelimagegeometry"
+    onTriggered:{
+      var surface=test.compactMode?compactSurface:window.contentItem
+      var preview=test.findItem(surface,"chatImagePreview-geometry"),list=test.findItem(surface,"messageList")
+      test.check(preview.width<=list.width+1 && Math.abs(preview.width/preview.height-4)<0.001,"ultrawide preview fits chat width without distortion")
+      test.findItem(preview,"openChatImage-geometry").clicked(null)
+    }
+  }
+  Timer {
+    interval:1020; running:test.mode==="imagegeometry" || test.mode==="panelimagegeometry"
+    onTriggered:{
+      var surface=test.compactMode?compactSurface:window.contentItem
+      var viewer=test.findObject(test.findFeed(surface),"chatImageViewer",[])
+      var picture=test.findItem(viewer.contentItem,"nativeChatImage"),viewport=test.findItem(viewer.contentItem,"imageViewerViewport")
+      test.check(viewer.visible && viewer.imageStatus===Image.Ready && !viewer.fitToWindow,"click opens separate image window at native scale")
+      test.check(picture.sourceSize.width===2400 && picture.sourceSize.height===600 && Math.abs(picture.width*viewer.pixelRatio-2400)<1,"viewer retains full source resolution at one image pixel per display pixel")
+      test.check(viewport.contentWidth>viewport.width,"oversized native image can be scrolled")
+      test.check(viewer.width>theme.space(280),"viewer sizes itself after original image dimensions load")
+      var path=Quickshell.env("WISP_CHAT_SCREENSHOT")
+      if(path)viewer.contentItem.children[0].grabToImage(function(result){result.saveToFile(path.replace(".png","-viewer.png"))})
+      test.findItem(viewer.contentItem,"imageFitWindow").clicked()
+    }
+  }
+  Timer {
+    interval:1130; running:test.mode==="imagegeometry" || test.mode==="panelimagegeometry"
+    onTriggered:{
+      var surface=test.compactMode?compactSurface:window.contentItem
+      var viewer=test.findObject(test.findFeed(surface),"chatImageViewer",[])
+      var picture=test.findItem(viewer.contentItem,"nativeChatImage"),viewport=test.findItem(viewer.contentItem,"imageViewerViewport")
+      test.check(picture.width<=viewport.width+1 && picture.height<=viewport.height+1 && Math.abs(picture.width/picture.height-4)<0.001,"Fit preserves image proportions")
+      var copy=test.findItem(viewer.contentItem,"imageCopyButton"),before=bridge.sent.length
+      test.check(copy && copy.enabled && !copy.text,"viewer has an icon-only Copy to Clipboard action")
+      copy.clicked()
+      test.check(bridge.sent.length===before+1 && bridge.sent[before].name==="copy_chat_image" && bridge.sent[before].args.message_id==="geometry","copy uses original message image even in Fit mode")
+      viewer.copyImage()
+      test.check(bridge.sent.length===before+1 && !copy.enabled,"copy prevents duplicate pending requests")
+      bridge.finishRequest({id:viewer.copyRequest,ok:false,error:{message:"Clipboard unavailable"}})
+      test.check(copy.enabled && viewer.copyError==="Clipboard unavailable" && !viewer.copied,"copy failure is visible and retryable")
+      copy.clicked()
+      bridge.finishRequest({id:viewer.copyRequest,ok:true,value:{copied:true}})
+      test.check(viewer.copied && !viewer.copyError,"successful copy shows confirmation")
+      test.findItem(viewer.contentItem,"imageNativeSize").clicked()
+      test.check(!viewer.fitToWindow && Math.abs(picture.width*viewer.pixelRatio-2400)<1,"100% restores original size")
+      viewer.contentItem.Window.window.close()
+      test.check(!viewer.visible && !viewer.imageSource.toString(),"closing viewer releases its image without changing chat")
+    }
+  }
+  Timer {
+    interval:400; running:test.mode==="latest" || test.mode==="panellatest"
+    onTriggered:{
+      var data=JSON.parse(JSON.stringify(bridge.snapshot))
+      for(var i=0;i<45;i++)data.messages.push({id:"scroll-"+i,conversation_id:"porch",sender:{id:"jared",display_name:"Jared"},created_at:"2026-09-03T17:04:00Z",content_type:"text/plain",payload:"Earlier message "+i+" in this conversation."})
+      bridge.snapshot=data
+    }
+  }
+  Timer {
+    interval:600; running:test.mode==="latest" || test.mode==="panellatest"
+    onTriggered:{
+      var feed=test.findFeed(test.compactMode?compactSurface:window.contentItem)
+      var list=test.findItem(feed,"messageList")
+      test.check(!feed.awayFromLatest && !test.findItem(feed,"scrollToLatestButton"),"latest button hidden while following newest messages")
+      list.movementStarted();list.positionViewAtBeginning();list.movementEnded()
+      test.readingPosition=list.contentY
+      test.check(feed.awayFromLatest && !!test.findItem(feed,"scrollToLatestButton"),"scrolling up reveals latest button")
+      test.appendScrollFixture()
+    }
+  }
+  Timer {
+    interval:750; running:test.mode==="latest" || test.mode==="panellatest"
+    onTriggered:{
+      var feed=test.findFeed(test.compactMode?compactSurface:window.contentItem)
+      var list=test.findItem(feed,"messageList")
+      test.check(Math.abs(list.contentY-test.readingPosition)<1 && feed.awayFromLatest,"incoming messages do not pull the reader down")
+      var button=test.findItem(feed,"scrollToLatestButton"),before=bridge.sent.length
+      test.check(button.x>=0 && button.y>=0 && button.x+button.width<=feed.width && button.y+button.height<=feed.height,"latest button stays within feed")
+      button.clicked()
+      test.check(!feed.awayFromLatest && list.followBottom,"click scrolls to bottom and restores following")
+      test.check(bridge.sent.length===before,"latest button is a local scrolling action")
+      test.appendScrollFixture()
+    }
+  }
+  Timer {
+    interval:950; running:test.mode==="latest" || test.mode==="panellatest"
+    onTriggered:{
+      var feed=test.findFeed(test.compactMode?compactSurface:window.contentItem)
+      var list=test.findItem(feed,"messageList")
+      test.check(!feed.awayFromLatest,"new arrivals stay in view after jumping to latest")
+      list.movementStarted();list.positionViewAtBeginning();list.movementEnded()
+      feed.conversationId="dm"
+    }
+  }
+  Timer {
+    interval:1050; running:test.mode==="latest" || test.mode==="panellatest"
+    onTriggered:{
+      var feed=test.findFeed(test.compactMode?compactSurface:window.contentItem)
+      test.check(!feed.awayFromLatest,"switching to a short or empty chat hides the button")
+      feed.conversationId="porch"
+    }
+  }
+  Timer {
+    interval:1125; running:test.mode==="latest" || test.mode==="panellatest"
+    onTriggered:{
+      var list=test.findItem(test.findFeed(test.compactMode?compactSurface:window.contentItem),"messageList")
+      list.movementStarted();list.positionViewAtBeginning();list.movementEnded()
     }
   }
   Timer {

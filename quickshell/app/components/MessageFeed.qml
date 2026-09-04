@@ -13,6 +13,14 @@ Rectangle {
   property bool savingEdit: false
   property string editError: ""
   readonly property bool editOpen: editDialog.opened
+  readonly property bool awayFromLatest: messages.count > 0 && !messages.atYEnd
+    && messages.contentHeight + messages.originY - messages.contentY - messages.height > theme.space(4)
+  function scrollToLatest() {
+    messages.cancelFlick()
+    messages.followBottom = true
+    messages.positionViewAtEnd()
+    Qt.callLater(messages.followLatest)
+  }
   function beginEdit(message) {
     editingId = String(message.id)
     editingImage = message.content_type === "image/png" || message.content_type === "application/octet-stream"
@@ -25,18 +33,26 @@ Rectangle {
   border.width: theme.performative ? 0 : theme.terminal ? 1 : 0
   border.color: theme.separator
   color: theme.performative ? theme.background : theme.alpha(theme.foreground, 0.025)
-  onConversationIdChanged: Qt.callLater(function() { messages.positionViewAtEnd() })
+  onConversationIdChanged: { messages.followBottom = true; Qt.callLater(messages.followLatest) }
   ListView {
     id: messages
+    objectName: "messageList"
     anchors.fill: parent
     anchors.margins: root.theme.space(root.theme.performative ? 6 : 16)
     clip: true
     spacing: root.theme.space(root.theme.performative ? 12 : 18)
     model: root.bridge.messagesFor(root.conversationId)
     property bool followBottom: true
-    onMovementEnded: followBottom = atYEnd
-    onCountChanged: if (followBottom) Qt.callLater(function() { positionViewAtEnd() })
-    ScrollBar.vertical: ScrollBar {}
+    function followLatest() { if (followBottom && !moving && !messageScrollBar.pressed) positionViewAtEnd() }
+    onMovementStarted: followBottom = false
+    onMovementEnded: followBottom = !root.awayFromLatest
+    onCountChanged: if (followBottom) Qt.callLater(followLatest)
+    onContentHeightChanged: if (followBottom) Qt.callLater(followLatest)
+    onHeightChanged: if (followBottom) Qt.callLater(followLatest)
+    ScrollBar.vertical: ScrollBar {
+      id: messageScrollBar
+      onPressedChanged: messages.followBottom = pressed ? false : !root.awayFromLatest
+    }
     delegate: Column {
       id: message
       required property var modelData
@@ -93,9 +109,14 @@ Rectangle {
         }
       }
       Rectangle {
+        objectName: "chatImagePreview-" + String(message.modelData.id)
         visible: message.isImage
-        width: Math.min(parent.width, root.theme.space(640))
-        height: message.isImage ? Math.min(root.theme.space(420), width * Number(message.modelData.payload.height || 180) / Math.max(1, Number(message.modelData.payload.width || 320))) : 0
+        readonly property real pixelRatio: Math.max(1, photo.Screen.devicePixelRatio)
+        readonly property real nativeWidth: (photo.status===Image.Ready ? photo.sourceSize.width : Math.max(1,Number(message.modelData.payload.width || 320))) / pixelRatio
+        readonly property real nativeHeight: (photo.status===Image.Ready ? photo.sourceSize.height : Math.max(1,Number(message.modelData.payload.height || 180))) / pixelRatio
+        readonly property real previewScale: Math.min(1, parent.width/nativeWidth, Math.max(1,messages.height)/nativeHeight)
+        width: message.isImage ? nativeWidth*previewScale : 0
+        height: message.isImage ? nativeHeight*previewScale : 0
         radius: root.theme.cornerRadius
         color: root.theme.surface
         Image {
@@ -114,10 +135,11 @@ Rectangle {
           color: root.theme.muted
         }
         MouseArea {
+          objectName: "openChatImage-" + String(message.modelData.id)
           anchors.fill: parent
           cursorShape: Qt.PointingHandCursor
           onClicked: {
-            if (photo.status === Image.Ready) Qt.openUrlExternally(message.imageUrl)
+            if (photo.status === Image.Ready) imageViewer.openImage(message.imageUrl,String(message.modelData.id))
             else root.bridge.loadChatImage(String(message.modelData.id), true)
           }
         }
@@ -180,6 +202,44 @@ Rectangle {
         textFormat: TextEdit.PlainText
         wrapMode: TextEdit.Wrap
         font.family: root.theme.font.family; font.pixelSize: root.theme.font.body
+      }
+    }
+  }
+  ChatImageWindow { id:imageViewer;objectName:"chatImageViewer";theme:root.theme;bridge:root.bridge }
+  ChatButton {
+    id: latestButton
+    objectName: "scrollToLatestButton"
+    theme: root.theme
+    visible: root.awayFromLatest
+    anchors.right: messages.right; anchors.bottom: messages.bottom
+    anchors.margins: root.theme.space(8)
+    width: root.theme.space(34); height: width
+    z: 2
+    Accessible.name: "Scroll to latest messages"
+    ToolTip.visible: hovered; ToolTip.text: "Latest messages"
+    onClicked: root.scrollToLatest()
+    background: Rectangle {
+      radius: root.theme.cornerRadius
+      color: root.theme.surface
+      border.width: latestButton.visualFocus ? 2 : 1
+      border.color: latestButton.hovered || latestButton.visualFocus ? root.theme.foreground : root.theme.accent
+      Rectangle {
+        anchors.fill: parent; radius: parent.radius
+        color: root.theme.alpha(root.theme.accent, latestButton.down ? 0.28 : latestButton.hovered ? 0.16 : 0.08)
+      }
+    }
+    contentItem: Item {
+      Canvas {
+        anchors.centerIn: parent; width: root.theme.space(18); height: width
+        property color ink: root.theme.foreground
+        onInkChanged: requestPaint()
+        onPaint: {
+          var ctx=getContext("2d")
+          ctx.reset();ctx.strokeStyle=ink;ctx.lineWidth=1.6;ctx.lineCap="round";ctx.lineJoin="round"
+          ctx.beginPath();ctx.moveTo(width*0.5,height*0.12);ctx.lineTo(width*0.5,height*0.65)
+          ctx.moveTo(width*0.25,height*0.42);ctx.lineTo(width*0.5,height*0.67);ctx.lineTo(width*0.75,height*0.42)
+          ctx.moveTo(width*0.2,height*0.86);ctx.lineTo(width*0.8,height*0.86);ctx.stroke()
+        }
       }
     }
   }

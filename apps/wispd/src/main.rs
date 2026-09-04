@@ -1194,7 +1194,7 @@ impl Daemon {
                 self.refresh("file_retention_changed").await?;
                 Ok(None)
             }
-            "load_chat_image" => {
+            "load_chat_image" | "copy_chat_image" => {
                 let _cache_operation = self.chat_images.cache_operation.lock().await;
                 let id: uuid::Uuid = string_arg(&command.args, "message_id")?.parse()?;
                 let conversation_id = self
@@ -1225,6 +1225,10 @@ impl Daemon {
                     let temporary = path.with_extension("part");
                     tokio::fs::write(&temporary, bytes).await?;
                     tokio::fs::rename(&temporary, &path).await?;
+                }
+                if command.name == "copy_chat_image" {
+                    self.chat_images.copy_image(path).await?;
+                    return Ok(Some(json!({"message_id": id, "copied": true})));
                 }
                 Ok(Some(
                     json!({"message_id": id, "url": chat_images::file_url(&path)?}),

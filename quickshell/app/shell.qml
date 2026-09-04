@@ -149,7 +149,7 @@ ShellRoot {
     clientName: "quickshell-desktop"
     notificationSoundsEnabled: true
     appFocused: (appWindow.visible && appWindow.contentItem.Window.active)
-      || detachedChatFocused
+      || detachedChatFocused || imageViewerFocused
       || (panelWindow.visible && panelWindow.contentItem.Window.active)
       || (previewWindow.visible && previewWindow.contentItem.Window.active)
     chatVisible: appWindow.chatVisible || panelWindow.chatVisible || detachedChatFocused

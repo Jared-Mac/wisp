@@ -298,6 +298,11 @@ and reattaching restores its slot. Drafts, attachments, and the existing chat vi
 move with it. Pop-outs return to their saved main-window slots after app restart.
 Notification sounds also stay quiet while a chat pop-out has focus.
 
+A small down-arrow button appears at the lower-right of a chat feed when scrolled
+above the latest messages. Click it to return to the bottom and resume following
+new messages; it disappears at the bottom or when the chat fits without scrolling.
+This local scrolling control works in the tray, main tiles, and pop-outs.
+
 Camera On (including the C shortcut) opens a local-only preview with the destination
 room and **Start Sharing Camera** / **Cancel**. Previewing uses Qt Multimedia
 (`qt6-multimedia` on Arch-based systems) without an audio input or recorder. No
@@ -333,8 +338,13 @@ and downloads stream without buffering the entire file. Available disk space
 and the host/proxy configuration still constrain transfers. The legacy endpoint
 for old clients retains its 25 MiB request limit. Up to eight attachments can be staged across
 all conversations. Folders, symlinks, and web URLs are not imported.
-Only conversation members can download attachments. Click an image to open it
-in the system viewer. **Save file** downloads a generic attachment into a new
+Only conversation members can download attachments. Chat images never enlarge
+beyond their native pixel size: previews shrink uniformly only to fit the feed's
+width and height. Clicking opens a separate Wisp image window at **100%**, with
+scrollbars for oversized originals and an optional **Fit** view. Preview sizing
+does not resize the uploaded image. The viewer's copy icon places the original
+image pixels on the clipboard, even in Fit mode, and briefly changes to a checkmark
+after success. **Save file** downloads a generic attachment into a new
 folder under Downloads/Wisp without opening it or giving it executable permissions.
 Explicitly saved files remain yours even if the chat is later cleared/deleted.
 Clipboard support includes Wayland data-control and X11/XWayland; nothing uploads
