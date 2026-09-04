@@ -140,9 +140,11 @@ publishing quality, codec, discovered encoder backends, and whether hardware
 acceleration is actually active. Error codes are stable machine-readable
 categories; `error` remains suitable for direct display. The nested `audio`
 object contains input/output inventories, selected device IDs, the processing
-preset, and an integer `input_level` from 0–100. While a call is active, `wispd`
-detects device changes, switches to an available fallback, and restores the
-preferred device if it returns.
+preset, and an integer `input_level` from 0–100. It also exposes
+`voice_gate_active`, `voice_gate_open`, `processing_time_us`, cumulative
+`processing_deadline_misses`, and `capture_queue_ms`. While a call is active,
+`wispd` detects device changes, switches to an available fallback, and restores
+the preferred device if it returns.
 
 The self state contains `push_to_talk.enabled`, `push_to_talk.active`, the
 optional global `shortcut`, its `shortcut_backend`, and any descriptions in

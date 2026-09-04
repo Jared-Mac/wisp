@@ -708,6 +708,12 @@ impl Daemon {
         let snapshot = {
             let mut state = self.state.write().await;
             inventory.state.input_level = state.self_state.media.audio.input_level;
+            inventory.state.voice_gate_open =
+                inventory.state.voice_gate_active && state.self_state.media.audio.voice_gate_open;
+            inventory.state.processing_time_us = state.self_state.media.audio.processing_time_us;
+            inventory.state.processing_deadline_misses =
+                state.self_state.media.audio.processing_deadline_misses;
+            inventory.state.capture_queue_ms = state.self_state.media.audio.capture_queue_ms;
             let next_error = inventory
                 .error
                 .as_ref()
@@ -1775,6 +1781,7 @@ fn clear_local_speaker(snapshot: &mut Snapshot, profile: &str) {
         .active_speakers
         .retain(|name| name != profile);
     snapshot.self_state.media.audio.input_level = 0;
+    snapshot.self_state.media.audio.voice_gate_open = false;
 }
 
 fn update_remote_mute_state(media: &mut MediaState, participant: &str, muted: bool) {
@@ -1986,6 +1993,7 @@ async fn synchronize_media_events(
             | MediaEvent::RemoteMuteChanged { generation, .. }
             | MediaEvent::AudioFrames { generation, .. }
             | MediaEvent::InputLevel { generation, .. }
+            | MediaEvent::AudioTelemetry { generation, .. }
             | MediaEvent::ActiveSpeakers { generation, .. }
             | MediaEvent::VideoAvailable { generation, .. }
             | MediaEvent::VideoUnavailable { generation, .. }
@@ -2019,6 +2027,7 @@ async fn synchronize_media_events(
                             media.livekit_connected = false;
                             media.active_speakers.clear();
                             media.audio.input_level = 0;
+                            media.audio.voice_gate_open = false;
                         },
                     )
                     .await;
@@ -2042,6 +2051,7 @@ async fn synchronize_media_events(
             | MediaEvent::RemoteMuteChanged { .. }
             | MediaEvent::AudioFrames { .. }
             | MediaEvent::InputLevel { .. }
+            | MediaEvent::AudioTelemetry { .. }
             | MediaEvent::ActiveSpeakers { .. }
             | MediaEvent::VideoAvailable { .. }
             | MediaEvent::VideoUnavailable { .. }
@@ -2115,6 +2125,7 @@ async fn synchronize_media_events(
                             media.remote_videos.clear();
                             media.active_speakers.clear();
                             media.audio.input_level = 0;
+                            media.audio.voice_gate_open = false;
                             media.error_code = Some("livekit_disconnected".into());
                             media.error = Some(format!("LiveKit disconnected: {reason}"));
                         },
@@ -2187,6 +2198,24 @@ async fn synchronize_track_event(daemon: &Daemon, event: MediaEvent) {
             daemon
                 .update_media_state(None, "audio_input_level_changed", |media| {
                     media.audio.input_level = level;
+                })
+                .await;
+        }
+        MediaEvent::AudioTelemetry {
+            level,
+            voice_gate_open,
+            processing_time_us,
+            processing_deadline_misses,
+            capture_queue_ms,
+            ..
+        } => {
+            daemon
+                .update_media_state(None, "audio_telemetry_changed", |media| {
+                    media.audio.input_level = level;
+                    media.audio.voice_gate_open = media.audio.voice_gate_active && voice_gate_open;
+                    media.audio.processing_time_us = processing_time_us;
+                    media.audio.processing_deadline_misses = processing_deadline_misses;
+                    media.audio.capture_queue_ms = capture_queue_ms;
                 })
                 .await;
         }

@@ -157,7 +157,12 @@ Item {
           "input_level": 0,
           "denoiser_active": true,
           "denoiser": "deepfilternet",
-          "processing_latency_ms": 30
+          "processing_latency_ms": 30,
+          "voice_gate_active": true,
+          "voice_gate_open": false,
+          "processing_time_us": 0,
+          "processing_deadline_misses": 0,
+          "capture_queue_ms": 0
         },
         "screen_share": {
           "starting": false,
@@ -279,7 +284,10 @@ Item {
     Object.keys(levels).forEach(function(name) {
       if (Number(levels[name]) >= 25 && (root.mediaState.remote_audio_participants || []).indexOf(name) >= 0 && names.indexOf(name) < 0) names.push(name)
     })
-    if (Number(mediaState.audio && mediaState.audio.input_level || 0) >= 25 && !effectiveMuted && names.indexOf(selfState.display_name) < 0) names.push(selfState.display_name)
+    var localAudio = mediaState.audio || ({}), localSpeaking = !!localAudio.voice_gate_active
+      ? !!localAudio.voice_gate_open
+      : Number(localAudio.input_level || 0) >= 25
+    if (localSpeaking && !effectiveMuted && names.indexOf(selfState.display_name) < 0) names.push(selfState.display_name)
     return names
   }
   property var speakerReleaseTimes: ({})
@@ -328,7 +336,12 @@ Item {
     "input_level": 0,
     "denoiser_active": true,
     "denoiser": "deepfilternet",
-    "processing_latency_ms": 30
+    "processing_latency_ms": 30,
+    "voice_gate_active": true,
+    "voice_gate_open": false,
+    "processing_time_us": 0,
+    "processing_deadline_misses": 0,
+    "capture_queue_ms": 0
   })
   readonly property var screenShareState: mediaState.screen_share || ({
     "starting": false,

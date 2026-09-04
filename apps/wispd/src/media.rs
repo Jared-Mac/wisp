@@ -51,6 +51,7 @@ use std::{
         Arc, Mutex,
         atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering},
     },
+    time::Instant,
 };
 use tokio::{
     sync::{Mutex as AsyncMutex, mpsc},
@@ -69,6 +70,17 @@ const AUDIO_SAMPLE_RATE: u32 = 48_000;
 const AUDIO_FRAME_SAMPLES: usize = 480;
 const DEEPFILTER_LATENCY_MS: u16 = 30;
 const RNNOISE_LATENCY_MS: u16 = 10;
+const AUDIO_FRAME_BUDGET_US: u32 = 10_000;
+const VOICE_GATE_OPEN_PROBABILITY: f32 = 0.58;
+const VOICE_GATE_HOLD_PROBABILITY: f32 = 0.28;
+const VOICE_GATE_OPEN_MARGIN_DB: f32 = 8.0;
+const VOICE_GATE_HOLD_MARGIN_DB: f32 = 3.0;
+const VOICE_GATE_MIN_OPEN_DBFS: f32 = -52.0;
+const VOICE_GATE_MIN_HOLD_DBFS: f32 = -56.0;
+const VOICE_GATE_STRONG_SIGNAL_DBFS: f32 = -18.0;
+const VOICE_GATE_HANGOVER_FRAMES: u16 = 25;
+const VOICE_GATE_ATTACK_FRAMES: u8 = 2;
+const VOICE_GATE_GAIN_STEP: f32 = 0.5;
 const VIDEO_WATCH_TOPIC: &str = "wisp.video-watch.v1";
 const PREVIEW_MAX_WIDTH: u32 = 480;
 const PREVIEW_MAX_HEIGHT: u32 = 270;
@@ -144,6 +156,127 @@ impl NeuralDenoiser {
         match self {
             Self::DeepFilterNet(model) => deepfilter_frame(model, input),
             Self::Rnnoise { state, first_frame } => Ok(rnnoise_frame(state, input, first_frame)),
+        }
+    }
+}
+
+struct VoiceGate {
+    detector: Box<DenoiseState<'static>>,
+    noise_floor_dbfs: f32,
+    candidate_frames: u8,
+    hangover_frames: u16,
+    gain: f32,
+    open: bool,
+}
+
+struct GatedFrame {
+    samples: Vec<i16>,
+    open: bool,
+}
+
+impl VoiceGate {
+    fn new() -> Self {
+        Self {
+            detector: DenoiseState::new(),
+            noise_floor_dbfs: -60.0,
+            candidate_frames: 0,
+            hangover_frames: 0,
+            gain: 0.0,
+            open: false,
+        }
+    }
+
+    fn reset(&mut self) {
+        *self = Self::new();
+    }
+
+    fn process(&mut self, detector_input: &[i16], denoised: Vec<i16>) -> GatedFrame {
+        let input = detector_input
+            .iter()
+            .map(|sample| f32::from(*sample))
+            .collect::<Vec<_>>();
+        let mut detector_output = [0.0_f32; DenoiseState::FRAME_SIZE];
+        let speech_probability = self.detector.process_frame(&mut detector_output, &input);
+        self.process_with_probability(detector_input, denoised, speech_probability)
+    }
+
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_precision_loss,
+        clippy::cast_sign_loss
+    )]
+    fn process_with_probability(
+        &mut self,
+        detector_input: &[i16],
+        mut denoised: Vec<i16>,
+        speech_probability: f32,
+    ) -> GatedFrame {
+        let input_dbfs = pcm_dbfs(detector_input);
+        if !self.open {
+            let alpha = if input_dbfs > self.noise_floor_dbfs {
+                0.08
+            } else {
+                0.015
+            };
+            self.noise_floor_dbfs += alpha * (input_dbfs - self.noise_floor_dbfs);
+            self.noise_floor_dbfs = self.noise_floor_dbfs.clamp(-90.0, -20.0);
+        }
+
+        let open_threshold =
+            (self.noise_floor_dbfs + VOICE_GATE_OPEN_MARGIN_DB).max(VOICE_GATE_MIN_OPEN_DBFS);
+        let hold_threshold =
+            (self.noise_floor_dbfs + VOICE_GATE_HOLD_MARGIN_DB).max(VOICE_GATE_MIN_HOLD_DBFS);
+        let strong_signal = input_dbfs >= VOICE_GATE_STRONG_SIGNAL_DBFS;
+        let open_candidate = strong_signal
+            || (speech_probability >= VOICE_GATE_OPEN_PROBABILITY && input_dbfs >= open_threshold);
+
+        if self.open {
+            let sustain = strong_signal
+                || (speech_probability >= VOICE_GATE_HOLD_PROBABILITY
+                    && input_dbfs >= hold_threshold);
+            if sustain {
+                self.hangover_frames = VOICE_GATE_HANGOVER_FRAMES;
+            } else if self.hangover_frames > 0 {
+                self.hangover_frames -= 1;
+            } else {
+                self.open = false;
+            }
+        } else if open_candidate {
+            self.candidate_frames = self.candidate_frames.saturating_add(1);
+            if self.candidate_frames >= VOICE_GATE_ATTACK_FRAMES {
+                self.open = true;
+                self.hangover_frames = VOICE_GATE_HANGOVER_FRAMES;
+                self.candidate_frames = 0;
+            }
+        } else {
+            self.candidate_frames = 0;
+        }
+
+        let target_gain = if self.open { 1.0 } else { 0.0 };
+        let start_gain = self.gain;
+        if self.gain < target_gain {
+            self.gain = (self.gain + VOICE_GATE_GAIN_STEP).min(target_gain);
+        } else if self.gain > target_gain {
+            self.gain = (self.gain - VOICE_GATE_GAIN_STEP).max(target_gain);
+        }
+        let end_gain = self.gain;
+        if start_gain <= f32::EPSILON && end_gain <= f32::EPSILON {
+            denoised.fill(0);
+        } else if start_gain < 1.0 - f32::EPSILON || end_gain < 1.0 - f32::EPSILON {
+            let denominator = denoised.len().saturating_sub(1).max(1) as f32;
+            for (index, sample) in denoised.iter_mut().enumerate() {
+                let position = index as f32 / denominator;
+                let gain = start_gain + (end_gain - start_gain) * position;
+                *sample = (f32::from(*sample) * gain)
+                    .round()
+                    .clamp(f32::from(i16::MIN), f32::from(i16::MAX))
+                    as i16;
+            }
+        }
+
+        GatedFrame {
+            samples: denoised,
+            open: self.open || start_gain > 0.0 || self.gain > 0.0,
         }
     }
 }
@@ -286,6 +419,14 @@ pub(crate) enum MediaEvent {
         generation: u64,
         level: u8,
     },
+    AudioTelemetry {
+        generation: u64,
+        level: u8,
+        voice_gate_open: bool,
+        processing_time_us: u32,
+        processing_deadline_misses: u64,
+        capture_queue_ms: u16,
+    },
     ActiveSpeakers {
         generation: u64,
         speakers: Vec<String>,
@@ -412,6 +553,7 @@ struct MediaSession {
     hangout_id: HangoutId,
     room: Arc<Room>,
     microphone: LocalAudioTrack,
+    microphone_source: NativeAudioSource,
     microphone_capture: gst::Pipeline,
     microphone_frames: mpsc::UnboundedSender<Vec<i16>>,
     microphone_task: JoinHandle<()>,
@@ -450,6 +592,7 @@ pub(crate) struct MediaManager {
     received_frames: Arc<AtomicU64>,
     received_video_frames: Arc<AtomicU64>,
     input_level: Arc<AtomicU8>,
+    capture_queue_samples: Arc<AtomicU64>,
     platform_audio: Mutex<Option<PlatformAudio>>,
     audio_preferences: Mutex<AudioPreferences>,
     participant_volumes: Arc<Mutex<HashMap<String, f64>>>,
@@ -502,6 +645,7 @@ impl MediaManager {
                 received_frames: Arc::new(AtomicU64::new(0)),
                 received_video_frames: Arc::new(AtomicU64::new(0)),
                 input_level: Arc::new(AtomicU8::new(0)),
+                capture_queue_samples: Arc::new(AtomicU64::new(0)),
                 platform_audio: Mutex::new(None),
                 audio_preferences: Mutex::new(AudioPreferences::default()),
                 participant_volumes: Arc::new(Mutex::new(HashMap::new())),
@@ -574,6 +718,7 @@ impl MediaManager {
                 let replacement = create_microphone_capture_pipeline(
                     &device.name,
                     session.microphone_frames.clone(),
+                    self.capture_queue_samples.clone(),
                 )?;
                 replacement
                     .set_state(gst::State::Playing)
@@ -623,6 +768,11 @@ impl MediaManager {
         audio
             .configure_audio_processing(processing_options(preset))
             .with_context(|| format!("apply {preset} audio preset"))?;
+        if let Some(session) = self.session.lock().await.as_ref() {
+            session
+                .microphone_source
+                .set_audio_options(source_processing_options(preset));
+        }
         self.audio_preferences
             .lock()
             .expect("audio preferences lock poisoned")
@@ -849,6 +999,11 @@ impl MediaManager {
             denoiser_active: false,
             denoiser: None,
             processing_latency_ms: 0,
+            voice_gate_active: false,
+            voice_gate_open: false,
+            processing_time_us: 0,
+            processing_deadline_misses: 0,
+            capture_queue_ms: 0,
         };
         apply_denoiser_state(&mut state, self.denoiser_backend());
         AudioInventory {
@@ -924,7 +1079,12 @@ impl MediaManager {
             room.e2ee_manager().set_enabled(true);
         }
         let room = Arc::new(room);
-        let microphone_source = NativeAudioSource::new(AudioSourceOptions::default(), 48_000, 1, 0);
+        let microphone_source = NativeAudioSource::new(
+            source_processing_options(inventory.state.preset),
+            AUDIO_SAMPLE_RATE,
+            1,
+            0,
+        );
         let microphone_track = LocalAudioTrack::create_audio_track(
             "microphone",
             RtcAudioSource::Native(microphone_source.clone()),
@@ -932,9 +1092,13 @@ impl MediaManager {
         if muted {
             microphone_track.mute();
         }
+        self.capture_queue_samples.store(0, Ordering::Release);
         let (microphone_frames, captured_frames) = mpsc::unbounded_channel();
-        let microphone_capture =
-            create_microphone_capture_pipeline(&microphone, microphone_frames.clone())?;
+        let microphone_capture = create_microphone_capture_pipeline(
+            &microphone,
+            microphone_frames.clone(),
+            self.capture_queue_samples.clone(),
+        )?;
         if let Err(error) = room
             .local_participant()
             .publish_track(
@@ -957,11 +1121,12 @@ impl MediaManager {
         let generation = self.generation.fetch_add(1, Ordering::AcqRel) + 1;
         let microphone_task = tokio::spawn(run_microphone_pipeline(
             captured_frames,
-            microphone_source,
+            microphone_source.clone(),
             microphone_track.clone(),
             self.neural_denoiser_enabled.clone(),
             self.denoiser.clone(),
             self.input_level.clone(),
+            self.capture_queue_samples.clone(),
             self.event_tx.clone(),
             generation,
         ));
@@ -1049,6 +1214,7 @@ impl MediaManager {
             hangout_id,
             room,
             microphone: microphone_track,
+            microphone_source,
             microphone_capture,
             microphone_frames,
             microphone_task,
@@ -1106,6 +1272,7 @@ impl MediaManager {
         let _ = session.microphone_capture.set_state(gst::State::Null);
         session.microphone_task.abort();
         let _ = session.microphone_task.await;
+        self.capture_queue_samples.store(0, Ordering::Release);
         if let Some(screen_share) = session.screen_share {
             stop_screen_share_session(&session.room, screen_share).await;
         }
@@ -2241,6 +2408,7 @@ fn select_playout_device(
 fn create_microphone_capture_pipeline(
     microphone: &str,
     frames: mpsc::UnboundedSender<Vec<i16>>,
+    queued_samples: Arc<AtomicU64>,
 ) -> anyhow::Result<gst::Pipeline> {
     gst::init().context("initialize GStreamer for microphone capture")?;
     let source = if std::env::var_os("WISP_TEST_MICROPHONE_TONE").is_some() {
@@ -2274,7 +2442,11 @@ fn create_microphone_capture_pipeline(
                         warn!(%error, "microphone capture failed");
                         gst::FlowError::Error
                     })?;
-                    frames.send(samples).map_err(|_| gst::FlowError::Eos)?;
+                    queued_samples.fetch_add(samples.len() as u64, Ordering::AcqRel);
+                    if let Err(error) = frames.send(samples) {
+                        atomic_saturating_sub(&queued_samples, error.0.len() as u64);
+                        return Err(gst::FlowError::Eos);
+                    }
                     Ok(gst::FlowSuccess::Ok)
                 })
                 .build(),
@@ -2293,6 +2465,12 @@ fn create_microphone_capture_pipeline(
     gst::Element::link_many([&source, &convert, &resample, app_sink.upcast_ref()])
         .context("link the microphone capture pipeline")?;
     Ok(pipeline)
+}
+
+fn atomic_saturating_sub(counter: &AtomicU64, value: u64) {
+    let _ = counter.fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
+        Some(current.saturating_sub(value))
+    });
 }
 
 fn microphone_capture_source(microphone: &str) -> anyhow::Result<gst::Element> {
@@ -2345,6 +2523,7 @@ async fn run_microphone_pipeline(
     neural_enabled: Arc<AtomicBool>,
     denoiser: Arc<DenoiserService>,
     input_level: Arc<AtomicU8>,
+    capture_queue_samples: Arc<AtomicU64>,
     event_tx: mpsc::UnboundedSender<MediaEvent>,
     generation: u64,
 ) {
@@ -2353,38 +2532,47 @@ async fn run_microphone_pipeline(
     let mut pending = std::collections::VecDeque::<i16>::with_capacity(AUDIO_FRAME_SAMPLES * 2);
     let mut meter_frames = 0_u8;
     let mut meter_peak = 0_u8;
+    let mut processing_peak_us = 0_u32;
+    let mut processing_deadline_misses = 0_u64;
+    let mut voice_gate = VoiceGate::new();
+    let mut gate_was_enabled = false;
 
     while let Some(samples) = captured_frames.recv().await {
+        atomic_saturating_sub(&capture_queue_samples, samples.len() as u64);
         pending.extend(samples);
         while pending.len() >= AUDIO_FRAME_SAMPLES {
+            let processing_started = Instant::now();
             let input = pending.drain(..AUDIO_FRAME_SAMPLES).collect::<Vec<_>>();
             let neural = neural_enabled.load(Ordering::Acquire);
-            let output = if neural {
+            if neural && !gate_was_enabled {
+                voice_gate.reset();
+            }
+            let processed_samples = if neural {
                 match denoiser.process(input.clone()).await {
                     Ok(processed) => processed,
                     Err(error) => {
                         warn!(%error, "neural denoiser worker stopped; publishing raw audio");
-                        input
+                        input.clone()
                     }
                 }
             } else {
-                input
+                input.clone()
             };
+            let gated = if neural {
+                voice_gate.process(&input, processed_samples)
+            } else {
+                if gate_was_enabled {
+                    voice_gate.reset();
+                }
+                GatedFrame {
+                    samples: processed_samples,
+                    open: false,
+                }
+            };
+            gate_was_enabled = neural;
+            let output = gated.samples;
             meter_peak = meter_peak.max(pcm_level_percent(&output));
             meter_frames += 1;
-            if meter_frames == 10 {
-                let level = if publish_track.is_muted() {
-                    0
-                } else {
-                    meter_peak
-                };
-                let previous = input_level.swap(level, Ordering::AcqRel);
-                if previous.abs_diff(level) >= 2 || (previous != 0 && level == 0) {
-                    let _ = event_tx.send(MediaEvent::InputLevel { generation, level });
-                }
-                meter_frames = 0;
-                meter_peak = 0;
-            }
             let frame = AudioFrame {
                 data: Cow::Owned(output),
                 sample_rate: AUDIO_SAMPLE_RATE,
@@ -2395,6 +2583,30 @@ async fn run_microphone_pipeline(
             if let Err(error) = publish_source.capture_frame(&frame).await {
                 warn!(%error, "neural microphone pipeline stopped");
                 return;
+            }
+            let elapsed_us =
+                u32::try_from(processing_started.elapsed().as_micros()).unwrap_or(u32::MAX);
+            processing_peak_us = processing_peak_us.max(elapsed_us);
+            if elapsed_us > AUDIO_FRAME_BUDGET_US {
+                processing_deadline_misses = processing_deadline_misses.saturating_add(1);
+            }
+            if meter_frames == 10 {
+                let muted = publish_track.is_muted();
+                let level = if muted { 0 } else { meter_peak };
+                input_level.store(level, Ordering::Release);
+                let queued_samples = capture_queue_samples.load(Ordering::Acquire);
+                let capture_queue_ms = u16::try_from(queued_samples / 48).unwrap_or(u16::MAX);
+                let _ = event_tx.send(MediaEvent::AudioTelemetry {
+                    generation,
+                    level,
+                    voice_gate_open: neural && gated.open && !muted,
+                    processing_time_us: processing_peak_us,
+                    processing_deadline_misses,
+                    capture_queue_ms,
+                });
+                meter_frames = 0;
+                meter_peak = 0;
+                processing_peak_us = 0;
             }
         }
     }
@@ -2494,6 +2706,10 @@ fn rnnoise_frame(
 fn apply_denoiser_state(state: &mut AudioState, backend: DenoiserBackend) {
     state.denoiser_active = state.preset == AudioPreset::Clear;
     state.denoiser = state.denoiser_active.then(|| backend.name().to_owned());
+    state.voice_gate_active = state.denoiser_active;
+    if !state.voice_gate_active {
+        state.voice_gate_open = false;
+    }
     state.processing_latency_ms = if state.denoiser_active {
         backend.latency_ms()
     } else {
@@ -3175,7 +3391,8 @@ fn processing_options(preset: AudioPreset) -> AudioProcessingOptions {
             echo_cancellation: true,
             // DeepFilterNet handles suppression in the explicit microphone pipeline.
             noise_suppression: false,
-            auto_gain_control: true,
+            // Raising the denoiser's residual floor makes intermittent artifacts audible.
+            auto_gain_control: false,
             prefer_hardware_processing: false,
         },
         AudioPreset::Studio => AudioProcessingOptions {
@@ -3187,10 +3404,19 @@ fn processing_options(preset: AudioPreset) -> AudioProcessingOptions {
     }
 }
 
-#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-fn pcm_level_percent(samples: &[i16]) -> u8 {
+fn source_processing_options(preset: AudioPreset) -> AudioSourceOptions {
+    let processing = processing_options(preset);
+    AudioSourceOptions {
+        echo_cancellation: processing.echo_cancellation,
+        noise_suppression: processing.noise_suppression,
+        auto_gain_control: processing.auto_gain_control,
+    }
+}
+
+#[allow(clippy::cast_possible_truncation)]
+fn pcm_dbfs(samples: &[i16]) -> f32 {
     if samples.is_empty() {
-        return 0;
+        return -90.0;
     }
     let mean_square = samples
         .iter()
@@ -3198,10 +3424,18 @@ fn pcm_level_percent(samples: &[i16]) -> u8 {
         .sum::<f64>()
         / f64::from(u32::try_from(samples.len()).expect("audio frame length fits u32"));
     if mean_square < 1.0 {
-        return 0;
+        return -90.0;
     }
     let full_scale_square = f64::from(i16::MAX).powi(2);
-    let dbfs = 10.0 * (mean_square / full_scale_square).log10();
+    (10.0 * (mean_square / full_scale_square).log10()).clamp(-90.0, 0.0) as f32
+}
+
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+fn pcm_level_percent(samples: &[i16]) -> u8 {
+    let dbfs = pcm_dbfs(samples);
+    if dbfs <= -60.0 {
+        return 0;
+    }
     (((dbfs + 60.0) / 60.0).clamp(0.0, 1.0) * 100.0).round() as u8
 }
 
@@ -3363,10 +3597,11 @@ mod tests {
     }
 
     use super::{
-        AUDIO_FRAME_SAMPLES, VideoWatchSignal, create_deepfilter_model, deepfilter_frame,
-        i420_to_rgba_texture, pcm_level_percent, preferred_or_first, processing_options,
-        public_device_id, publishing_video_encoder, same_logical_device, screen_share_resolution,
-        surface_quality, video_profile, video_watch_targets_local,
+        AUDIO_FRAME_SAMPLES, VOICE_GATE_HANGOVER_FRAMES, VideoWatchSignal, VoiceGate,
+        create_deepfilter_model, deepfilter_frame, i420_to_rgba_texture, pcm_level_percent,
+        preferred_or_first, processing_options, public_device_id, publishing_video_encoder,
+        same_logical_device, screen_share_resolution, source_processing_options, surface_quality,
+        video_profile, video_watch_targets_local,
     };
     use livekit::options::VideoEncoderBackend;
     use livekit::track::VideoQuality;
@@ -3454,8 +3689,51 @@ mod tests {
 
         assert!(natural.echo_cancellation && natural.noise_suppression);
         assert!(!natural.auto_gain_control);
-        assert!(clear.auto_gain_control && !clear.noise_suppression);
+        assert!(clear.echo_cancellation && !clear.auto_gain_control && !clear.noise_suppression);
         assert!(!studio.echo_cancellation && !studio.noise_suppression);
+
+        let natural_source = source_processing_options(AudioPreset::Natural);
+        let clear_source = source_processing_options(AudioPreset::Clear);
+        let studio_source = source_processing_options(AudioPreset::Studio);
+        assert!(natural_source.echo_cancellation && natural_source.noise_suppression);
+        assert!(clear_source.echo_cancellation && !clear_source.noise_suppression);
+        assert!(!studio_source.echo_cancellation && !studio_source.noise_suppression);
+    }
+
+    #[test]
+    fn voice_gate_silences_loud_non_speech_residue() {
+        let mut gate = VoiceGate::new();
+        let residue = vec![2_000; AUDIO_FRAME_SAMPLES];
+
+        for _ in 0..100 {
+            let frame = gate.process_with_probability(&residue, residue.clone(), 0.05);
+            assert!(!frame.open);
+            assert!(frame.samples.iter().all(|sample| *sample == 0));
+        }
+    }
+
+    #[test]
+    fn voice_gate_opens_for_speech_then_releases_smoothly() {
+        let mut gate = VoiceGate::new();
+        let speech = vec![8_000; AUDIO_FRAME_SAMPLES];
+        let background = vec![1_000; AUDIO_FRAME_SAMPLES];
+
+        let first = gate.process_with_probability(&speech, speech.clone(), 0.95);
+        assert!(!first.open);
+        let second = gate.process_with_probability(&speech, speech.clone(), 0.95);
+        assert!(second.open);
+        assert!(second.samples.iter().any(|sample| *sample != 0));
+
+        for _ in 0..=VOICE_GATE_HANGOVER_FRAMES {
+            let frame = gate.process_with_probability(&background, background.clone(), 0.01);
+            assert!(frame.open);
+        }
+        let fade = gate.process_with_probability(&background, background.clone(), 0.01);
+        assert!(fade.open);
+        assert!(fade.samples.iter().any(|sample| *sample != 0));
+        let closed = gate.process_with_probability(&background, background.clone(), 0.01);
+        assert!(!closed.open);
+        assert!(closed.samples.iter().all(|sample| *sample == 0));
     }
 
     #[test]

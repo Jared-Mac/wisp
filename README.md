@@ -73,10 +73,14 @@ to the primary display's bottom-right corner.
 
 The default **Clear** audio preset publishes the microphone through the
 DeepFilterNet3 neural denoiser (48 kHz, 10 ms frames, 30 ms algorithmic
-latency). **Natural** keeps WebRTC's lighter speech cleanup, while **Studio**
-leaves the signal unprocessed. If DeepFilterNet cannot initialize, Wisp falls
-back to RNNoise and reports that backend under **Settings → Audio** and in
-`wispctl status`.
+latency), then uses an adaptive neural speech gate with hysteresis, hangover,
+and short gain ramps to turn residual background noise into true silence
+without starving the denoiser of microphone context. Opus DTX can stop sending
+those closed frames. **Natural** keeps WebRTC's lighter speech cleanup, while
+**Studio** leaves the signal unprocessed. If DeepFilterNet cannot initialize,
+Wisp falls back to RNNoise and reports that backend under **Settings → Audio**
+and in `wispctl status`. The same view reports gate state, processing time,
+deadline misses, and capture-queue depth for live diagnosis.
 
 During a hangout, **Share screen** opens the standard XDG desktop portal picker
 for a monitor or individual window, while **Camera on** publishes the selected

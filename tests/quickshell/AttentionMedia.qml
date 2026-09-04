@@ -78,6 +78,17 @@ ShellRoot {
       bridge.participantVolumes.setVolume({id:"jared"},200)
       test.check(bridge.participantVolumes.volumeFor({id:"charlie"})===50,"per-person volume")
       test.check(bridge.participantVolumes.volumeFor({id:"jared"})===200,"independent boost")
+      var gateState=JSON.parse(JSON.stringify(bridge.snapshot))
+      gateState.self.media.audio.voice_gate_active=true
+      gateState.self.media.audio.voice_gate_open=true
+      gateState.self.media.audio.input_level=0
+      bridge.snapshot=gateState
+      test.check(bridge.rawSpeakers.indexOf("Tyler")>=0,"open voice gate marks local speech")
+      gateState=JSON.parse(JSON.stringify(gateState))
+      gateState.self.media.audio.voice_gate_open=false
+      gateState.self.media.audio.input_level=100
+      bridge.snapshot=gateState
+      test.check(bridge.rawSpeakers.indexOf("Tyler")<0,"closed voice gate overrides residual level")
       test.changeMedia(["Jared"],45)
       test.check(bridge.activeSpeakers.indexOf("Jared")>=0,"audio activity visible")
       test.tile.openVideo({participant:"Jared",source:"screen_share"})

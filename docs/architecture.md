@@ -26,8 +26,12 @@ room. Active calls refresh device inventory every two seconds; opening either
 frontend refreshes it immediately. The daemon exposes Natural, Clear, and
 Studio processing presets plus a throttled local input level through the same
 snapshot/event stream. Clear defaults to an embedded DeepFilterNet3 model on a
-dedicated bounded worker; RNNoise remains an automatic fallback. Inference
-state stays off the async networking/UI executor.
+dedicated bounded worker; RNNoise remains an automatic fallback and supplies
+the speech detector used by Clear's adaptive post-denoise gate. Raw capture
+continues through both models so their state and noise estimate remain warm;
+only the processed publication is faded to true silence. Inference state stays
+off the async networking/UI executor. The daemon also reports per-window peak
+processing time, cumulative 10 ms deadline misses, and capture-queue depth.
 
 Push-to-talk is a daemon-owned microphone gate rather than a UI-only button.
 Manual mute always wins. Presses carry a renewable 30-second lease, and the
