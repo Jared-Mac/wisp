@@ -60,6 +60,7 @@ for script in \
   register-friend-device.sh \
   restore-database.sh \
   plugin-sync.sh \
+  wisp-update.sh \
   wisp-launch.sh \
   wisp-ui.sh \
   wisp.sh; do
