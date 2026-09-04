@@ -11,7 +11,7 @@ ShellRoot {
   readonly property string mode: Quickshell.env("WISP_CHAT_FIXTURE_MODE")
   readonly property real testWidth: Number(Quickshell.env("WISP_TEST_WIDTH")) || (Quickshell.env("WISP_TEST_CONSTRAINED") === "1" ? 840 : 1180)
   readonly property real testHeight: Number(Quickshell.env("WISP_TEST_HEIGHT")) || (Quickshell.env("WISP_TEST_CONSTRAINED") === "1" ? 700 : 900)
-  readonly property bool compactMode: mode === "panelprivacy" || mode === "panelinvites" || mode === "returnchat" || mode === "panelimagegeometry" || mode === "panellatest" || mode === "panelaudiotooltips" || mode === "panelpresence" || mode === "traycollapse" || mode === "panel" || mode === "panelmedia" || mode === "panelsettings" || mode === "friends" || mode === "panelidentity" || mode === "panelidentityactions"
+  readonly property bool compactMode: mode === "panelinteractions" || mode === "panelprivacy" || mode === "panelinvites" || mode === "returnchat" || mode === "panelimagegeometry" || mode === "panellatest" || mode === "panelaudiotooltips" || mode === "panelpresence" || mode === "traycollapse" || mode === "panel" || mode === "panelmedia" || mode === "panelsettings" || mode === "friends" || mode === "panelidentity" || mode === "panelidentityactions"
   function setImageFixture(w,h) {
     var data=JSON.parse(JSON.stringify(bridge.snapshot))
     bridge.chatImageUrls={"geometry":"data:image/svg+xml,"+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="'+w+'" height="'+h+'"><rect width="'+w+'" height="'+h+'" fill="#254261"/><circle cx="40" cy="40" r="25" fill="#e6b75b"/><path d="M0 0L'+w+' '+h+'" stroke="#74c9d6" stroke-width="5"/></svg>')}
@@ -752,6 +752,84 @@ ShellRoot {
   }
   TestCase { id:keyDriver; parent:window.contentItem; name:"WindowKeys"; when:false }
   Timer {
+    interval: 600; running: test.mode === "interactions" || test.mode === "panelinteractions"
+    onTriggered: {
+      var surface = test.compactMode ? compactSurface : window.contentItem
+      keyDriver.parent = surface
+      var editor = test.findItem(surface, test.compactMode ? "trayComposerEditor" : "mainComposerEditor")
+      test.check(!!editor, "composer exists in both presentations")
+      if (!editor) return
+      editor.forceActiveFocus()
+      keyDriver.keyClick(Qt.Key_A, Qt.ControlModifier)
+      keyDriver.keyClick("x")
+      test.check(bridge.draftFor("porch") === "x", "typed text updates draft")
+      var before = bridge.sent.length
+      keyDriver.keyClick(Qt.Key_Return)
+      var request = "test-" + bridge.requestId
+      keyDriver.keyClick(Qt.Key_Return)
+      keyDriver.keyClick(Qt.Key_Enter)
+      bridge.sendComposedMessage("porch")
+      keyDriver.keyClick("z")
+      test.check(bridge.sent.length === before + 1, "rapid Enter/click send produces one request")
+      test.check(editor.readOnly && editor.text === "x", "pending draft cannot accidentally be extended and resent")
+      bridge.finishRequest({id:request,ok:true})
+      keyDriver.wait(30)
+      test.check(!editor.readOnly && editor.text === "" && bridge.draftFor("porch") === "", "ack clears editor before unlocking send")
+      keyDriver.keyClick(Qt.Key_Return)
+      test.check(bridge.sent.length === before + 1, "Enter after acknowledgement cannot resend old text")
+      keyDriver.keyClick("y")
+      keyDriver.keyClick(Qt.Key_Return, Qt.ShiftModifier)
+      keyDriver.keyClick("z")
+      test.check(editor.text === "y\nz", "Shift+Enter retains multiline composing")
+      keyDriver.keyClick(Qt.Key_Enter)
+      request = "test-" + bridge.requestId
+      bridge.finishRequest({id:request,ok:false,error:{message:"Fixture offline"}})
+      test.check(!editor.readOnly && editor.text === "y\nz", "failed send preserves editable draft")
+      keyDriver.keyClick(Qt.Key_Return)
+      bridge.finishRequest({id:"test-" + bridge.requestId,ok:true})
+
+      var feed = test.findFeed(surface)
+      var incoming = test.findItem(surface, "messageOptions-1")
+      test.check(!!incoming, "incoming message exposes options")
+      incoming.clicked()
+      keyDriver.wait(30)
+      var menu = test.findObject(surface, "messageMenu-1", [])
+      var copy = menu.itemAt(0)
+      test.check(copy.text === "Copy" && copy.enabled, "incoming menu offers Copy")
+      test.check(!menu.itemAt(1).visible && !menu.itemAt(2).visible, "incoming menu cannot edit/delete others' messages")
+      copy.triggered()
+      test.check(bridge.sent[bridge.sent.length-1].name === "copy_chat_text"
+        && bridge.sent[bridge.sent.length-1].args.text === String(bridge.snapshot.messages[0].payload), "Copy sends plain message content only to local clipboard")
+      menu.close()
+      feed.beginEdit(bridge.snapshot.messages[1])
+      keyDriver.wait(30)
+      var dialog = test.findObject(feed, "messageEditDialog", [])
+      var field = dialog ? test.findItem(dialog.contentItem, "messageEditField") : null
+      test.check(!!field, "message edit field is available")
+      field.forceActiveFocus()
+      keyDriver.keyClick(Qt.Key_A, Qt.ControlModifier)
+      keyDriver.keyClick("a")
+      keyDriver.keyClick(Qt.Key_Return, Qt.ShiftModifier)
+      keyDriver.keyClick("b")
+      test.check(field.text === "a\nb", "Shift+Enter adds newline to edit")
+      before = bridge.sent.length
+      keyDriver.keyClick(Qt.Key_Return)
+      request = "test-" + bridge.requestId
+      feed.saveEdit()
+      test.check(bridge.sent.length === before + 1 && bridge.sent[before].name === "edit_message"
+        && bridge.sent[before].args.text === "a\nb", "Enter saves edit once, without adding newline")
+      bridge.finishRequest({id:request,ok:false,error:{message:"Edit failed"}})
+      test.check(!feed.savingEdit && field.text === "a\nb" && feed.editError === "Edit failed", "failed edit remains retryable")
+      field.forceActiveFocus()
+      keyDriver.keyClick(Qt.Key_Enter)
+      bridge.finishRequest({id:"test-" + bridge.requestId,ok:true})
+      keyDriver.wait(50)
+      test.check(!feed.editOpen, "successful keyboard edit closes dialog")
+      var add = test.findItem(surface, "headerAddChatButton")
+      if (add) test.check(add.text === "+ add chat", "header add chat is lowercase")
+    }
+  }
+  Timer {
     interval:600; running:test.mode==="addchat"
     onTriggered:{
       var chat=test.findItem(window.contentItem,"conversationPane")
@@ -1216,7 +1294,7 @@ ShellRoot {
     }
   }
   Timer {
-    interval: test.mode === "saved" ? 3800 : 1200; running: true
+    interval: test.mode === "saved" ? 3800 : test.mode === "interactions" || test.mode === "panelinteractions" ? 2500 : 1200; running: true
     onTriggered: {
       var surface = test.compactMode ? compactSurface : window.contentItem
       if (test.mode === "presence" || test.mode === "panelpresence") {

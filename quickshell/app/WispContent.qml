@@ -186,7 +186,7 @@ FocusScope {
         ChatButton {
           objectName: "workspaceLayoutButton"
           visible: root.presentation === "app" && root.showingChats
-          theme: root.theme; text: "Layout"; height: root.theme.space(30)
+          theme: root.theme; text: root.theme.tui ? "layout" : "Layout"; height: root.theme.space(30)
           onClicked: layoutMenu.open()
         }
 
@@ -223,7 +223,7 @@ FocusScope {
           Text {
             id: appButtonText
             anchors.centerIn: parent
-            text: "Open app"
+            text: root.theme.tui ? "open app" : "Open app"
             color: root.theme.foreground
             font.family: root.theme.font.family
             font.pixelSize: root.theme.font.caption

@@ -109,6 +109,8 @@ Column {
         id: editor
         objectName: root.autoGrow ? "mainComposerEditor" : "trayComposerEditor"
         property bool wispTextEditor: true
+        // Keep the submitted draft stable until its acknowledgement arrives.
+        readOnly: root.busy
         onActiveFocusChanged: if (activeFocus) root.editorFocused()
         text: root.bridge.draftFor(root.conversationId)
         onTextChanged: root.bridge.setDraft(root.conversationId, text)
@@ -136,7 +138,9 @@ Column {
             event.accepted = true
           } else if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter)
               && !(event.modifiers & Qt.ShiftModifier)) {
-            root.bridge.sendComposedMessage(root.conversationId)
+            if (editor.inputMethodComposing) return
+            if (!event.isAutoRepeat && !root.busy)
+              root.bridge.sendComposedMessage(root.conversationId)
             event.accepted = true
           }
         }

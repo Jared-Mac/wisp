@@ -63,7 +63,7 @@ Column {
         id: addChatButton
         objectName: "headerAddChatButton"
         visible: root.showAddChat; enabled: root.canAddChat
-        theme: root.theme; text: "+ Add Chat"; height: root.theme.space(32)
+        theme: root.theme; text: "+ add chat"; height: root.theme.space(32)
         Accessible.name: "Add chat tile"
         ToolTip.visible: hovered; ToolTip.text: enabled ? "Add a chat tile" : "Up to eight chat tiles"
         onClicked: addChatPicker.open()

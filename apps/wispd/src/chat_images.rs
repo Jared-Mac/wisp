@@ -271,6 +271,24 @@ pub(crate) fn file_url(path: &std::path::Path) -> anyhow::Result<String> {
 }
 
 impl ImageStore {
+    pub(crate) async fn copy_text(&self, text: String) -> anyhow::Result<()> {
+        let owner = self.clipboard.clone();
+        tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+            let mut clipboard = owner
+                .lock()
+                .map_err(|_| anyhow::anyhow!("Clipboard lock unavailable"))?;
+            if clipboard.is_none() {
+                *clipboard = Some(arboard::Clipboard::new().context("Open clipboard")?);
+            }
+            clipboard
+                .as_mut()
+                .context("Clipboard unavailable")?
+                .set_text(text)
+                .context("Copy message to clipboard")
+        })
+        .await?
+    }
+
     pub(crate) async fn copy_image(&self, path: PathBuf) -> anyhow::Result<()> {
         let owner = self.clipboard.clone();
         tokio::task::spawn_blocking(move || -> anyhow::Result<()> {

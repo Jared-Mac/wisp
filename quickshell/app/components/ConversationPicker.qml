@@ -141,7 +141,7 @@ Popup {
     ChatButton {
       id:newChat; objectName:"pickerNewChat"
       anchors.left:parent.left; anchors.right:parent.right; anchors.bottom:parent.bottom
-      theme:root.theme; text:"+ New chat"; onClicked:{root.close();root.newChatRequested()}
+      theme:root.theme; text:root.theme.tui ? "+ new chat" : "+ New chat"; onClicked:{root.close();root.newChatRequested()}
     }
   }
 }

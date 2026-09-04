@@ -1252,6 +1252,12 @@ impl Daemon {
                 Ok(Some(result))
             }
             "paste_clipboard" => Ok(Some(self.chat_images.paste().await?)),
+            "copy_chat_text" => {
+                self.chat_images
+                    .copy_text(opaque_string_arg(&command.args, "text")?)
+                    .await?;
+                Ok(Some(json!({"copied": true})))
+            }
             "import_chat_files" => {
                 let urls: Vec<String> = serde_json::from_value(
                     command

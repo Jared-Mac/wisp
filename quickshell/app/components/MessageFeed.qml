@@ -29,6 +29,12 @@ Rectangle {
     editDialog.open()
     editField.forceActiveFocus()
   }
+  function saveEdit() {
+    if (savingEdit || (!editingImage && !editField.text.trim())) return
+    editError = ""
+    savingEdit = true
+    if (!bridge.editChatMessage(editingId, editField.text)) savingEdit = false
+  }
   radius: theme.cornerRadius
   border.width: theme.tui ? 0 : theme.terminal ? 1 : 0
   border.color: theme.separator
@@ -59,6 +65,8 @@ Rectangle {
       readonly property bool isImage: modelData.content_type === "image/png"
       readonly property bool isFile: modelData.content_type === "application/octet-stream"
       readonly property bool isInvitation: modelData.content_type === "application/vnd.wisp.room-invitation+json"
+      readonly property bool ownMessage: modelData.sender.id === root.bridge.selfState.id
+      readonly property string copyText: isImage ? String(modelData.payload.caption || "") : isFile ? String(modelData.payload.caption || modelData.payload.file_name || "") : isInvitation ? "" : String(modelData.payload || "")
       readonly property string imageUrl: root.bridge.chatImageUrls[String(modelData.id)] || ""
       width: messages.width
       spacing: root.theme.tui ? root.theme.space(2) : root.theme.spacing.md
@@ -83,7 +91,7 @@ Rectangle {
           font.pixelSize: root.theme.space(10)
         }
         ChatButton {
-          visible: message.modelData.sender.id === root.bridge.selfState.id
+          objectName: "messageOptions-" + String(message.modelData.id)
           theme: root.theme; text: "···"
           implicitWidth: root.theme.space(26); implicitHeight: root.theme.space(20)
           onClicked: messageMenu.open()
@@ -92,17 +100,33 @@ Rectangle {
             Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
             Binding on font.pixelSize { when: root.theme.terminal; value: root.theme.font.caption; restoreMode: Binding.RestoreBindingOrValue }
             id: messageMenu
+            objectName: "messageMenu-" + String(message.modelData.id)
             palette.window: root.theme.surface
             palette.text: root.theme.foreground
             MenuItem {
+              id: copyControl
+              objectName: "copyMessage-" + String(message.modelData.id)
+              ThemeControlStyle { theme: root.theme; control: copyControl }
+              font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
+              text: "Copy"
+              enabled: message.copyText.length > 0 || message.isImage
+              onTriggered: {
+                if (message.copyText.length > 0) root.bridge.copyChatText(message.copyText)
+                else if (message.isImage) root.bridge.copyChatImage(String(message.modelData.id))
+              }
+            }
+            MenuItem {
               id: trialControl0
+              objectName: "editMessage-" + String(message.modelData.id)
               ThemeControlStyle { theme: root.theme; control: trialControl0 }
               Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
               Binding on font.pixelSize { when: root.theme.terminal; value: root.theme.font.caption; restoreMode: Binding.RestoreBindingOrValue }
-               visible: !message.isInvitation; height: visible ? implicitHeight : 0
+               visible: message.ownMessage && !message.isInvitation; height: visible ? implicitHeight : 0
                text: message.isImage || message.isFile ? "Edit caption…" : "Edit message…"; onTriggered: root.beginEdit(message.modelData) }
             MenuItem {
               id: trialControl1
+              objectName: "deleteMessage-" + String(message.modelData.id)
+              visible: message.ownMessage; height: visible ? implicitHeight : 0
               ThemeControlStyle { theme: root.theme; control: trialControl1 }
               Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
               Binding on font.pixelSize { when: root.theme.terminal; value: root.theme.font.caption; restoreMode: Binding.RestoreBindingOrValue }
@@ -272,6 +296,7 @@ Rectangle {
     Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
     Binding on font.pixelSize { when: root.theme.terminal; value: root.theme.font.caption; restoreMode: Binding.RestoreBindingOrValue }
     id: editDialog
+    objectName: "messageEditDialog"
     parent: Overlay.overlay
     x: parent ? (parent.width - width) / 2 : 0; y: parent ? (parent.height - height) / 2 : 0
     width: Math.min(root.width, root.theme.space(440)); implicitHeight: root.theme.space(300)
@@ -288,9 +313,19 @@ Rectangle {
           Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
           Binding on font.pixelSize { when: root.theme.terminal; value: root.theme.font.body; restoreMode: Binding.RestoreBindingOrValue }
           id: editField
+          objectName: "messageEditField"
+          property bool wispTextEditor: true
           enabled: !root.savingEdit
           color: root.theme.foreground
           wrapMode: TextEdit.Wrap; textFormat: TextEdit.PlainText; selectByMouse: true
+          Keys.onPressed: function(event) {
+            if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter)
+                && !(event.modifiers & Qt.ShiftModifier)) {
+              if (editField.inputMethodComposing) return
+              if (!event.isAutoRepeat) root.saveEdit()
+              event.accepted = true
+            }
+          }
           background: Rectangle {
             color: root.theme.background; radius: root.theme.cornerRadius
             border.width: root.theme.terminal ? 1 : 0
@@ -307,7 +342,7 @@ Rectangle {
         ChatButton {
           theme: root.theme; primary: true; text: root.savingEdit ? "Saving…" : "Save changes"
           enabled: !root.savingEdit && (root.editingImage || editField.text.trim().length > 0)
-          onClicked: root.savingEdit = root.bridge.editChatMessage(root.editingId, editField.text)
+          onClicked: root.saveEdit()
         }
       }
     }

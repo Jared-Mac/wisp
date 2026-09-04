@@ -277,7 +277,7 @@ not leave the room or change the Main window's room list.
 The Main window puts identity, access/audio controls, and window actions on one
 row when space permits, wrapping at narrow sizes without hiding controls.
 
-Use **+ Add Chat** in the main window's top bar, left of mute/deafen, to choose an existing conversation or
+Use **+ add chat** in the main window's top bar, left of mute/deafen, to choose an existing conversation or
 **New chat** and open it in a new tile, leaving the current tile intact. Wide tiles
 split right; narrow tiles split below. The Activity toggle sits beside **Open** in
 the main window header and never reserves an empty rail beside the chat.
@@ -353,6 +353,9 @@ file/image drops onto the conversation or composer. Attachments stay in a
 removable preview strip until **Send** and may include a caption. Multiple files
 send in order; a failed upload retains the unsent files without resending those
 already acknowledged. **Enter** sends; **Shift+Enter** adds a line break.
+While a send is pending, the composer is read-only and ignores repeated Enter
+presses. Success clears the submitted draft before sending is enabled again;
+failure keeps it available for editing and retry.
 Inline image previews have a 12 MiB / 32 megapixel safety limit. PNG, JPEG, GIF,
 and WebP drops within those limits are converted to a still PNG (animated formats
 use their first frame); larger dropped images are sent as ordinary files.
@@ -386,8 +389,12 @@ Chunks are stored in SQLite so database backups include the files. Deletion
 releases database pages for reuse; it does not necessarily shrink the database
 file or remove copies in older backups.
 
-Use the **···** menu on your own messages to edit text or an attachment caption, or
-confirm **Delete message…** to remove it for everyone. Edits display a subtle
+Every message has a **···** (**[:]** in TUI appearances) menu. **Copy** copies
+plain text or an attachment caption locally; an uncaptioned image copies its
+pixels. Editing and deletion remain available only on your own messages.
+Use the menu on your own messages to edit text or an attachment caption, or
+confirm **Delete message…** to remove it for everyone.
+**Enter** saves an edit; **Shift+Enter** inserts a newline. Edits display a subtle
 **edited** label without changing the original timestamp. Deleting an attachment
 also removes its stored attachment; deletion does not erase existing backups
 or copies someone has already saved outside Wisp.

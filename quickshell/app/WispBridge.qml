@@ -764,10 +764,10 @@ Item {
   }
   function sendAttachmentQueue(conversationId, tokens, caption, originalText) {
     var attachment = attachmentsFor(conversationId).filter(function(a) { return a.token === tokens[0] })[0]
+    sendingConversations = replaceEntry(sendingConversations, conversationId, true)
     var id = send("send_attachment_message", {conversation_id: conversationId, token: tokens[0], caption: caption, keep:!!(attachment && attachment.keep)})
     if (id) {
       requests[id] = {kind: "send", conversationId: conversationId, text: originalText, token: tokens[0], remaining: tokens.slice(1)}
-      sendingConversations = replaceEntry(sendingConversations, conversationId, true)
     } else sendingConversations = replaceEntry(sendingConversations, conversationId, undefined)
   }
   function sendComposedMessage(conversationId) {
@@ -779,11 +779,11 @@ Item {
       return
     }
     if (!text) return
+    sendingConversations = replaceEntry(sendingConversations, conversationId, true)
     var id = send("send_message", {conversation_id: conversationId, text: text})
     if (id) {
       requests[id] = {kind: "send", conversationId: conversationId, text: draftFor(conversationId), token: ""}
-      sendingConversations = replaceEntry(sendingConversations, conversationId, true)
-    }
+    } else sendingConversations = replaceEntry(sendingConversations, conversationId, undefined)
   }
   function saveChatFile(messageId) {
     if (savingFiles[messageId]) return
@@ -811,6 +811,7 @@ Item {
     if(id)requests[id]={kind:"copyImage"}
     return id || ""
   }
+  function copyChatText(text) { return send("copy_chat_text", {text: String(text)}) }
   function finishRequest(message) {
     var action = requests[message.id]
     if (!action) return
@@ -859,13 +860,16 @@ Item {
       if (message.ok && action.action === "create_room" && value.id) activeConversationId = String(value.id)
       roomActionFinished(action.action, !!message.ok, message.error ? String(message.error.message || "Could not update room") : "")
     } else if (action.kind === "send") {
-      sendingConversations = replaceEntry(sendingConversations, conversationId, undefined)
       if (message.ok) {
         if (action.text !== undefined && draftFor(conversationId) === action.text) setDraft(conversationId, "")
         if (action.token) removeAttachment(conversationId, action.token, true)
-        if (action.remaining && action.remaining.length > 0)
+        if (action.remaining && action.remaining.length > 0) {
           sendAttachmentQueue(conversationId, action.remaining, "", undefined)
+          return
+        }
       }
+      // Clear acknowledged content before re-enabling Enter and Send.
+      sendingConversations = replaceEntry(sendingConversations, conversationId, undefined)
     } else if (action.kind === "paste" || action.kind === "import") {
       importingConversations = replaceEntry(importingConversations, conversationId,
         Math.max(0, (importingConversations[conversationId] || 1) - 1))
