@@ -6,17 +6,20 @@ Column {
   id: root
   required property var bridge
   required property var theme
+  // The tray host supplies the space remaining below its other sections.
+  property real availableHeight: 0
   width: parent ? parent.width : 0
   spacing: theme.spacing.sm
 
   function conversationLabel(c) { return c.label === "Hangout" ? "Room" : c.label }
   Item {
+    id: messageHeader
     width: parent.width; height: root.theme.space(30)
     Text {
       anchors.left: parent.left; anchors.right: chatOptions.left
       anchors.rightMargin: root.theme.spacing.md; anchors.verticalCenter: parent.verticalCenter
       elide: Text.ElideRight
-      text: root.bridge.activeConversation ? "MESSAGES · " + root.conversationLabel(root.bridge.activeConversation) : "MESSAGES"
+      text: root.theme.performative ? "┌─ 03: /chat" : root.bridge.activeConversation ? "MESSAGES · " + root.conversationLabel(root.bridge.activeConversation) : "MESSAGES"
       color: root.theme.muted; font.family: root.theme.font.family
       font.pixelSize: root.theme.font.caption; font.bold: true
       font.letterSpacing: root.theme.terminal ? 1 : 0
@@ -29,7 +32,7 @@ Column {
       theme: root.theme; text: "···"; implicitWidth: root.theme.space(28)
       onClicked: optionsMenu.open()
       Menu {
-        ThemeControlStyle { theme: root.theme; control: optionsMenu }
+        ThemeControlStyle { theme: root.theme; control: optionsMenu; outline: true; menuOutline: true }
         Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
         Binding on font.pixelSize { when: root.theme.terminal; value: root.theme.font.caption; restoreMode: Binding.RestoreBindingOrValue }
         id: optionsMenu
@@ -52,7 +55,7 @@ Column {
       id: allConversations
       anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
       visible: !!root.bridge.activeConversation
-      text: "All conversations" + (root.bridge.unreadMessages > 0 ? " · " + root.bridge.unreadMessages : "")
+      text: (root.theme.performative ? "chats" : "All conversations") + (root.bridge.unreadMessages > 0 ? " · " + root.bridge.unreadMessages : "")
       theme: root.theme
       onClicked: root.bridge.closeConversation()
     }
@@ -113,10 +116,14 @@ Column {
       width: parent.width
       spacing: root.theme.spacing.sm
       MessageFeed {
-        width: parent.width; height: root.theme.space(220)
+        width: parent.width
+        height: root.availableHeight > 0
+          ? Math.max(root.theme.space(140), root.availableHeight - messageHeader.height - composer.implicitHeight - root.spacing * 2)
+          : root.theme.space(140)
         bridge: root.bridge; theme: root.theme; conversationId: root.bridge.activeConversationId
       }
       ChatComposer {
+        id: composer
         width: parent.width
         bridge: root.bridge; theme: root.theme; conversationId: root.bridge.activeConversationId
       }

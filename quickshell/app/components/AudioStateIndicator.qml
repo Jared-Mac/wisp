@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls
 
 Row {
   id: root
@@ -13,6 +14,7 @@ Row {
 
   Rectangle {
     id: mutedIcon
+    objectName: "muteControl"
     activeFocusOnTab: true
     Accessible.role: Accessible.Button
     Accessible.name: root.muted ? "Unmute microphone" : "Mute microphone"
@@ -21,13 +23,14 @@ Row {
     width: root.theme.space(32)
     height: width
     radius: root.theme.cornerRadius
-    color: root.muted
+    color: root.theme.performative ? "transparent" : root.muted
       ? root.theme.alpha(root.theme.warning, mutedMouse.containsMouse ? 0.3 : 0.18)
       : root.theme.alpha(root.theme.foreground, mutedMouse.containsMouse ? 0.12 : 0.055)
     border.color: activeFocus ? root.theme.focusBorder : root.muted ? root.theme.alpha(root.theme.warning, 0.72) : "transparent"
-    border.width: 1
+    border.width: root.theme.performative && !activeFocus ? 0 : 1
 
     Image {
+      visible: !root.theme.performative
       anchors.centerIn: parent
       width: root.theme.space(20)
       height: width
@@ -35,6 +38,11 @@ Row {
         ? "../assets/microphone-muted.svg"
         : "../assets/microphone.svg")
       fillMode: Image.PreserveAspectFit
+    }
+    Text {
+      anchors.centerIn: parent; visible: root.theme.performative
+      text: "[M]"; color: root.muted ? root.theme.warning : root.theme.foreground
+      font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
     }
 
     MouseArea {
@@ -46,24 +54,26 @@ Row {
       onClicked: root.bridge.toggleMuted()
     }
 
-    Rectangle {
+    ToolTip {
+      id: muteTooltip
+      objectName: "muteTooltip"
       visible: mutedMouse.containsMouse
-      z: 10
-      anchors.left: parent.left
-      anchors.bottom: parent.top
-      anchors.bottomMargin: root.theme.spacing.sm
-      width: mutedTip.implicitWidth + root.theme.spacing.lg * 2
-      height: root.theme.space(28)
-      radius: root.theme.cornerRadius
-      color: root.theme.surface
-      border.color: root.theme.alpha(root.theme.warning, 0.72)
-
-      Text {
+      x: (parent.width - width) / 2
+      y: parent.height + root.theme.spacing.sm
+      margins: root.theme.spacing.sm
+      padding: root.theme.spacing.sm
+      width: Math.min(mutedTip.implicitWidth + padding * 2, root.Window.window ? root.Window.window.width - margins * 2 : root.theme.space(360))
+      background: Rectangle {
+        radius: root.theme.cornerRadius
+        color: root.theme.surface
+        border.color: root.theme.alpha(root.theme.warning, 0.72)
+      }
+      contentItem: Text {
         id: mutedTip
-        anchors.centerIn: parent
-        text: root.deafened
+        wrapMode: Text.Wrap
+        text: (root.deafened
           ? "Unmute microphone and undeafen"
-          : root.muted ? "Unmute microphone" : "Mute microphone"
+          : root.muted ? "Unmute microphone" : "Mute microphone") + " · Shift+M"
         color: root.muted ? root.theme.warning : root.theme.foreground
         font.family: root.theme.font.family
         font.pixelSize: root.theme.font.caption
@@ -73,6 +83,7 @@ Row {
 
   Rectangle {
     id: deafenedIcon
+    objectName: "deafenControl"
     activeFocusOnTab: true
     Accessible.role: Accessible.Button
     Accessible.name: root.deafened ? "Undeafen" : "Deafen"
@@ -81,13 +92,14 @@ Row {
     width: root.theme.space(32)
     height: width
     radius: root.theme.cornerRadius
-    color: root.deafened
+    color: root.theme.performative ? "transparent" : root.deafened
       ? root.theme.alpha(root.theme.danger, deafenedMouse.containsMouse ? 0.32 : 0.2)
       : root.theme.alpha(root.theme.foreground, deafenedMouse.containsMouse ? 0.12 : 0.055)
     border.color: activeFocus ? root.theme.focusBorder : root.deafened ? root.theme.alpha(root.theme.danger, 0.72) : "transparent"
-    border.width: 1
+    border.width: root.theme.performative && !activeFocus ? 0 : 1
 
     Image {
+      visible: !root.theme.performative
       anchors.centerIn: parent
       width: root.theme.space(20)
       height: width
@@ -95,6 +107,11 @@ Row {
         ? "../assets/deafened.svg"
         : "../assets/headphones.svg")
       fillMode: Image.PreserveAspectFit
+    }
+    Text {
+      anchors.centerIn: parent; visible: root.theme.performative
+      text: "[D]"; color: root.deafened ? root.theme.danger : root.theme.foreground
+      font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
     }
 
     MouseArea {
@@ -106,22 +123,24 @@ Row {
       onClicked: root.bridge.toggleDeafened()
     }
 
-    Rectangle {
+    ToolTip {
+      id: deafenTooltip
+      objectName: "deafenTooltip"
       visible: deafenedMouse.containsMouse
-      z: 10
-      anchors.left: parent.left
-      anchors.bottom: parent.top
-      anchors.bottomMargin: root.theme.spacing.sm
-      width: deafenedTip.implicitWidth + root.theme.spacing.lg * 2
-      height: root.theme.space(28)
-      radius: root.theme.cornerRadius
-      color: root.theme.surface
-      border.color: root.theme.alpha(root.theme.danger, 0.72)
-
-      Text {
+      x: (parent.width - width) / 2
+      y: parent.height + root.theme.spacing.sm
+      margins: root.theme.spacing.sm
+      padding: root.theme.spacing.sm
+      width: Math.min(deafenedTip.implicitWidth + padding * 2, root.Window.window ? root.Window.window.width - margins * 2 : root.theme.space(360))
+      background: Rectangle {
+        radius: root.theme.cornerRadius
+        color: root.theme.surface
+        border.color: root.theme.alpha(root.theme.danger, 0.72)
+      }
+      contentItem: Text {
         id: deafenedTip
-        anchors.centerIn: parent
-        text: root.deafened ? "Undeafen · keep microphone muted" : "Deafen and mute microphone"
+        wrapMode: Text.Wrap
+        text: (root.deafened ? "Undeafen · keep microphone muted" : "Deafen and mute microphone") + " · Shift+D"
         color: root.deafened ? root.theme.danger : root.theme.foreground
         font.family: root.theme.font.family
         font.pixelSize: root.theme.font.caption

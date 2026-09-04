@@ -640,6 +640,13 @@ pub struct CreateDirectConversationRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateGroupConversationRequest {
+    pub request_id: Uuid,
+    pub name: String,
+    pub members: Vec<UserId>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MarkConversationReadRequest {
     pub conversation_id: String,
 }

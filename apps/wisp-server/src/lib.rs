@@ -1,4 +1,5 @@
 mod attachments;
+mod groups;
 mod rooms;
 
 use axum::{
@@ -437,6 +438,7 @@ pub fn router(state: AppState) -> Router {
             patch(edit_message).delete(delete_message),
         )
         .route("/v1/conversations/direct", post(create_direct_conversation))
+        .route("/v1/conversations/group", post(groups::create))
         .route("/v1/conversations/read", post(mark_conversation_read))
         .route("/v1/conversations/tab", post(set_conversation_tab))
         .route("/v1/conversations/clear", post(clear_conversation_history))

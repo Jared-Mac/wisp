@@ -36,7 +36,9 @@ Column {
     width: parent.width
     height: appearanceSettings.implicitHeight + root.theme.spacing.xxl * 2
     radius: root.theme.cornerRadius
-    color: root.theme.alpha(root.theme.foreground, 0.035)
+    color: root.theme.performative ? root.theme.background : root.theme.alpha(root.theme.foreground, 0.035)
+    border.width: root.theme.performative ? 1 : 0
+    border.color: root.theme.separator
     AppearanceSettingsView {
       id: appearanceSettings
       anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
@@ -49,7 +51,9 @@ Column {
     width: parent.width
     height: notificationSettings.implicitHeight + root.theme.spacing.xxl * 2
     radius: root.theme.cornerRadius
-    color: root.theme.alpha(root.theme.foreground, 0.035)
+    color: root.theme.performative ? root.theme.background : root.theme.alpha(root.theme.foreground, 0.035)
+    border.width: root.theme.performative ? 1 : 0
+    border.color: root.theme.separator
     NotificationSettingsView {
       id: notificationSettings
       anchors.left: parent.left
@@ -65,7 +69,9 @@ Column {
     width: parent.width
     height: deviceSettings.implicitHeight + root.theme.spacing.xxl * 2
     radius: root.theme.cornerRadius
-    color: root.theme.alpha(root.theme.foreground, 0.035)
+    color: root.theme.performative ? root.theme.background : root.theme.alpha(root.theme.foreground, 0.035)
+    border.width: root.theme.performative ? 1 : 0
+    border.color: root.theme.separator
 
     DeviceSettingsView {
       id: deviceSettings
@@ -82,7 +88,9 @@ Column {
     width: parent.width
     height: videoSettings.implicitHeight + root.theme.spacing.xxl * 2
     radius: root.theme.cornerRadius
-    color: root.theme.alpha(root.theme.foreground, 0.035)
+    color: root.theme.performative ? root.theme.background : root.theme.alpha(root.theme.foreground, 0.035)
+    border.width: root.theme.performative ? 1 : 0
+    border.color: root.theme.separator
 
     VideoSettingsView {
       id: videoSettings
@@ -99,7 +107,9 @@ Column {
     width: parent.width
     height: audioSettings.implicitHeight + root.theme.spacing.xxl * 2
     radius: root.theme.cornerRadius
-    color: root.theme.alpha(root.theme.foreground, 0.035)
+    color: root.theme.performative ? root.theme.background : root.theme.alpha(root.theme.foreground, 0.035)
+    border.width: root.theme.performative ? 1 : 0
+    border.color: root.theme.separator
 
     AudioSettingsView {
       id: audioSettings
@@ -117,7 +127,9 @@ Column {
     width: parent.width
     height: visible ? desktopSettings.implicitHeight + root.theme.spacing.xxl * 2 : 0
     radius: root.theme.cornerRadius
-    color: root.theme.alpha(root.theme.foreground, 0.035)
+    color: root.theme.performative ? root.theme.background : root.theme.alpha(root.theme.foreground, 0.035)
+    border.width: root.theme.performative ? 1 : 0
+    border.color: root.theme.separator
 
     Column {
       id: desktopSettings

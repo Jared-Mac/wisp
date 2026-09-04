@@ -1193,9 +1193,13 @@ impl MediaManager {
         }
     }
 
-    pub(crate) async fn start_camera(&self) -> anyhow::Result<CameraInfo> {
+    pub(crate) async fn start_camera(
+        &self,
+        expected_hangout_id: Option<&str>,
+        expected_camera_id: Option<&str>,
+    ) -> anyhow::Result<CameraInfo> {
         let _operation = self.operation.lock().await;
-        let (room, generation) = {
+        let (room, generation, hangout_id) = {
             let session = self.session.lock().await;
             let session = session
                 .as_ref()
@@ -1203,7 +1207,11 @@ impl MediaManager {
             if session.camera.is_some() {
                 bail!("the camera is already active");
             }
-            (session.room.clone(), self.generation())
+            (
+                session.room.clone(),
+                self.generation(),
+                session.hangout_id.to_string(),
+            )
         };
         let (selected_camera_id, quality, codec) = {
             let preferences = self
@@ -1216,6 +1224,12 @@ impl MediaManager {
                 preferences.codec,
             )
         };
+        validate_camera_start_target(
+            expected_hangout_id,
+            &hangout_id,
+            expected_camera_id,
+            selected_camera_id.as_deref(),
+        )?;
         let (camera, state) = create_camera(
             &room,
             generation,
@@ -2034,6 +2048,21 @@ const fn video_quality_name(quality: VideoQuality) -> &'static str {
     }
 }
 
+fn validate_camera_start_target(
+    expected_room: Option<&str>,
+    room: &str,
+    expected_device: Option<&str>,
+    device: Option<&str>,
+) -> anyhow::Result<()> {
+    if expected_room.is_some_and(|expected| expected != room) {
+        bail!("the room changed; confirm camera sharing again");
+    }
+    if expected_device.is_some_and(|expected| Some(expected) != device) {
+        bail!("the selected camera changed; confirm camera sharing again");
+    }
+    Ok(())
+}
+
 fn enumerate_camera_devices() -> anyhow::Result<Vec<(VideoDevice, gst::Device)>> {
     gst::init().context("initialize GStreamer for camera discovery")?;
     let monitor = gst::DeviceMonitor::new();
@@ -2434,9 +2463,15 @@ async fn create_camera(
     let devices = enumerate_camera_devices()?;
     let (protocol_device, device) = selected_camera_id
         .and_then(|id| devices.iter().find(|(candidate, _)| candidate.id == id))
-        .or_else(|| devices.first())
+        // Never substitute a different camera after the user previewed one.
+        .or_else(|| {
+            selected_camera_id
+                .is_none()
+                .then(|| devices.first())
+                .flatten()
+        })
         .cloned()
-        .context("no camera is available")?;
+        .context("the selected camera is unavailable; select a camera and confirm again")?;
     let source = device
         .create_element(Some("wisp-camera-source"))
         .with_context(|| format!("open camera {}", protocol_device.name))?;
@@ -3220,6 +3255,41 @@ async fn count_audio_frames(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn camera_confirmation_rejects_changed_room_or_device() {
+        use super::validate_camera_start_target;
+        assert!(
+            validate_camera_start_target(
+                Some("porch"),
+                "porch",
+                Some("camera-a"),
+                Some("camera-a")
+            )
+            .is_ok()
+        );
+        assert!(
+            validate_camera_start_target(
+                Some("porch"),
+                "other",
+                Some("camera-a"),
+                Some("camera-a")
+            )
+            .is_err()
+        );
+        assert!(
+            validate_camera_start_target(
+                Some("porch"),
+                "porch",
+                Some("camera-a"),
+                Some("camera-b")
+            )
+            .is_err()
+        );
+        assert!(
+            validate_camera_start_target(Some("porch"), "porch", Some("camera-a"), None).is_err()
+        );
+    }
+
     use super::{
         AUDIO_FRAME_SAMPLES, VideoWatchSignal, create_deepfilter_model, deepfilter_frame,
         i420_to_rgba_texture, pcm_level_percent, preferred_or_first, processing_options,

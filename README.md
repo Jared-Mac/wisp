@@ -173,11 +173,13 @@ wispctl devices
 wispctl revoke-device <device-id>
 ```
 
-The full app has a large, resizable chat workspace and persistent conversation
-tabs. Switching tabs, hiding the window, or restarting Wisp does not close a
-conversation. **Chat options → Close conversation** hides its tab without
-deleting messages. A new incoming DM or opening that friend's DM restores it;
-**All conversations** can also reopen closed tabs. **Clear Chat History…** is a
+The full app has a large, resizable tiled chat workspace. Switching chats, hiding
+the window, or restarting Wisp does not close a conversation. In the main window,
+**Chat options → Close tile** removes only the local tile; it never closes the
+conversation on the server or deletes history. The tray's explicit **Close
+conversation** action hides its tab without deleting messages. A new incoming DM
+or opening that friend's DM restores it; the chat picker also lists closed chats.
+**Clear Chat History…** is a
 separate confirmed action. In DMs it clears your view first; messages and attached
 files cleared by both participants are then removed from active server storage.
 Newer messages not yet cleared by both remain. Room owners/admins clear history
@@ -186,7 +188,7 @@ for everyone, with an irreversible-action warning, red **Yes, clear**, and norma
 saved per user on the host. Clearing overrides file Keep flags; it does not erase
 existing backups or copies already saved outside Wisp.
 
-**Settings → Appearance** selects **Terminal** (the default desktop theme) or
+**Settings → Appearance** selects the **Terminal** base style or
 **Classic** (the original appearance). Both themes have exactly the same features,
 chats, permissions, controls, and shortcuts. The choice applies immediately to
 both the tray popup and full app, is saved locally in
@@ -197,12 +199,14 @@ launches with unknown integration metadata conservatively retain Classic unless
 a theme has been explicitly chosen. Old `terminal-experimental` preferences
 continue to work as Terminal.
 
-Choose **Wisp blue**, **Graphite**, **Violet**, or **Ember** independently of the
+**Performative** is the default for new desktop/CachyOS installations; saved
+appearance choices and Omarchy/unknown environments are preserved.
+Choose **Wisp blue**, **Graphite**, **Violet**, **Ember**, or **Performative** independently of the
 Terminal/Classic style. Wisp blue keeps the original palette; status and warning
 colors retain their meaning across palettes. Terminal uses monospace typography,
 square-edged controls, fine keylines, and outlined selections.
 
-Presence choices, microphone mute, and deafen stay pinned below your identity in
+Presence choices, microphone mute, and deafen stay pinned in the header in
 both windows, including outside a room and while scrolling. Room-specific camera,
 screen-share, and Leave controls remain with the room. Click the **Friends** header
 to collapse/expand the tray list. Use the star beside a friend to favorite them.
@@ -211,7 +215,106 @@ non-favorites, alphabetically within each group. Favorites apply in both windows
 favorites and tray collapse state are saved per account on this device in
 `~/.config/wisp/friends.json` and are independent of the theme.
 
-Use **Rooms → New room** to create a private room you own. **Chat options → Room
+Click the top-left waveform/Wisp/profile area to open the account menu in either
+window. **Settings** and **New Room** live here. A **Home** icon appears in the
+header while in Settings, immediately left of **Open app** in the tray. It returns
+to chats without closing the window or resetting drafts. Friend rows are compact, with the favorite star immediately after the
+name. Stars appear only while hovering the friend row or focusing the star with
+the keyboard, without shifting the name. Add Friend is deferred until the
+friend-invitation workflow is agreed.
+
+Friend access statuses use compact, theme-colored icons in both presentations:
+open door (Open), bell (Knock), padlock (Closed), and moon (Away), with hover labels
+and accessible names. A filled green connection dot means online; a hollow dot
+means offline, without consuming name space with an additional text label.
+
+We call the compact system-tray surface the **Tray popup**, and the separate
+Open App surface the **Main window**. Right-clicking the system tray icon offers
+**Open App** as its first action.
+
+Only the Main window has resizable sections: drag the dividers between activity
+and chat, or rooms and friends. Double-click a
+divider to reset it; keyboard-focus a divider and use arrow keys for fine changes.
+The **Layout** menu moves activity left/right/above/below chat or resets the layout.
+Narrow windows stack activity and chat automatically. Preferences persist locally
+in `~/.config/wisp/workspace.json`; switching layouts never changes conversations,
+drafts, rooms, or media. A single arrow beside **Open** in the main header
+collapses Activity completely, leaving no unused rail; expanding restores its previous size.
+This collapsed state also persists. Chat uses a single compact tab/menu toolbar,
+and the one-line composer grows with wrapped text up to a comfortable limit,
+then scrolls. Shortening or sending a draft shrinks it again. The Tray popup
+retains its single-column flow and existing composer height. Both composers place
+the Send control inside the right edge (an up-arrow, or `[send]` in Performative), reserve text space around it, and
+omit the keyboard hint (Enter sends; Shift+Enter still inserts a line break).
+In the Tray popup, Rooms and Friends can be collapsed independently. The message
+history fills the remaining vertical space and grows when either list is hidden;
+the composer keeps its usual height. Room collapse is remembered locally and does
+not leave the room or change the Main window's room list.
+
+The Main window puts identity, access/audio controls, and window actions on one
+row when space permits, wrapping at narrow sizes without hiding controls.
+
+Use **+ Add Chat** in the main window's top bar, left of mute/deafen, to choose an existing conversation or
+**New chat** and open it in a new tile, leaving the current tile intact. Wide tiles
+split right; narrow tiles split below. The Activity toggle sits beside **Open** in
+the main window header and never reserves an empty rail beside the chat.
+**Shift+M** toggles mute and **Shift+D** toggles deafen when not typing in an
+editor. Plain M/D no longer toggle audio; uppercase letters still type normally.
+The chat pane's **⠿** handle opens **Split right**, **Split below**, and **Pop out
+chat**. Up to eight independent panes can display different conversations at once.
+Drag shared dividers to resize. Drag a pane's handle onto another pane: the center
+swaps chats; an edge creates a split there, with a highlighted drop preview. This
+preview shows the resulting layout after freeing the dragged pane's old slot.
+The workspace's outer edges move a pane above/below/beside the entire remaining
+group, including when dragging over its own old area. Top and bottom targets use
+the nearest edge so tall panes remain easy to rearrange. Unchanged placements say
+**Already here** and preserve existing divider sizes. Every main-window chat pane
+and pop-out uses a current-conversation dropdown, with a searchable, scrollable
+list grouped into **Rooms** and **Friends List** (DMs and friend group chats).
+Use the All/Rooms/Friends List filters to jump between categories.
+Unread counts and closed conversations remain visible. Type to filter names;
+Up/Down selects a result, Enter opens it, and Escape dismisses the picker.
+The picker's **New chat** action opens a friend selector: start/reopen a DM, or
+name a group and choose 2–31 friends (including offline friends). The creator is
+included automatically. Group chats use the existing group-text wire type and
+do not create/join a voice room. The creator can clear group history for everyone
+through the existing explicit confirmation. Creation retries reuse an idempotency
+token, so a lost response cannot create duplicate groups.
+
+Custom group creation requires the server's new `POST /v1/conversations/group`
+endpoint. No database migration or new conversation wire enum is needed. Older
+servers return a clear update-required error and keep the form's selections;
+existing DM creation still works. Updating the local client does not deploy the
+remote server.
+This follows the local Tile Flow split-tree interaction without changing KWin settings.
+At very small window sizes, the workspace scrolls rather than crushing editors.
+**Close pane** removes only that tile, never its conversation, draft, or history.
+The split tree and chat destinations survive restart in the local workspace file.
+
+Pop-outs are separate normal desktop windows, suitable for the desktop's own
+tiling system. Click the **anchor icon** to return to the main window; closing the
+pop-out does the same. Remaining docked panes expand while a chat is detached,
+and reattaching restores its slot. Drafts, attachments, and the existing chat view
+move with it. Pop-outs return to their saved main-window slots after app restart.
+Notification sounds also stay quiet while a chat pop-out has focus.
+
+Camera On (including the C shortcut) opens a local-only preview with the destination
+room and **Start Sharing Camera** / **Cancel**. Previewing uses Qt Multimedia
+(`qt6-multimedia` on Arch-based systems) without an audio input or recorder. No
+video is published until explicitly confirmed; missing/failed preview prevents
+sharing. Closing the dialog/window or changing room/camera cancels it. The daemon
+rechecks the confirmed room and camera while starting capture. Camera Off remains
+immediate. Run `bash scripts/test-camera-confirmation.sh` for hardware-free checks.
+
+Confirmed settings saves briefly show **Changes Saved** for 2.5 seconds. Activity
+collapse, divider resizing, docking, and chat tiling save silently. Failed
+saves retain their error feedback instead. The Home icon has no tooltip.
+
+Wisp-managed windows, menus, dialogs, and local video previews use a shared thin
+border for clear separation. Borders follow the selected color palette; Omarchy
+continues using its host-provided frames.
+
+Use **Account menu → New Room** to create a private room you own. **Chat options → Room
 settings…** lets owners/admins invite friends, and lets owners grant or revoke
 admin access. Membership and permissions survive restarts. Jared owns Porch;
 owning Porch does not confer privileges in someone else's room. Creating or

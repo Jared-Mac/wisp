@@ -20,20 +20,35 @@ ShellRoot {
         return
       }
       var expected = Quickshell.env("WISP_EXPECT_APPEARANCE")
-      if (theme.profile !== expected || theme.background != "#151821" || theme.accent != "#2f8cff" || theme.accentText != "#ffffff"
-          || theme.cornerRadius !== (expected === "legacy" ? 9 : 2)
+      var defaultPerformative = Quickshell.env("WISP_EXPECT_PALETTE") === "performative"
+      if (theme.profile !== expected || theme.paletteName !== (defaultPerformative ? "performative" : "wisp")
+          || theme.background != (defaultPerformative ? "#000000" : "#151821") || theme.accent != (defaultPerformative ? "#a2b586" : "#2f8cff")
+          || theme.cornerRadius !== (defaultPerformative ? 0 : expected === "legacy" ? 9 : 2)
           || theme.bodySize !== (expected === "legacy" ? 14 : 13))
         console.error("APPEARANCE_FAILED " + theme.profile)
       else console.log("APPEARANCE_OK " + theme.profile + " " + theme.font.family)
       var originalProfile = appearance.profile
-      for (var i = 0; i < 4; i++) {
-        var name = ["wisp", "graphite", "violet", "ember"][i]
+      for (var i = 0; i < 5; i++) {
+        var name = ["wisp", "graphite", "violet", "ember", "performative"][i]
         appearance.setPalette(name)
         if (appearance.profile !== originalProfile || theme.paletteName !== (appearance.managed ? "wisp" : name)
-            || popupTheme.accent !== theme.accent || theme.danger != "#ff7777")
+            || popupTheme.accent !== theme.accent || theme.danger != (name === "performative" && !appearance.managed ? "#d56b75" : "#ff7777"))
           console.error("APPEARANCE_FAILED palette " + name)
+        if (name === "performative" && !appearance.managed
+            && (theme.background != "#000000" || theme.accent != "#a2b586"
+                || theme.foreground != "#d3d5cf" || theme.warning != "#c9b458"
+                || !theme.terminal || theme.cornerRadius !== 0 || theme.fontFamily !== theme.monospaceFamily
+                || theme.surface != "#000000" || theme.titleSize !== 14
+                || theme.roomBorder != "#68613b" || theme.conversationBorder != "#70464c"
+                || theme.secondaryAccent != "#a291d4" || popupTheme.surfaceBorder != "#505747"
+                || theme.selectionBackground != "#b7baad" || theme.statusBackground != "#171914"
+                || theme.onlineIndicator != "#79b88a"))
+          console.error("APPEARANCE_FAILED performative tokens")
       }
       appearance.setPalette("wisp")
+      if (theme.cornerRadius !== (originalProfile === "legacy" ? 9 : 2)
+          || theme.terminal !== (originalProfile !== "legacy"))
+        console.error("APPEARANCE_FAILED base style restoration")
       if (Quickshell.env("WISP_TEST_CHANGE")) appearance.setProfile(Quickshell.env("WISP_TEST_CHANGE"))
       else Qt.quit()
     }

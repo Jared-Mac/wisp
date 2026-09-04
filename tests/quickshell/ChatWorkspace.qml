@@ -1,14 +1,23 @@
 import QtQuick
+import QtTest
 import Quickshell
 import "app" as Wisp
 import "app/components" as Components
+import "app/ChatTiles.js" as Tiles
 
 ShellRoot {
   id: test
   property bool failed: false
   readonly property string mode: Quickshell.env("WISP_CHAT_FIXTURE_MODE")
-  readonly property bool compactMode: mode === "panel" || mode === "panelmedia" || mode === "panelsettings" || mode === "friends"
+  readonly property real testWidth: Number(Quickshell.env("WISP_TEST_WIDTH")) || (Quickshell.env("WISP_TEST_CONSTRAINED") === "1" ? 840 : 1180)
+  readonly property real testHeight: Number(Quickshell.env("WISP_TEST_HEIGHT")) || (Quickshell.env("WISP_TEST_CONSTRAINED") === "1" ? 700 : 900)
+  readonly property bool compactMode: mode === "panelaudiotooltips" || mode === "panelpresence" || mode === "traycollapse" || mode === "panel" || mode === "panelmedia" || mode === "panelsettings" || mode === "friends" || mode === "panelidentity" || mode === "panelidentityactions"
+  property real trayInitialFeed: 0
+  property real trayFriendsFeed: 0
+  property int trayCommandCount: 0
   property var popupTarget: null
+  property var tileKeys: []
+  property int tileCommands: 0
   function check(condition, message) { if (!condition) { failed = true; console.error("CHAT_TEST_FAILED: " + message) } }
   function findFeed(item) { return findItem(item, "messageFeed") }
   function findItem(item, name) {
@@ -67,8 +76,8 @@ ShellRoot {
   }
   Wisp.WispWindow {
     id: window; bridge: bridge; theme: theme; visible: !test.compactMode && test.mode !== "preview"
-    implicitWidth: theme.space(Quickshell.env("WISP_TEST_CONSTRAINED") === "1" ? 840 : 1180)
-    implicitHeight: theme.space(Quickshell.env("WISP_TEST_CONSTRAINED") === "1" ? 700 : 900)
+    implicitWidth: theme.space(test.testWidth)
+    implicitHeight: theme.space(test.testHeight)
   }
   Wisp.WispPreviewWindow { id: preview; bridge: bridge; theme: theme; visible: test.mode === "preview" && bridge.sharing }
   Item {
@@ -85,6 +94,7 @@ ShellRoot {
       id: compactSurface
       anchors.fill: parent
       color: theme.background
+      Components.SurfaceOutline { theme: theme; radius: 0 }
       Wisp.WispContent {
         id: compactContent
         anchors.fill: parent
@@ -96,6 +106,8 @@ ShellRoot {
     }
   }
   Component.onCompleted: {
+    if (Quickshell.env("WISP_TEST_DOCK")) bridge.workspaceLayout.dock = Quickshell.env("WISP_TEST_DOCK")
+    bridge.workspaceLayout.activityCollapsed = Quickshell.env("WISP_TEST_COLLAPSED") === "1"
     var data = JSON.parse(JSON.stringify(bridge.snapshot))
     data.self.id = "self"
     data.self.display_name = "Tyler"
@@ -108,6 +120,17 @@ ShellRoot {
       {id:"friends",kind:"circle",label:"Friends",unread_count:0}
     ]
     data.friends = [{id:"jared",display_name:"Jared",online:true,presence:"open"}, {id:"charlie",display_name:"Charlie",online:false,presence:"away"}]
+    if (test.mode === "presence" || test.mode === "panelpresence") {
+      data.friends = [
+        {id:"jared",display_name:"Jared",online:true,presence:"open"},
+        {id:"charlie",display_name:"Charlie",online:true,presence:"knock"},
+        {id:"tyler",display_name:"Tyler",online:true,presence:"closed"},
+        {id:"morgan",display_name:"Morgan",online:true,presence:"away"},
+        {id:"jack",display_name:"Jack",online:false,presence:"closed"}
+      ]
+      bridge.workspaceLayout.activityRatio = 0.2
+    }
+    if (test.mode === "traycollapse") data.spots = [{id:"porch",name:"Porch",members:[]}, {id:"games",name:"Games",members:[]}]
     if (Quickshell.env("WISP_TEST_STRESS")) {
       data.self.display_name = "A very long display name"
       data.friends[0].display_name = "A friend with a long name"
@@ -194,8 +217,16 @@ ShellRoot {
     bridge.notificationMuted = true
     bridge.notificationVolume = 35
     bridge.notificationSoundPath = "file:///tmp/test-custom-sound.wav"
-    if (test.mode === "settings" || test.mode === "themes") window.contentItem.children[0].children[0].settingsOpen = true
-    if (test.mode === "panelsettings") compactContent.settingsOpen = true
+    if (test.mode === "settings" || test.mode === "themes" || test.mode === "saved") test.findItem(window.contentItem, "wispContent").toggleSettings()
+    if (test.mode === "panelsettings") compactContent.toggleSettings()
+  }
+  Timer {
+    interval: 300; running: test.mode === "workspace"
+    onTriggered: bridge.workspaceLayout.reset()
+  }
+  Timer {
+    interval: 400; running: test.mode === "presence" || test.mode === "panelpresence"
+    onTriggered: if (bridge.friendPreferences.collapsed) bridge.friendPreferences.toggleCollapsed()
   }
   Timer {
     interval: 600; running: test.mode === "themes"
@@ -217,12 +248,20 @@ ShellRoot {
       if (terminal) terminal.clicked()
       test.check(theme.profile === "terminal", "Settings restores Terminal live")
       test.check(bridge.draftFor("dm") === "", "chat state remains unchanged")
+      var performative = test.findItem(window.contentItem, "palette-performative")
+      test.check(!!performative && performative.enabled, "Performative palette is available in Settings")
+      var before = bridge.sent.length
+      var draft = bridge.draftFor("porch")
+      if (performative) performative.clicked()
+      test.check(theme.paletteName === "performative" && theme.background == "#000000", "Settings selects Performative live")
+      test.check(bridge.sent.length === before && bridge.draftFor("porch") === draft, "palette switching preserves drafts and sends no commands")
+      themeAppearance.setPalette(Quickshell.env("WISP_TEST_PALETTE") || "wisp")
     }
   }
   Timer {
     interval: 700; running: test.mode === "focus"
     onTriggered: {
-      var button = test.findText(window.contentItem, "Chat options ▾")
+      var button = test.findItem(window.contentItem, "chatOptionsButton")
       test.check(!!button && !!button.forceActiveFocus, "focusable chat button")
       if (button) button.forceActiveFocus(Qt.TabFocusReason)
     }
@@ -245,7 +284,7 @@ ShellRoot {
     }
   }
   Timer {
-    interval: 400; running: ["settings","themes","panelsettings","preview","empty","transfer"].indexOf(test.mode) < 0
+    interval: 400; running: ["settings","themes","panelsettings","preview","empty","transfer","saved"].indexOf(test.mode) < 0
     onTriggered: {
       var target = test.compactMode ? compactSurface : window.contentItem
       var area = test.findItem(target, "chatDropArea")
@@ -263,7 +302,7 @@ ShellRoot {
   Timer {
     interval: 650; running: test.mode === "menu"
     onTriggered: {
-      var button = test.findText(window.contentItem, "Chat options ▾")
+      var button = test.findItem(window.contentItem, "chatOptionsButton")
       test.check(!!button && !!button.clicked, "chat options button available")
       if (button && button.clicked) button.clicked()
     }
@@ -288,11 +327,107 @@ ShellRoot {
     }
   }
   Timer {
+    interval: 600; running: ["identity", "panelidentity", "identityactions", "panelidentityactions"].indexOf(test.mode) >= 0
+    onTriggered: {
+      var target = test.compactMode ? compactSurface : window.contentItem
+      var button = test.findItem(target, "identityMenuButton")
+      var before = bridge.sent.length
+      test.check(!!button && button.width > theme.space(100), "identity is one generous click target")
+      if (button) button.clicked()
+      var menu = test.findObject(target, "identityMenu", [])
+      test.check(!!menu && menu.opened, "identity click opens menu")
+      test.check(!!menu && menu.itemAt(0).objectName === "identitySettings", "Settings is in identity menu")
+      test.check(!!menu && menu.itemAt(1).objectName === "identityNewRoom", "New Room is in identity menu")
+      test.check(!!menu && menu.count === 2, "identity menu contains only Settings and New Room")
+      if (menu) {
+        var frame = test.findItem(menu.background, "wispSurfaceOutline")
+        test.check(!!frame === !theme.hostManaged, "Wisp popup outline preserves host-managed frames")
+        if (frame) test.check(frame.border.width === 1 && frame.width === menu.background.width, "popup outline follows full background")
+        menu.currentIndex = 0
+      }
+      test.check(bridge.sent.length === before, "opening menu does not activate media or join")
+    }
+  }
+  Timer {
+    interval: 800; running: test.mode === "identityactions" || test.mode === "panelidentityactions"
+    onTriggered: {
+      var target = test.compactMode ? compactSurface : window.contentItem
+      var menu = test.findObject(target, "identityMenu", [])
+      var settings = menu ? menu.itemAt(0) : null
+      if (settings) settings.triggered()
+      if (menu) menu.close()
+      var content = test.findItem(target, "wispContent")
+      test.check(!!content && content.settingsOpen, "Settings action opens settings")
+      var home = test.findItem(target, "headerHomeButton")
+      test.check(!!home && home.width === theme.space(30), "Settings exposes a compact Home icon")
+      var appButton = test.findItem(target, "headerOpenAppButton")
+      if (home && appButton) {
+        home.parent.forceLayout()
+        test.check(home.x + home.width <= appButton.x, "Home sits left of Open app")
+      }
+      var savedDraft = bridge.draftFor("porch")
+      var navigationCommands = bridge.sent.length
+      if (home) home.clicked()
+      test.check(content.showingChats && !test.findItem(target, "headerHomeButton"), "Home returns to chats and hides itself")
+      test.check(bridge.draftFor("porch") === savedDraft && bridge.sent.length === navigationCommands, "Home preserves drafts and sends no commands")
+      if (settings) settings.triggered()
+      var before = bridge.sent.length
+      var newRoom = menu ? menu.itemAt(1) : null
+      if (newRoom) newRoom.triggered()
+      var dialog = test.findObject(target, "identityRoomManager", [])
+      test.check(!!dialog && dialog.opened && dialog.creating, "New Room opens creation dialog")
+      test.check(bridge.sent.length === before, "opening New Room does not create or join a room")
+    }
+  }
+  Timer {
+    interval: 600; running: test.mode === "traycollapse"
+    onTriggered: {
+      test.trayInitialFeed = test.findFeed(compactSurface).height
+      test.trayCommandCount = bridge.sent.length
+      test.findItem(compactSurface, "friends-collapse").clicked()
+    }
+  }
+  Timer {
+    interval: 750; running: test.mode === "traycollapse"
+    onTriggered: {
+      test.trayFriendsFeed = test.findFeed(compactSurface).height
+      test.check(test.trayFriendsFeed > test.trayInitialFeed, "collapsing tray friends enlarges message history")
+      test.findItem(compactSurface, "rooms-collapse").clicked()
+    }
+  }
+  Timer {
+    interval: 900; running: test.mode === "traycollapse"
+    onTriggered: {
+      test.check(test.findFeed(compactSurface).height > test.trayFriendsFeed, "collapsing tray rooms enlarges message history")
+      test.check(!test.findItem(compactSurface, "availableRoomCard"), "collapsed rooms hide room cards")
+      test.check(bridge.sent.length === test.trayCommandCount && bridge.draftFor("porch") === "Here's the latest version…", "section collapse preserves draft and sends no commands")
+      test.findItem(compactSurface, "rooms-collapse").clicked()
+      test.findItem(compactSurface, "friends-collapse").clicked()
+    }
+  }
+  Timer {
+    interval: 1050; running: test.mode === "traycollapse"
+    onTriggered: {
+      test.check(Math.abs(test.findFeed(compactSurface).height - test.trayInitialFeed) < 1, "expanding sections restores original chat allocation")
+      test.check(!!test.findItem(compactSurface, "availableRoomCard"), "room cards restored")
+      test.findItem(compactSurface, "rooms-collapse").clicked()
+      test.findItem(compactSurface, "friends-collapse").clicked()
+    }
+  }
+  Timer {
     interval: 600; running: test.mode === "friends"
     onTriggered: {
       var star = test.findItem(compactSurface, "favorite-charlie")
       var before = bridge.sent.length
       test.check(!!star, "favorite action available in tray")
+      if (star) {
+        var label = test.findItem(star.parent, "friendName")
+        test.check(!!label && star.x >= label.x + label.width, "star is to the right of the name")
+        test.check(star.parent.height === theme.space(theme.performative ? 28 : 32), "friends use compact rows")
+        test.check(star.opacity === 0, "favorite star hidden without hover or focus")
+        star.forceActiveFocus(Qt.TabFocusReason)
+        test.check(star.opacity === 1, "keyboard focus reveals favorite action")
+      }
       if (star) star.clicked()
       test.check(bridge.sortedFriends[0].id === "charlie", "offline favorite precedes online non-favorite")
       var collapse = test.findItem(compactSurface, "friends-collapse")
@@ -312,10 +447,525 @@ ShellRoot {
     }
   }
   Timer {
-    interval: 1200; running: true
+    interval:600; running:test.mode==="audiotooltips" || test.mode==="panelaudiotooltips"
+    onTriggered:{
+      var surface=test.compactMode?compactSurface:window.contentItem
+      var audio=test.findItem(surface,"globalAudioControls")
+      audio.muted=true;audio.deafened=true
+      test.findObject(audio,"muteTooltip",[]).open()
+    }
+  }
+  Timer {
+    interval:750; running:test.mode==="audiotooltips" || test.mode==="panelaudiotooltips"
+    onTriggered:{
+      var surface=test.compactMode?compactSurface:window.contentItem
+      var audio=test.findItem(surface,"globalAudioControls")
+      var tip=test.findObject(audio,"muteTooltip",[])
+      var control=test.findItem(audio,"muteControl")
+      var p=tip.contentItem.mapToItem(surface,0,0)
+      test.check(tip.visible && p.y>=control.mapToItem(surface,0,control.height).y,"mute tooltip appears below its button")
+      test.check(p.x>=0 && p.x+tip.contentItem.width<=surface.width && p.y+tip.contentItem.height<=surface.height,"mute tooltip fits window")
+      var path=Quickshell.env("WISP_CHAT_SCREENSHOT")
+      if(path)surface.grabToImage(function(result){result.saveToFile(path.replace(".png","-mute.png"))})
+      tip.close()
+      test.findObject(audio,"deafenTooltip",[]).open()
+    }
+  }
+  Timer {
+    interval:950; running:test.mode==="audiotooltips" || test.mode==="panelaudiotooltips"
+    onTriggered:{
+      var surface=test.compactMode?compactSurface:window.contentItem
+      var audio=test.findItem(surface,"globalAudioControls")
+      var tip=test.findObject(audio,"deafenTooltip",[])
+      var control=test.findItem(audio,"deafenControl")
+      var p=tip.contentItem.mapToItem(surface,0,0)
+      test.check(tip.visible && p.y>=control.mapToItem(surface,0,control.height).y,"deafen tooltip appears below its button")
+      test.check(p.x>=0 && p.x+tip.contentItem.width<=surface.width && p.y+tip.contentItem.height<=surface.height,"deafen tooltip fits window")
+      var path=Quickshell.env("WISP_CHAT_SCREENSHOT")
+      if(path)tip.contentItem.parent.grabToImage(function(result){result.saveToFile(path.replace(".png","-deafen.png"))})
+    }
+  }
+  Timer {
+    interval:600; running:test.mode==="shortcuts"
+    onTriggered:{
+      var content=test.findItem(window.contentItem,"wispContent")
+      content.forceActiveFocus()
+      var before=bridge.sent.length
+      keyDriver.keyClick(Qt.Key_M,Qt.NoModifier)
+      keyDriver.keyClick(Qt.Key_D,Qt.NoModifier)
+      test.check(bridge.sent.length===before,"unmodified M/D do not toggle audio")
+      keyDriver.keyClick(Qt.Key_M,Qt.ShiftModifier)
+      keyDriver.keyClick(Qt.Key_D,Qt.ShiftModifier)
+      test.check(bridge.sent.length===before+2 && bridge.sent[before].name==="toggle_muted" && bridge.sent[before+1].name==="toggle_deafened","Shift+M/D toggle audio once")
+      content.handleWindowKey({key:Qt.Key_M,modifiers:Qt.ShiftModifier,isAutoRepeat:true,accepted:false})
+      keyDriver.keyClick(Qt.Key_M,Qt.ControlModifier|Qt.ShiftModifier)
+      test.check(bridge.sent.length===before+2,"repeats and unrelated chords do not toggle audio")
+      var editor=test.findItem(window.contentItem,"mainComposerEditor")
+      editor.forceActiveFocus();editor.text=""
+      keyDriver.keyClick("M",Qt.ShiftModifier)
+      keyDriver.keyClick("D",Qt.ShiftModifier)
+      test.check(editor.text==="MD" && bridge.sent.length===before+2,"capital M/D remain normal text in chat editors: text="+editor.text+", commands="+(bridge.sent.length-before))
+    }
+  }
+  TestCase { id:keyDriver; parent:window.contentItem; name:"WindowKeys"; when:false }
+  Timer {
+    interval:600; running:test.mode==="addchat"
+    onTriggered:{
+      var chat=test.findItem(window.contentItem,"conversationPane")
+      chat.commit({key:"add-source",id:"porch"});chat.activate("add-source")
+      var original=Tiles.leaves(chat.tree)[0], originalId=original.id
+      var pane=test.findItem(chat,"chatTile-"+original.key)
+      var add=test.findItem(window.contentItem,"headerAddChatButton")
+      var audio=test.findItem(window.contentItem,"globalAudioControls")
+      test.check(add && add.visible && add.enabled && add.parent===audio.parent && add.x<audio.x,"Add Chat is in the header just left of mute/deafen")
+      test.check(!test.findItem(pane,"addChatTileButton"),"chat panes have no Add Chat button")
+      add.clicked()
+      var picker=test.findObject(window.contentItem,"headerAddChatPicker",[])
+      test.check(picker.visible,"Add chat opens searchable conversation picker")
+      picker.chosen("dm");picker.close()
+      test.check(chat.paneCount===2 && Tiles.find(chat.tree,original.key).id===originalId && Tiles.find(chat.tree,chat.activeKey).id==="dm","existing chat adds a tile without replacing the source")
+      add.clicked();test.findItem(picker.contentItem,"pickerNewChat").clicked()
+      var dialog=test.findObject(window.contentItem,"headerNewChatDialog",[])
+      dialog.close()
+      test.check(chat.paneCount===2,"canceling New chat adds no tile")
+      add.clicked();test.findItem(picker.contentItem,"pickerNewChat").clicked()
+      dialog.toggleFriend("jared");dialog.submit()
+      bridge.finishRequest({id:dialog.requestId,ok:true,value:{id:"dm",kind:"direct",label:"Jared",members:[],unread_count:0}})
+      test.check(chat.paneCount===3 && Tiles.find(chat.tree,original.key).id===originalId,"New DM from Add chat opens in a new tile")
+      test.findItem(pane,"compactChatSelector").clicked()
+      var panePicker=test.findObject(pane,"chatConversationMenu",[])
+      panePicker.chosen("dm");panePicker.close()
+      test.check(chat.paneCount===3 && Tiles.find(chat.tree,original.key).id==="dm","current-chat selector still replaces only its pane")
+      while(chat.paneCount<8)chat.addConversation(original.key,"dm")
+      test.check(!add.enabled,"Add chat disables at eight tiles")
+      chat.addConversation(original.key,"dm")
+      test.check(chat.paneCount===8,"tile limit is enforced")
+      while(chat.paneCount>2)chat.closePane(Tiles.leaves(chat.tree)[chat.paneCount-1].key)
+      add.clicked()
+      var position=add.mapToItem(window.contentItem,picker.x,0)
+      test.check(position.x>=0 && position.x+picker.width<=window.width,"header picker stays inside the window")
+    }
+  }
+  Timer {
+    interval:600; running:test.mode==="newchat"
+    onTriggered:{
+      var chat=test.findItem(window.contentItem,"conversationPane")
+      var original=Tiles.leaves(chat.tree)[0].key
+      chat.split(original,"right")
+      test.tileKeys=[original,chat.activeKey]
+      var pane=test.findItem(chat,"chatTile-"+original)
+      test.findItem(pane,"compactChatSelector").clicked()
+      var picker=test.findObject(pane,"chatConversationMenu",[])
+      var before=bridge.sent.length
+      test.findItem(picker.contentItem,"pickerNewChat").clicked()
+      var dialog=test.findObject(pane,"newChatDialog",[])
+      test.popupTarget=dialog
+      test.check(dialog.visible && !dialog.canSubmit,"New chat opens an empty selection form")
+      dialog.close()
+      test.check(bridge.sent.length===before,"Cancel creates nothing")
+      dialog.begin(); dialog.toggleFriend("jared"); dialog.submit()
+      test.check(dialog.busy && bridge.sent[bridge.sent.length-1].name==="open_direct","DM submits existing direct-message API")
+      before=bridge.sent.length;dialog.submit()
+      test.check(bridge.sent.length===before,"busy guard prevents duplicate submissions")
+      bridge.finishRequest({id:dialog.requestId,ok:false,error:{message:"Fixture failure"}})
+      test.check(!dialog.busy && dialog.selectedIds[0]==="jared" && dialog.error,"failed DM retains selected friend")
+      dialog.submit()
+      bridge.finishRequest({id:dialog.requestId,ok:true,value:{id:"dm",kind:"direct",label:"Jared",members:[],unread_count:0}})
+      test.check(!dialog.visible && Tiles.find(chat.tree,original).id==="dm","DM opens in its originating pane")
+      dialog.begin();dialog.group=true
+      test.findItem(dialog.contentItem,"newChatName").text="Weekend games"
+      dialog.toggleFriend("jared");dialog.toggleFriend("charlie")
+      test.check(dialog.canSubmit,"offline friends can be selected for group chats")
+      dialog.submit()
+      var args=bridge.sent[bridge.sent.length-1].args
+      test.check(bridge.sent[bridge.sent.length-1].name==="create_group" && args.name==="Weekend games" && args.members.length===2 && args.request_id,"group submits name, members and retry token")
+      bridge.finishRequest({id:dialog.requestId,ok:false,error:{message:"Group chats require a server update."}})
+      test.check(!dialog.busy && dialog.selectedIds.length===2 && dialog.error.indexOf("server update")>=0,"older server error keeps form intact")
+      var path=Quickshell.env("WISP_CHAT_SCREENSHOT")
+      if(path)dialog.contentItem.parent.grabToImage(function(result){result.saveToFile(path.replace(".png","-dialog.png"))})
+    }
+  }
+  Timer {
+    interval:1000; running:test.mode==="newchat"
+    onTriggered:{
+      var dialog=test.popupTarget,token=dialog.groupRequestId
+      dialog.submit()
+      test.check(bridge.sent[bridge.sent.length-1].args.request_id===token,"retry uses same creation token")
+      bridge.finishRequest({id:dialog.requestId,ok:true,value:{id:"new-group",kind:"circle",label:"Weekend games",members:[],unread_count:0}})
+      var chat=test.findItem(window.contentItem,"conversationPane")
+      test.check(!dialog.visible && Tiles.find(chat.tree,test.tileKeys[0]).id==="new-group","group result opens in originating pane")
+      test.check(bridge.conversationById("new-group"),"creation response is immediately available in picker")
+      test.check(!bridge.sent.some(function(c){return ["create_room","join_spot","join_hangout","camera","share"].indexOf(c.name)>=0}),"creating chats never joins rooms or publishes media")
+      chat.activate(test.tileKeys[0])
+    }
+  }
+  Timer {
+    interval: 600; running: test.mode === "picker"
+    onTriggered: {
+      var selector=test.findItem(window.contentItem,"compactChatSelector")
+      test.check(selector && !test.findItem(window.contentItem,"chatTabs"),"dropdown is default even in full-width chat")
+      var data=JSON.parse(JSON.stringify(bridge.snapshot))
+      for (var i=0;i<80;i++) data.conversations.push({id:"room-"+i,kind:"hangout",label:"Room "+String(i).padStart(2,"0"),unread_count:i%3})
+      data.conversations.push({id:"closed-friend",kind:"direct",label:"Archived Friend",tab_closed:true,unread_count:5})
+      bridge.snapshot=data
+      selector.clicked()
+    }
+  }
+  Timer {
+    interval: 750; running: test.mode === "picker"
+    onTriggered: {
+      var picker=test.findObject(window.contentItem,"chatConversationMenu",[])
+      test.check(picker.opened && picker.count===84,"picker includes long lists and closed chats")
+      test.check(picker.rows.filter(function(r) { return r.section }).map(function(r) { return r.label }).join(",")==="Rooms,Friends List","picker categories are Rooms and Friends List")
+      test.check(test.findItem(picker.contentItem,"conversationSearch").activeFocus,"opening picker focuses search")
+      test.check(picker.height<=theme.space(420),"long list has bounded scrolling height")
+      var before=bridge.sent.length
+      picker.category="Friends List"
+      test.check(picker.count===3 && picker.rows[0].label==="Friends List","category filter jumps directly to friend chats")
+      picker.category="Rooms"
+      test.check(picker.count===81,"category filter shows only room chats")
+      picker.category=""
+      picker.query="  jArEd  "
+      test.check(picker.count===1 && picker.rows[1].id==="dm","search is trimmed and case-insensitive")
+      picker.resetSelection(); picker.moveSelection(1)
+      test.check(bridge.sent.length===before,"search and navigation do not send commands")
+      picker.chooseCurrent()
+      test.check(bridge.activeConversationId==="dm" && !picker.visible,"Enter-style selection opens matched DM")
+      picker.open()
+    }
+  }
+  Timer {
+    interval: 1000; running: test.mode === "picker"
+    onTriggered: {
+      var picker=test.findObject(window.contentItem,"chatConversationMenu",[])
+      test.check(picker.query==="","search resets when reopened")
+      picker.query="no-such-conversation"
+      test.check(picker.count===0 && picker.rows.length===0,"no-results state hides empty categories")
+      picker.resetSelection(); picker.moveSelection(1); picker.chooseCurrent()
+      test.check(picker.visible,"Enter with no matches does nothing")
+      picker.query="Archived Friend"; picker.resetSelection(); picker.chooseCurrent()
+      test.check(bridge.sent.some(function(c) { return c.name==="set_conversation_tab" && c.args.conversation_id==="closed-friend" && c.args.closed===false }),"search reopens a closed DM without clearing history")
+      picker.open()
+    }
+  }
+  Timer {
+    interval: 500; running: test.mode === "tilemoves"
+    onTriggered: {
+      var pair={key:"pair",axis:"x",ratio:0.4,a:{key:"a",id:"porch"},b:{key:"b",id:"dm"}}
+      var rects=Tiles.geometry(pair,1000,900,10,280,230)
+      var noop=Tiles.planDrop(pair,"a",rects.b.x+40,450,1000,900,10,280,230,26)
+      test.check(noop && noop.unchanged && noop.rect.width===rects.a.width,"adjacent left-to-left drop previews its actual existing slot")
+      test.check(JSON.stringify(Tiles.move(pair,"a","b","left","new"))===JSON.stringify(pair),"no-op drop preserves divider proportions")
+      var ownTop=Tiles.planDrop(pair,"a",200,8,1000,900,10,280,230,26)
+      test.check(ownTop && ownTop.whole && ownTop.edge==="top" && !ownTop.unchanged,"can move a column above its neighbor from its own top edge")
+      var stacked=Tiles.move(pair,"a",ownTop.target,ownTop.edge,"new")
+      test.check(stacked.axis==="y" && ownTop.rect.width===1000,"top-edge move spans whole workspace")
+      var nextRects=Tiles.geometry(stacked,1000,900,10,280,230)
+      test.check(JSON.stringify(ownTop.rect)===JSON.stringify(nextRects.a),"drop preview matches resulting geometry exactly")
+      test.check(Tiles.dropEdge(30,8,450,900)==="top" && Tiles.dropEdge(30,892,450,900)==="bottom","tall-pane corners use reachable nearest-edge top/bottom zones")
+      var group=Tiles.insert(Tiles.copy(pair),"b",{key:"c",id:"friends"},"bottom","group")
+      var whole=Tiles.planDrop(group,"a",500,892,1000,900,10,280,230,26)
+      var moved=Tiles.move(group,"a",whole.target,whole.edge,"outer")
+      test.check(moved.axis==="y" && moved.b.key==="a" && moved.a.a && Tiles.leaves(moved).length===3,"workspace edge can move a pane below an entire nested group")
+      test.check(Tiles.valid(moved),"group move remains a valid persistent tree")
+      var chat=test.findItem(window.contentItem,"conversationPane")
+      var populated=JSON.parse(JSON.stringify(bridge.snapshot))
+      populated.conversations.push({id:"long-room",kind:"circle",label:"A room with a much longer name",unread_count:12})
+      bridge.snapshot=populated
+      bridge.workspaceLayout.activityCollapsed=true
+      chat.commit(pair)
+      chat.choose("a","porch")
+    }
+  }
+  Timer {
+    interval: 800; running: test.mode === "tilemoves"
+    onTriggered: {
+      var chat=test.findItem(window.contentItem,"conversationPane")
+      var pane=test.findItem(chat,"chatTile-a")
+      var selector=test.findItem(pane,"compactChatSelector")
+      test.check(selector && selector.text==="Porch","pane shows selected chat instead of clipping tabs")
+      if (selector) {
+        test.check(selector.width>theme.space(80) && selector.x>=0 && selector.x+selector.width<=pane.width,"compact selector retains a readable click target")
+        selector.clicked()
+        var menu=test.findObject(pane,"chatConversationMenu",[])
+        test.check(menu && menu.count===bridge.conversations.length,"selector offers every conversation")
+        if (menu) menu.close()
+      }
+      pane.choose("friends")
+      test.check(selector && selector.text==="Friends","selected title updates even for conversations beyond the old clipped row")
+      pane.choose("porch")
+      var geometry=chat.rectangles.a
+      var p=chat.mapFromItem(pane.parent.parent,geometry.x+geometry.width/2,8)
+      chat.dragAt("a",p.x,p.y)
+      test.check(chat.dropPlan && chat.dropPlan.edge==="top","UI exposes whole-workspace drop above own pane")
+      chat.cancelDrag()
+    }
+  }
+  Timer {
+    interval: 500; running: test.mode === "tiles"
+    onTriggered: {
+      test.check(!Tiles.valid({key:"bad",axis:"x",ratio:2,a:{key:"same",id:"a"},b:{key:"same",id:"b"}}),"invalid persisted layouts are rejected")
+      var pure={key:"a",id:"a"}
+      for (var i=1;i<8;i++) pure=Tiles.insert(pure,"a",{key:"leaf"+i,id:String(i)},i%2?"right":"bottom","split"+i)
+      test.check(Tiles.valid(pure) && Tiles.leaves(pure).length===8,"nested split tree supports eight panes")
+      var min=Tiles.minimum(pure,10,280,230), rects=Tiles.geometry(pure,min.width,min.height,10,280,230)
+      test.check(Tiles.leaves(pure).every(function(n) { return rects[n.key].width>=280 && rects[n.key].height>=230 }),"nested layout preserves minimum readable pane sizes")
+      test.check(Tiles.dropEdge(0,50,100,100)==="left" && Tiles.dropEdge(100,50,100,100)==="right" && Tiles.dropEdge(50,0,100,100)==="top" && Tiles.dropEdge(50,100,100,100)==="bottom","all directional drop zones")
+      var chat=test.findItem(window.contentItem,"conversationPane")
+      chat.commit({key:"pane-0",id:"porch"})
+      bridge.workspaceLayout.activityCollapsed=true
+      var first=Tiles.leaves(chat.tree)[0].key
+      chat.choose(first,"porch")
+      chat.split(first,"right")
+      var second=chat.activeKey
+      chat.choose(second,"dm")
+      chat.split(second,"bottom")
+      var third=chat.activeKey
+      chat.choose(third,"friends")
+      test.tileKeys=[first,second,third]
+      test.check(chat.paneCount===3,"three independent chat panes")
+      test.check(Tiles.find(chat.tree,first).id==="porch" && Tiles.find(chat.tree,second).id==="dm","splitting retains existing conversations")
+      bridge.setDraft("porch","Room draft")
+      bridge.setDraft("dm","DM draft")
+      test.tileCommands=bridge.sent.length
+    }
+  }
+  Timer {
+    interval: 650; running: test.mode === "tiles"
+    onTriggered: {
+      var chat=test.findItem(window.contentItem,"conversationPane"), keys=test.tileKeys
+      var first=test.findItem(chat,"chatTile-"+keys[0]), second=test.findItem(chat,"chatTile-"+keys[1])
+      test.check(first.currentId==="porch" && second.currentId==="dm","pane feeds select different conversations")
+      test.check(test.findItem(first,"mainComposerEditor").text==="Room draft" && test.findItem(second,"mainComposerEditor").text==="DM draft","drafts are isolated by destination")
+      var split=chat.tree.key, original=chat.rectangles[split].first
+      chat.resize(split,30)
+      test.check(chat.rectangles[split].first>original,"shared divider resizes adjacent chats")
+      var r=chat.rectangles[keys[1]], point=chat.mapFromItem(first.parent.parent,r.x+r.width/2,r.y+r.height/2)
+      chat.dragAt(keys[0],point.x,point.y)
+      test.check(chat.dropKey===keys[1] && chat.dropEdge==="center","drag center previews a swap")
+      chat.finishDrag()
+      test.check(Tiles.find(chat.tree,keys[0]).id==="dm" && Tiles.find(chat.tree,keys[1]).id==="porch","center drop swaps chats")
+      chat.move(keys[0],keys[2],"bottom")
+      test.check(Tiles.valid(chat.tree) && chat.paneCount===3,"edge drop reparents a split without losing a pane")
+      test.check(bridge.sent.length===test.tileCommands,"resize and drag send no backend commands")
+      chat.detach(keys[1])
+    }
+  }
+  Timer {
+    interval: 800; running: test.mode === "tiles"
+    onTriggered: {
+      var chat=test.findItem(window.contentItem,"conversationPane"), key=test.tileKeys[1]
+      var host=test.findObject(chat,"chatTileHost-"+key,[])
+      test.check(host && host.detached && host.popoutWindow.visible,"chat opens in its own window")
+      if (!host) return
+      test.check(host.workspace.parent===host.popoutWindow.contentItem,"same chat component moves into pop-out")
+      test.check(bridge.detachedChatFocused,"focused pop-out is included in notification focus state")
+      window.visible=false
+      test.check(host.popoutWindow.visible && host.workspace.visible,"pop-out remains usable while main window is hidden")
+      test.check(!chat.rectangles[key],"detached pane gives space to remaining chats")
+      var anchor=test.findItem(host.popoutWindow.contentItem,"chatAnchorButton")
+      test.check(anchor && !anchor.text,"return action is an anchor icon")
+      var path=Quickshell.env("WISP_CHAT_SCREENSHOT")
+      if (path) host.workspace.grabToImage(function(result) { result.saveToFile(path.replace(".png","-popout.png")) })
+      anchor.clicked()
+      test.check(!host.detached && !host.popoutWindow.visible && host.workspace.parent===host,"anchor returns the same chat to main window")
+      test.check(window.visible,"anchor reveals the main window")
+      chat.detach(key)
+      var returnAction=test.findObject(host.workspace,"wispChatOptions",[]).itemAt(0)
+      test.check(returnAction.text==="Return to main window","pop-out menu preserves local reanchoring behavior")
+      returnAction.triggered()
+      test.check(!host.detached && host.workspace.parent===host,"pop-out menu returns its tile without closing the conversation")
+      chat.detach(key)
+    }
+  }
+  Timer {
+    interval: 950; running: test.mode === "tiles"
+    onTriggered: {
+      var chat=test.findItem(window.contentItem,"conversationPane"), key=test.tileKeys[1]
+      var host=test.findObject(chat,"chatTileHost-"+key,[])
+      host.popoutWindow.contentItem.Window.window.close()
+      test.check(!host.detached && !!chat.rectangles[key],"native window close reanchors chat")
+      test.check(bridge.draftFor("porch")==="Room draft" && bridge.draftFor("dm")==="DM draft","pop-out and return preserve drafts")
+      var closingPane=test.findItem(chat,"chatTile-"+test.tileKeys[2])
+      var closeAction=test.findObject(closingPane,"wispChatOptions",[]).itemAt(0)
+      test.check(closeAction.text==="Close tile" && closeAction.enabled,"chat options offer a local tile close")
+      closeAction.triggered()
+      test.check(chat.paneCount===2 && bridge.conversationById("friends"),"closing a pane retains its conversation")
+      test.check(!bridge.sent.slice(test.tileCommands).some(function(c) { return ["send_message","set_conversation_tab","clear_chat_history","join","camera","screen_share"].indexOf(c.name)>=0 }),"tiling and pop-outs never send, close, clear, join, or publish")
+      var third=test.tileKeys[0]
+      chat.split(third,"bottom")
+      chat.choose(chat.activeKey,"friends")
+      chat.activate(Tiles.leaves(chat.tree)[0].key)
+      bridge.workspaceLayout.settingsSaved()
+      test.check(!test.findObject(window.contentItem,"settingsSavedNotice",[]).shown,"tile saves are silent")
+    }
+  }
+  Timer {
+    interval: 600; running: test.mode === "tilesreload"
+    onTriggered: {
+      var chat=test.findItem(window.contentItem,"conversationPane")
+      test.check(chat.paneCount===3 && Tiles.valid(chat.tree),"saved multi-chat tree restores after restart")
+      test.check(chat.detachedKeys.length===0,"restart anchors every pop-out back into main window")
+      test.check(Tiles.leaves(chat.tree).map(function(n) { return n.id }).sort().join(",")==="dm,friends,porch","restored panes retain conversation destinations")
+      var original=bridge.snapshot, closed=JSON.parse(JSON.stringify(original))
+      closed.conversations[0].tab_closed=true
+      bridge.snapshot=closed
+      bridge.activeConversationId="porch"
+      var before=bridge.sent.length
+      chat.choose(chat.activeKey,"porch")
+      test.check(bridge.sent.slice(before).some(function(c) { return c.name==="set_conversation_tab" && c.args.conversation_id==="porch" && c.args.closed===false }),"Chats can reopen a closed conversation even when its id was already active")
+      bridge.snapshot=original
+    }
+  }
+  Timer {
+    interval: 600; running: test.mode === "workspace"
+    onTriggered: {
+      var target = window.contentItem
+      var workspace = test.findItem(target, "mainWorkspace")
+      var activity = test.findItem(target, "activityPane")
+      var chat = test.findItem(target, "conversationPane")
+      test.check(!!workspace && !!activity && !!chat, "main window has separate resizable panes")
+      if (!workspace || !activity || !chat) return
+      var before = bridge.sent.length
+      test.check(test.findFeed(target).height > chat.height * 0.55, "message history occupies most of the conversation")
+      var original = workspace.activitySize
+      test.findItem(target, "activityResizeHandle").moved(60)
+      test.check(workspace.activitySize > original, "activity divider resizes the pane")
+      var rooms = test.findItem(target, "roomsPane")
+      var originalRooms = rooms.height
+      test.findItem(target, "roomsResizeHandle").moved(20)
+      test.check(rooms.height >= originalRooms, "room/friend divider resizes sections")
+      var composer = test.findItem(target, "composerPane")
+      test.check(composer.height <= theme.space(60), "one-line composer stays compact")
+      bridge.workspaceLayout.dock = "right"
+      test.check(workspace.stacked ? activity.y > chat.y : activity.x > chat.x, "activity can move to trailing edge")
+      bridge.workspaceLayout.dock = "top"
+      test.check(workspace.stacked && activity.y < chat.y, "activity can move above chat")
+      bridge.workspaceLayout.dock = "bottom"
+      test.check(workspace.stacked && activity.y > chat.y, "activity can move below chat")
+      bridge.workspaceLayout.dock = "auto"
+      test.check(activity.width > 0 && chat.width > 0 && chat.height > 0, "panes fit window after redocking")
+      var toggle = test.findItem(target, "activityCollapseButton")
+      var preservedRatio = bridge.workspaceLayout.activityRatio
+      for (var dock of ["left", "right", "top", "bottom"]) {
+        bridge.workspaceLayout.dock = dock
+        var openButton = test.findItem(target,"presence-open")
+        test.check(toggle.parent===openButton.parent && toggle.x<openButton.x,"activity arrow is beside Open: " + dock)
+        var beforeSize = workspace.stacked ? chat.height : chat.width
+        toggle.clicked()
+        test.check(!activity.visible && workspace.activitySize === 0, "collapse hides all activity: " + dock)
+        test.check(chat.x === 0 && chat.y === 0 && chat.width === workspace.width && chat.height === workspace.height, "collapsed activity leaves no unused rail: " + dock)
+        test.check((workspace.stacked ? chat.height : chat.width) > beforeSize, "collapse gives chat the space: " + dock)
+        test.check(toggle.direction === (workspace.stacked ? (workspace.reversed ? "up" : "down") : (workspace.reversed ? "left" : "right")), "expand arrow points away from anchor: " + dock)
+        toggle.clicked()
+        test.check(activity.visible && bridge.workspaceLayout.activityRatio === preservedRatio, "expand restores size: " + dock)
+      }
+      bridge.workspaceLayout.reset()
+      bridge.workspaceLayout.settingsSaved()
+      test.check(!test.findObject(target,"settingsSavedNotice",[]).shown,"layout saves do not show Changes Saved")
+      bridge.setDraft("porch", "line\n".repeat(30))
+      test.check(bridge.sent.length === before, "layout changes never send chat/media commands")
+    }
+  }
+  Timer {
+    interval: 750; running: test.mode === "workspace"
+    onTriggered: {
+      var pane = test.findItem(window.contentItem, "composerPane")
+      test.check(pane.height > theme.space(40), "multiline draft grows composer within available space")
+      test.check(pane.height <= pane.available * 0.45, "long draft leaves room for history")
+      bridge.setDraft("porch", "Short again")
+    }
+  }
+  Timer {
+    interval: 900; running: test.mode === "workspace"
+    onTriggered: test.check(test.findItem(window.contentItem, "composerPane").height <= theme.space(60), "composer shrinks after shortening draft")
+  }
+  Timer {
+    interval: 600; running: test.mode === "saved"
+    onTriggered: {
+      var notice = test.findObject(window.contentItem, "settingsSavedNotice", [])
+      notice.clear()
+      bridge.setVideoQuality("high")
+      test.check(!notice.shown, "no saved notice before acknowledgement")
+      bridge.finishRequest({id:"test-" + bridge.requestId,ok:false})
+      test.check(!notice.shown, "failed changes never say saved")
+      bridge.setVideoQuality("high")
+      bridge.finishRequest({id:"test-" + bridge.requestId,ok:true})
+      test.check(notice.shown, "acknowledged settings show saved notice")
+      themeAppearance.setPalette("violet")
+    }
+  }
+  Timer {
+    interval: 800; running: test.mode === "saved"
+    onTriggered: {
+      var notice = test.findObject(window.contentItem, "settingsSavedNotice", [])
+      test.check(notice.shown, "appearance save shows notice")
+      notice.clear()
+      bridge.notificationVolume = 36
+    }
+  }
+  Timer {
+    interval: 1000; running: test.mode === "saved"
+    onTriggered: {
+      test.check(test.findObject(window.contentItem, "settingsSavedNotice", []).shown, "notification file save shows notice")
+      bridge.notificationVolume = 35
+      var path = Quickshell.env("WISP_CHAT_SCREENSHOT")
+      if (path) window.contentItem.children[0].grabToImage(function(result) { test.check(result.saveToFile(path.replace(".png", "-notice.png")), "save notice screenshot") })
+    }
+  }
+  Timer {
+    interval: 3650; running: test.mode === "saved"
+    onTriggered: test.check(!test.findObject(window.contentItem, "settingsSavedNotice", []).shown, "saved notice disappears after 2.5 seconds")
+  }
+  Timer {
+    interval: test.mode === "saved" ? 3800 : 1200; running: true
     onTriggered: {
       var surface = test.compactMode ? compactSurface : window.contentItem
+      if (test.mode === "presence" || test.mode === "panelpresence") {
+        for (var entry of [{id:"jared",label:"Open"},{id:"charlie",label:"Knock"},{id:"tyler",label:"Closed"},{id:"morgan",label:"Away"}]) {
+          var icon = test.findItem(surface, "friendPresence-" + entry.id)
+          test.check(icon && icon.imageStatus === Image.Ready && icon.label === entry.label && icon.width === theme.space(16), "presence icon renders with accessible status: " + entry.label)
+          var favorite = test.findItem(surface, "favorite-" + entry.id)
+          test.check(!!favorite, "friend row available for icon verification: " + entry.id)
+          if (!favorite) continue
+          var row = favorite.parent
+          test.check(test.findItem(row, "friendConnectionDot").presence === "open", "online remains distinct from offline: " + entry.label)
+          var name = test.findItem(row, "friendName")
+          test.check(name.width >= name.implicitWidth, "short friend name fits beside compact icon: " + entry.id)
+          test.check(!test.findText(row, entry.label.toLowerCase()), "text status replaced by icon")
+        }
+        var offlineFavorite = test.findItem(surface, "favorite-jack")
+        test.check(!!offlineFavorite, "offline friend row available")
+        var offlineRow = offlineFavorite ? offlineFavorite.parent : surface
+        test.check(!test.findItem(offlineRow, "friendPresence-jack") && test.findItem(offlineRow, "friendConnectionDot").presence === "closed", "offline uses hollow connection dot only")
+        test.check(!test.findText(offlineRow, "offline"), "offline label no longer takes name space")
+      }
+      var messageBox = test.findItem(surface, "composerMessageBox")
+      if (messageBox) {
+        var send = test.findItem(messageBox, "composerSendButton")
+        var textViewport = test.findItem(messageBox, "composerTextViewport")
+        test.check(!!send && send.parent === messageBox && !send.text, "send is an icon inside the message box")
+        test.check(send.x >= 0 && send.y >= 0 && send.x + send.width <= messageBox.width && send.y + send.height <= messageBox.height, "send icon fits inside message box")
+        test.check(textViewport.x + textViewport.width < send.x, "message text reserves space for send icon")
+        var editor = test.findItem(messageBox, test.compactMode ? "trayComposerEditor" : "mainComposerEditor")
+        var current = bridge.conversationById(messageBox.parent.conversationId)
+        test.check(editor && editor.placeholderText === "Message " + (current.label === "Hangout" ? "Room" : current.label), "placeholder identifies the conversation")
+        var oldId = messageBox.parent.conversationId
+        messageBox.parent.conversationId = "dm"
+        test.check(editor.placeholderText === "Message Jared", "placeholder follows DM destination")
+        messageBox.parent.conversationId = oldId
+        test.check(!test.findText(surface, "Shift+Enter for a new line"), "keyboard hint removed")
+      }
       if (test.mode !== "preview") {
+        var page = test.findItem(surface, "wispContent")
+        if (page.inlineHeader) {
+          var identity = test.findItem(surface, "identityMenuButton")
+          var access = test.findItem(surface, "alwaysVisibleControls")
+          var identityPosition = identity.mapToItem(surface, 0, 0)
+          var accessPosition = access.mapToItem(surface, 0, 0)
+          test.check(accessPosition.x >= identityPosition.x + identity.width && accessPosition.y >= identityPosition.y && accessPosition.y + access.height <= identityPosition.y + identity.height, "main access controls share the identity row without overlap")
+        }
+        test.check(!!test.findItem(surface, "headerHomeButton") === !page.showingChats, "Home visibility follows current page")
         var audio = test.findItem(surface, "globalAudioControls")
         test.check(!!audio && audio.width > 0, "mute/deafen available with or without a room and in settings")
         if (audio) {
@@ -323,16 +973,29 @@ ShellRoot {
           test.check(position.y >= 0 && position.y + audio.height < surface.height, "audio controls inside window")
         }
       }
-      test.check(window.width === theme.space(Quickshell.env("WISP_TEST_CONSTRAINED") === "1" ? 840 : 1180), "app width")
-      test.check(window.height === theme.space(Quickshell.env("WISP_TEST_CONSTRAINED") === "1" ? 700 : 900), "app height")
+      if (test.mode === "media" || test.mode === "panelmedia") {
+        var room = test.findItem(surface, "roomCard")
+        test.check(!!room && room.height === theme.space(theme.performative ? 42 : 48), "occupied room cards use compact height")
+      }
+      test.check(window.width === theme.space(test.testWidth), "app width")
+      test.check(window.height === theme.space(test.testHeight), "app height")
       var path = Quickshell.env("WISP_CHAT_SCREENSHOT")
       var target = test.compactMode ? compactSurface : window.contentItem.children[0]
       if (test.mode === "preview") target = preview.contentItem.children[0]
+      if (test.mode === "identity" || test.mode === "panelidentity") {
+        var identityMenu = test.findObject(test.compactMode ? compactSurface : window.contentItem, "identityMenu", [])
+        if (identityMenu) target = identityMenu.contentItem.parent
+      }
+      if (test.mode === "identityactions" || test.mode === "panelidentityactions") {
+        var identityRoom = test.findObject(test.compactMode ? compactSurface : window.contentItem, "identityRoomManager", [])
+        if (identityRoom) target = identityRoom.contentItem.parent
+      }
       if (test.mode === "menu") {
         var menu = test.findObject(window.contentItem, "wispChatOptions", [])
         test.check(!!menu && menu.opened, "chat options menu opened")
         if (menu) target = menu.contentItem.parent
       }
+      if (test.mode === "picker") target=test.findObject(window.contentItem,"chatConversationMenu",[]).contentItem.parent
       if (test.mode === "clearroom" || test.mode === "cleardm") target = clearDialog.contentItem.parent
       if (test.mode === "roomsettings" || test.mode === "newroom") target = roomDialog.contentItem.parent
       if (test.mode === "edit") {

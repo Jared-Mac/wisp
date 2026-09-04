@@ -12,46 +12,59 @@ Item {
   readonly property bool canRequest: root.friend.online &&
     (root.friend.presence === "open" || root.friend.presence === "knock")
 
-  implicitHeight: root.theme.space(42)
+  implicitHeight: root.theme.space(root.theme.performative ? 28 : 32)
+
+  // Observe the entire row, including child buttons, without intercepting clicks.
+  HoverHandler { id: rowHover }
 
   Rectangle {
     anchors.fill: parent
     radius: root.theme.cornerRadius
-    color: mouse.containsMouse ? root.theme.alpha(root.theme.foreground, 0.07) : "transparent"
+    color: rowHover.hovered ? root.theme.alpha(root.theme.foreground, 0.07) : "transparent"
   }
 
   PresenceDot {
     id: dot
-    anchors.left: favoriteButton.right
+    objectName: "friendConnectionDot"
+    z: 1
+    anchors.left: parent.left
     anchors.leftMargin: root.theme.spacing.sm
     anchors.verticalCenter: parent.verticalCenter
-    presence: root.friend.online ? String(root.friend.presence) : "closed"
+    // Connectivity is distinct from access: an online Closed friend isn't offline.
+    presence: root.friend.online ? "open" : "closed"
     theme: root.theme
+    Accessible.role: Accessible.StaticText
+    Accessible.name: root.friend.online ? "Online" : "Offline"
+    HoverHandler { id: connectionHover }
+    ToolTip.visible: connectionHover.hovered
+    ToolTip.text: root.friend.online ? "Online" : "Offline"
   }
 
   Text {
     id: friendName
+    objectName: "friendName"
     anchors.left: dot.right
     anchors.leftMargin: root.theme.spacing.md
-    y: root.theme.space(5)
+    anchors.verticalCenter: parent.verticalCenter
     text: String(root.friend.display_name || "")
-    color: root.friend.online ? root.theme.foreground : root.theme.muted
+    color: root.friend.online ? (root.theme.performative ? root.theme.accent : root.theme.foreground) : root.theme.muted
     font.family: root.theme.font.family
     font.pixelSize: root.theme.font.body
-    width: Math.max(0, messageButton.x - x - root.theme.spacing.md)
+    width: Math.min(implicitWidth, Math.max(0, statusIcon.x - x - favoriteButton.width - root.theme.spacing.md * 2))
     elide: Text.ElideRight
   }
 
-  Text {
-    id: statusText
-    anchors.left: friendName.left
-    anchors.top: friendName.bottom
-    width: friendName.width
-    elide: Text.ElideRight
-    text: root.friend.online ? String(root.friend.presence) : "offline"
-    color: root.theme.muted
-    font.family: root.theme.font.family
-    font.pixelSize: root.theme.font.caption
+  PresenceIcon {
+    id: statusIcon
+    objectName: "friendPresence-" + String(root.friend.id || root.friend.display_name)
+    z: 1
+    anchors.right: messageButton.left
+    anchors.rightMargin: root.theme.spacing.md
+    anchors.verticalCenter: parent.verticalCenter
+    visible: !!root.friend.online
+    width: visible ? implicitWidth : 0
+    presence: String(root.friend.presence || "away")
+    theme: root.theme
   }
 
   MouseArea {
@@ -68,8 +81,11 @@ Item {
   Button {
     id: favoriteButton
     objectName: "favorite-" + String(root.friend.id || root.friend.display_name)
-    anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
-    width: root.theme.space(28); height: root.theme.space(34)
+    anchors.left: friendName.right; anchors.leftMargin: root.theme.spacing.xs; anchors.verticalCenter: parent.verticalCenter
+    width: root.theme.space(26); height: root.theme.performative ? root.height : root.theme.space(32)
+    // Keep its footprint and tab stop so names don't shift and keyboard users
+    // can still discover the action; hide both filled and empty stars at rest.
+    opacity: rowHover.hovered || visualFocus ? 1 : 0
     Accessible.name: (root.favorite ? "Unfavorite " : "Favorite ") + root.friend.display_name
     ToolTip.visible: hovered
     ToolTip.text: Accessible.name
@@ -95,14 +111,14 @@ Item {
     anchors.rightMargin: root.theme.spacing.sm
     anchors.verticalCenter: parent.verticalCenter
     radius: root.theme.cornerRadius
-    color: messageMouse.containsMouse
+    color: root.theme.performative && !messageMouse.containsMouse ? "transparent" : messageMouse.containsMouse
       ? root.theme.alpha(root.theme.accent, 0.25)
       : root.theme.alpha(root.theme.foreground, 0.07)
 
     Text {
       id: messageLabel
       anchors.centerIn: parent
-      text: "Message"
+      text: root.theme.performative ? "[msg]" : "Message"
       color: root.theme.foreground
       font.family: root.theme.font.family
       font.pixelSize: root.theme.font.caption

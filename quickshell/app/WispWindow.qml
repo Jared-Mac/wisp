@@ -1,5 +1,6 @@
 import QtQuick
 import Quickshell
+import "components"
 
 // Normal application host. Compact anchored surfaces live in
 // WispPanelWindow.qml and the optional Omarchy Panel.qml adapter.
@@ -9,14 +10,14 @@ FloatingWindow {
   required property var bridge
   required property var theme
   property bool localPreviewsPoppedOut: false
-  readonly property bool chatVisible: visible && !content.settingsOpen
+  readonly property bool chatVisible: visible && content.showingChats
   signal hideRequested()
   signal popOutLocalPreviewsRequested()
 
   title: "Wisp"
   implicitWidth: theme.space(1180)
   implicitHeight: theme.space(900)
-  minimumSize: Qt.size(theme.space(840), theme.space(700))
+  minimumSize: Qt.size(theme.space(360), theme.space(520))
   color: theme.background
 
   function reveal() {
@@ -24,8 +25,8 @@ FloatingWindow {
     minimized = false
     Qt.callLater(function() {
       content.forceActiveFocus()
-      if (root.contentItem && root.contentItem.window)
-        root.contentItem.window.requestActivate()
+      if (root.contentItem && root.contentItem.Window.window)
+        root.contentItem.Window.window.requestActivate()
     })
   }
 
@@ -38,6 +39,7 @@ FloatingWindow {
   Rectangle {
     anchors.fill: parent
     color: root.theme.background
+    SurfaceOutline { theme: root.theme; radius: 0 }
 
     WispContent {
       id: content
@@ -51,6 +53,7 @@ FloatingWindow {
       localPreviewsPoppedOut: root.localPreviewsPoppedOut
       onPopOutLocalPreviewsRequested: root.popOutLocalPreviewsRequested()
       onCloseRequested: root.hideRequested()
+      onAppRequested: { content.goHome(); root.reveal() }
     }
   }
 }

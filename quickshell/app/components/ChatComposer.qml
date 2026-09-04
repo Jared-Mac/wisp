@@ -7,9 +7,25 @@ Column {
   required property var theme
   required property string conversationId
   property bool spacious: false
+  property bool autoGrow: false
+  signal editorFocused()
+  property real maximumEditorHeight: theme.space(160)
+  readonly property real naturalEditorHeight: Math.max(theme.space(40), editor.contentHeight + editor.topPadding + editor.bottomPadding + (theme.performative ? theme.spacing.sm : theme.spacing.lg) * 2)
+  property real editorHeight: theme.space(theme.performative && !spacious ? 44 : spacious ? 106 : 66)
   readonly property var attachments: bridge.attachmentsFor(conversationId)
+  readonly property var conversation: bridge.conversationById(conversationId)
+  readonly property string destination: conversation && conversation.label ? (conversation.label === "Hangout" ? "Room" : String(conversation.label)) : ""
   readonly property bool busy: !!bridge.sendingConversations[conversationId] || !!bridge.importingConversations[conversationId]
-  spacing: theme.spacing.lg
+  spacing: autoGrow ? theme.spacing.xs : theme.performative ? theme.spacing.sm : theme.spacing.lg
+
+  Text {
+    objectName: "terminalChatPrompt"
+    visible: root.theme.performative
+    width: parent.width; elide: Text.ElideRight
+    text: String(root.bridge.selfState.display_name || "user").toLowerCase() + "@wisp:~/chat/" + root.destination + " $"
+    color: root.theme.accent
+    font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
+  }
 
   Flickable {
     visible: root.attachments.length > 0
@@ -69,23 +85,35 @@ Column {
   }
 
   Rectangle {
+    objectName: "composerMessageBox"
     width: parent.width
-    height: root.theme.space(root.spacious ? 106 : 66)
+    height: root.autoGrow ? Math.min(root.maximumEditorHeight, root.naturalEditorHeight) : root.editorHeight
     radius: root.theme.cornerRadius
-    color: root.theme.alpha(root.theme.foreground, 0.06)
-    border.width: editor.activeFocus ? 1 : 0
-    border.color: root.theme.accent
+    color: root.theme.performative ? root.theme.background : root.theme.alpha(root.theme.foreground, 0.06)
+    border.width: editor.activeFocus || root.theme.performative ? 1 : 0
+    border.color: editor.activeFocus ? root.theme.accent : root.theme.separator
+    Text {
+      visible: root.theme.performative
+      x: root.theme.space(8); y: root.theme.space(11)
+      text: ">"; color: root.theme.accent
+      font.family: root.theme.font.family; font.pixelSize: root.theme.font.body
+    }
     ScrollView {
+      objectName: "composerTextViewport"
       anchors.fill: parent
-      anchors.margins: root.theme.spacing.lg
+      anchors.margins: root.theme.performative ? root.theme.spacing.sm : root.theme.spacing.lg
+      anchors.leftMargin: root.theme.performative ? root.theme.space(24) : root.theme.spacing.lg
+      anchors.rightMargin: sendButton.width + root.theme.spacing.lg * 2
       TextArea {
         ThemeControlStyle { theme: root.theme; control: editor }
         id: editor
+        objectName: root.autoGrow ? "mainComposerEditor" : "trayComposerEditor"
         property bool wispTextEditor: true
+        onActiveFocusChanged: if (activeFocus) root.editorFocused()
         text: root.bridge.draftFor(root.conversationId)
         onTextChanged: root.bridge.setDraft(root.conversationId, text)
         color: root.theme.foreground
-        placeholderText: "Message"
+        placeholderText: root.destination ? "Message " + root.destination : "Message"
         placeholderTextColor: root.theme.muted
         font.family: root.theme.font.family
         font.pixelSize: root.theme.font.body
@@ -93,6 +121,15 @@ Column {
         textFormat: TextEdit.PlainText
         selectByMouse: true
         background: null
+        // Keep Qt's editing, selection, IME, and shortcuts; only replace the caret.
+        Component {
+          id: terminalCaret
+          Rectangle {
+            width: root.theme.space(8)
+            color: root.theme.alpha(root.theme.accent, 0.65)
+          }
+        }
+        Binding { target: editor; property: "cursorDelegate"; value: terminalCaret; when: root.theme.performative; restoreMode: Binding.RestoreBindingOrValue }
         Keys.onPressed: function(event) {
           if (event.matches(StandardKey.Paste)) {
             root.bridge.pasteClipboard(root.conversationId)
@@ -105,26 +142,44 @@ Column {
         }
       }
     }
-  }
-  Row {
-    width: parent.width
-    spacing: root.theme.spacing.lg
-    Item { width: Math.max(0, parent.width - (pasteHint.visible ? pasteHint.implicitWidth : 0) - sendButton.width - parent.spacing * 2); height: 1 }
-    Text {
-      Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
-      id: pasteHint
-      visible: root.spacious
-      anchors.verticalCenter: parent.verticalCenter
-      text: "Shift+Enter for a new line"
-      color: root.theme.muted; font.pixelSize: root.theme.font.caption
-    }
     ChatButton {
       id: sendButton
+      objectName: "composerSendButton"
+      anchors.right: parent.right; anchors.bottom: parent.bottom
+      anchors.margins: root.theme.space(4)
+      width: root.theme.space(root.theme.performative ? 60 : 32); height: root.theme.space(32)
       theme: root.theme; primary: true
-      text: root.bridge.sendingConversations[root.conversationId] ? "Sending" + root.bridge.transferLabel("upload", root.attachments.length ? root.attachments[0].token : "") : root.bridge.importingConversations[root.conversationId] ? "Preparing…" : "Send"
+      readonly property string statusText: root.bridge.sendingConversations[root.conversationId] ? "Sending" + root.bridge.transferLabel("upload", root.attachments.length ? root.attachments[0].token : "") : root.bridge.importingConversations[root.conversationId] ? "Preparing…" : "Send message"
+      Accessible.name: statusText
+      ToolTip.visible: hovered
+      ToolTip.text: statusText
       enabled: !root.busy
         && (root.attachments.length > 0 || root.bridge.draftFor(root.conversationId).trim().length > 0)
       onClicked: root.bridge.sendComposedMessage(root.conversationId)
+      contentItem: Item {
+        Canvas {
+          anchors.centerIn: parent; width: root.theme.space(14); height: width
+          visible: !root.busy && !root.theme.performative
+          opacity: sendButton.enabled ? 1 : 0.4
+          property color strokeColor: root.theme.terminal ? root.theme.accent : root.theme.accentText
+          onStrokeColorChanged: requestPaint()
+          onPaint: {
+            var ctx = getContext("2d")
+            ctx.reset(); ctx.strokeStyle = strokeColor; ctx.lineWidth = 1.8
+            ctx.beginPath(); ctx.moveTo(width * 0.2, height * 0.45)
+            ctx.lineTo(width * 0.5, height * 0.15); ctx.lineTo(width * 0.8, height * 0.45)
+            ctx.moveTo(width * 0.5, height * 0.15); ctx.lineTo(width * 0.5, height * 0.85); ctx.stroke()
+          }
+        }
+        Text {
+          anchors.centerIn: parent
+          visible: root.theme.performative && !root.busy
+          text: "[send]"
+          color: root.theme.selectionText; opacity: sendButton.enabled ? 1 : 0.4
+          font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
+        }
+        BusyIndicator { anchors.centerIn: parent; width: root.theme.space(18); height: width; running: root.busy; visible: running }
+      }
     }
   }
   Connections {

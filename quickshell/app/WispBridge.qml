@@ -8,6 +8,10 @@ Item {
   id: root
 
   property string clientName: "quickshell"
+  readonly property alias workspaceLayout: workspaceLayout
+  WispWorkspaceLayout { id: workspaceLayout }
+  readonly property alias chatColors: chatColors
+  WispChatColors { id: chatColors; conversations: root.conversations }
   readonly property alias friendPreferences: friendPreferences
   WispFriendPreferences {
     id: friendPreferences
@@ -16,6 +20,7 @@ Item {
   // Only the standalone desktop host plays sounds, never its tray adapter.
   property bool notificationSoundsEnabled: false
   property bool appFocused: false
+  property bool detachedChatFocused: false
   property bool chatVisible: false
   property bool receivedSnapshot: false
   property string lastReadMessageId: ""
@@ -38,6 +43,9 @@ Item {
   signal messageMutationFinished(string messageId, string action, bool success, string error)
   signal historyClearFinished(string conversationId, bool success, string error)
   signal roomActionFinished(string action, bool success, string error)
+  signal chatCreationFinished(string requestId, bool success, string conversationId, string error)
+  signal settingsSaved()
+  signal settingsSaveFailed()
   onAppFocusedChanged: markVisibleConversationRead()
   onChatVisibleChanged: markVisibleConversationRead()
   readonly property string runtimeDir: Quickshell.env("XDG_RUNTIME_DIR")
@@ -266,7 +274,12 @@ Item {
     printErrors: false
     watchChanges: true
     onFileChanged: reload()
-    onAdapterUpdated: writeAdapter()
+    onAdapterUpdated: { root.notificationError = ""; writeAdapter() }
+    onSaved: root.settingsSaved()
+    onSaveFailed: {
+      root.notificationError = "Couldn't save notification settings on this device."
+      root.settingsSaveFailed()
+    }
     JsonAdapter {
       id: notificationSettings
       property bool muted: false
@@ -593,11 +606,23 @@ Item {
     delete requests[message.id]
     var value = message.value || ({})
     var conversationId = action.conversationId
-    if (action.kind === "edit" || action.kind === "delete") {
+    if (action.kind === "setting") {
+      if (message.ok) settingsSaved()
+      else settingsSaveFailed()
+    } else if (action.kind === "edit" || action.kind === "delete") {
       messageMutationFinished(action.messageId, action.kind, !!message.ok,
         message.error ? String(message.error.message || "Could not update message") : "")
     } else if (action.kind === "clear") {
       historyClearFinished(action.conversationId, !!message.ok, message.error ? String(message.error.message || "Could not clear history") : "")
+    } else if (action.kind === "newChat") {
+      var created = !!message.ok && !!value.id
+      if (created) {
+        var next = Object.assign({}, snapshot)
+        next.conversations = conversations.filter(function(c) { return String(c.id) !== String(value.id) }).concat([value])
+        snapshot = next
+      }
+      chatCreationFinished(String(message.id), created, created ? String(value.id) : "",
+        created ? "" : message.error ? String(message.error.message || "Could not create chat") : "Could not create chat")
     } else if (action.kind === "room") {
       if (message.ok && action.action === "create_room" && value.id) activeConversationId = String(value.id)
       roomActionFinished(action.action, !!message.ok, message.error ? String(message.error.message || "Could not update room") : "")
@@ -627,6 +652,12 @@ Item {
   }
 
   function setPresence(value) { send("set_presence", { "presence": value }) }
+  function saveSetting(name, args) {
+    var id = send(name, args)
+    if (id) requests[id] = {kind: "setting"}
+    else settingsSaveFailed()
+    return id
+  }
   function editChatMessage(messageId, text) {
     var id = send("edit_message", {message_id: messageId, text: text})
     if (id) requests[id] = {kind: "edit", messageId: messageId}
@@ -642,6 +673,11 @@ Item {
   function openDirect(friendName) {
     pendingDirectName = String(friendName)
     send("open_direct", { "friend": String(friendName) })
+  }
+  function createChat(group, args) {
+    var request = send(group ? "create_group" : "open_direct", args)
+    if (request) requests[request] = {kind:"newChat"}
+    return request || ""
   }
   function selectConversation(id) {
     activeConversationId = String(id)
@@ -686,20 +722,20 @@ Item {
   function respondKnock(id, response) { send("respond_knock", { "knock_id": id, "response": response }) }
   function toggleMuted() { send("toggle_muted", {}) }
   function toggleDeafened() { send("toggle_deafened", {}) }
-  function setPushToTalk(enabled) { send("set_push_to_talk", { "enabled": enabled }) }
+  function setPushToTalk(enabled) { saveSetting("set_push_to_talk", { "enabled": enabled }) }
   function setPushToTalkShortcut(shortcut) {
-    send("set_push_to_talk_shortcut", { "shortcut": shortcut || null })
+    saveSetting("set_push_to_talk_shortcut", { "shortcut": shortcut || null })
   }
   function pushToTalkPress() { send("push_to_talk_press", {}) }
   function pushToTalkRelease() { send("push_to_talk_release", {}) }
   function refreshAudioDevices() { send("refresh_audio_devices", {}) }
-  function setInputDevice(id) { send("set_input_device", { "id": id }) }
-  function setOutputDevice(id) { send("set_output_device", { "id": id }) }
-  function setAudioPreset(preset) { send("set_audio_preset", { "preset": preset }) }
+  function setInputDevice(id) { saveSetting("set_input_device", { "id": id }) }
+  function setOutputDevice(id) { saveSetting("set_output_device", { "id": id }) }
+  function setAudioPreset(preset) { saveSetting("set_audio_preset", { "preset": preset }) }
   function refreshVideoDevices() { send("refresh_video_devices", {}) }
-  function setCameraDevice(id) { send("set_camera_device", { "id": id }) }
-  function setVideoQuality(quality) { send("set_video_quality", { "quality": quality }) }
-  function setVideoCodec(codec) { send("set_video_codec", { "codec": codec }) }
+  function setCameraDevice(id) { saveSetting("set_camera_device", { "id": id }) }
+  function setVideoQuality(quality) { saveSetting("set_video_quality", { "quality": quality }) }
+  function setVideoCodec(codec) { saveSetting("set_video_codec", { "codec": codec }) }
   function openSurface() { send("open_surface", {}) }
   function closeSurface() { send("close_surface", {}) }
   function toggleSurface() { mediaState.surface_open ? closeSurface() : openSurface() }
@@ -716,10 +752,7 @@ Item {
     if (shareStarting) return
     send("share", { "enabled": !sharing, "source": "portal" })
   }
-  function toggleCamera() {
-    if (cameraStarting) return
-    send("camera", { "enabled": !cameraActive })
-  }
+  function stopCamera() { send("camera", { "enabled": false }) }
 
   Component {
     id: socketComponent

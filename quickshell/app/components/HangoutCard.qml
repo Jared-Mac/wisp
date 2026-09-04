@@ -7,13 +7,14 @@ Rectangle {
   required property var theme
   signal joined()
 
-  implicitHeight: root.theme.space(72)
+  objectName: "roomCard"
+  implicitHeight: root.theme.space(root.theme.performative ? 42 : 48)
   radius: root.theme.cornerRadius
-  color: root.theme.alpha(root.theme.foreground, 0.055)
-  border.width: 1
+  color: root.theme.performative ? root.theme.surface : root.theme.alpha(root.theme.foreground, 0.055)
+  border.width: root.theme.performative ? 0 : 1
   border.color: root.hasActiveMember()
     ? root.theme.alpha(root.theme.accent, 0.65)
-    : root.theme.alpha(root.theme.foreground, 0.10)
+    : root.theme.roomBorder
 
   function memberSpeaking(name) {
     var active = bridge.activeSpeakers || []
@@ -64,12 +65,15 @@ Rectangle {
 
         delegate: Row {
           id: memberRow
+          objectName: "roomMember-" + index
           required property var modelData
           required property int index
           spacing: root.theme.spacing.xs
-          Binding on width { when: root.theme.terminal; value: Math.max(0, (hangoutInfo.width - Math.max(0, (root.hangout.members || []).length - 1) * memberRow.spacing) / Math.max(1, (root.hangout.members || []).length)); restoreMode: Binding.RestoreBindingOrValue }
+          readonly property real allottedWidth: Math.max(0, (hangoutInfo.width - Math.max(0, (root.hangout.members || []).length - 1) * memberRow.spacing) / Math.max(1, (root.hangout.members || []).length))
+          Binding on width { when: root.theme.terminal; value: root.theme.performative ? Math.min(memberRow.allottedWidth, memberName.implicitWidth + mutedIcon.width + deafenedIcon.width + memberRow.spacing * 2) : memberRow.allottedWidth; restoreMode: Binding.RestoreBindingOrValue }
 
           Text {
+            id: memberName
             Binding on width { when: root.theme.terminal; value: Math.max(0, memberRow.width - mutedIcon.width - deafenedIcon.width - memberRow.spacing * 2); restoreMode: Binding.RestoreBindingOrValue }
             elide: root.theme.terminal ? Text.ElideRight : Text.ElideNone
             anchors.verticalCenter: parent.verticalCenter
@@ -108,7 +112,7 @@ Rectangle {
     Text {
       Binding on width { when: root.theme.terminal; value: hangoutInfo.width; restoreMode: Binding.RestoreBindingOrValue }
       elide: root.theme.terminal ? Text.ElideRight : Text.ElideNone
-      text: root.hangout.label || "Room"
+      text: (root.theme.performative ? "# " : "") + (root.hangout.label || "Room")
       color: root.theme.muted
       font.family: root.theme.font.family
       font.pixelSize: root.theme.font.caption
@@ -123,13 +127,13 @@ Rectangle {
     width: joinText.implicitWidth + root.theme.spacing.lg * 2
     height: root.theme.space(30)
     radius: root.theme.cornerRadius
-    color: joinMouse.containsMouse ? Qt.lighter(root.theme.accent, 1.12) : root.theme.accent
+    color: root.theme.performative ? (joinMouse.containsMouse ? root.theme.alpha(root.theme.accent, 0.18) : "transparent") : joinMouse.containsMouse ? Qt.lighter(root.theme.accent, 1.12) : root.theme.accent
 
     Text {
       id: joinText
       anchors.centerIn: parent
-      text: root.bridge.selfState.hangout_id === root.hangout.id ? "HERE" : "JOIN"
-      color: root.theme.accentText
+      text: root.theme.performative ? (root.bridge.selfState.hangout_id === root.hangout.id ? "[here]" : "[join]") : root.bridge.selfState.hangout_id === root.hangout.id ? "HERE" : "JOIN"
+      color: root.theme.performative ? root.theme.accent : root.theme.accentText
       font.family: root.theme.font.family
       font.pixelSize: root.theme.font.caption
       font.weight: Font.Bold

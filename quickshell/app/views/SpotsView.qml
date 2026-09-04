@@ -18,19 +18,20 @@ Column {
     })
   }
   width: parent ? parent.width : 0
-  spacing: root.theme.spacing.sm
+  spacing: root.theme.spacing.xs
   visible: availableSpots.length > 0
 
   Repeater {
     model: root.availableSpots
     delegate: Rectangle {
+      objectName: "availableRoomCard"
       required property var modelData
       width: root.width
-      height: root.theme.space(52)
+      height: root.theme.space(44)
       radius: root.theme.cornerRadius
-      color: root.theme.alpha(root.theme.foreground, 0.05)
-      border.width: root.theme.terminal ? 1 : 0
-      border.color: root.theme.separator
+      color: root.theme.performative ? root.theme.surface : root.theme.alpha(root.theme.foreground, 0.05)
+      border.width: root.theme.performative ? 0 : root.theme.terminal ? 1 : 0
+      border.color: root.theme.roomBorder
 
       Column {
         id: spotInfo
@@ -42,7 +43,7 @@ Column {
         Text {
           Binding on width { when: root.theme.terminal; value: spotInfo.width; restoreMode: Binding.RestoreBindingOrValue }
           elide: root.theme.terminal ? Text.ElideRight : Text.ElideNone
-          text: String(modelData.name || "Spot")
+          text: (root.theme.performative ? "# " : "") + String(modelData.name || "Spot")
           color: root.theme.foreground
           font.family: root.theme.font.family
           font.pixelSize: root.theme.font.body
@@ -69,14 +70,14 @@ Column {
         anchors.rightMargin: root.theme.spacing.lg
         anchors.verticalCenter: parent.verticalCenter
         radius: root.theme.cornerRadius
-        color: joinMouse.containsMouse
+        color: root.theme.performative ? (joinMouse.containsMouse ? root.theme.alpha(root.theme.accent, 0.18) : "transparent") : joinMouse.containsMouse
           ? root.theme.alpha(root.theme.accent, 0.8) : root.theme.accent
 
         Text {
           id: joinText
           anchors.centerIn: parent
-          text: "Join"
-          color: root.theme.accentText
+          text: root.theme.performative ? "[join]" : "Join"
+          color: root.theme.performative ? root.theme.accent : root.theme.accentText
           font.family: root.theme.font.family
           font.pixelSize: root.theme.font.caption
           font.weight: Font.DemiBold

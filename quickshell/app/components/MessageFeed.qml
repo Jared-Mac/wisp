@@ -22,16 +22,16 @@ Rectangle {
     editField.forceActiveFocus()
   }
   radius: theme.cornerRadius
-  border.width: theme.terminal ? 1 : 0
+  border.width: theme.performative ? 0 : theme.terminal ? 1 : 0
   border.color: theme.separator
-  color: theme.alpha(theme.foreground, 0.025)
+  color: theme.performative ? theme.background : theme.alpha(theme.foreground, 0.025)
   onConversationIdChanged: Qt.callLater(function() { messages.positionViewAtEnd() })
   ListView {
     id: messages
     anchors.fill: parent
-    anchors.margins: root.theme.space(16)
+    anchors.margins: root.theme.space(root.theme.performative ? 6 : 16)
     clip: true
-    spacing: root.theme.space(18)
+    spacing: root.theme.space(root.theme.performative ? 12 : 18)
     model: root.bridge.messagesFor(root.conversationId)
     property bool followBottom: true
     onMovementEnded: followBottom = atYEnd
@@ -44,18 +44,18 @@ Rectangle {
       readonly property bool isFile: modelData.content_type === "application/octet-stream"
       readonly property string imageUrl: root.bridge.chatImageUrls[String(modelData.id)] || ""
       width: messages.width
-      spacing: root.theme.spacing.md
+      spacing: root.theme.performative ? root.theme.space(2) : root.theme.spacing.md
       Component.onCompleted: if (isImage) root.bridge.loadChatImage(String(modelData.id))
       Row {
         spacing: root.theme.spacing.lg
         Text {
-          text: String(message.modelData.sender.display_name || "")
-          color: message.modelData.sender.id === root.bridge.selfState.id ? root.theme.accent : root.theme.foreground
+          text: root.theme.performative ? "<" + String(message.modelData.sender.display_name || "") + ">" : String(message.modelData.sender.display_name || "")
+          color: message.modelData.sender.id === root.bridge.selfState.id ? root.theme.accent : root.theme.secondaryAccent
           font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption; font.bold: true
         }
         Text {
           Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
-          text: Qt.formatDateTime(new Date(message.modelData.created_at), "MMM d · h:mm AP")
+          text: root.theme.performative ? "[" + Qt.formatDateTime(new Date(message.modelData.created_at), "HH:mm:ss") + "]" : Qt.formatDateTime(new Date(message.modelData.created_at), "MMM d · h:mm AP")
           color: root.theme.muted; font.pixelSize: root.theme.font.caption
         }
         Text {
@@ -71,7 +71,7 @@ Rectangle {
           implicitWidth: root.theme.space(26); implicitHeight: root.theme.space(20)
           onClicked: messageMenu.open()
           Menu {
-            ThemeControlStyle { theme: root.theme; control: messageMenu }
+            ThemeControlStyle { theme: root.theme; control: messageMenu; outline: true; menuOutline: true }
             Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
             Binding on font.pixelSize { when: root.theme.terminal; value: root.theme.font.caption; restoreMode: Binding.RestoreBindingOrValue }
             id: messageMenu
@@ -187,11 +187,11 @@ Rectangle {
     Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
     anchors.centerIn: parent
     visible: messages.count === 0
-    text: "This is the start of your conversation."
+    text: root.theme.performative ? "-- beginning of chat log --" : "This is the start of your conversation."
     color: root.theme.muted; font.pixelSize: root.theme.font.body
   }
   Dialog {
-    ThemeControlStyle { theme: root.theme; control: editDialog }
+    ThemeControlStyle { theme: root.theme; control: editDialog; outline: true }
     Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
     Binding on font.pixelSize { when: root.theme.terminal; value: root.theme.font.caption; restoreMode: Binding.RestoreBindingOrValue }
     id: editDialog
@@ -236,7 +236,7 @@ Rectangle {
     }
   }
   Dialog {
-    ThemeControlStyle { theme: root.theme; control: deleteDialog }
+    ThemeControlStyle { theme: root.theme; control: deleteDialog; outline: true }
     Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
     Binding on font.pixelSize { when: root.theme.terminal; value: root.theme.font.caption; restoreMode: Binding.RestoreBindingOrValue }
     id: deleteDialog

@@ -17,7 +17,9 @@ for environment in cachyos desktop omarchy unknown; do
     if [[ $environment != omarchy && $requested != legacy && $requested != classic ]]; then
       if [[ $environment != unknown || $requested == terminal || $requested == terminal-experimental ]]; then expected=terminal; fi
     fi
-    XDG_CONFIG_HOME="$test_dir/config" WISP_APPEARANCE_ENVIRONMENT="$environment" WISP_EXPECT_APPEARANCE="$expected" \
+    expected_palette=wisp
+    if [[ $environment == cachyos || $environment == desktop ]] && [[ $requested == missing || $requested == invalid ]]; then expected_palette=performative; fi
+    XDG_CONFIG_HOME="$test_dir/config" WISP_APPEARANCE_ENVIRONMENT="$environment" WISP_EXPECT_APPEARANCE="$expected" WISP_EXPECT_PALETTE="$expected_palette" \
       QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software timeout 10 qs --path "$test_dir" >"$test_dir/log" 2>&1
     if ! rg -q APPEARANCE_OK "$test_dir/log" || rg -q 'APPEARANCE_FAILED|Binding loop|TypeError|ReferenceError|Cannot assign|Failed to load' "$test_dir/log"; then
       cat "$test_dir/log"; exit 1
@@ -34,7 +36,7 @@ for change in legacy terminal; do
   if ! rg -q APPEARANCE_SWITCH_OK "$test_dir/log" || rg -q 'APPEARANCE_FAILED|Binding loop|TypeError|ReferenceError|Cannot assign|Failed to load' "$test_dir/log"; then cat "$test_dir/log"; exit 1; fi
   jq -e --arg profile "$change" '.profile == $profile' "$test_dir/config/wisp/appearance.json" >/dev/null
 done
-for palette in graphite violet ember wisp; do
+for palette in graphite violet ember performative wisp; do
   for reload in 0 1; do
     XDG_CONFIG_HOME="$test_dir/config" WISP_APPEARANCE_ENVIRONMENT=desktop \
       WISP_PALETTE_PERSIST="$palette" WISP_PALETTE_RELOAD="$reload" QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software \

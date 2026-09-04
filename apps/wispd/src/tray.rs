@@ -198,9 +198,9 @@ impl ksni::Tray for WispTray {
         };
 
         vec![
-            action("Show Wisp panel", "window-new", TrayAction::Show),
-            action("Hide Wisp panel", "window-close", TrayAction::Hide),
-            action("Open Wisp app", "view-fullscreen", TrayAction::OpenApp),
+            action("Open App", "view-fullscreen", TrayAction::OpenApp),
+            action("Show tray popup", "window-new", TrayAction::Show),
+            action("Hide tray popup", "window-close", TrayAction::Hide),
             MenuItem::Separator,
             muted.into(),
             deafened.into(),
@@ -430,6 +430,26 @@ fn draw_state_badge(data: &mut [u8], dimension: usize, size: i32, state: AudioSt
 #[cfg(test)]
 mod tests {
     use super::{AudioState, TrayState, WispTray, waveform_icon};
+
+    #[test]
+    fn open_app_is_first_in_tray_context_menu() {
+        use ksni::Tray;
+        let (actions, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+        let mut tray = WispTray {
+            actions,
+            state: TrayState::new((false, false), (false, false), 0),
+        };
+        let menu = tray.menu();
+        let ksni::MenuItem::Standard(item) = &menu[0] else {
+            panic!("expected Open App action")
+        };
+        assert_eq!(item.label, "Open App");
+        (item.activate)(&mut tray);
+        assert!(matches!(
+            receiver.try_recv(),
+            Ok(super::TrayAction::OpenApp)
+        ));
+    }
 
     #[test]
     fn tray_icon_is_argb32() {

@@ -40,6 +40,7 @@ FloatingWindow {
   Rectangle {
     anchors.fill: parent
     color: root.theme.background
+    SurfaceOutline { theme: root.theme; radius: 0 }
 
     Column {
       id: previewColumn

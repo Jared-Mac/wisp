@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Appearance launch metadata only. Never infer an integration from a user name
 # or from user accounts. Omarchy keeps its host appearance; other desktop
-# launches default to Terminal, with Classic available in Settings.
+# launches default to Performative, with other styles available in Settings.
 export WISP_APPEARANCE_ENVIRONMENT=desktop
 if [[ ${WISP_INTEGRATION:-} == omarchy || -n ${OMARCHY_PATH:-} \
     || -d ${XDG_CONFIG_HOME:-$HOME/.config}/omarchy \

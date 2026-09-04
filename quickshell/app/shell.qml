@@ -84,7 +84,9 @@ ShellRoot {
       "visible": appWindow.visible,
       "width": appWindow.width,
       "height": appWindow.height,
-      "wide_layout": appWindow.width >= appTheme.space(760),
+      "wide_layout": appWindow.width - appTheme.spacing.huge * 2 >= appTheme.space(600)
+        && ["top", "bottom"].indexOf(bridge.workspaceLayout.dock) < 0,
+      "workspace_dock": bridge.workspaceLayout.dock,
       "appearance": appTheme.profile,
       "palette": appTheme.paletteName,
       "appearance_environment": appearance.environment,
@@ -130,6 +132,11 @@ ShellRoot {
     id: settingsFile
     path: Quickshell.statePath("desktop.json")
     onAdapterUpdated: writeAdapter()
+    onSaved: bridge.settingsSaved()
+    onSaveFailed: {
+      bridge.lastError = "Couldn't save the desktop position."
+      bridge.settingsSaveFailed()
+    }
 
     JsonAdapter {
       id: appSettings
@@ -141,10 +148,11 @@ ShellRoot {
     id: bridge
     clientName: "quickshell-desktop"
     notificationSoundsEnabled: true
-    appFocused: (appWindow.visible && !!appWindow.contentItem.window && appWindow.contentItem.window.active)
-      || (panelWindow.visible && !!panelWindow.contentItem.window && panelWindow.contentItem.window.active)
-      || (previewWindow.visible && !!previewWindow.contentItem.window && previewWindow.contentItem.window.active)
-    chatVisible: appWindow.chatVisible || panelWindow.chatVisible
+    appFocused: (appWindow.visible && appWindow.contentItem.Window.active)
+      || detachedChatFocused
+      || (panelWindow.visible && panelWindow.contentItem.Window.active)
+      || (previewWindow.visible && previewWindow.contentItem.Window.active)
+    chatVisible: appWindow.chatVisible || panelWindow.chatVisible || detachedChatFocused
   }
 
   // Compatibility endpoint: direct Wisp launches now mean the full app.

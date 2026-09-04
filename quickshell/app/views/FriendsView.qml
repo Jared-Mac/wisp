@@ -8,15 +8,17 @@ Column {
   required property var theme
   signal selected()
   property bool collapsible: false
+  property bool showHeader: true
   readonly property bool collapsed: collapsible && bridge.friendPreferences.collapsed
   width: parent ? parent.width : 0
-  spacing: root.theme.spacing.xs
+  spacing: root.theme.space(1)
 
   Button {
     id: collapseButton
+    visible: root.showHeader
     objectName: "friends-collapse"
     width: parent.width
-    height: root.collapsible ? root.theme.space(30) : root.theme.space(20)
+    height: root.collapsible ? root.theme.space(root.theme.performative ? 26 : 30) : root.theme.space(20)
     enabled: root.collapsible
     Accessible.name: root.collapsed ? "Expand friends" : "Collapse friends"
     onClicked: root.bridge.friendPreferences.toggleCollapsed()
@@ -29,8 +31,8 @@ Column {
     contentItem: Item {
       Text {
         anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
-        text: "FRIENDS" + (root.collapsible ? " · " + root.bridge.friends.length : "")
-        color: root.theme.muted
+        text: (root.theme.performative ? "┌─ 02: /friends" : "FRIENDS") + (root.collapsible ? " · " + root.bridge.friends.length : "")
+        color: root.theme.performative ? root.theme.secondaryAccent : root.theme.muted
         font.family: root.theme.font.family
         font.pixelSize: root.theme.font.caption; font.weight: Font.Bold
         font.letterSpacing: root.theme.terminal ? 1 : 0

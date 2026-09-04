@@ -43,7 +43,7 @@ Column {
   Flow {
     width: parent.width; spacing: root.theme.spacing.lg
     Repeater {
-      model: [{key:"wisp",label:"Wisp blue"},{key:"graphite",label:"Graphite"},{key:"violet",label:"Violet"},{key:"ember",label:"Ember"}]
+      model: [{key:"wisp",label:"Wisp blue"},{key:"graphite",label:"Graphite"},{key:"violet",label:"Violet"},{key:"ember",label:"Ember"},{key:"performative",label:"Performative"}]
       ChatButton {
         required property var modelData
         objectName: "palette-" + modelData.key
@@ -53,6 +53,13 @@ Column {
         onClicked: root.appearance.setPalette(modelData.key)
       }
     }
+  }
+  Text {
+    width: parent.width; wrapMode: Text.WordWrap
+    visible: !!root.appearance && root.appearance.palette === "performative"
+    text: "Performative · a Linux-terminal interface: monospace, numbered frames, bracketed controls, prompt editor, and a live status line. Overrides the base style while selected."
+    color: root.theme.muted
+    font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
   }
   Text {
     width: parent.width; wrapMode: Text.WordWrap

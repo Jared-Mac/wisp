@@ -2,7 +2,7 @@ import QtQuick
 import QtQuick.Controls
 
 Dialog {
-  ThemeControlStyle { theme: root.theme; control: root }
+  ThemeControlStyle { theme: root.theme; control: root; outline: true }
   Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
   Binding on font.pixelSize { when: root.theme.terminal; value: root.theme.font.caption; restoreMode: Binding.RestoreBindingOrValue }
   id: root
@@ -25,7 +25,7 @@ Dialog {
   implicitHeight: 300
   modal: true
   closePolicy: clearing ? Popup.NoAutoClose : Popup.CloseOnEscape
-  title: forEveryone ? "Clear room chat for everyone?" : "Clear Chat History?"
+  title: forEveryone ? "Clear chat for everyone?" : "Clear Chat History?"
   palette.window: theme.surface; palette.windowText: theme.foreground
   background: Rectangle { color: root.theme.surface; radius: root.theme.cornerRadius; border.color: root.theme.alpha(root.theme.foreground, 0.12) }
   contentItem: Column {
@@ -35,7 +35,7 @@ Dialog {
       Binding on font.pixelSize { when: root.theme.terminal; value: root.theme.font.body; restoreMode: Binding.RestoreBindingOrValue }
       width: parent.width; wrapMode: Text.Wrap
       text: root.forEveryone
-        ? "This will permanently clear this room's chat history and attachments for all users, including files marked Keep. This cannot be reversed."
+        ? "This will permanently clear this chat's history and attachments for all users, including files marked Keep. This cannot be reversed."
         : "Clear your chat history? In a DM, messages and attachments are permanently removed from server storage once both participants have cleared them. This cannot be reversed."
       color: root.theme.foreground
     }

@@ -38,6 +38,7 @@ Rectangle {
   color: root.theme.surface
   border.width: 1
   border.color: root.theme.alpha(root.theme.accent, 0.42)
+  SurfaceOutline { theme: root.theme }
 
   Rectangle {
     id: header

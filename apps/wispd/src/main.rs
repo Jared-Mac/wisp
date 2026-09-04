@@ -1028,6 +1028,24 @@ impl Daemon {
                 self.refresh("conversation_changed").await?;
                 Ok(Some(serde_json::to_value(conversation)?))
             }
+            "create_group" => {
+                let response = self
+                    .api
+                    .request(reqwest::Method::POST, "/v1/conversations/group")
+                    .json(&command.args)
+                    .send()
+                    .await?;
+                if response.status() == reqwest::StatusCode::NOT_FOUND {
+                    bail!(
+                        "Group chats require a server update. Your selected friends and group name have been kept."
+                    );
+                }
+                let conversation: wisp_protocol::ConversationView = decode(response).await?;
+                if let Err(error) = self.refresh("conversation_changed").await {
+                    warn!(%error, "group created but snapshot refresh failed");
+                }
+                Ok(Some(serde_json::to_value(conversation)?))
+            }
             "create_room" | "invite_to_room" | "set_room_admin" => {
                 let endpoint = match command.name.as_str() {
                     "create_room" => "/v1/rooms",
@@ -1466,6 +1484,14 @@ impl Daemon {
             .await;
             return Ok(Some(json!({"camera": false})));
         }
+        let expected_room = args
+            .get("expected_hangout_id")
+            .map(|_| string_arg(args, "expected_hangout_id"))
+            .transpose()?;
+        let expected_camera = args
+            .get("expected_camera_id")
+            .map(|_| string_arg(args, "expected_camera_id"))
+            .transpose()?;
         self.set_local_media(
             |state| {
                 state.self_state.media.camera.starting = true;
@@ -1474,7 +1500,11 @@ impl Daemon {
             "camera_starting",
         )
         .await;
-        match self.media.start_camera().await {
+        match self
+            .media
+            .start_camera(expected_room.as_deref(), expected_camera.as_deref())
+            .await
+        {
             Ok(info) => {
                 let result = serde_json::to_value(&info.state)?;
                 self.set_local_media(

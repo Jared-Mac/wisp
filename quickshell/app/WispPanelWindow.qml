@@ -1,5 +1,6 @@
 import QtQuick
 import Quickshell
+import "components"
 
 // Compact layer-shell host used by the generic system-tray integration. The
 // Omarchy adapter embeds the same WispContent presentation in its own popup.
@@ -12,7 +13,7 @@ PanelWindow {
   required property var anchorController
   property int verticalInset: theme.space(12)
   property bool localPreviewsPoppedOut: false
-  readonly property bool chatVisible: visible && !content.settingsOpen
+  readonly property bool chatVisible: visible && content.showingChats
   signal hideRequested()
   signal appRequested()
   signal popOutLocalPreviewsRequested()
@@ -56,6 +57,7 @@ PanelWindow {
   Rectangle {
     anchors.fill: parent
     color: root.theme.background
+    SurfaceOutline { theme: root.theme; radius: 0 }
 
     WispContent {
       id: content
