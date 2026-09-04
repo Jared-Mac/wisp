@@ -8,7 +8,7 @@ Item {
   property string title: ""
   property color ink: theme.surfaceBorder
   property bool emphasized: false
-  visible: theme.performative
+  visible: theme.tui
   Rectangle {
     anchors.fill: parent; anchors.topMargin: root.theme.space(7)
     color: "transparent"; border.width: root.emphasized ? 2 : 1; border.color: root.ink

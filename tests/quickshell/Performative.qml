@@ -67,7 +67,9 @@ ShellRoot {
       test.check(button.contentItem.text === "[Settings]", "controls use brackets")
       test.check(button.background.color == "#b7baad" && button.contentItem.color == "#000000", "selection uses legible ash inverse, not mint")
       test.check(theme.statusBackground != theme.accent && theme.statusText == theme.foreground, "status bar uses a neutral dark surface")
-      test.check(trayComposer.height <= theme.space(64), "tray prompt and editor stay compact")
+      // Font fallback metrics can round the prompt line one or two pixels up.
+      test.check(trayComposer.height <= theme.space(66),
+        "tray prompt and editor stay compact (height=" + trayComposer.height + ")")
       test.check(test.find(room, "roomMember-0").width < theme.space(80)
         && test.find(room, "roomMember-1").x < theme.space(90), "short room names stay grouped")
       test.check(test.find(media, "mediaAction-share").width < media.width / 2, "media actions use content widths")

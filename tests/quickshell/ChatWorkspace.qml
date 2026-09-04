@@ -73,6 +73,7 @@ ShellRoot {
       if ("profile" in theme) theme.profile = Quickshell.env("WISP_TEST_ADAPTER") === "omarchy" ? "legacy" : Quickshell.env("WISP_TEST_THEME") || "legacy"
       if (Quickshell.env("WISP_TEST_ADAPTER") === "omarchy") {
         // Representative host overrides, not Jared's settings or machine.
+        tuiTreatment = true
         foreground = "#d8dee9"; background = "#242933"; surface = "#242933"
         accent = "#81a1c1"; muted = "#a0a8b7"; danger = "#bf616a"
         cornerRadius = 7; fontFamily = "DejaVu Sans"; captionSize = 13; bodySize = 15; titleSize = 19; spacingScale = 1.1
@@ -131,6 +132,15 @@ ShellRoot {
       {id:"dm",kind:"direct",label:"Jared",unread_count:2},
       {id:"friends",kind:"circle",label:"Friends",unread_count:0}
     ]
+    if (test.mode === "roomcleanup") {
+      data.conversations.push(
+        {id:"hangout:ended-empty",kind:"hangout",label:"Room",unread_count:0,last_message:null},
+        {id:"hangout:ended-history",kind:"hangout",label:"Room",unread_count:0,
+          last_message:{id:"history",conversation_id:"hangout:ended-history",sender:{id:"jared",display_name:"Jared"},created_at:"2026-09-03T17:03:00Z",content_type:"text/plain",payload:"Saved history"}},
+        {id:"hangout:active-empty",kind:"hangout",label:"Room",unread_count:0,last_message:null}
+      )
+      data.hangouts = [{id:"active-empty",label:null,members:[],sharing:[]}]
+    }
     data.friends = [{id:"jared",display_name:"Jared",online:true,presence:"open"}, {id:"charlie",display_name:"Charlie",online:false,presence:"away"}]
     if (test.mode === "presence" || test.mode === "panelpresence") {
       data.friends = [
@@ -154,6 +164,17 @@ ShellRoot {
       {id:"3",conversation_id:"porch",sender:{id:"jared",display_name:"Jared"},created_at:"2026-09-03T17:02:00Z",content_type:"text/plain",payload:"Perfect. We can keep Porch and our DMs side by side."}
     ]
     bridge.applySnapshot(data)
+    if (test.mode === "roomcleanup") {
+      test.check(!bridge.conversationById("hangout:ended-empty"), "ended empty temporary rooms are hidden")
+      test.check(!!bridge.conversationById("hangout:ended-history"), "ended rooms with visible history remain available")
+      test.check(!!bridge.conversationById("hangout:active-empty"), "active empty rooms remain available")
+      test.check(bridge.snapshot.conversations.length === 6, "room cleanup is a non-destructive presentation filter")
+      bridge.selectConversation("hangout:active-empty")
+      var ended = JSON.parse(JSON.stringify(bridge.snapshot))
+      ended.hangouts = []
+      bridge.applySnapshot(ended)
+      test.check(bridge.activeConversationId === "", "an open empty room closes when its call ends")
+    }
     bridge.selectConversation("porch")
     bridge.setDraft("porch", "Here's the latest version…")
     bridge.setDraft("dm", "A separate DM draft")
@@ -267,6 +288,12 @@ ShellRoot {
       if (performative) performative.clicked()
       test.check(theme.paletteName === "performative" && theme.background == "#000000", "Settings selects Performative live")
       test.check(bridge.sent.length === before && bridge.draftFor("porch") === draft, "palette switching preserves drafts and sends no commands")
+      var herdr = test.findItem(window.contentItem, "palette-herdr")
+      test.check(!!herdr && herdr.enabled, "Herdr palette is available in Settings")
+      if (herdr) herdr.clicked()
+      test.check(theme.paletteName === "herdr" && theme.background == "#001419"
+        && theme.accent == "#29a298" && theme.tui, "Settings selects Herdr live")
+      test.check(bridge.sent.length === before && bridge.draftFor("porch") === draft, "Herdr switching preserves drafts and sends no commands")
       themeAppearance.setPalette(Quickshell.env("WISP_TEST_PALETTE") || "wisp")
     }
   }
@@ -435,7 +462,7 @@ ShellRoot {
       if (star) {
         var label = test.findItem(star.parent, "friendName")
         test.check(!!label && star.x >= label.x + label.width, "star is to the right of the name")
-        test.check(star.parent.height === theme.space(theme.performative ? 28 : 32), "friends use compact rows")
+        test.check(star.parent.height === theme.space(theme.tui ? 28 : 32), "friends use compact rows")
         test.check(star.opacity === 0, "favorite star hidden without hover or focus")
         star.forceActiveFocus(Qt.TabFocusReason)
         test.check(star.opacity === 1, "keyboard focus reveals favorite action")
@@ -745,7 +772,7 @@ ShellRoot {
       var selector=test.findItem(window.contentItem,"compactChatSelector")
       test.check(selector && !test.findItem(window.contentItem,"chatTabs"),"dropdown is default even in full-width chat")
       var data=JSON.parse(JSON.stringify(bridge.snapshot))
-      for (var i=0;i<80;i++) data.conversations.push({id:"room-"+i,kind:"hangout",label:"Room "+String(i).padStart(2,"0"),unread_count:i%3})
+      for (var i=0;i<80;i++) data.conversations.push({id:"room-"+i,kind:"hangout",label:"Room "+String(i).padStart(2,"0"),spot_id:"room-"+i,unread_count:i%3})
       data.conversations.push({id:"closed-friend",kind:"direct",label:"Archived Friend",tab_closed:true,unread_count:5})
       bridge.snapshot=data
       selector.clicked()
@@ -1098,6 +1125,11 @@ ShellRoot {
       }
       if (test.mode !== "preview") {
         var page = test.findItem(surface, "wispContent")
+        if (Quickshell.env("WISP_TEST_ADAPTER") === "omarchy" && test.compactMode) {
+          var statusLine = test.findItem(surface, "terminalStatusLine")
+          test.check(theme.hostManaged && theme.tui, "Omarchy popup combines host styling with compact TUI structure")
+          test.check(!!statusLine && statusLine.visible, "Omarchy popup includes the live compact status line")
+        }
         if (page.inlineHeader) {
           var identity = test.findItem(surface, "identityMenuButton")
           var access = test.findItem(surface, "alwaysVisibleControls")
@@ -1115,7 +1147,7 @@ ShellRoot {
       }
       if (test.mode === "media" || test.mode === "panelmedia") {
         var room = test.findItem(surface, "roomCard")
-        test.check(!!room && room.height === theme.space(theme.performative ? 42 : 48), "occupied room cards use compact height")
+        test.check(!!room && room.height === theme.space(theme.tui ? 42 : 48), "occupied room cards use compact height")
       }
       test.check(window.width === theme.space(test.testWidth), "app width")
       test.check(window.height === theme.space(test.testHeight), "app height")

@@ -122,7 +122,9 @@ presentations over one bridge: a compositor-managed `FloatingWindow` app and a
 compact layer-shell `PanelWindow` for the generic system tray. The shared
 content switches between one and two columns as the application window changes
 size. `quickshell/Panel.qml` is a thin optional Omarchy adapter that embeds the
-same compact presentation in Omarchy's native anchored popup. Each active
+same compact presentation in Omarchy's native anchored popup. It opts into the
+shared TUI structure while overriding visual tokens with Omarchy's host colors,
+font, scale, corners, and geometry. Each active
 frontend has its own pushed IPC connection; none owns call state.
 
 The Voice MVP reliability gate is intentionally short and deterministic rather

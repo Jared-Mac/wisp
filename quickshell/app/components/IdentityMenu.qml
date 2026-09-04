@@ -27,8 +27,8 @@ Button {
   contentItem: Item {
     Image {
       id: logo
-      width: root.theme.performative ? 0 : root.theme.space(30); height: width
-      visible: !root.theme.performative
+      width: root.theme.tui ? 0 : root.theme.space(30); height: width
+      visible: !root.theme.tui
       anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
       source: root.logoSource; fillMode: Image.PreserveAspectFit
     }
@@ -38,9 +38,9 @@ Button {
       anchors.verticalCenter: parent.verticalCenter
       Text {
         id: titleText
-        text: root.theme.performative ? String(root.bridge.selfState.display_name || root.bridge.configuredProfile || "user").toLowerCase() + "@wisp:~" : "Wisp"
+        text: root.theme.tui ? String(root.bridge.selfState.display_name || root.bridge.configuredProfile || "user").toLowerCase() + "@wisp:~" : "Wisp"
         width: parent.width; elide: Text.ElideRight
-        color: root.theme.performative ? root.theme.accent : root.theme.foreground
+        color: root.theme.tui ? root.theme.accent : root.theme.foreground
         font.family: root.theme.font.family; font.pixelSize: root.theme.font.title; font.weight: Font.DemiBold
       }
       Item {
@@ -54,7 +54,7 @@ Button {
         Text {
           id: statusText
           anchors.left: dot.right; anchors.leftMargin: root.theme.spacing.xs; anchors.right: parent.right
-          text: root.theme.performative ? root.bridge.selfStatusLabel.toLowerCase() + " / account" : String(root.bridge.selfState.display_name || root.bridge.configuredProfile || "Unknown profile") + " · " + root.bridge.selfStatusLabel
+          text: root.theme.tui ? root.bridge.selfStatusLabel.toLowerCase() + " / account" : String(root.bridge.selfState.display_name || root.bridge.configuredProfile || "Unknown profile") + " · " + root.bridge.selfStatusLabel
           elide: Text.ElideRight
           color: root.bridge.hasError ? root.theme.danger : root.theme.muted
           font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
@@ -64,7 +64,7 @@ Button {
     Text {
       id: arrow
       anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
-      text: root.theme.performative ? "[≡]" : "▾"; color: root.theme.muted
+      text: root.theme.tui ? "[≡]" : "▾"; color: root.theme.muted
       font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
     }
   }

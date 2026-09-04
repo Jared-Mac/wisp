@@ -26,6 +26,32 @@ for environment in cachyos desktop omarchy unknown; do
     fi
   done
 done
+mkdir -p "$test_dir/standalone-default/wisp"
+XDG_CONFIG_HOME="$test_dir/standalone-default" \
+  WISP_APPEARANCE_ENVIRONMENT=omarchy WISP_TEST_UNMANAGED=1 \
+  WISP_EXPECT_APPEARANCE=terminal \
+  WISP_EXPECT_PALETTE=performative \
+  QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software \
+  timeout 10 qs --path "$test_dir" >"$test_dir/log" 2>&1
+if ! rg -q 'APPEARANCE_OK terminal' "$test_dir/log" \
+    || rg -q 'APPEARANCE_FAILED|Binding loop|TypeError|ReferenceError|Cannot assign|Failed to load' "$test_dir/log"; then
+  cat "$test_dir/log"; exit 1
+fi
+mkdir -p "$test_dir/standalone-switch/wisp"
+jq -cn '{profile:"terminal",palette:"wisp"}' \
+  >"$test_dir/standalone-switch/wisp/appearance.json"
+XDG_CONFIG_HOME="$test_dir/standalone-switch" \
+  WISP_APPEARANCE_ENVIRONMENT=omarchy WISP_TEST_UNMANAGED=1 \
+  WISP_EXPECT_APPEARANCE=terminal \
+  WISP_TEST_CHANGE=legacy WISP_EXPECT_CHANGED=legacy \
+  QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software \
+  timeout 10 qs --path "$test_dir" >"$test_dir/log" 2>&1
+if ! rg -q APPEARANCE_SWITCH_OK "$test_dir/log" \
+    || rg -q 'APPEARANCE_FAILED|Binding loop|TypeError|ReferenceError|Cannot assign|Failed to load' "$test_dir/log"; then
+  cat "$test_dir/log"; exit 1
+fi
+jq -e '.profile == "legacy"' \
+  "$test_dir/standalone-switch/wisp/appearance.json" >/dev/null
 for change in legacy terminal; do
   current=$(jq -r '.profile' "$test_dir/config/wisp/appearance.json" 2>/dev/null || echo missing)
   expected=terminal
@@ -36,7 +62,7 @@ for change in legacy terminal; do
   if ! rg -q APPEARANCE_SWITCH_OK "$test_dir/log" || rg -q 'APPEARANCE_FAILED|Binding loop|TypeError|ReferenceError|Cannot assign|Failed to load' "$test_dir/log"; then cat "$test_dir/log"; exit 1; fi
   jq -e --arg profile "$change" '.profile == $profile' "$test_dir/config/wisp/appearance.json" >/dev/null
 done
-for palette in graphite violet ember performative wisp; do
+for palette in graphite violet ember performative herdr wisp; do
   for reload in 0 1; do
     XDG_CONFIG_HOME="$test_dir/config" WISP_APPEARANCE_ENVIRONMENT=desktop \
       WISP_PALETTE_PERSIST="$palette" WISP_PALETTE_RELOAD="$reload" QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software \
@@ -45,4 +71,4 @@ for palette in graphite violet ember performative wisp; do
     jq -e --arg palette "$palette" '.palette == $palette' "$test_dir/config/wisp/appearance.json" >/dev/null
   done
 done
-echo 'Theme defaults, palette switching/persistence, backwards compatibility, Omarchy guards, and live switching passed'
+echo 'Theme defaults, palette switching/persistence, backwards compatibility, per-surface Omarchy ownership, and live switching passed'

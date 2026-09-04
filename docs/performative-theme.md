@@ -1,13 +1,15 @@
 # Performative terminal mode
 
-**Performative** is the default on new desktop/CachyOS installations. Existing
-saved appearance choices, Omarchy-managed styling, and unknown environments stay
-unchanged. Choose **Settings → Appearance → Performative** to switch an existing
+**Performative** is the default on new Wisp-owned desktop windows, including
+standalone windows opened from Omarchy. Existing saved appearance choices,
+host-managed Omarchy adapter styling, and unknown environments stay unchanged.
+Choose **Settings → Appearance → Performative** to switch an existing
 installation. This mode enforces monospace
 type, square corners, and a flat black canvas even when the base style is Classic.
 Switching to another palette restores that base style.
 It applies to the full app, tray, dialogs, and detached chat windows, without
-changing chats, room membership, media controls, or the host-managed Omarchy theme.
+changing chats, room membership, media controls, or the host-managed Omarchy bar
+theme.
 
 Inspired by the supplied btop screenshot: black canvas, restrained olive highlights and
 online names, neutral text, yellow room accents, violet friend headings and remote
@@ -20,8 +22,9 @@ saved locally in `~/.config/wisp/chat-colors.json`, keyed by conversation ID, so
 renaming, reordering, closing/reopening, splitting, and popping out chats retain
 their colors. Focus thickens the border without changing its hue. The first
 eight assignments use distinct terminal-friendly swatches; larger histories get
-additional colors (which may be perceptually closer together). Other themes and
-host-managed integrations retain their existing frames.
+additional colors (which may be perceptually closer together). The host-managed
+Omarchy adapter shares the compact frame structure while retaining its own
+palette, typography, scaling, corners, and popup geometry.
 
 The terminal treatment includes numbered curses-like panel frames, bracketed
 controls, ash-gray inverse selections, a dark status bar, a `user@wisp` identity, compact chat logs with

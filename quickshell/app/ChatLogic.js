@@ -1,3 +1,17 @@
+function visibleConversations(conversations, hangouts) {
+  var activeHangouts = {}
+  ;(hangouts || []).forEach(function(hangout) {
+    activeHangouts["hangout:" + String(hangout.id)] = true
+  })
+  return (conversations || []).filter(function(conversation) {
+    if (String(conversation.kind) !== "hangout" || conversation.spot_id)
+      return true
+    // Temporary call chats are useful while the call is live, or afterward
+    // when they contain history. Empty ended calls only clutter the picker.
+    return !!conversation.last_message || !!activeHangouts[String(conversation.id)]
+  })
+}
+
 function reconcileTabs(previous, conversations) {
   var available = {}
   conversations.forEach(function(c) { if (!c.tab_closed) available[String(c.id)] = true })

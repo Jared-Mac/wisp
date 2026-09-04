@@ -28,12 +28,12 @@ Column {
         readonly property bool controlEnabled: (modelData.action !== "share" || !root.bridge.shareStarting)
           && (modelData.action !== "camera" || (!root.bridge.cameraStarting
             && root.bridge.cameraState.devices.length > 0))
-        width: root.theme.performative ? controlLabel.implicitWidth + root.theme.space(16) : Math.max(root.theme.terminal ? controlLabel.implicitWidth + root.theme.space(20) : 0, (root.width
+        width: root.theme.tui ? controlLabel.implicitWidth + root.theme.space(16) : Math.max(root.theme.terminal ? controlLabel.implicitWidth + root.theme.space(20) : 0, (root.width
           - controls.spacing * (controlRepeater.count - 1))
           / Math.max(1, controlRepeater.count))
-        height: root.theme.space(root.theme.performative ? 28 : 34)
+        height: root.theme.space(root.theme.tui ? 28 : 34)
         radius: root.theme.cornerRadius
-        color: root.theme.performative && !controlMouse.containsMouse ? "transparent" : controlMouse.containsMouse
+        color: root.theme.tui && !controlMouse.containsMouse ? "transparent" : controlMouse.containsMouse
           ? (modelData.action === "leave" ? root.theme.alpha(root.theme.danger, 0.28) : root.theme.alpha(root.theme.foreground, 0.12))
           : root.theme.alpha(root.theme.foreground, 0.065)
         opacity: controlEnabled ? 1 : 0.55
@@ -41,7 +41,7 @@ Column {
         Text {
           id: controlLabel
           anchors.centerIn: parent
-          text: root.theme.performative ? "[" + modelData.label.toLowerCase() + "]" : modelData.label
+          text: root.theme.tui ? "[" + modelData.label.toLowerCase() + "]" : modelData.label
           color: modelData.action === "leave" ? root.theme.danger : root.theme.foreground
           font.family: root.theme.font.family
           font.pixelSize: root.theme.font.caption

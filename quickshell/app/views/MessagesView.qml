@@ -19,7 +19,7 @@ Column {
       anchors.left: parent.left; anchors.right: chatOptions.left
       anchors.rightMargin: root.theme.spacing.md; anchors.verticalCenter: parent.verticalCenter
       elide: Text.ElideRight
-      text: root.theme.performative ? "┌─ 03: /chat" : root.bridge.activeConversation ? "MESSAGES · " + root.conversationLabel(root.bridge.activeConversation) : "MESSAGES"
+      text: root.theme.tui ? "┌─ 03: /chat" : root.bridge.activeConversation ? "MESSAGES · " + root.conversationLabel(root.bridge.activeConversation) : "MESSAGES"
       color: root.theme.muted; font.family: root.theme.font.family
       font.pixelSize: root.theme.font.caption; font.bold: true
       font.letterSpacing: root.theme.terminal ? 1 : 0
@@ -55,7 +55,7 @@ Column {
       id: allConversations
       anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
       visible: !!root.bridge.activeConversation
-      text: (root.theme.performative ? "chats" : "All conversations") + (root.bridge.unreadMessages > 0 ? " · " + root.bridge.unreadMessages : "")
+      text: (root.theme.tui ? "chats" : "All conversations") + (root.bridge.unreadMessages > 0 ? " · " + root.bridge.unreadMessages : "")
       theme: root.theme
       onClicked: root.bridge.closeConversation()
     }

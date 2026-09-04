@@ -18,7 +18,7 @@ Column {
     visible: root.showHeader
     objectName: "friends-collapse"
     width: parent.width
-    height: root.collapsible ? root.theme.space(root.theme.performative ? 26 : 30) : root.theme.space(20)
+    height: root.collapsible ? root.theme.space(root.theme.tui ? 26 : 30) : root.theme.space(20)
     enabled: root.collapsible
     Accessible.name: root.collapsed ? "Expand friends" : "Collapse friends"
     onClicked: root.bridge.friendPreferences.toggleCollapsed()
@@ -31,8 +31,8 @@ Column {
     contentItem: Item {
       Text {
         anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
-        text: (root.theme.performative ? "┌─ 02: /friends" : "FRIENDS") + (root.collapsible ? " · " + root.bridge.friends.length : "")
-        color: root.theme.performative ? root.theme.secondaryAccent : root.theme.muted
+        text: (root.theme.tui ? "┌─ 02: /friends" : "FRIENDS") + (root.collapsible ? " · " + root.bridge.friends.length : "")
+        color: root.theme.tui ? root.theme.secondaryAccent : root.theme.muted
         font.family: root.theme.font.family
         font.pixelSize: root.theme.font.caption; font.weight: Font.Bold
         font.letterSpacing: root.theme.terminal ? 1 : 0

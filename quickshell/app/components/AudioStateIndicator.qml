@@ -23,14 +23,14 @@ Row {
     width: root.theme.space(32)
     height: width
     radius: root.theme.cornerRadius
-    color: root.theme.performative ? "transparent" : root.muted
+    color: root.theme.tui ? "transparent" : root.muted
       ? root.theme.alpha(root.theme.warning, mutedMouse.containsMouse ? 0.3 : 0.18)
       : root.theme.alpha(root.theme.foreground, mutedMouse.containsMouse ? 0.12 : 0.055)
     border.color: activeFocus ? root.theme.focusBorder : root.muted ? root.theme.alpha(root.theme.warning, 0.72) : "transparent"
-    border.width: root.theme.performative && !activeFocus ? 0 : 1
+    border.width: root.theme.tui && !activeFocus ? 0 : 1
 
     Image {
-      visible: !root.theme.performative
+      visible: !root.theme.tui
       anchors.centerIn: parent
       width: root.theme.space(20)
       height: width
@@ -40,7 +40,7 @@ Row {
       fillMode: Image.PreserveAspectFit
     }
     Text {
-      anchors.centerIn: parent; visible: root.theme.performative
+      anchors.centerIn: parent; visible: root.theme.tui
       text: "[M]"; color: root.muted ? root.theme.warning : root.theme.foreground
       font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
     }
@@ -92,14 +92,14 @@ Row {
     width: root.theme.space(32)
     height: width
     radius: root.theme.cornerRadius
-    color: root.theme.performative ? "transparent" : root.deafened
+    color: root.theme.tui ? "transparent" : root.deafened
       ? root.theme.alpha(root.theme.danger, deafenedMouse.containsMouse ? 0.32 : 0.2)
       : root.theme.alpha(root.theme.foreground, deafenedMouse.containsMouse ? 0.12 : 0.055)
     border.color: activeFocus ? root.theme.focusBorder : root.deafened ? root.theme.alpha(root.theme.danger, 0.72) : "transparent"
-    border.width: root.theme.performative && !activeFocus ? 0 : 1
+    border.width: root.theme.tui && !activeFocus ? 0 : 1
 
     Image {
-      visible: !root.theme.performative
+      visible: !root.theme.tui
       anchors.centerIn: parent
       width: root.theme.space(20)
       height: width
@@ -109,7 +109,7 @@ Row {
       fillMode: Image.PreserveAspectFit
     }
     Text {
-      anchors.centerIn: parent; visible: root.theme.performative
+      anchors.centerIn: parent; visible: root.theme.tui
       text: "[D]"; color: root.deafened ? root.theme.danger : root.theme.foreground
       font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
     }

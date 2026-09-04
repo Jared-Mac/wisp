@@ -36,8 +36,8 @@ Column {
     width: parent.width
     height: appearanceSettings.implicitHeight + root.theme.spacing.xxl * 2
     radius: root.theme.cornerRadius
-    color: root.theme.performative ? root.theme.background : root.theme.alpha(root.theme.foreground, 0.035)
-    border.width: root.theme.performative ? 1 : 0
+    color: root.theme.tui ? root.theme.background : root.theme.alpha(root.theme.foreground, 0.035)
+    border.width: root.theme.tui ? 1 : 0
     border.color: root.theme.separator
     AppearanceSettingsView {
       id: appearanceSettings
@@ -51,8 +51,8 @@ Column {
     width: parent.width
     height: notificationSettings.implicitHeight + root.theme.spacing.xxl * 2
     radius: root.theme.cornerRadius
-    color: root.theme.performative ? root.theme.background : root.theme.alpha(root.theme.foreground, 0.035)
-    border.width: root.theme.performative ? 1 : 0
+    color: root.theme.tui ? root.theme.background : root.theme.alpha(root.theme.foreground, 0.035)
+    border.width: root.theme.tui ? 1 : 0
     border.color: root.theme.separator
     NotificationSettingsView {
       id: notificationSettings
@@ -69,8 +69,8 @@ Column {
     width: parent.width
     height: deviceSettings.implicitHeight + root.theme.spacing.xxl * 2
     radius: root.theme.cornerRadius
-    color: root.theme.performative ? root.theme.background : root.theme.alpha(root.theme.foreground, 0.035)
-    border.width: root.theme.performative ? 1 : 0
+    color: root.theme.tui ? root.theme.background : root.theme.alpha(root.theme.foreground, 0.035)
+    border.width: root.theme.tui ? 1 : 0
     border.color: root.theme.separator
 
     DeviceSettingsView {
@@ -88,8 +88,8 @@ Column {
     width: parent.width
     height: videoSettings.implicitHeight + root.theme.spacing.xxl * 2
     radius: root.theme.cornerRadius
-    color: root.theme.performative ? root.theme.background : root.theme.alpha(root.theme.foreground, 0.035)
-    border.width: root.theme.performative ? 1 : 0
+    color: root.theme.tui ? root.theme.background : root.theme.alpha(root.theme.foreground, 0.035)
+    border.width: root.theme.tui ? 1 : 0
     border.color: root.theme.separator
 
     VideoSettingsView {
@@ -107,8 +107,8 @@ Column {
     width: parent.width
     height: audioSettings.implicitHeight + root.theme.spacing.xxl * 2
     radius: root.theme.cornerRadius
-    color: root.theme.performative ? root.theme.background : root.theme.alpha(root.theme.foreground, 0.035)
-    border.width: root.theme.performative ? 1 : 0
+    color: root.theme.tui ? root.theme.background : root.theme.alpha(root.theme.foreground, 0.035)
+    border.width: root.theme.tui ? 1 : 0
     border.color: root.theme.separator
 
     AudioSettingsView {
@@ -127,8 +127,8 @@ Column {
     width: parent.width
     height: visible ? desktopSettings.implicitHeight + root.theme.spacing.xxl * 2 : 0
     radius: root.theme.cornerRadius
-    color: root.theme.performative ? root.theme.background : root.theme.alpha(root.theme.foreground, 0.035)
-    border.width: root.theme.performative ? 1 : 0
+    color: root.theme.tui ? root.theme.background : root.theme.alpha(root.theme.foreground, 0.035)
+    border.width: root.theme.tui ? 1 : 0
     border.color: root.theme.separator
 
     Column {

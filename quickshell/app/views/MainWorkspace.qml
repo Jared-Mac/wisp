@@ -19,7 +19,7 @@ Item {
   readonly property real handleSize: theme.space(10)
   readonly property real dividerSize: collapsed ? 0 : handleSize
   readonly property real available: Math.max(1, (stacked ? height : width) - dividerSize)
-  readonly property real activitySize: collapsed ? 0 : Math.max(Math.min(available * 0.3, theme.space(stacked ? 70 : theme.performative ? 220 : 180)), Math.min(available - theme.space(stacked ? 230 : 250), available * layout.bounded(layout.activityRatio, 0.25)))
+  readonly property real activitySize: collapsed ? 0 : Math.max(Math.min(available * 0.3, theme.space(stacked ? 70 : theme.tui ? 220 : 180)), Math.min(available - theme.space(stacked ? 230 : 250), available * layout.bounded(layout.activityRatio, 0.25)))
 
   Item {
     id: activity
@@ -32,8 +32,8 @@ Item {
     height: root.stacked ? root.activitySize : root.height
     readonly property real available: Math.max(1, height - root.handleSize)
     readonly property real minimumPane: root.theme.space(root.stacked ? 70 : 44)
-    readonly property real frameInset: root.theme.performative ? root.theme.space(8) : 0
-    readonly property real frameTop: root.theme.performative ? root.theme.space(22) : 0
+    readonly property real frameInset: root.theme.tui ? root.theme.space(8) : 0
+    readonly property real frameTop: root.theme.tui ? root.theme.space(22) : 0
     readonly property real roomsSize: Math.max(Math.min(minimumPane, available / 2), Math.min(available - Math.min(minimumPane, available / 2), root.layout.roomsRatio <= 0 ? Math.min(available * 0.55, roomColumn.implicitHeight + frameTop + frameInset) : available * root.layout.bounded(root.layout.roomsRatio, 0.28)))
     Flickable {
       id: rooms
@@ -49,10 +49,10 @@ Item {
           model: root.bridge.knocks
           KnockCard { required property var modelData; width: roomColumn.width; knock: modelData; bridge: root.bridge; theme: root.theme }
         }
-        NowView { width: parent.width; showHeader: !root.theme.performative; bridge: root.bridge; theme: root.theme; onCameraRequested: root.cameraRequested() }
+        NowView { width: parent.width; showHeader: !root.theme.tui; bridge: root.bridge; theme: root.theme; onCameraRequested: root.cameraRequested() }
         SpotsView { width: parent.width; bridge: root.bridge; theme: root.theme }
         Text {
-          visible: root.theme.performative && !root.bridge.hangouts.length && !root.bridge.spots.length
+          visible: root.theme.tui && !root.bridge.hangouts.length && !root.bridge.spots.length
           width: parent.width; wrapMode: Text.Wrap
           text: "(no rooms available)"
           color: root.theme.muted; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
@@ -74,7 +74,7 @@ Item {
       contentWidth: width; contentHeight: friends.implicitHeight
       clip: true; boundsBehavior: Flickable.StopAtBounds
       ScrollBar.vertical: ScrollBar {}
-      FriendsView { id: friends; showHeader: !root.theme.performative; width: parent.width; bridge: root.bridge; theme: root.theme }
+      FriendsView { id: friends; showHeader: !root.theme.tui; width: parent.width; bridge: root.bridge; theme: root.theme }
     }
     TerminalFrame {
       width: parent.width; height: activity.roomsSize

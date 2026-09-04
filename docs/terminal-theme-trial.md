@@ -8,6 +8,10 @@ experimental naming are historical, not the current release policy. For the old
 appearance, use Settings rather than the historical full-UI rollback script,
 which would also remove subsequently added UI features such as the selector.
 
+**Later policy update:** the embedded Omarchy bar popup remains host-managed,
+but the standalone resizable Wisp window is now Wisp-owned and offers the same
+appearance choices and Performative default as other known desktop launches.
+
 ## Starting point and scope
 
 The task began on `codex/wisp-edit` at `a2281d3`, with the completed room,

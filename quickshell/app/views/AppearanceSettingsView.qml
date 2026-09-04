@@ -43,7 +43,7 @@ Column {
   Flow {
     width: parent.width; spacing: root.theme.spacing.lg
     Repeater {
-      model: [{key:"wisp",label:"Wisp blue"},{key:"graphite",label:"Graphite"},{key:"violet",label:"Violet"},{key:"ember",label:"Ember"},{key:"performative",label:"Performative"}]
+      model: [{key:"wisp",label:"Wisp blue"},{key:"graphite",label:"Graphite"},{key:"violet",label:"Violet"},{key:"ember",label:"Ember"},{key:"performative",label:"Performative"},{key:"herdr",label:"Herdr"}]
       ChatButton {
         required property var modelData
         objectName: "palette-" + modelData.key
@@ -56,8 +56,10 @@ Column {
   }
   Text {
     width: parent.width; wrapMode: Text.WordWrap
-    visible: !!root.appearance && root.appearance.palette === "performative"
-    text: "Performative · a Linux-terminal interface: monospace, numbered frames, bracketed controls, prompt editor, and a live status line. Overrides the base style while selected."
+    visible: !!root.appearance && ["performative", "herdr"].indexOf(root.appearance.palette) >= 0
+    text: root.appearance && root.appearance.palette === "herdr"
+      ? "Herdr · the same compact TUI structure with your Solarized Japan terminal colors, cyan focus, soft pane borders, and JetBrains Mono. Overrides the base style while selected."
+      : "Performative · a Linux-terminal interface: monospace, numbered frames, bracketed controls, prompt editor, and a live status line. Overrides the base style while selected."
     color: root.theme.muted
     font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
   }

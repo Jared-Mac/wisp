@@ -34,16 +34,16 @@ Column {
         width: presenceText.implicitWidth + root.theme.spacing.lg * 2
         height: root.theme.space(30)
         radius: root.theme.cornerRadius
-        color: root.theme.performative ? (root.bridge.selfState.presence === modelData ? root.theme.selectionBackground : "transparent") : root.bridge.selfState.presence === modelData
+        color: root.theme.tui ? (root.bridge.selfState.presence === modelData ? root.theme.selectionBackground : "transparent") : root.bridge.selfState.presence === modelData
           ? root.theme.alpha(root.theme.accent, 0.38)
           : root.theme.alpha(root.theme.foreground, presenceMouse.containsMouse ? 0.12 : 0.055)
-        border.width: root.theme.performative ? (activeFocus ? 1 : 0) : root.theme.terminal || activeFocus ? 1 : 0
+        border.width: root.theme.tui ? (activeFocus ? 1 : 0) : root.theme.terminal || activeFocus ? 1 : 0
         border.color: activeFocus || root.bridge.selfState.presence === modelData ? root.theme.accent : root.theme.separator
         Text {
           id: presenceText
           anchors.centerIn: parent
-          text: root.theme.performative ? "[" + modelData + "]" : modelData.charAt(0).toUpperCase() + modelData.slice(1)
-          color: root.theme.performative && root.bridge.selfState.presence === modelData ? root.theme.selectionText : root.theme.foreground
+          text: root.theme.tui ? "[" + modelData + "]" : modelData.charAt(0).toUpperCase() + modelData.slice(1)
+          color: root.theme.tui && root.bridge.selfState.presence === modelData ? root.theme.selectionText : root.theme.foreground
           font.family: root.theme.font.family
           font.pixelSize: root.theme.font.caption
         }
