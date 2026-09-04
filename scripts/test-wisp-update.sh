@@ -39,9 +39,20 @@ case "$command" in
       printf '%s\n' '{"self":{"hangout_id":null,"sharing":false,"muted":true,"deafened":false,"media":{"screen_share":{"active":false},"camera":{"active":false}}}}'
       exit 0
     fi
-    [[ -e "$WISP_TEST_STATE_DIR/left" ]] && hangout=null || hangout='"rejoined"'
-    [[ -e "$WISP_TEST_STATE_DIR/share-stopped" ]] && sharing=false || sharing=true
-    [[ -e "$WISP_TEST_STATE_DIR/camera-stopped" ]] && camera=false || camera=true
+    status_count_file="$WISP_TEST_STATE_DIR/status-count"
+    status_count=0
+    [[ -e "$status_count_file" ]] && read -r status_count <"$status_count_file"
+    ((status_count += 1))
+    printf '%s\n' "$status_count" >"$status_count_file"
+    if (( status_count <= 2 )); then
+      hangout=null
+      sharing=false
+      camera=false
+    else
+      [[ -e "$WISP_TEST_STATE_DIR/left" ]] && hangout=null || hangout='"rejoined"'
+      [[ -e "$WISP_TEST_STATE_DIR/share-stopped" ]] && sharing=false || sharing=true
+      [[ -e "$WISP_TEST_STATE_DIR/camera-stopped" ]] && camera=false || camera=true
+    fi
     [[ -e "$WISP_TEST_STATE_DIR/muted" ]] && muted=true || muted=false
     printf '{"self":{"hangout_id":%s,"sharing":%s,"muted":%s,"deafened":false,"media":{"screen_share":{"active":%s},"camera":{"active":%s}}}}\n' \
       "$hangout" "$sharing" "$muted" "$sharing" "$camera"

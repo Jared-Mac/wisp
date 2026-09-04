@@ -88,7 +88,8 @@ fi
 
 if [[ "$service_active" == true ]]; then
   systemctl --user restart wisp.service
-  for _ in {1..10}; do
+  stable_checks=0
+  for _ in {1..60}; do
     if restarted_snapshot=$("$bin_root/wispctl" status 2>/dev/null); then
       if jq -e '.self.hangout_id != null' >/dev/null <<<"$restarted_snapshot"; then
         "$bin_root/wispctl" leave >/dev/null
@@ -111,7 +112,7 @@ if [[ "$service_active" == true ]]; then
         "$bin_root/wispctl" unmute >/dev/null
       fi
       final_snapshot=$("$bin_root/wispctl" status)
-      if ! jq -e \
+      if jq -e \
         --argjson muted "$was_muted" \
         --argjson deafened "$was_deafened" '
           .self.hangout_id == null
@@ -121,15 +122,18 @@ if [[ "$service_active" == true ]]; then
           and .self.muted == $muted
           and .self.deafened == $deafened
         ' >/dev/null <<<"$final_snapshot"; then
-        echo "Wisp restarted, but its safe session state could not be restored." >&2
-        exit 1
+        ((stable_checks += 1))
+        if (( stable_checks >= 15 )); then
+          echo "Updated and restarted Wisp."
+          exit 0
+        fi
+      else
+        stable_checks=0
       fi
-      echo "Updated and restarted Wisp."
-      exit 0
     fi
     sleep 1
   done
-  echo "Installed the update, but Wisp did not become ready after restart." >&2
+  echo "Installed the update, but Wisp did not remain in a safe session state after restart." >&2
   exit 1
 fi
 
