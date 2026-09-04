@@ -155,6 +155,7 @@ FocusScope {
         anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
         maximumWidth: root.inlineHeader ? Math.min(root.theme.space(220), Math.max(0, headerActions.x - root.theme.space(520) - root.theme.spacing.lg * 2)) : Math.max(0, headerActions.x - root.theme.spacing.lg)
         bridge: root.bridge; theme: root.theme; logoSource: root.logoSource
+        showWordmark: root.presentation === "app"
         onSettingsRequested: if (!root.settingsOpen) root.toggleSettings()
         onNewRoomRequested: identityRoomManager.createRoom()
       }
