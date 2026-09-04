@@ -212,7 +212,8 @@ Item {
   readonly property var sortedFriends: FriendLogic.sorted(friends, friendPreferences.favorites)
   readonly property var hangouts: snapshot.hangouts || []
   readonly property var knocks: snapshot.knocks || []
-  readonly property var conversations: snapshot.conversations || []
+  readonly property var conversations: ChatLogic.visibleConversations(
+    snapshot.conversations || [], snapshot.hangouts || [])
   readonly property var messages: snapshot.messages || []
   readonly property var spots: snapshot.spots || []
   readonly property var devices: snapshot.devices || []
@@ -534,6 +535,14 @@ Item {
     var incoming = ChatLogic.incomingConversationIds(receivedSnapshot ? snapshot : null, next, eventName)
     var roomEvents = ChatLogic.roomSoundEvents(receivedSnapshot ? snapshot : null, next, eventName)
     snapshot = next
+    if (activeConversationId) {
+      var nextVisibleConversations = ChatLogic.visibleConversations(
+        next.conversations || [], next.hangouts || [])
+      var activeStillVisible = nextVisibleConversations.some(function(conversation) {
+        return String(conversation.id) === String(activeConversationId)
+      })
+      if (!activeStillVisible) activeConversationId = ""
+    }
     receivedSnapshot = true
     if (notificationSoundsEnabled) roomEvents.forEach(function(kind) { root.playNotificationSound(kind) })
     if (notificationSoundsEnabled && incoming.some(function(id) {

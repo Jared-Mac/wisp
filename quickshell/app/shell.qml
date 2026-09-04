@@ -90,6 +90,7 @@ ShellRoot {
       "appearance": appTheme.profile,
       "palette": appTheme.paletteName,
       "appearance_environment": appearance.environment,
+      "appearance_managed": appearance.managed,
       "font_family": appTheme.font.family
     })
   }
@@ -105,6 +106,7 @@ ShellRoot {
       "appearance": appTheme.profile,
       "palette": appTheme.paletteName,
       "appearance_environment": appearance.environment,
+      "appearance_managed": appearance.managed,
       "font_family": appTheme.font.family
     })
   }
@@ -134,7 +136,9 @@ ShellRoot {
     "setAnchor": function(value) { app.setAnchor(value) }
   })
 
-  WispAppearance { id: appearance }
+  // The standalone app owns its appearance on every desktop, including when
+  // opened from the Omarchy adapter. The embedded adapter remains host-managed.
+  WispAppearance { id: appearance; managed: false }
   WispTheme { id: appTheme; profile: appearance.profile; appearanceController: appearance }
 
   FileView {

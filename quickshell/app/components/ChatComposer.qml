@@ -10,17 +10,17 @@ Column {
   property bool autoGrow: false
   signal editorFocused()
   property real maximumEditorHeight: theme.space(160)
-  readonly property real naturalEditorHeight: Math.max(theme.space(40), editor.contentHeight + editor.topPadding + editor.bottomPadding + (theme.performative ? theme.spacing.sm : theme.spacing.lg) * 2)
-  property real editorHeight: theme.space(theme.performative && !spacious ? 44 : spacious ? 106 : 66)
+  readonly property real naturalEditorHeight: Math.max(theme.space(40), editor.contentHeight + editor.topPadding + editor.bottomPadding + (theme.tui ? theme.spacing.sm : theme.spacing.lg) * 2)
+  property real editorHeight: theme.space(theme.tui && !spacious ? 44 : spacious ? 106 : 66)
   readonly property var attachments: bridge.attachmentsFor(conversationId)
   readonly property var conversation: bridge.conversationById(conversationId)
   readonly property string destination: conversation && conversation.label ? (conversation.label === "Hangout" ? "Room" : String(conversation.label)) : ""
   readonly property bool busy: !!bridge.sendingConversations[conversationId] || !!bridge.importingConversations[conversationId]
-  spacing: autoGrow ? theme.spacing.xs : theme.performative ? theme.spacing.sm : theme.spacing.lg
+  spacing: autoGrow ? theme.spacing.xs : theme.tui ? theme.spacing.sm : theme.spacing.lg
 
   Text {
     objectName: "terminalChatPrompt"
-    visible: root.theme.performative
+    visible: root.theme.tui
     width: parent.width; elide: Text.ElideRight
     text: String(root.bridge.selfState.display_name || "user").toLowerCase() + "@wisp:~/chat/" + root.destination + " $"
     color: root.theme.accent
@@ -89,11 +89,11 @@ Column {
     width: parent.width
     height: root.autoGrow ? Math.min(root.maximumEditorHeight, root.naturalEditorHeight) : root.editorHeight
     radius: root.theme.cornerRadius
-    color: root.theme.performative ? root.theme.background : root.theme.alpha(root.theme.foreground, 0.06)
-    border.width: editor.activeFocus || root.theme.performative ? 1 : 0
+    color: root.theme.tui ? root.theme.background : root.theme.alpha(root.theme.foreground, 0.06)
+    border.width: editor.activeFocus || root.theme.tui ? 1 : 0
     border.color: editor.activeFocus ? root.theme.accent : root.theme.separator
     Text {
-      visible: root.theme.performative
+      visible: root.theme.tui
       x: root.theme.space(8); y: root.theme.space(11)
       text: ">"; color: root.theme.accent
       font.family: root.theme.font.family; font.pixelSize: root.theme.font.body
@@ -101,8 +101,8 @@ Column {
     ScrollView {
       objectName: "composerTextViewport"
       anchors.fill: parent
-      anchors.margins: root.theme.performative ? root.theme.spacing.sm : root.theme.spacing.lg
-      anchors.leftMargin: root.theme.performative ? root.theme.space(24) : root.theme.spacing.lg
+      anchors.margins: root.theme.tui ? root.theme.spacing.sm : root.theme.spacing.lg
+      anchors.leftMargin: root.theme.tui ? root.theme.space(24) : root.theme.spacing.lg
       anchors.rightMargin: sendButton.width + root.theme.spacing.lg * 2
       TextArea {
         ThemeControlStyle { theme: root.theme; control: editor }
@@ -129,7 +129,7 @@ Column {
             color: root.theme.alpha(root.theme.accent, 0.65)
           }
         }
-        Binding { target: editor; property: "cursorDelegate"; value: terminalCaret; when: root.theme.performative; restoreMode: Binding.RestoreBindingOrValue }
+        Binding { target: editor; property: "cursorDelegate"; value: terminalCaret; when: root.theme.tui; restoreMode: Binding.RestoreBindingOrValue }
         Keys.onPressed: function(event) {
           if (event.matches(StandardKey.Paste)) {
             root.bridge.pasteClipboard(root.conversationId)
@@ -147,7 +147,7 @@ Column {
       objectName: "composerSendButton"
       anchors.right: parent.right; anchors.bottom: parent.bottom
       anchors.margins: root.theme.space(4)
-      width: root.theme.space(root.theme.performative ? 60 : 32); height: root.theme.space(32)
+      width: root.theme.space(root.theme.tui ? 60 : 32); height: root.theme.space(32)
       theme: root.theme; primary: true
       readonly property string statusText: root.bridge.sendingConversations[root.conversationId] ? "Sending" + root.bridge.transferLabel("upload", root.attachments.length ? root.attachments[0].token : "") : root.bridge.importingConversations[root.conversationId] ? "Preparing…" : "Send message"
       Accessible.name: statusText
@@ -159,7 +159,7 @@ Column {
       contentItem: Item {
         Canvas {
           anchors.centerIn: parent; width: root.theme.space(14); height: width
-          visible: !root.busy && !root.theme.performative
+          visible: !root.busy && !root.theme.tui
           opacity: sendButton.enabled ? 1 : 0.4
           property color strokeColor: root.theme.terminal ? root.theme.accent : root.theme.accentText
           onStrokeColorChanged: requestPaint()
@@ -173,7 +173,7 @@ Column {
         }
         Text {
           anchors.centerIn: parent
-          visible: root.theme.performative && !root.busy
+          visible: root.theme.tui && !root.busy
           text: "[send]"
           color: root.theme.selectionText; opacity: sendButton.enabled ? 1 : 0.4
           font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption

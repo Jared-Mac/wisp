@@ -71,8 +71,10 @@ ShellRoot {
     appearanceController: themeAppearance
     Component.onCompleted: {
       if ("profile" in theme) theme.profile = Quickshell.env("WISP_TEST_ADAPTER") === "omarchy" ? "legacy" : Quickshell.env("WISP_TEST_THEME") || "legacy"
+      if (test.mode === "cleantui" && "profile" in theme) theme.profile = "clean_tui"
       if (Quickshell.env("WISP_TEST_ADAPTER") === "omarchy") {
         // Representative host overrides, not Jared's settings or machine.
+        tuiTreatment = true
         foreground = "#d8dee9"; background = "#242933"; surface = "#242933"
         accent = "#81a1c1"; muted = "#a0a8b7"; danger = "#bf616a"
         cornerRadius = 7; fontFamily = "DejaVu Sans"; captionSize = 13; bodySize = 15; titleSize = 19; spacingScale = 1.1
@@ -131,6 +133,15 @@ ShellRoot {
       {id:"dm",kind:"direct",label:"Jared",unread_count:2},
       {id:"friends",kind:"circle",label:"Friends",unread_count:0}
     ]
+    if (test.mode === "roomcleanup") {
+      data.conversations.push(
+        {id:"hangout:ended-empty",kind:"hangout",label:"Room",unread_count:0,last_message:null},
+        {id:"hangout:ended-history",kind:"hangout",label:"Room",unread_count:0,
+          last_message:{id:"history",conversation_id:"hangout:ended-history",sender:{id:"jared",display_name:"Jared"},created_at:"2026-09-03T17:03:00Z",content_type:"text/plain",payload:"Saved history"}},
+        {id:"hangout:active-empty",kind:"hangout",label:"Room",unread_count:0,last_message:null}
+      )
+      data.hangouts = [{id:"active-empty",label:null,members:[],sharing:[]}]
+    }
     data.friends = [{id:"jared",display_name:"Jared",online:true,presence:"open"}, {id:"charlie",display_name:"Charlie",online:false,presence:"away"}]
     if (test.mode === "presence" || test.mode === "panelpresence") {
       data.friends = [
@@ -154,6 +165,17 @@ ShellRoot {
       {id:"3",conversation_id:"porch",sender:{id:"jared",display_name:"Jared"},created_at:"2026-09-03T17:02:00Z",content_type:"text/plain",payload:"Perfect. We can keep Porch and our DMs side by side."}
     ]
     bridge.applySnapshot(data)
+    if (test.mode === "roomcleanup") {
+      test.check(!bridge.conversationById("hangout:ended-empty"), "ended empty temporary rooms are hidden")
+      test.check(!!bridge.conversationById("hangout:ended-history"), "ended rooms with visible history remain available")
+      test.check(!!bridge.conversationById("hangout:active-empty"), "active empty rooms remain available")
+      test.check(bridge.snapshot.conversations.length === 6, "room cleanup is a non-destructive presentation filter")
+      bridge.selectConversation("hangout:active-empty")
+      var ended = JSON.parse(JSON.stringify(bridge.snapshot))
+      ended.hangouts = []
+      bridge.applySnapshot(ended)
+      test.check(bridge.activeConversationId === "", "an open empty room closes when its call ends")
+    }
     bridge.selectConversation("porch")
     bridge.setDraft("porch", "Here's the latest version…")
     bridge.setDraft("dm", "A separate DM draft")
@@ -238,6 +260,10 @@ ShellRoot {
     onTriggered: bridge.workspaceLayout.reset()
   }
   Timer {
+    interval: 300; running: test.mode === "cleantui"
+    onTriggered: bridge.workspaceLayout.reset()
+  }
+  Timer {
     interval: 400; running: test.mode === "presence" || test.mode === "panelpresence"
     onTriggered: if (bridge.friendPreferences.collapsed) bridge.friendPreferences.toggleCollapsed()
   }
@@ -256,18 +282,31 @@ ShellRoot {
   Timer {
     interval: 900; running: test.mode === "themes"
     onTriggered: {
+      var before = bridge.sent.length
+      var draft = bridge.draftFor("porch")
       var terminal = test.findItem(window.contentItem, "theme-terminal")
       test.check(!!terminal && terminal.enabled, "Terminal remains available in Classic")
       if (terminal) terminal.clicked()
       test.check(theme.profile === "terminal", "Settings restores Terminal live")
       test.check(bridge.draftFor("dm") === "", "chat state remains unchanged")
+      var clean = test.findItem(window.contentItem, "theme-clean_tui")
+      test.check(!!clean && clean.enabled, "Clean TUI is available beside Terminal and Classic")
+      if (clean) clean.clicked()
+      test.check(theme.profile === "clean_tui" && theme.cleanTui && theme.tui,
+        "Settings selects the independent Clean TUI interface live")
+      test.check(bridge.sent.length === before && bridge.draftFor("porch") === draft,
+        "Clean TUI switching preserves drafts and sends no commands")
       var performative = test.findItem(window.contentItem, "palette-performative")
       test.check(!!performative && performative.enabled, "Performative palette is available in Settings")
-      var before = bridge.sent.length
-      var draft = bridge.draftFor("porch")
       if (performative) performative.clicked()
       test.check(theme.paletteName === "performative" && theme.background == "#000000", "Settings selects Performative live")
       test.check(bridge.sent.length === before && bridge.draftFor("porch") === draft, "palette switching preserves drafts and sends no commands")
+      var herdr = test.findItem(window.contentItem, "palette-herdr")
+      test.check(!!herdr && herdr.enabled, "Herdr palette is available in Settings")
+      if (herdr) herdr.clicked()
+      test.check(theme.paletteName === "herdr" && theme.background == "#001419"
+        && theme.accent == "#29a298" && theme.tui, "Settings selects Herdr live")
+      test.check(bridge.sent.length === before && bridge.draftFor("porch") === draft, "Herdr switching preserves drafts and sends no commands")
       themeAppearance.setPalette(Quickshell.env("WISP_TEST_PALETTE") || "wisp")
     }
   }
@@ -436,7 +475,7 @@ ShellRoot {
       if (star) {
         var label = test.findItem(star.parent, "friendName")
         test.check(!!label && star.x >= label.x + label.width, "star is to the right of the name")
-        test.check(star.parent.height === theme.space(theme.performative ? 28 : 32), "friends use compact rows")
+        test.check(star.parent.height === theme.space(theme.tui ? 28 : 32), "friends use compact rows")
         test.check(star.opacity === 0, "favorite star hidden without hover or focus")
         star.forceActiveFocus(Qt.TabFocusReason)
         test.check(star.opacity === 1, "keyboard focus reveals favorite action")
@@ -555,6 +594,7 @@ ShellRoot {
       var list=test.findItem(feed,"messageList")
       test.check(Math.abs(list.contentY-test.readingPosition)<1 && feed.awayFromLatest,"incoming messages do not pull the reader down")
       var button=test.findItem(feed,"scrollToLatestButton"),before=bridge.sent.length
+      if(theme.performative) test.check(test.findItem(button,"latestMessagesText").text==="[vv]","Performative latest control uses the approved text symbol")
       test.check(button.x>=0 && button.y>=0 && button.x+button.width<=feed.width && button.y+button.height<=feed.height,"latest button stays within feed")
       button.clicked()
       test.check(!feed.awayFromLatest && list.followBottom,"click scrolls to bottom and restores following")
@@ -746,7 +786,7 @@ ShellRoot {
       var selector=test.findItem(window.contentItem,"compactChatSelector")
       test.check(selector && !test.findItem(window.contentItem,"chatTabs"),"dropdown is default even in full-width chat")
       var data=JSON.parse(JSON.stringify(bridge.snapshot))
-      for (var i=0;i<80;i++) data.conversations.push({id:"room-"+i,kind:"hangout",label:"Room "+String(i).padStart(2,"0"),unread_count:i%3})
+      for (var i=0;i<80;i++) data.conversations.push({id:"room-"+i,kind:"hangout",label:"Room "+String(i).padStart(2,"0"),spot_id:"room-"+i,unread_count:i%3})
       data.conversations.push({id:"closed-friend",kind:"direct",label:"Archived Friend",tab_closed:true,unread_count:5})
       bridge.snapshot=data
       selector.clicked()
@@ -1099,6 +1139,11 @@ ShellRoot {
       }
       if (test.mode !== "preview") {
         var page = test.findItem(surface, "wispContent")
+        if (Quickshell.env("WISP_TEST_ADAPTER") === "omarchy" && test.compactMode) {
+          var statusLine = test.findItem(surface, "terminalStatusLine")
+          test.check(theme.hostManaged && theme.tui, "Omarchy popup combines host styling with compact TUI structure")
+          test.check(!!statusLine && statusLine.visible, "Omarchy popup includes the live compact status line")
+        }
         if (page.inlineHeader) {
           var identity = test.findItem(surface, "identityMenuButton")
           var access = test.findItem(surface, "alwaysVisibleControls")
@@ -1116,7 +1161,32 @@ ShellRoot {
       }
       if (test.mode === "media" || test.mode === "panelmedia") {
         var room = test.findItem(surface, "roomCard")
-        test.check(!!room && room.height === theme.space(theme.performative ? 42 : 48), "occupied room cards use compact height")
+        test.check(!!room && room.height === theme.space(theme.tui ? 42 : 48), "occupied room cards use compact height")
+      }
+      if (test.mode === "cleantui") {
+        var cleanWorkspace = test.findObject(surface, "mainWorkspace", [])
+        var cleanActivity = test.findObject(surface, "activityPane", [])
+        var cleanChat = test.findObject(surface, "conversationPane", [])
+        var cleanFrame = test.findObject(surface, "conversationColorFrame", [])
+        var cleanSelector = test.findObject(surface, "compactChatSelector", [])
+        test.check(theme.cleanTui && theme.tui && theme.terminal,
+          "Clean TUI is a distinct terminal interface profile")
+        test.check(!!cleanWorkspace && !!cleanActivity && !!cleanChat
+          && cleanWorkspace.visible && cleanActivity.visible && cleanChat.visible,
+          "Clean TUI keeps the activity and chat workspace")
+        test.check(cleanActivity && cleanActivity.width >= theme.space(219),
+          "Clean TUI activity rail keeps a usable minimum width")
+        test.check(cleanActivity && cleanActivity.width <= theme.space(360),
+          "Clean TUI activity rail stays narrow")
+        test.check(cleanActivity && cleanChat && cleanChat.width > cleanActivity.width,
+          "Clean TUI gives chat more width than activity")
+        test.check(cleanFrame && cleanFrame.quiet,
+          "Clean TUI replaces full pane boxes with quiet section rules")
+        test.check(cleanSelector && cleanSelector.background.border.width === 0,
+          "Clean TUI removes the idle selector box")
+        test.check(theme.statusBackground == theme.surface
+          && theme.selectionBackground == theme.alpha(theme.accent, 0.18),
+          "Clean TUI uses restrained status and selection surfaces")
       }
       test.check(window.width === theme.space(test.testWidth), "app width")
       test.check(window.height === theme.space(test.testHeight), "app height")

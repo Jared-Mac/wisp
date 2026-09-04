@@ -20,11 +20,13 @@ Panel {
     Qt.callLater(function() { content.forceActiveFocus() })
   } else content.resetNavigation()
 
-  WispAppearance { id: appearance; environment: "omarchy" }
+  // This embedded popup belongs to Omarchy and follows the shell's host theme.
+  WispAppearance { id: appearance; environment: "omarchy"; managed: true }
 
   WispTheme {
     id: pluginTheme
     profile: "legacy"
+    tuiTreatment: true
     appearanceController: appearance
     foreground: Color.foreground
     background: Color.popups.background
@@ -80,6 +82,12 @@ Panel {
         "connected": bridge.daemonConnected,
         "socket": bridge.socketPath,
         "error": bridge.lastError,
+        "appearance": {
+          "host_managed": pluginTheme.hostManaged,
+          "tui": pluginTheme.tui,
+          "profile": pluginTheme.profile,
+          "palette": pluginTheme.paletteName
+        },
         "snapshot": bridge.snapshot
       })
     }

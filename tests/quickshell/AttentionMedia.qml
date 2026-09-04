@@ -54,7 +54,7 @@ ShellRoot {
     data.self.media.remote_audio_participants=["Jared"]
     data.friends=[{id:"jared",display_name:"Jared",online:true,presence:"open"},{id:"charlie",display_name:"Charlie",online:false,presence:"away"}]
     data.hangouts=[{id:"porch",label:"Porch",members:[{id:"self",display_name:"Tyler"},{id:"jared",display_name:"Jared"},{id:"charlie",display_name:"Charlie"}]}]
-    data.conversations=[{id:"porch",label:"Porch",kind:"hangout",unread_count:0},{id:"dm",label:"Jared",kind:"direct",unread_count:12}]
+    data.conversations=[{id:"porch",label:"Porch",kind:"spot",spot_id:"porch",unread_count:0},{id:"dm",label:"Jared",kind:"direct",unread_count:12}]
     data.messages=[]
     data.self.media.remote_videos=[{participant:"Jared",source:"screen_share",subscribed:true}]
     bridge.applySnapshot(data); bridge.selectConversation("porch")
@@ -62,6 +62,7 @@ ShellRoot {
   Timer {
     interval: 200; running: true
     onTriggered: {
+      appearance.setPalette("performative")
       test.tile=test.find(window.contentItem,"conversationPane")
       test.check(!!test.tile,"main tile host exists")
       test.check(!!test.find(tray,"unreadChat-dm"),"clickable unread chat shows its count and name")
@@ -133,8 +134,9 @@ ShellRoot {
       if(test.volumePopup) test.volumePopup.close()
       var renderer=test.find(window.contentItem,"remoteVideoRenderer")
       test.check(renderer && renderer.item && renderer.item.ready,"stream survives reparenting")
+      var beforeClose=bridge.sent.length
       test.tile.closePane(test.videoKey)
-      test.check(bridge.sent[bridge.sent.length-1].name==="watch_video" && bridge.sent[bridge.sent.length-1].args.open===false,"closing stream tile stops watching locally")
+      test.check(bridge.sent.slice(beforeClose).some(function(command) { return command.name==="watch_video" && command.args.open===false && command.args.participant==="Jared" }),"closing stream tile stops watching locally")
       bridge.mainWindowOpen=false
       test.tile.openVideo({participant:"Jared",source:"screen_share"})
       test.videoKey=Tiles.leaves(test.tile.tree).filter(function(n){return !!test.tile.videoFor(n.id)})[0].key

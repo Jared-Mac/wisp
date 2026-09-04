@@ -28,7 +28,7 @@ Column {
       anchors.rightMargin: root.theme.spacing.md; anchors.verticalCenter: parent.verticalCenter
       elide: Text.ElideRight
       objectName: "trayChatHeading"
-      text: (root.theme.performative ? "┌─ 03: /chat" : "MESSAGES") + (root.bridge.activeConversation ? (root.theme.performative ? "/" : " · ") + root.conversationLabel(root.bridge.activeConversation) : "")
+      text: (root.theme.tui ? "┌─ 03: /chat" : "MESSAGES") + (root.bridge.activeConversation ? (root.theme.tui ? "/" : " · ") + root.conversationLabel(root.bridge.activeConversation) : "")
       color: root.bridge.activeConversation ? root.chatColor : root.theme.muted; font.family: root.theme.font.family
       font.pixelSize: root.theme.font.caption; font.bold: true
       font.letterSpacing: root.theme.terminal ? 1 : 0
@@ -70,7 +70,7 @@ Column {
       id: allConversations
       anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
       visible: !!root.bridge.activeConversation
-      text: (root.theme.performative ? "chats" : "All conversations") + (root.bridge.unreadMessages > 0 ? " · " + root.bridge.unreadMessages : "")
+      text: (root.theme.tui ? "chats" : "All conversations") + (root.bridge.unreadMessages > 0 ? " · " + root.bridge.unreadMessages : "")
       theme: root.theme
       primary: root.bridge.unreadMessages > 0
       onClicked: root.bridge.closeConversation()
@@ -114,9 +114,9 @@ Column {
     model: root.bridge.activeConversation ? [] : root.bridge.conversations
     delegate: Rectangle {
       required property var modelData
-      width: root.width; height: root.theme.space(48)
+      width: root.width; height: root.theme.space(root.theme.cleanTui ? 42 : 48)
       radius: root.theme.cornerRadius
-      color: conversationMouse.containsMouse ? root.theme.alpha(root.theme.foreground, 0.09) : root.theme.alpha(root.theme.foreground, 0.045)
+      color: conversationMouse.containsMouse ? root.theme.alpha(root.theme.foreground, root.theme.cleanTui ? 0.07 : 0.09) : root.theme.cleanTui ? "transparent" : root.theme.alpha(root.theme.foreground, 0.045)
       Column {
         anchors.left: parent.left; anchors.right: unreadBadge.left
         anchors.leftMargin: root.theme.spacing.lg; anchors.rightMargin: root.theme.spacing.md

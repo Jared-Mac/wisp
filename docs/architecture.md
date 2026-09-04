@@ -121,8 +121,13 @@ The primary desktop UI is the named `wisp` Quickshell configuration in
 presentations over one bridge: a compositor-managed `FloatingWindow` app and a
 compact layer-shell `PanelWindow` for the generic system tray. The shared
 content switches between one and two columns as the application window changes
-size. `quickshell/Panel.qml` is a thin optional Omarchy adapter that embeds the
-same compact presentation in Omarchy's native anchored popup. Each active
+size. Wisp-owned windows persist an interface profile independently from their
+color palette: Classic, Terminal Grid, or the restrained, narrow-rail Clean TUI.
+All profiles consume the same bridge state and expose the same actions.
+`quickshell/Panel.qml` is a thin optional Omarchy adapter that embeds the
+same compact presentation in Omarchy's native anchored popup. It opts into the
+shared TUI structure while overriding visual tokens with Omarchy's host colors,
+font, scale, corners, and geometry. Each active
 frontend has its own pushed IPC connection; none owns call state.
 
 The Voice MVP reliability gate is intentionally short and deterministic rather

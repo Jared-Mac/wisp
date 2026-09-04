@@ -23,7 +23,7 @@ Rectangle {
   signal tileDragged(real px, real py)
   signal tileDropped()
   signal tileDragCanceled()
-  readonly property real panelMargin: theme.space(8)
+  readonly property real panelMargin: theme.space(theme.cleanTui ? 12 : 8)
   property var tabIds: []
   property string confirmationId: ""
   readonly property string currentId: tiled ? selectedId : String(bridge.activeConversationId || "")
@@ -35,15 +35,17 @@ Rectangle {
   onCurrentIdChanged: updateChatFocus()
   Component.onDestruction: bridge.setChatFocus(focusKey, "")
   readonly property color chatBorderColor: bridge.chatColors.colorFor(currentId, theme.conversationBorder)
-  color: theme.surface
+  color: theme.cleanTui ? theme.background : theme.surface
   radius: theme.cornerRadius
-  border.width: theme.performative ? 0 : theme.terminal || tiled ? 1 : 0
+  border.width: theme.tui ? 0 : theme.terminal || tiled ? 1 : 0
   border.color: tiled && paneActive && canClosePane ? theme.alpha(theme.accent,0.65) : theme.conversationBorder
   TerminalFrame {
     objectName: "conversationColorFrame"
     anchors.fill: parent; theme: root.theme
-    title: "03: /chat/" + root.label(root.current)
-    ink: root.chatBorderColor
+    title: root.theme.cleanTui ? "03 /chat" : "03: /chat/" + root.label(root.current)
+    ink: root.theme.cleanTui
+      ? (root.paneActive ? root.theme.accent : root.theme.surfaceBorder)
+      : root.chatBorderColor
     emphasized: root.paneActive && root.tiled && root.canClosePane
   }
 
@@ -66,7 +68,7 @@ Rectangle {
     id: heading
     anchors.top: parent.top; anchors.left: parent.left; anchors.right: parent.right
     anchors.margins: root.panelMargin
-    anchors.topMargin: root.theme.performative ? root.theme.space(22) : root.panelMargin
+    anchors.topMargin: root.theme.tui ? root.theme.space(22) : root.panelMargin
     height: root.theme.space(34)
     Row {
       id: leadingActions
@@ -116,22 +118,28 @@ Rectangle {
       spacing: root.theme.spacing.xs
       ChatButton { id: optionsButton; objectName: "chatOptionsButton"; theme: root.theme; text: "⋯"; implicitWidth: root.theme.space(34); visible: !!root.current; Accessible.name: "Chat options"; onClicked: optionsMenu.open() }
     }
+    TextMetrics {
+      id: selectorTextMetrics
+      font.family: root.theme.font.family
+      font.pixelSize: root.theme.font.caption
+      text: chatSelector.text
+    }
     ChatButton {
       id: chatSelector
       objectName: "compactChatSelector"
       anchors.left: leadingActions.right
       anchors.leftMargin: root.theme.spacing.xs
       readonly property real availableHeaderWidth: Math.max(0, toolbarActions.x - leadingActions.x - leadingActions.width - root.theme.spacing.xs * 2)
-      width: root.theme.performative
-        ? Math.min(availableHeaderWidth, Math.max(root.theme.space(88), Math.min(root.theme.space(260), selectorLabel.implicitWidth + root.theme.space(32))))
+      width: root.theme.tui
+        ? Math.min(availableHeaderWidth, Math.max(root.theme.space(88), Math.min(root.theme.space(260), selectorTextMetrics.advanceWidth + root.theme.space(32))))
         : availableHeaderWidth
-      theme: root.theme; primary: !root.theme.performative
-      readonly property color selectorInk: root.theme.performative ? (visualFocus ? root.chatBorderColor : root.theme.foreground) : root.theme.terminal ? root.theme.accent : root.theme.accentText
-      Binding { target: chatSelector; property: "leftPadding"; value: root.theme.space(8); when: root.theme.performative; restoreMode: Binding.RestoreBindingOrValue }
-      Binding { target: chatSelector; property: "rightPadding"; value: root.theme.space(8); when: root.theme.performative; restoreMode: Binding.RestoreBindingOrValue }
-      Binding { target: chatSelector.background; property: "color"; value: root.theme.alpha(root.theme.foreground, chatSelector.down ? 0.10 : chatSelector.hovered ? 0.06 : 0.025); when: root.theme.performative; restoreMode: Binding.RestoreBindingOrValue }
-      Binding { target: chatSelector.background; property: "border.width"; value: 1; when: root.theme.performative; restoreMode: Binding.RestoreBindingOrValue }
-      Binding { target: chatSelector.background; property: "border.color"; value: chatSelector.visualFocus ? root.chatBorderColor : chatSelector.hovered ? root.theme.muted : root.theme.separator; when: root.theme.performative; restoreMode: Binding.RestoreBindingOrValue }
+      theme: root.theme; primary: !root.theme.tui
+      readonly property color selectorInk: root.theme.cleanTui ? root.theme.foreground : root.theme.tui ? (visualFocus ? root.chatBorderColor : root.theme.foreground) : root.theme.terminal ? root.theme.accent : root.theme.accentText
+      Binding { target: chatSelector; property: "leftPadding"; value: root.theme.space(8); when: root.theme.tui; restoreMode: Binding.RestoreBindingOrValue }
+      Binding { target: chatSelector; property: "rightPadding"; value: root.theme.space(8); when: root.theme.tui; restoreMode: Binding.RestoreBindingOrValue }
+      Binding { target: chatSelector.background; property: "color"; value: root.theme.alpha(root.theme.foreground, chatSelector.down ? 0.10 : chatSelector.hovered ? 0.06 : root.theme.cleanTui ? 0 : 0.025); when: root.theme.tui; restoreMode: Binding.RestoreBindingOrValue }
+      Binding { target: chatSelector.background; property: "border.width"; value: root.theme.cleanTui ? (chatSelector.visualFocus ? 1 : 0) : 1; when: root.theme.tui; restoreMode: Binding.RestoreBindingOrValue }
+      Binding { target: chatSelector.background; property: "border.color"; value: chatSelector.visualFocus ? (root.theme.cleanTui ? root.theme.accent : root.chatBorderColor) : chatSelector.hovered ? root.theme.muted : root.theme.separator; when: root.theme.tui; restoreMode: Binding.RestoreBindingOrValue }
       text: root.label(root.current) + (root.current && root.current.unread_count ? " · " + root.current.unread_count : "")
       Accessible.name: "Current chat: " + text + ". Choose conversation"
       ToolTip.visible: hovered && selectorLabel.truncated && !allMenu.opened
@@ -145,7 +153,7 @@ Rectangle {
           text: chatSelector.text; elide: Text.ElideRight
           color: chatSelector.selectorInk; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
         }
-        Text { id: selectorArrow; anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; text: "▾"; color: root.theme.performative ? root.theme.muted : chatSelector.selectorInk; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption }
+        Text { id: selectorArrow; anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; text: "▾"; color: root.theme.tui ? root.theme.muted : chatSelector.selectorInk; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption }
       }
     }
   }
@@ -154,7 +162,7 @@ Rectangle {
     objectName: "chatConversationMenu"
     bridge: root.bridge; theme: root.theme; selectedId: root.currentId
     width: Math.min(root.width - root.panelMargin * 2, root.theme.space(380))
-    x: root.theme.performative ? Math.min(heading.x + chatSelector.x, root.width - width - root.panelMargin) : Math.max(root.panelMargin, root.width - width - root.panelMargin)
+    x: root.theme.tui ? Math.min(heading.x + chatSelector.x, root.width - width - root.panelMargin) : Math.max(root.panelMargin, root.width - width - root.panelMargin)
     y: heading.y + heading.height
     onChosen: function(id) { root.choose(id) }
     onNewChatRequested: newChatDialog.begin()

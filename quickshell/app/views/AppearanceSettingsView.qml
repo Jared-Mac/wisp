@@ -17,14 +17,14 @@ Column {
     width: parent.width; wrapMode: Text.WordWrap
     text: !root.appearance || root.appearance.managed
       ? "Appearance follows your Omarchy shell. All Wisp features are available."
-      : "Themes change appearance only. Both have the same features, chats, and controls. Applies to the tray popup and full app."
+      : "Interface styles change presentation only. All have the same features, chats, and controls. Applies to the tray popup and full app."
     color: root.theme.muted
     font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
   }
   Flow {
     width: parent.width; spacing: root.theme.spacing.lg
     Repeater {
-      model: [{profile:"terminal",label:"Terminal · default"},{profile:"legacy",label:"Classic · original"}]
+      model: [{profile:"terminal",label:"Terminal Grid · default"},{profile:"clean_tui",label:"Clean TUI · focused"},{profile:"legacy",label:"Classic · original"}]
       ChatButton {
         required property var modelData
         objectName: "theme-" + modelData.profile
@@ -36,6 +36,13 @@ Column {
     }
   }
   Text {
+    width: parent.width; wrapMode: Text.WordWrap
+    visible: !!root.appearance && root.appearance.profile === "clean_tui"
+    text: "Clean TUI uses a narrow activity rail, quiet rules, neutral panes, restrained selections, and a calmer transcript. Choose any color palette below."
+    color: root.theme.muted
+    font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
+  }
+  Text {
     text: "Color palette"
     color: root.theme.muted
     font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
@@ -43,7 +50,7 @@ Column {
   Flow {
     width: parent.width; spacing: root.theme.spacing.lg
     Repeater {
-      model: [{key:"wisp",label:"Wisp blue"},{key:"graphite",label:"Graphite"},{key:"violet",label:"Violet"},{key:"ember",label:"Ember"},{key:"performative",label:"Performative"}]
+      model: [{key:"wisp",label:"Wisp blue"},{key:"graphite",label:"Graphite"},{key:"violet",label:"Violet"},{key:"ember",label:"Ember"},{key:"performative",label:"Performative"},{key:"herdr",label:"Herdr"}]
       ChatButton {
         required property var modelData
         objectName: "palette-" + modelData.key
@@ -56,8 +63,10 @@ Column {
   }
   Text {
     width: parent.width; wrapMode: Text.WordWrap
-    visible: !!root.appearance && root.appearance.palette === "performative"
-    text: "Performative · a Linux-terminal interface: monospace, numbered frames, bracketed controls, prompt editor, and a live status line. Overrides the base style while selected."
+    visible: !!root.appearance && ["performative", "herdr"].indexOf(root.appearance.palette) >= 0
+    text: root.appearance && root.appearance.palette === "herdr"
+      ? "Herdr · the same compact TUI structure with your Solarized Japan terminal colors, cyan focus, soft pane borders, and JetBrains Mono. Overrides the base style while selected."
+      : "Performative · a Linux-terminal interface: monospace, numbered frames, bracketed controls, prompt editor, and a live status line. Overrides the base style while selected."
     color: root.theme.muted
     font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
   }

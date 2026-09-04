@@ -32,8 +32,8 @@ Column {
       width: root.width
       height: root.theme.space(44)
       radius: root.theme.cornerRadius
-      color: root.theme.performative ? root.theme.surface : root.theme.alpha(root.theme.foreground, 0.05)
-      border.width: root.theme.performative ? 0 : root.theme.terminal ? 1 : 0
+      color: root.theme.tui ? root.theme.surface : root.theme.alpha(root.theme.foreground, 0.05)
+      border.width: root.theme.tui ? 0 : root.theme.terminal ? 1 : 0
       border.color: root.theme.roomBorder
 
       Column {
@@ -46,7 +46,7 @@ Column {
         Text {
           Binding on width { when: root.theme.terminal; value: spotInfo.width; restoreMode: Binding.RestoreBindingOrValue }
           elide: root.theme.terminal ? Text.ElideRight : Text.ElideNone
-          text: (root.theme.performative ? "# " : "") + String(modelData.name || "Spot")
+          text: (root.theme.tui ? "# " : "") + String(modelData.name || "Spot")
           color: root.theme.foreground
           font.family: root.theme.font.family
           font.pixelSize: root.theme.font.body
@@ -73,14 +73,14 @@ Column {
         anchors.rightMargin: root.theme.spacing.lg
         anchors.verticalCenter: parent.verticalCenter
         radius: root.theme.cornerRadius
-        color: root.theme.performative ? (joinMouse.containsMouse ? root.theme.alpha(root.theme.accent, 0.18) : "transparent") : joinMouse.containsMouse
+        color: root.theme.tui ? (joinMouse.containsMouse ? root.theme.alpha(root.theme.accent, 0.18) : "transparent") : joinMouse.containsMouse
           ? root.theme.alpha(root.theme.accent, 0.8) : root.theme.accent
 
         Text {
           id: joinText
           anchors.centerIn: parent
-          text: root.theme.performative ? "[join]" : "Join"
-          color: root.theme.performative ? root.theme.accent : root.theme.accentText
+          text: root.theme.tui ? "[join]" : "Join"
+          color: root.theme.tui ? root.theme.accent : root.theme.accentText
           font.family: root.theme.font.family
           font.pixelSize: root.theme.font.caption
           font.weight: Font.DemiBold

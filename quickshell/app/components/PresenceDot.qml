@@ -5,7 +5,7 @@ Rectangle {
   required property var theme
   width: 9
   height: 9
-  radius: theme.performative ? 0 : 5
+  radius: theme.tui ? 0 : 5
   color: presence === "open" ? theme.onlineIndicator
     : presence === "knock" ? "#f5b94c"
     : presence === "away" ? theme.muted
