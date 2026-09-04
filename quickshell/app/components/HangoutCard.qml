@@ -10,7 +10,7 @@ Rectangle {
   ParticipantVolumeMenu { id: volumeMenu; bridge: root.bridge; theme: root.theme; people: root.hangout.members || [] }
 
   objectName: "roomCard"
-  implicitHeight: root.theme.space(root.theme.tui ? 42 : 48)
+  implicitHeight: Math.max(root.theme.space(root.theme.tui ? 42 : 48), hangoutInfo.implicitHeight + root.theme.spacing.sm * 2)
   radius: root.theme.cornerRadius
   color: root.theme.tui ? root.theme.surface : root.theme.alpha(root.theme.foreground, 0.055)
   border.width: root.theme.tui ? 0 : 1
@@ -57,9 +57,10 @@ Rectangle {
     anchors.leftMargin: root.theme.spacing.lg
     anchors.verticalCenter: parent.verticalCenter
     spacing: root.theme.spacing.xs
-    Binding on width { when: root.theme.terminal; value: Math.max(0, joinButton.x - hangoutInfo.x - root.theme.spacing.lg); restoreMode: Binding.RestoreBindingOrValue }
+    width: Math.max(0, root.width - root.theme.spacing.lg * 2)
 
-    Row {
+    Flow {
+      width: parent.width
       spacing: root.theme.spacing.xs
 
       Repeater {
@@ -71,13 +72,15 @@ Rectangle {
           required property var modelData
           required property int index
           spacing: root.theme.spacing.xs
-          readonly property real allottedWidth: Math.max(0, (hangoutInfo.width - Math.max(0, (root.hangout.members || []).length - 1) * memberRow.spacing) / Math.max(1, (root.hangout.members || []).length))
-          Binding on width { when: root.theme.terminal; value: root.theme.tui ? Math.min(memberRow.allottedWidth, memberName.implicitWidth + mutedIcon.width + deafenedIcon.width + memberRow.spacing * 2) : memberRow.allottedWidth; restoreMode: Binding.RestoreBindingOrValue }
+          readonly property real iconSpace: (mutedIcon.visible ? mutedIcon.width + spacing : 0)
+            + (deafenedIcon.visible ? deafenedIcon.width + spacing : 0)
+          width: Math.min(hangoutInfo.width, memberName.implicitWidth + iconSpace)
 
           Text {
             id: memberName
-            Binding on width { when: root.theme.terminal; value: Math.max(0, memberRow.width - mutedIcon.width - deafenedIcon.width - memberRow.spacing * 2); restoreMode: Binding.RestoreBindingOrValue }
-            elide: root.theme.terminal ? Text.ElideRight : Text.ElideNone
+            objectName: "roomMemberName-" + index
+            width: Math.max(1, memberRow.width - memberRow.iconSpace)
+            wrapMode: Text.WrapAnywhere
             anchors.verticalCenter: parent.verticalCenter
             text: (index > 0 ? " + " : "")
               + (root.memberSpeaking(modelData.display_name) ? "● " : "")
@@ -112,8 +115,10 @@ Rectangle {
       }
     }
     Text {
-      Binding on width { when: root.theme.terminal; value: hangoutInfo.width; restoreMode: Binding.RestoreBindingOrValue }
-      elide: root.theme.terminal ? Text.ElideRight : Text.ElideNone
+      width: Math.max(0, hangoutInfo.width - joinButton.width - root.theme.spacing.sm)
+      height: Math.max(implicitHeight, joinButton.height)
+      verticalAlignment: Text.AlignVCenter
+      elide: Text.ElideRight
       text: (root.theme.tui ? "# " : "") + (root.hangout.label || "Room")
       color: root.theme.muted
       font.family: root.theme.font.family
@@ -125,7 +130,7 @@ Rectangle {
     id: joinButton
     anchors.right: parent.right
     anchors.rightMargin: root.theme.spacing.md
-    anchors.verticalCenter: parent.verticalCenter
+    anchors.bottom: hangoutInfo.bottom
     width: joinText.implicitWidth + root.theme.spacing.lg * 2
     height: root.theme.space(30)
     radius: root.theme.cornerRadius

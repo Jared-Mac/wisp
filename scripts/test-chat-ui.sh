@@ -10,7 +10,7 @@ if [[ -f "$repo_dir/target/video-ui/libwispvideo.so" ]]; then
   cp "$repo_dir/target/video-ui/libwispvideo.so" "$repo_dir/target/video-ui/qmldir" "$test_dir/app/native/WispVideo/"
 fi
 cp "$repo_dir/tests/quickshell/ChatWorkspace.qml" "$test_dir/shell.qml"
-for fixture_mode in ${WISP_TEST_MODES:-app image panel settings edit files clearroom cleardm roomsettings newroom themes friends identity panelidentity identityactions panelidentityactions workspace saved traycollapse presence panelpresence picker tilemoves tiles tilesreload newchat addchat shortcuts audiotooltips panelaudiotooltips latest panellatest imagegeometry panelimagegeometry roomcleanup cleantui}; do
+for fixture_mode in ${WISP_TEST_MODES:-app image panel settings edit files clearroom cleardm roomsettings newroom themes friends identity panelidentity identityactions panelidentityactions workspace saved traycollapse presence panelpresence picker tilemoves tiles tilesreload newchat addchat shortcuts audiotooltips panelaudiotooltips latest panellatest imagegeometry panelimagegeometry roomcleanup cleantui returnchat}; do
   screenshot=""
   if [[ -n "${WISP_CHAT_SCREENSHOT:-}" ]]; then
     screenshot="${WISP_CHAT_SCREENSHOT%.png}-$fixture_mode.png"

@@ -90,7 +90,7 @@ ShellRoot {
       var editor = test.find(composer, "mainComposerEditor")
       test.check(!theme.terminal && theme.cornerRadius === 9, "Classic style restored")
       test.check(button.contentItem.text === "Settings", "normal control label restored")
-      test.check(trayComposer.editorHeight === theme.space(66) && room.height === theme.space(48), "normal theme spacing restored")
+      test.check(trayComposer.editorHeight === theme.space(66) && room.height >= theme.space(48), "normal composer spacing restored and room fits its members")
       test.check(!test.find(composer, "terminalChatPrompt").visible, "prompt hidden outside mode")
       test.check(editor.cursorDelegate === test.originalCaret, "native caret restored")
       test.check(editor.text === "This is a chat draft, not a command.", "draft preserved")

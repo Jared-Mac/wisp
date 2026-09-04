@@ -11,7 +11,7 @@ ShellRoot {
   readonly property string mode: Quickshell.env("WISP_CHAT_FIXTURE_MODE")
   readonly property real testWidth: Number(Quickshell.env("WISP_TEST_WIDTH")) || (Quickshell.env("WISP_TEST_CONSTRAINED") === "1" ? 840 : 1180)
   readonly property real testHeight: Number(Quickshell.env("WISP_TEST_HEIGHT")) || (Quickshell.env("WISP_TEST_CONSTRAINED") === "1" ? 700 : 900)
-  readonly property bool compactMode: mode === "panelimagegeometry" || mode === "panellatest" || mode === "panelaudiotooltips" || mode === "panelpresence" || mode === "traycollapse" || mode === "panel" || mode === "panelmedia" || mode === "panelsettings" || mode === "friends" || mode === "panelidentity" || mode === "panelidentityactions"
+  readonly property bool compactMode: mode === "returnchat" || mode === "panelimagegeometry" || mode === "panellatest" || mode === "panelaudiotooltips" || mode === "panelpresence" || mode === "traycollapse" || mode === "panel" || mode === "panelmedia" || mode === "panelsettings" || mode === "friends" || mode === "panelidentity" || mode === "panelidentityactions"
   function setImageFixture(w,h) {
     var data=JSON.parse(JSON.stringify(bridge.snapshot))
     bridge.chatImageUrls={"geometry":"data:image/svg+xml,"+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="'+w+'" height="'+h+'"><rect width="'+w+'" height="'+h+'" fill="#254261"/><circle cx="40" cy="40" r="25" fill="#e6b75b"/><path d="M0 0L'+w+' '+h+'" stroke="#74c9d6" stroke-width="5"/></svg>')}
@@ -279,6 +279,31 @@ ShellRoot {
         if (theme.chatBordersColored) test.check(frame.ink === frame.parent.chatBorderColor, "chat rule uses its assigned color even in Clean TUI")
       }
       if (Quickshell.env("WISP_TEST_COLOR_MODE") === "chat-only") test.check(theme.chatBordersColored && theme.chatHeadingsColored && theme.roomSectionColor === theme.muted && theme.friendSectionColor === theme.muted, "chat-only colors leave activity sections neutral")
+    }
+  }
+  Timer {
+    interval: 300; running: test.mode === "returnchat"
+    onTriggered: {
+      var data=JSON.parse(JSON.stringify(bridge.snapshot))
+      data.conversations.forEach(function(c) { c.unread_count=0; if(c.id==="dm") c.label="Jared with a very long display name" })
+      bridge.applySnapshot(data)
+      bridge.selectConversation("dm"); bridge.selectConversation("porch")
+    }
+  }
+  Timer {
+    interval: 650; running: test.mode === "returnchat"
+    onTriggered: {
+      var header=test.findItem(compactSurface,"trayChatHeader")
+      var back=test.findItem(compactSurface,"returnLastChat")
+      var navigation=test.findObject(compactSurface,"unreadChatNavigation",[])
+      test.check(back && back.parent===header,"return button is in the chat header")
+      test.check(!navigation.visible && navigation.height===0,"return button does not create a navigation row")
+      test.check(back.x>=0 && back.x+back.width<=header.width && back.y>=0 && back.y+back.height<=header.height,"long return label remains within header")
+      var title=test.findItem(compactSurface,"trayChatHeading")
+      test.check(title.x+title.width<=back.x,"heading does not overlap return button")
+      back.clicked()
+      test.check(bridge.activeConversationId==="dm","header return action opens the previous chat")
+      bridge.selectConversation("porch")
     }
   }
   Timer {
@@ -1167,7 +1192,7 @@ ShellRoot {
         test.check(editor && editor.placeholderText === "Message " + (current.label === "Hangout" ? "Room" : current.label), "placeholder identifies the conversation")
         var oldId = messageBox.parent.conversationId
         messageBox.parent.conversationId = "dm"
-        test.check(editor.placeholderText === "Message Jared", "placeholder follows DM destination")
+        test.check(editor.placeholderText === "Message " + bridge.conversationById("dm").label, "placeholder follows DM destination")
         messageBox.parent.conversationId = oldId
         test.check(!test.findText(surface, "Shift+Enter for a new line"), "keyboard hint removed")
       }
@@ -1195,7 +1220,7 @@ ShellRoot {
       }
       if (test.mode === "media" || test.mode === "panelmedia") {
         var room = test.findItem(surface, "roomCard")
-        test.check(!!room && room.height === theme.space(theme.tui ? 42 : 48), "occupied room cards use compact height")
+        test.check(!!room && room.height >= theme.space(theme.tui ? 42 : 48), "occupied room cards grow to fit their members")
       }
       if (test.mode === "cleantui") {
         var cleanWorkspace = test.findObject(surface, "mainWorkspace", [])

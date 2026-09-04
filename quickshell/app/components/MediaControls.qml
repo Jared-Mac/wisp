@@ -18,22 +18,27 @@ Column {
     Repeater {
       id: controlRepeater
       model: [
-        { "label": root.bridge.shareStarting ? "Choosing…" : root.bridge.sharing ? "Stop share" : "Share screen", "action": "share" },
-        { "label": root.bridge.cameraStarting ? "Starting…" : root.bridge.cameraActive ? "Camera off" : "Camera on", "action": "camera" },
+        { "label": root.bridge.sharing ? "Stop sharing screen" : root.bridge.shareStarting ? "Choosing…" : "Share screen", "action": "share" },
+        { "label": root.bridge.cameraActive ? "Stop camera" : root.bridge.cameraStarting ? "Starting…" : "Camera on", "action": "camera" },
         { "label": "Leave", "action": "leave" }
       ]
       delegate: Rectangle {
         required property var modelData
         objectName: "mediaAction-" + modelData.action
-        readonly property bool controlEnabled: (modelData.action !== "share" || !root.bridge.shareStarting)
+        readonly property bool publishing: (modelData.action === "share" && root.bridge.sharing)
+          || (modelData.action === "camera" && root.bridge.cameraActive)
+        readonly property bool controlEnabled: publishing || ((modelData.action !== "share" || !root.bridge.shareStarting)
           && (modelData.action !== "camera" || (!root.bridge.cameraStarting
-            && root.bridge.cameraState.devices.length > 0))
-        width: root.theme.tui ? controlLabel.implicitWidth + root.theme.space(16) : Math.max(root.theme.terminal ? controlLabel.implicitWidth + root.theme.space(20) : 0, (root.width
+            && root.bridge.cameraState.devices.length > 0)))
+        width: Math.min(root.width, root.theme.tui ? controlLabel.implicitWidth + root.theme.space(16) : Math.max(controlLabel.implicitWidth + root.theme.space(20), (root.width
           - controls.spacing * (controlRepeater.count - 1))
-          / Math.max(1, controlRepeater.count))
-        height: root.theme.space(root.theme.tui ? 28 : 34)
+          / Math.max(1, controlRepeater.count)))
+        height: Math.max(root.theme.space(root.theme.tui ? 28 : 34), controlLabel.implicitHeight + root.theme.space(10))
         radius: root.theme.cornerRadius
-        color: root.theme.tui && !controlMouse.containsMouse ? "transparent" : controlMouse.containsMouse
+        border.width: publishing ? 1 : 0
+        border.color: root.theme.danger
+        color: publishing ? root.theme.alpha(root.theme.danger, controlMouse.pressed ? 0.42 : controlMouse.containsMouse ? 0.32 : 0.2)
+          : root.theme.tui && !controlMouse.containsMouse ? "transparent" : controlMouse.containsMouse
           ? (modelData.action === "leave" ? root.theme.alpha(root.theme.danger, 0.28) : root.theme.alpha(root.theme.foreground, 0.12))
           : root.theme.alpha(root.theme.foreground, 0.065)
         opacity: controlEnabled ? 1 : 0.55
@@ -41,8 +46,12 @@ Column {
         Text {
           id: controlLabel
           anchors.centerIn: parent
+          width: Math.min(implicitWidth, parent.width - root.theme.space(16))
+          wrapMode: Text.Wrap
+          horizontalAlignment: Text.AlignHCenter
           text: root.theme.tui ? "[" + modelData.label.toLowerCase() + "]" : modelData.label
-          color: modelData.action === "leave" ? root.theme.danger : root.theme.foreground
+          color: parent.publishing || modelData.action === "leave" ? root.theme.danger : root.theme.foreground
+          font.weight: parent.publishing ? Font.Bold : Font.Normal
           font.family: root.theme.font.family
           font.pixelSize: root.theme.font.caption
         }

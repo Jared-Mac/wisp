@@ -1,0 +1,3 @@
+#!/bin/sh
+echo 'Unexpected CMake invocation in Cargo video build' >&2
+exit 99

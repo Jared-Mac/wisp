@@ -18,7 +18,7 @@ case "${XDG_CURRENT_DESKTOP:-}" in
 esac
 
 sudo pacman -S --needed \
-  base-devel rustup clang cmake pkgconf openssl alsa-lib libpulse pipewire \
+  base-devel rustup clang pkgconf qt6-base qt6-declarative openssl alsa-lib libpulse pipewire \
   gst-plugin-pipewire gst-plugins-base gst-plugins-good gst-libav \
   xdg-desktop-portal "$portal_backend" \
   quickshell tailscale just jq curl git

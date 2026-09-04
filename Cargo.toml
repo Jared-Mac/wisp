@@ -5,6 +5,7 @@ members = [
   "apps/wisp-server",
   "apps/wispctl",
   "tools/wisp-sim",
+  "native/video",
 ]
 resolver = "2"
 exclude = ["third_party/libwebrtc", "third_party/webrtc-sys"]

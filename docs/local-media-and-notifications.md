@@ -28,12 +28,26 @@
 
 ## Native viewer/build
 
-`bash scripts/build-video-ui.sh` builds the small Qt Quick scene-graph renderer
-with CMake and Qt6 Quick/Network/QML development packages. `app-sync.sh` runs this
-and installs it under the installed UI's `native/WispVideo`. `wisp-ui` sets the
+`cargo build --release -p wisp-video` builds the Rust-owned video receiver and
+small Qt Quick scene-graph adapter as a QML plugin. Cargo invokes Qt6 `moc` and
+the C++ compiler through `cxx-build`; **CMake is not used**. Source builds require
+Qt6 development packages, pkg-config, and a C++ compiler. The helper
+`bash scripts/build-video-ui.sh` stages Cargo's output for `app-sync.sh`, which
+installs it under the installed UI's `native/WispVideo`. `wisp-ui` sets the
 physical QML import and sound-asset paths (Quickshell virtual URLs cannot load
 native libraries or serve as external audio-player filenames). Release packaging
 includes the built module; CI installs Qt6 development packages and builds it.
+People installing that precompiled package do not need the compiler, moc, Cargo,
+or CMake, but still need compatible Qt/Quickshell runtime libraries.
+
+Rust owns the Unix socket, bounded frame validation/storage, cancellation on
+source change/destruction, viewport requests, and aspect-fit geometry. The C++
+adapter is limited to Qt properties, a timer that polls Rust, texture upload, and
+plugin registration. The socket worker never touches Qt objects or invokes GUI
+callbacks; it exchanges at most one pending frame with the UI thread. Old-source
+workers have separate state and cannot overwrite a new stream. The only
+handwritten unsafe Rust is two Qt plugin-loader ABI forwarding functions;
+receiver code forbids unsafe, and the existing workspace policy is unchanged.
 
 The daemon's private mode-0600 `wispd.video` Unix socket transports decoded RGBA,
 with one requested frame in flight and latest-frame replacement. No media files,

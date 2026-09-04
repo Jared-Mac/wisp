@@ -1,0 +1,32 @@
+[package]
+name = "wisp-video"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "wispvideo"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+cxx = "=1.0.199"
+serde_json.workspace = true
+socket2 = "0.6"
+
+[build-dependencies]
+cxx-build = "=1.0.199"
+pkg-config = "0.3"
+
+[dev-dependencies]
+tempfile = "3"
+
+# Only Qt's two plugin-loader entry points require handwritten unsafe FFI.
+# The receiver/geometry modules forbid unsafe code; other workspace crates
+# retain the workspace-wide unsafe_code=forbid policy.
+[lints.rust]
+unsafe_code = "deny"
+unsafe_op_in_unsafe_fn = "deny"
+
+[lints.clippy]
+undocumented_unsafe_blocks = "deny"

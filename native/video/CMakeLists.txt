@@ -1,8 +1,0 @@
-cmake_minimum_required(VERSION 3.16)
-project(wispvideo LANGUAGES CXX)
-set(CMAKE_AUTOMOC ON)
-set(CMAKE_CXX_STANDARD 17)
-find_package(Qt6 REQUIRED COMPONENTS Quick Network Qml)
-add_library(wispvideo MODULE plugin.cpp)
-target_link_libraries(wispvideo PRIVATE Qt6::Quick Qt6::Network Qt6::Qml)
-configure_file(qmldir qmldir COPYONLY)

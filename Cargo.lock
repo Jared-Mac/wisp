@@ -6962,6 +6962,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "wisp-video"
+version = "0.1.0"
+dependencies = [
+ "cxx",
+ "cxx-build",
+ "pkg-config",
+ "serde_json",
+ "socket2",
+ "tempfile",
+]
+
+[[package]]
 name = "wispctl"
 version = "0.1.0"
 dependencies = [

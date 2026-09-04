@@ -22,9 +22,11 @@ Column {
   readonly property color chatColor: root.theme.chatHeadingsColored ? root.bridge.chatColors.colorFor(root.bridge.activeConversationId, root.theme.muted) : root.theme.muted
   Item {
     id: messageHeader
-    width: parent.width; height: root.theme.space(30)
+    objectName: "trayChatHeader"
+    width: parent.width; height: Math.max(root.theme.space(30), chatOptions.implicitHeight)
     Text {
-      anchors.left: parent.left; anchors.right: chatOptions.left
+      anchors.left: parent.left
+      anchors.right: returnLastChat.visible ? returnLastChat.left : chatOptions.visible ? chatOptions.left : parent.right
       anchors.rightMargin: root.theme.spacing.md; anchors.verticalCenter: parent.verticalCenter
       elide: Text.ElideRight
       objectName: "trayChatHeading"
@@ -75,12 +77,28 @@ Column {
       primary: root.bridge.unreadMessages > 0
       onClicked: root.bridge.closeConversation()
     }
+    ChatButton {
+      id: returnLastChat
+      objectName: "returnLastChat"
+      visible: !!root.bridge.lastConversation
+      anchors.right: chatOptions.visible ? chatOptions.left : parent.right
+      anchors.rightMargin: chatOptions.visible ? root.theme.spacing.md : 0
+      anchors.verticalCenter: parent.verticalCenter
+      width: Math.min(implicitWidth, root.theme.space(120), Math.max(root.theme.space(34), messageHeader.width - (chatOptions.visible ? chatOptions.width + allConversations.width + root.theme.spacing.md * 2 : 0) - root.theme.space(120)))
+      theme: root.theme
+      text: "↶ " + (root.bridge.lastConversation ? root.conversationLabel(root.bridge.lastConversation) : "")
+      Accessible.name: "Return to " + (root.bridge.lastConversation ? root.conversationLabel(root.bridge.lastConversation) : "last chat")
+      ToolTip.visible: hovered
+      ToolTip.text: Accessible.name
+      onClicked: root.bridge.selectConversation(root.bridge.lastConversationId)
+    }
   }
   Flow {
     id: navigation
+    objectName: "unreadChatNavigation"
     width: parent.width
     spacing: root.theme.spacing.sm
-    visible: root.bridge.unreadConversations.length > 0 || !!root.bridge.lastConversation
+    visible: root.bridge.unreadConversations.length > 0
     height: visible ? implicitHeight : 0
     Repeater {
       model: root.bridge.unreadConversations
@@ -93,15 +111,6 @@ Column {
         Accessible.name: modelData.unread_count + " unread messages in " + root.conversationLabel(modelData)
         onClicked: root.bridge.selectConversation(modelData.id)
       }
-    }
-    ChatButton {
-      objectName: "returnLastChat"
-      visible: !!root.bridge.lastConversation
-      width: Math.min(implicitWidth, navigation.width)
-      theme: root.theme
-      text: "↶ " + (root.bridge.lastConversation ? root.conversationLabel(root.bridge.lastConversation) : "")
-      Accessible.name: "Return to " + (root.bridge.lastConversation ? root.conversationLabel(root.bridge.lastConversation) : "last chat")
-      onClicked: root.bridge.selectConversation(root.bridge.lastConversationId)
     }
   }
   Text {
