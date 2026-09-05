@@ -72,17 +72,20 @@ its corner choice under **Settings → Desktop position**. Auto uses the tray
 click's edge when the tray is on the primary display and otherwise falls back
 to the primary display's bottom-right corner.
 
-The default **Clear** audio preset publishes the microphone through the
-DeepFilterNet3 neural denoiser (48 kHz, 10 ms frames, 30 ms algorithmic
-latency) and transmits its output continuously. Its live 0–100 strength slider
-maps to DeepFilterNet's 0–100 dB attenuation limit; zero bypasses noise
-reduction and 100 allows full suppression. There is no secondary speech
-detector or post-denoise gate. **Natural** keeps WebRTC echo cancellation and
-lighter noise suppression, while **Studio** leaves the signal unprocessed. If
-DeepFilterNet cannot initialize, Wisp falls back to RNNoise and reports that
-backend under **Settings → Audio** and in `wispctl status`. The same view
-reports processing time, deadline misses, and capture-queue depth for live
-diagnosis.
+The default **Clear voice** mode runs an explicit speech pipeline: speaker-reference
+echo cancellation and rumble filtering, DeepFilterNet3 noise suppression, then
+attenuation-only peak protection. Audio stays at 48 kHz mono in 10 ms frames,
+with a 64 kb/s Opus ceiling and redundant packets. There is no extra speech gate
+or automatic gain boost. **Light cleanup** uses WebRTC suppression;
+**Unprocessed** preserves microphone samples for headphones and quiet rooms.
+The wire preset names remain `clear`, `natural`, and `studio`.
+
+Capture buffering is capped at 60 ms, and stale frames are discarded before
+publication. Muting, changing devices, or switching modes clears buffered speech.
+Sustained neural-processing overload selects the lightweight WebRTC fallback
+for the rest of that call. `wispctl status` reports processing cost, deadline
+misses, queue depth, and speaker-reference frames for diagnosis. See
+[the audio pipeline](docs/audio-pipeline.md) for architecture and validation.
 
 During a hangout, **Share screen** opens the standard XDG desktop portal picker
 for a monitor or individual window, while **Camera on** publishes the selected

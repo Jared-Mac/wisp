@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+export WISP_TEST_MICROPHONE_TONE=1
 export WISP_E2EE_KEY="wisp-integration-e2ee-key-32-bytes"
 
 repo_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
@@ -140,17 +141,17 @@ wait_for_status '
   .self.media.audio.denoiser_active == true and
   .self.media.audio.denoiser == "deepfilternet" and
   .self.media.audio.processing_latency_ms == 30 and
-  .self.media.audio.deepfilter_strength == 100 and
   (.self.media.audio.processing_time_us | type) == "number" and
   (.self.media.audio.processing_deadline_misses | type) == "number" and
-  (.self.media.audio.capture_queue_ms | type) == "number"
+  .self.media.audio.capture_queue_ms <= 60 and
+  .self.media.audio.echo_reference_frames > 0
 '
 
 WISP_SERVER_URL="http://127.0.0.1:$server_port" RUST_LOG=info \
   target/debug/wisp-sim --profile MemberB --join Owner --publish-tone >"$test_dir/member_b.log" 2>&1 &
 member_b_pid=$!
 wait_for_status '
-  .self.media.remote_audio_participants == ["MemberB", "MemberA"] and
+  (.self.media.remote_audio_participants | sort) == ["MemberA", "MemberB"] and
   .self.media.received_audio_frames > 0
 '
 
@@ -159,7 +160,7 @@ WISP_SERVER_URL="http://127.0.0.1:$server_port" RUST_LOG=info \
 member_c_pid=$!
 wait_for_status '
   .self.connection == "connected" and
-  .self.media.remote_audio_participants == ["MemberC", "MemberB", "MemberA"] and
+  (.self.media.remote_audio_participants | sort) == ["MemberA", "MemberB", "MemberC"] and
   .self.media.received_audio_frames > 0
 '
 
@@ -178,7 +179,7 @@ for cycle in $(seq 1 "$cycles"); do
   wait_for_status '
     .self.connection == "connected" and
     .self.media.livekit_connected == true and
-    .self.media.remote_audio_participants == ["MemberC", "MemberB", "MemberA"] and
+    (.self.media.remote_audio_participants | sort) == ["MemberA", "MemberB", "MemberC"] and
     .self.media.received_audio_frames > 0 and
     .self.media.audio.denoiser == "deepfilternet"
   '
@@ -200,7 +201,7 @@ for _ in $(seq 1 100); do
 done
 jq -e --argjson before "$frames_before_ipc" '
   .self.connection == "connected" and
-  .self.media.remote_audio_participants == ["MemberC", "MemberB", "MemberA"] and
+  (.self.media.remote_audio_participants | sort) == ["MemberA", "MemberB", "MemberC"] and
   .self.media.received_audio_frames > $before
 ' <<<"$status_json" >/dev/null
 
@@ -215,7 +216,7 @@ for _ in $(seq 1 300); do
   if jq -e --argjson before "$frames_before_restart" '
     .self.connection == "connected" and
     .self.media.livekit_connected == true and
-    .self.media.remote_audio_participants == ["MemberC", "MemberB", "MemberA"] and
+    (.self.media.remote_audio_participants | sort) == ["MemberA", "MemberB", "MemberC"] and
     .self.media.received_audio_frames > $before
   ' <<<"$status_json" >/dev/null; then break; fi
   sleep 0.1
@@ -223,7 +224,7 @@ done
 jq -e --argjson before "$frames_before_restart" '
   .self.connection == "connected" and
   .self.media.livekit_connected == true and
-  .self.media.remote_audio_participants == ["MemberC", "MemberB", "MemberA"] and
+  (.self.media.remote_audio_participants | sort) == ["MemberA", "MemberB", "MemberC"] and
   .self.media.received_audio_frames > $before
 ' <<<"$status_json" >/dev/null
 rg -q 'LiveKit media reconnecting' "$test_dir/daemon.log"
@@ -252,7 +253,7 @@ wait_for_status '
   .self.media.livekit_connected == true and
   .self.media.error_code == null and
   .self.media.error == null and
-  .self.media.remote_audio_participants == ["MemberC", "MemberB", "MemberA"] and
+  (.self.media.remote_audio_participants | sort) == ["MemberA", "MemberB", "MemberC"] and
   .self.media.received_audio_frames > 0
 '
 

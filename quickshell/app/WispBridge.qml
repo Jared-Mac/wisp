@@ -262,7 +262,6 @@ Item {
           "denoiser_active": true,
           "denoiser": "deepfilternet",
           "processing_latency_ms": 30,
-          "deepfilter_strength": 100,
           "processing_time_us": 0,
           "processing_deadline_misses": 0,
           "capture_queue_ms": 0
@@ -626,7 +625,6 @@ Item {
     "denoiser_active": true,
     "denoiser": "deepfilternet",
     "processing_latency_ms": 30,
-    "deepfilter_strength": 100,
     "processing_time_us": 0,
     "processing_deadline_misses": 0,
     "capture_queue_ms": 0
@@ -856,7 +854,7 @@ Item {
     else parts.push("Audio ready")
     if (audioState.denoiser_active) {
       var backend = String(audioState.denoiser || "deepfilternet")
-      parts.push(backend === "deepfilternet" ? "DeepFilterNet neural denoiser" : "RNNoise fallback")
+      parts.push(backend === "deepfilternet" ? "DeepFilterNet neural denoiser" : "WebRTC fallback")
     }
     if (inHangout) parts.push(mediaState.e2ee_enabled
       ? "End-to-end encrypted" : "Media encryption off")
@@ -1356,9 +1354,6 @@ Item {
   function setInputDevice(id) { saveSetting("set_input_device", { "id": id }) }
   function setOutputDevice(id) { saveSetting("set_output_device", { "id": id }) }
   function setAudioPreset(preset) { saveSetting("set_audio_preset", { "preset": preset }) }
-  function setDeepfilterStrength(strength) {
-    saveSetting("set_deepfilter_strength", { "strength": Math.max(0, Math.min(100, Math.round(strength))) })
-  }
   function refreshVideoDevices() { send("refresh_video_devices", {}) }
   function setCameraDevice(id) { saveSetting("set_camera_device", { "id": id }) }
   function setVideoQuality(quality) { saveSetting("set_video_quality", { "quality": quality }) }

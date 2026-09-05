@@ -6,7 +6,6 @@ use ashpd::desktop::{
         StartCastOptions,
     },
 };
-use df::tract::{DfParams, DfTract, RuntimeParams};
 use futures_util::StreamExt;
 use gstreamer as gst;
 use gstreamer::prelude::*;
@@ -38,8 +37,6 @@ use livekit::{
         video_stream::native::NativeVideoStream,
     },
 };
-use ndarray::{ArrayView2, ArrayViewMut2};
-use nnnoiseless::DenoiseState;
 use serde::{Deserialize, Serialize};
 use std::{
     borrow::Cow,
@@ -59,18 +56,17 @@ use tokio::{
 };
 use tracing::{debug, info, warn};
 use wisp_protocol::{
-    AudioDevice, AudioPreset, AudioState, CameraState, DEFAULT_DEEPFILTER_STRENGTH, HangoutId,
-    LiveKitTokenResponse, RemoteVideoState, RemoteVideoTarget, ScreenShareState,
-    VideoCodecPreference, VideoDevice, VideoQualityPreset, VideoSettings, VideoSource,
+    AudioDevice, AudioPreset, AudioState, CameraState, HangoutId, LiveKitTokenResponse,
+    RemoteVideoState, RemoteVideoTarget, ScreenShareState, VideoCodecPreference, VideoDevice,
+    VideoQualityPreset, VideoSettings, VideoSource,
 };
 
 use crate::surface::{RgbaFrame, SurfaceController};
 
-const AUDIO_SAMPLE_RATE: u32 = 48_000;
-const AUDIO_FRAME_SAMPLES: usize = 480;
-const DEEPFILTER_LATENCY_MS: u16 = 30;
-const RNNOISE_LATENCY_MS: u16 = 10;
-const AUDIO_FRAME_BUDGET_US: u32 = 10_000;
+use crate::audio::{
+    AUDIO_FRAME_BUDGET_US, AUDIO_FRAME_SAMPLES, AUDIO_SAMPLE_RATE, CaptureQueue, DenoiserBackend,
+    DenoiserService, apply_denoiser_state, preset_code,
+};
 const VIDEO_WATCH_TOPIC: &str = "wisp.video-watch.v1";
 const PREVIEW_MAX_WIDTH: u32 = 480;
 const PREVIEW_MAX_HEIGHT: u32 = 270;
@@ -82,192 +78,6 @@ struct VideoWatchSignal {
     participant_identity: Option<String>,
     source: VideoSource,
     watching: bool,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(u8)]
-enum DenoiserBackend {
-    DeepFilterNet,
-    Rnnoise,
-}
-
-impl DenoiserBackend {
-    fn from_atomic(value: u8) -> Self {
-        if value == Self::Rnnoise as u8 {
-            Self::Rnnoise
-        } else {
-            Self::DeepFilterNet
-        }
-    }
-
-    const fn name(self) -> &'static str {
-        match self {
-            Self::DeepFilterNet => "deepfilternet",
-            Self::Rnnoise => "rnnoise",
-        }
-    }
-
-    const fn latency_ms(self) -> u16 {
-        match self {
-            Self::DeepFilterNet => DEEPFILTER_LATENCY_MS,
-            Self::Rnnoise => RNNOISE_LATENCY_MS,
-        }
-    }
-}
-
-enum NeuralDenoiser {
-    DeepFilterNet(Box<DfTract>),
-    Rnnoise {
-        state: Box<DenoiseState<'static>>,
-        first_frame: bool,
-    },
-}
-
-impl NeuralDenoiser {
-    fn deepfilternet(model: DfTract) -> Self {
-        Self::DeepFilterNet(Box::new(model))
-    }
-
-    fn rnnoise() -> Self {
-        Self::Rnnoise {
-            state: DenoiseState::new(),
-            first_frame: true,
-        }
-    }
-
-    const fn backend(&self) -> DenoiserBackend {
-        match self {
-            Self::DeepFilterNet(_) => DenoiserBackend::DeepFilterNet,
-            Self::Rnnoise { .. } => DenoiserBackend::Rnnoise,
-        }
-    }
-
-    fn process_frame(&mut self, input: &[i16]) -> anyhow::Result<Vec<i16>> {
-        match self {
-            Self::DeepFilterNet(model) => deepfilter_frame(model, input),
-            Self::Rnnoise { state, first_frame } => Ok(rnnoise_frame(state, input, first_frame)),
-        }
-    }
-
-    fn set_strength(&mut self, strength: u8) {
-        if let Self::DeepFilterNet(model) = self {
-            // DeepFilterNet defines 0 dB as bypass and 100 dB as unlimited
-            // attenuation, which maps directly to Wisp's 0–100 strength scale.
-            model.set_atten_lim(f32::from(strength));
-        }
-    }
-}
-
-enum DenoiserRequest {
-    StartSession {
-        response: tokio::sync::oneshot::Sender<DenoiserBackend>,
-    },
-    Process {
-        input: Vec<i16>,
-        response: tokio::sync::oneshot::Sender<Vec<i16>>,
-    },
-}
-
-struct DenoiserService {
-    requests: Option<mpsc::Sender<DenoiserRequest>>,
-    worker: Option<std::thread::JoinHandle<()>>,
-}
-
-impl DenoiserService {
-    fn spawn(backend_state: Arc<AtomicU8>, strength: Arc<AtomicU8>) -> anyhow::Result<Self> {
-        let (requests, mut request_rx) = mpsc::channel::<DenoiserRequest>(2);
-        let worker = std::thread::Builder::new()
-            .name("wisp-denoiser".into())
-            .spawn(move || {
-                let mut denoiser = preferred_neural_denoiser();
-                let mut session_processed_audio = false;
-                let mut applied_strength = strength.load(Ordering::Acquire);
-                denoiser.set_strength(applied_strength);
-                backend_state.store(denoiser.backend() as u8, Ordering::Release);
-
-                while let Some(request) = request_rx.blocking_recv() {
-                    match request {
-                        DenoiserRequest::StartSession { response } => {
-                            if session_processed_audio {
-                                denoiser = preferred_neural_denoiser();
-                                applied_strength = strength.load(Ordering::Acquire);
-                                denoiser.set_strength(applied_strength);
-                                backend_state
-                                    .store(denoiser.backend() as u8, Ordering::Release);
-                            }
-                            session_processed_audio = false;
-                            let _ = response.send(denoiser.backend());
-                        }
-                        DenoiserRequest::Process { input, response } => {
-                            let requested_strength = strength.load(Ordering::Acquire);
-                            if requested_strength != applied_strength {
-                                denoiser.set_strength(requested_strength);
-                                applied_strength = requested_strength;
-                            }
-                            session_processed_audio = true;
-                            let output = match denoiser.process_frame(&input) {
-                                Ok(output) => output,
-                                Err(error) => {
-                                    warn!(%error, "DeepFilterNet processing failed; falling back to RNNoise");
-                                    denoiser = NeuralDenoiser::rnnoise();
-                                    backend_state.store(
-                                        DenoiserBackend::Rnnoise as u8,
-                                        Ordering::Release,
-                                    );
-                                    denoiser.process_frame(&input).unwrap_or_else(
-                                        |fallback_error| {
-                                            warn!(%fallback_error, "RNNoise fallback failed; publishing raw audio");
-                                            input
-                                        },
-                                    )
-                                }
-                            };
-                            if response.send(output).is_err() {
-                                debug!("discarding denoised frame after microphone pipeline stopped");
-                            }
-                        }
-                    }
-                }
-            })
-            .context("start neural denoiser worker")?;
-        Ok(Self {
-            requests: Some(requests),
-            worker: Some(worker),
-        })
-    }
-
-    async fn start_session(&self) -> anyhow::Result<DenoiserBackend> {
-        let (response, result) = tokio::sync::oneshot::channel();
-        self.requests
-            .as_ref()
-            .context("neural denoiser worker is unavailable")?
-            .send(DenoiserRequest::StartSession { response })
-            .await
-            .context("start neural denoiser session")?;
-        result.await.context("neural denoiser worker stopped")
-    }
-
-    async fn process(&self, input: Vec<i16>) -> anyhow::Result<Vec<i16>> {
-        let (response, result) = tokio::sync::oneshot::channel();
-        self.requests
-            .as_ref()
-            .context("neural denoiser worker is unavailable")?
-            .send(DenoiserRequest::Process { input, response })
-            .await
-            .context("queue neural denoiser frame")?;
-        result.await.context("neural denoiser worker stopped")
-    }
-}
-
-impl Drop for DenoiserService {
-    fn drop(&mut self) {
-        self.requests.take();
-        if let Some(worker) = self.worker.take()
-            && worker.join().is_err()
-        {
-            warn!("neural denoiser worker panicked");
-        }
-    }
 }
 
 #[derive(Debug)]
@@ -282,6 +92,10 @@ pub(crate) enum MediaEvent {
         generation: u64,
     },
     Disconnected {
+        generation: u64,
+        reason: String,
+    },
+    AudioFailed {
         generation: u64,
         reason: String,
     },
@@ -314,6 +128,7 @@ pub(crate) enum MediaEvent {
         processing_time_us: u32,
         processing_deadline_misses: u64,
         capture_queue_ms: u16,
+        echo_reference_frames: u64,
     },
     ActiveSpeakers {
         generation: u64,
@@ -422,27 +237,13 @@ pub(crate) struct CameraInfo {
     pub state: CameraState,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 struct AudioPreferences {
     preferred_input_id: Option<String>,
     preferred_output_id: Option<String>,
     selected_input_id: Option<String>,
     selected_output_id: Option<String>,
     preset: AudioPreset,
-    deepfilter_strength: u8,
-}
-
-impl Default for AudioPreferences {
-    fn default() -> Self {
-        Self {
-            preferred_input_id: None,
-            preferred_output_id: None,
-            selected_input_id: None,
-            selected_output_id: None,
-            preset: AudioPreset::default(),
-            deepfilter_strength: DEFAULT_DEEPFILTER_STRENGTH,
-        }
-    }
 }
 
 #[derive(Debug, Default)]
@@ -458,7 +259,7 @@ struct MediaSession {
     microphone: LocalAudioTrack,
     microphone_source: NativeAudioSource,
     microphone_capture: gst::Pipeline,
-    microphone_frames: mpsc::UnboundedSender<Vec<i16>>,
+    microphone_frames: Arc<CaptureQueue>,
     microphone_task: JoinHandle<()>,
     screen_share: Option<ScreenShareSession>,
     camera: Option<CameraSession>,
@@ -495,13 +296,11 @@ pub(crate) struct MediaManager {
     received_frames: Arc<AtomicU64>,
     received_video_frames: Arc<AtomicU64>,
     input_level: Arc<AtomicU8>,
-    capture_queue_samples: Arc<AtomicU64>,
     platform_audio: Mutex<Option<PlatformAudio>>,
     audio_preferences: Mutex<AudioPreferences>,
     participant_volumes: Arc<Mutex<HashMap<String, f64>>>,
     video_preferences: Mutex<VideoPreferences>,
-    neural_denoiser_enabled: Arc<AtomicBool>,
-    deepfilter_strength: Arc<AtomicU8>,
+    audio_preset: Arc<AtomicU8>,
     denoiser_backend: Arc<AtomicU8>,
     denoiser: Arc<DenoiserService>,
     surface: Option<SurfaceController>,
@@ -533,9 +332,8 @@ impl MediaManager {
         remove_local_preview(VideoSource::ScreenShare);
         let (event_tx, event_rx) = mpsc::unbounded_channel();
         let denoiser_backend = Arc::new(AtomicU8::new(DenoiserBackend::DeepFilterNet as u8));
-        let deepfilter_strength = Arc::new(AtomicU8::new(DEFAULT_DEEPFILTER_STRENGTH));
         let denoiser = Arc::new(
-            DenoiserService::spawn(denoiser_backend.clone(), deepfilter_strength.clone())
+            DenoiserService::spawn(denoiser_backend.clone())
                 .expect("start neural denoiser service"),
         );
         let surface = if surface_enabled {
@@ -563,13 +361,11 @@ impl MediaManager {
                 received_frames: Arc::new(AtomicU64::new(0)),
                 received_video_frames: Arc::new(AtomicU64::new(0)),
                 input_level: Arc::new(AtomicU8::new(0)),
-                capture_queue_samples: Arc::new(AtomicU64::new(0)),
                 platform_audio: Mutex::new(None),
                 audio_preferences: Mutex::new(AudioPreferences::default()),
                 participant_volumes: Arc::new(Mutex::new(HashMap::new())),
                 video_preferences: Mutex::new(VideoPreferences::default()),
-                neural_denoiser_enabled: Arc::new(AtomicBool::new(true)),
-                deepfilter_strength,
+                audio_preset: Arc::new(AtomicU8::new(preset_code(AudioPreset::Clear))),
                 denoiser_backend,
                 denoiser,
                 surface,
@@ -616,10 +412,49 @@ impl MediaManager {
     pub(crate) async fn refresh_audio_devices(&self) -> AudioInventory {
         let _operation = self.operation.lock().await;
         let active = self.is_active().await;
-        match self.platform_audio() {
+        let previous = {
+            let preferences = self
+                .audio_preferences
+                .lock()
+                .expect("audio preferences lock poisoned");
+            (
+                preferences.selected_input_id.clone(),
+                preferences.selected_output_id.clone(),
+            )
+        };
+        let mut inventory = match self.platform_audio() {
             Ok(audio) => self.reconcile_audio_devices(&audio, active, false),
-            Err(error) => self.unavailable_audio_inventory(error.to_string()),
+            Err(error) => return self.unavailable_audio_inventory(error.to_string()),
+        };
+        if active && let Some(session) = self.session.lock().await.as_mut() {
+            if previous.0 != inventory.state.selected_input_id
+                && let Some(microphone) = inventory.microphone.as_deref()
+            {
+                let replacement = create_microphone_capture_pipeline(
+                    microphone,
+                    session.microphone_frames.clone(),
+                )
+                .and_then(|(pipeline, source_id)| {
+                    if let Err(error) = pipeline.set_state(gst::State::Playing) {
+                        let _ = pipeline.set_state(gst::State::Null);
+                        return Err(error.into());
+                    }
+                    Ok((pipeline, source_id))
+                });
+                match replacement {
+                    Ok((pipeline, source_id)) => {
+                        session.microphone_frames.activate(source_id);
+                        let previous = std::mem::replace(&mut session.microphone_capture, pipeline);
+                        let _ = previous.set_state(gst::State::Null);
+                    }
+                    Err(error) => inventory.error = Some(format!("switch microphone: {error}")),
+                }
+            }
+            if previous.1 != inventory.state.selected_output_id {
+                session.microphone_frames.reset();
+            }
         }
+        inventory
     }
 
     pub(crate) async fn select_input_device(&self, id: &str) -> anyhow::Result<AudioInventory> {
@@ -633,14 +468,15 @@ impl MediaManager {
         if active {
             let mut session = self.session.lock().await;
             if let Some(session) = session.as_mut() {
-                let replacement = create_microphone_capture_pipeline(
+                let (replacement, source_id) = create_microphone_capture_pipeline(
                     &device.name,
                     session.microphone_frames.clone(),
-                    self.capture_queue_samples.clone(),
                 )?;
-                replacement
-                    .set_state(gst::State::Playing)
-                    .context("start the replacement microphone capture pipeline")?;
+                if let Err(error) = replacement.set_state(gst::State::Playing) {
+                    let _ = replacement.set_state(gst::State::Null);
+                    return Err(error).context("start replacement microphone");
+                }
+                session.microphone_frames.activate(source_id);
                 let previous = std::mem::replace(&mut session.microphone_capture, replacement);
                 let _ = previous.set_state(gst::State::Null);
             }
@@ -666,6 +502,9 @@ impl MediaManager {
         let active = self.is_active().await;
         select_playout_device(&audio, &device, active)
             .with_context(|| format!("select speaker {}", device.name))?;
+        if let Some(session) = self.session.lock().await.as_ref() {
+            session.microphone_frames.reset();
+        }
         {
             let mut preferences = self
                 .audio_preferences
@@ -695,25 +534,11 @@ impl MediaManager {
             .lock()
             .expect("audio preferences lock poisoned")
             .preset = preset;
-        self.neural_denoiser_enabled
-            .store(preset == AudioPreset::Clear, Ordering::Release);
-        Ok(self.reconcile_audio_devices(&audio, self.is_active().await, false))
-    }
-
-    pub(crate) async fn set_deepfilter_strength(
-        &self,
-        strength: u8,
-    ) -> anyhow::Result<AudioInventory> {
-        if strength > 100 {
-            bail!("DeepFilterNet strength must be between 0 and 100");
+        self.audio_preset
+            .store(preset_code(preset), Ordering::Release);
+        if let Some(session) = self.session.lock().await.as_ref() {
+            session.microphone_frames.reset();
         }
-        let _operation = self.operation.lock().await;
-        self.deepfilter_strength.store(strength, Ordering::Release);
-        self.audio_preferences
-            .lock()
-            .expect("audio preferences lock poisoned")
-            .deepfilter_strength = strength;
-        let audio = self.platform_audio()?;
         Ok(self.reconcile_audio_devices(&audio, self.is_active().await, false))
     }
 
@@ -821,13 +646,13 @@ impl MediaManager {
     }
 
     fn unavailable_audio_inventory(&self, error: String) -> AudioInventory {
-        let preferences = self
+        let preset = self
             .audio_preferences
             .lock()
-            .expect("audio preferences lock poisoned");
+            .expect("audio preferences lock poisoned")
+            .preset;
         let mut state = AudioState {
-            preset: preferences.preset,
-            deepfilter_strength: preferences.deepfilter_strength,
+            preset,
             ..AudioState::default()
         };
         apply_denoiser_state(&mut state, self.denoiser_backend());
@@ -934,10 +759,10 @@ impl MediaManager {
             denoiser_active: false,
             denoiser: None,
             processing_latency_ms: 0,
-            deepfilter_strength: preferences.deepfilter_strength,
             processing_time_us: 0,
             processing_deadline_misses: 0,
             capture_queue_ms: 0,
+            echo_reference_frames: 0,
         };
         apply_denoiser_state(&mut state, self.denoiser_backend());
         AudioInventory {
@@ -1039,19 +864,15 @@ impl MediaManager {
         if muted || !microphone_allowed {
             microphone_track.mute();
         }
-        self.capture_queue_samples.store(0, Ordering::Release);
-        let (microphone_frames, captured_frames) = mpsc::unbounded_channel();
-        let microphone_capture = match create_microphone_capture_pipeline(
-            &microphone,
-            microphone_frames.clone(),
-            self.capture_queue_samples.clone(),
-        ) {
-            Ok(pipeline) => pipeline,
-            Err(error) => {
-                let _ = room.close().await;
-                return Err(error).context("create microphone capture");
-            }
-        };
+        let microphone_frames = Arc::new(CaptureQueue::default());
+        let (microphone_capture, source_id) =
+            match create_microphone_capture_pipeline(&microphone, microphone_frames.clone()) {
+                Ok(pipeline) => pipeline,
+                Err(error) => {
+                    let _ = room.close().await;
+                    return Err(error).context("create microphone capture");
+                }
+            };
         if microphone_allowed
             && let Err(error) = room
                 .local_participant()
@@ -1059,6 +880,11 @@ impl MediaManager {
                     LocalTrack::Audio(microphone_track.clone()),
                     TrackPublishOptions {
                         source: TrackSource::Microphone,
+                        audio_encoding: Some(livekit::options::AudioEncoding {
+                            max_bitrate: 64_000,
+                        }),
+                        dtx: true,
+                        red: true,
                         ..Default::default()
                     },
                 )
@@ -1073,15 +899,15 @@ impl MediaManager {
             return Err(error).context("start microphone capture");
         }
 
+        microphone_frames.activate(source_id);
         let generation = self.generation.fetch_add(1, Ordering::AcqRel) + 1;
         let microphone_task = tokio::spawn(run_microphone_pipeline(
-            captured_frames,
+            microphone_frames.clone(),
             microphone_source.clone(),
             microphone_track.clone(),
-            self.neural_denoiser_enabled.clone(),
+            self.audio_preset.clone(),
             self.denoiser.clone(),
             self.input_level.clone(),
-            self.capture_queue_samples.clone(),
             self.event_tx.clone(),
             generation,
         ));
@@ -1233,7 +1059,9 @@ impl MediaManager {
         let _ = session.microphone_capture.set_state(gst::State::Null);
         session.microphone_task.abort();
         let _ = session.microphone_task.await;
-        self.capture_queue_samples.store(0, Ordering::Release);
+        if let Err(error) = self.denoiser.start_session().await {
+            warn!(%error, "release speech processing state");
+        }
         if let Some(screen_share) = session.screen_share {
             stop_screen_share_session(&session.room, screen_share).await;
         }
@@ -1299,12 +1127,16 @@ impl MediaManager {
                     });
             if muted {
                 session.microphone.mute();
+                session.microphone_frames.reset();
                 self.input_level.store(0, Ordering::Release);
                 let _ = self.event_tx.send(MediaEvent::InputLevel {
                     generation: self.generation(),
                     level: 0,
                 });
             } else {
+                if session.microphone.is_muted() {
+                    session.microphone_frames.reset();
+                }
                 session.microphone.unmute();
             }
         }
@@ -2483,9 +2315,9 @@ fn select_playout_device(
 
 fn create_microphone_capture_pipeline(
     microphone: &str,
-    frames: mpsc::UnboundedSender<Vec<i16>>,
-    queued_samples: Arc<AtomicU64>,
-) -> anyhow::Result<gst::Pipeline> {
+    frames: Arc<CaptureQueue>,
+) -> anyhow::Result<(gst::Pipeline, u64)> {
+    let source_id = frames.new_source();
     gst::init().context("initialize GStreamer for microphone capture")?;
     let source = if std::env::var_os("WISP_TEST_MICROPHONE_TONE").is_some() {
         gst::ElementFactory::make("audiotestsrc")
@@ -2518,11 +2350,8 @@ fn create_microphone_capture_pipeline(
                         warn!(%error, "microphone capture failed");
                         gst::FlowError::Error
                     })?;
-                    queued_samples.fetch_add(samples.len() as u64, Ordering::AcqRel);
-                    if let Err(error) = frames.send(samples) {
-                        atomic_saturating_sub(&queued_samples, error.0.len() as u64);
-                        return Err(gst::FlowError::Eos);
-                    }
+                    frames.push(source_id, &samples);
+
                     Ok(gst::FlowSuccess::Ok)
                 })
                 .build(),
@@ -2532,6 +2361,7 @@ fn create_microphone_capture_pipeline(
         .build()
         .context("the GStreamer audio converter is not installed")?;
     let resample = gst::ElementFactory::make("audioresample")
+        .property("quality", 8_i32)
         .build()
         .context("the GStreamer audio resampler is not installed")?;
     let pipeline = gst::Pipeline::default();
@@ -2540,13 +2370,7 @@ fn create_microphone_capture_pipeline(
         .context("build the microphone capture pipeline")?;
     gst::Element::link_many([&source, &convert, &resample, app_sink.upcast_ref()])
         .context("link the microphone capture pipeline")?;
-    Ok(pipeline)
-}
-
-fn atomic_saturating_sub(counter: &AtomicU64, value: u64) {
-    let _ = counter.fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
-        Some(current.saturating_sub(value))
-    });
+    Ok((pipeline, source_id))
 }
 
 fn microphone_capture_source(microphone: &str) -> anyhow::Result<gst::Element> {
@@ -2585,184 +2409,113 @@ fn capture_microphone_sample(sink: &gst_app::AppSink) -> anyhow::Result<Vec<i16>
 
 #[allow(clippy::too_many_arguments)]
 async fn run_microphone_pipeline(
-    mut captured_frames: mpsc::UnboundedReceiver<Vec<i16>>,
+    captured_frames: Arc<CaptureQueue>,
     publish_source: NativeAudioSource,
     publish_track: LocalAudioTrack,
-    neural_enabled: Arc<AtomicBool>,
+    preset: Arc<AtomicU8>,
     denoiser: Arc<DenoiserService>,
     input_level: Arc<AtomicU8>,
-    capture_queue_samples: Arc<AtomicU64>,
     event_tx: mpsc::UnboundedSender<MediaEvent>,
     generation: u64,
 ) {
-    const CHANNELS: u32 = 1;
-
-    let mut pending = std::collections::VecDeque::<i16>::with_capacity(AUDIO_FRAME_SAMPLES * 2);
+    let mut previous = None;
+    let mut was_muted = true;
     let mut meter_frames = 0_u8;
     let mut meter_peak = 0_u8;
     let mut processing_peak_us = 0_u32;
     let mut processing_deadline_misses = 0_u64;
-
-    while let Some(samples) = captured_frames.recv().await {
-        atomic_saturating_sub(&capture_queue_samples, samples.len() as u64);
-        pending.extend(samples);
-        while pending.len() >= AUDIO_FRAME_SAMPLES {
-            let processing_started = Instant::now();
-            let input = pending.drain(..AUDIO_FRAME_SAMPLES).collect::<Vec<_>>();
-            let neural = neural_enabled.load(Ordering::Acquire);
-            let processed_samples = if neural {
-                match denoiser.process(input.clone()).await {
-                    Ok(processed) => processed,
-                    Err(error) => {
-                        warn!(%error, "neural denoiser worker stopped; publishing raw audio");
-                        input.clone()
-                    }
+    loop {
+        // Device failure must become visible instead of silently leaving a dead
+        // microphone published. Synthetic tests also exercise this watchdog.
+        let Ok(captured) =
+            tokio::time::timeout(std::time::Duration::from_secs(3), captured_frames.recv()).await
+        else {
+            let _ = event_tx.send(MediaEvent::AudioFailed {
+                generation,
+                reason: "Microphone stopped delivering audio. Check the input device and rejoin."
+                    .into(),
+            });
+            return;
+        };
+        let processing_started = Instant::now();
+        let muted = publish_track.is_muted();
+        let selected_preset = preset.load(Ordering::Acquire);
+        let reset = was_muted || previous != Some((captured.epoch, captured.sequence));
+        previous = Some((captured.epoch, captured.sequence.wrapping_add(1)));
+        was_muted = muted;
+        let (output, echo_reference_frames) = if muted {
+            ([0; AUDIO_FRAME_SAMPLES], 0)
+        } else {
+            match denoiser
+                .process(&captured.samples, selected_preset, reset)
+                .await
+            {
+                Ok(processed) => (processed.samples, processed.reference_frames),
+                Err(error) => {
+                    warn!(%error, "speech processing stopped");
+                    let _ = event_tx.send(MediaEvent::AudioFailed {
+                        generation,
+                        reason: "Audio processing stopped. Rejoin to restart the microphone."
+                            .into(),
+                    });
+                    return;
                 }
+            }
+        };
+        let elapsed_us =
+            u32::try_from(processing_started.elapsed().as_micros()).unwrap_or(u32::MAX);
+        processing_peak_us = processing_peak_us.max(elapsed_us);
+        if elapsed_us > AUDIO_FRAME_BUDGET_US {
+            processing_deadline_misses = processing_deadline_misses.saturating_add(1);
+        }
+        // Never release stale, pre-mute, or previous-device speech after an await.
+        if !captured_frames.is_current(&captured)
+            || selected_preset != preset.load(Ordering::Acquire)
+        {
+            previous = None;
+            continue;
+        }
+        let output = if muted || publish_track.is_muted() {
+            [0; AUDIO_FRAME_SAMPLES]
+        } else {
+            output
+        };
+        meter_peak = meter_peak.max(pcm_level_percent(&output));
+        meter_frames += 1;
+        let frame = AudioFrame {
+            data: Cow::Borrowed(&output),
+            sample_rate: AUDIO_SAMPLE_RATE,
+            num_channels: 1,
+            samples_per_channel: 480,
+        };
+        if let Err(error) = publish_source.capture_frame(&frame).await {
+            warn!(%error, "microphone publication stopped");
+            let _ = event_tx.send(MediaEvent::AudioFailed {
+                generation,
+                reason: "Microphone publication stopped. Rejoin to restart audio.".into(),
+            });
+            return;
+        }
+        if meter_frames == 10 {
+            let level = if publish_track.is_muted() {
+                0
             } else {
-                input.clone()
+                meter_peak
             };
-            // Clear publishes DeepFilterNet directly. No secondary detector,
-            // gate, or gain stage is allowed to reshape the processed signal.
-            let output = processed_samples;
-            meter_peak = meter_peak.max(pcm_level_percent(&output));
-            meter_frames += 1;
-            let frame = AudioFrame {
-                data: Cow::Owned(output),
-                sample_rate: AUDIO_SAMPLE_RATE,
-                num_channels: CHANNELS,
-                samples_per_channel: u32::try_from(AUDIO_FRAME_SAMPLES)
-                    .expect("neural denoiser frame length fits u32"),
-            };
-            if let Err(error) = publish_source.capture_frame(&frame).await {
-                warn!(%error, "neural microphone pipeline stopped");
-                return;
-            }
-            let elapsed_us =
-                u32::try_from(processing_started.elapsed().as_micros()).unwrap_or(u32::MAX);
-            processing_peak_us = processing_peak_us.max(elapsed_us);
-            if elapsed_us > AUDIO_FRAME_BUDGET_US {
-                processing_deadline_misses = processing_deadline_misses.saturating_add(1);
-            }
-            if meter_frames == 10 {
-                let muted = publish_track.is_muted();
-                let level = if muted { 0 } else { meter_peak };
-                input_level.store(level, Ordering::Release);
-                let queued_samples = capture_queue_samples.load(Ordering::Acquire);
-                let capture_queue_ms = u16::try_from(queued_samples / 48).unwrap_or(u16::MAX);
-                let _ = event_tx.send(MediaEvent::AudioTelemetry {
-                    generation,
-                    level,
-                    processing_time_us: processing_peak_us,
-                    processing_deadline_misses,
-                    capture_queue_ms,
-                });
-                meter_frames = 0;
-                meter_peak = 0;
-                processing_peak_us = 0;
-            }
+            input_level.store(level, Ordering::Release);
+            let _ = event_tx.send(MediaEvent::AudioTelemetry {
+                generation,
+                level,
+                processing_time_us: processing_peak_us,
+                processing_deadline_misses,
+                capture_queue_ms: captured_frames.queued_ms(),
+                echo_reference_frames,
+            });
+            meter_frames = 0;
+            meter_peak = 0;
+            processing_peak_us = 0;
         }
     }
-}
-
-fn preferred_neural_denoiser() -> NeuralDenoiser {
-    match create_deepfilter_model() {
-        Ok(model) => {
-            info!(
-                backend = DenoiserBackend::DeepFilterNet.name(),
-                latency_ms = DEEPFILTER_LATENCY_MS,
-                "neural denoiser ready"
-            );
-            NeuralDenoiser::deepfilternet(model)
-        }
-        Err(error) => {
-            warn!(%error, "DeepFilterNet initialization failed; falling back to RNNoise");
-            NeuralDenoiser::rnnoise()
-        }
-    }
-}
-
-fn create_deepfilter_model() -> anyhow::Result<DfTract> {
-    let model = DfTract::new(DfParams::default(), &RuntimeParams::default())
-        .context("initialize embedded DeepFilterNet model")?;
-    if model.sr != AUDIO_SAMPLE_RATE as usize || model.hop_size != AUDIO_FRAME_SAMPLES {
-        bail!(
-            "unsupported DeepFilterNet format: {} Hz, {} samples",
-            model.sr,
-            model.hop_size
-        );
-    }
-    let delay_samples = model.fft_size - model.hop_size + model.lookahead * model.hop_size;
-    let delay_ms = delay_samples * 1_000 / model.sr;
-    if delay_ms != usize::from(DEEPFILTER_LATENCY_MS) {
-        bail!("unexpected DeepFilterNet latency: {delay_ms} ms");
-    }
-    Ok(model)
-}
-
-#[allow(clippy::cast_possible_truncation)]
-fn deepfilter_frame(model: &mut DfTract, input: &[i16]) -> anyhow::Result<Vec<i16>> {
-    if input.len() != AUDIO_FRAME_SAMPLES {
-        bail!(
-            "DeepFilterNet needs {AUDIO_FRAME_SAMPLES} samples, received {}",
-            input.len()
-        );
-    }
-    let input = input
-        .iter()
-        .map(|sample| f32::from(*sample) / 32_768.0)
-        .collect::<Vec<_>>();
-    let mut output = vec![0.0_f32; AUDIO_FRAME_SAMPLES];
-    model
-        .process(
-            ArrayView2::from_shape((1, AUDIO_FRAME_SAMPLES), &input)
-                .expect("DeepFilterNet input shape is fixed"),
-            ArrayViewMut2::from_shape((1, AUDIO_FRAME_SAMPLES), &mut output)
-                .expect("DeepFilterNet output shape is fixed"),
-        )
-        .context("process DeepFilterNet audio frame")?;
-    Ok(output
-        .into_iter()
-        .map(|sample| {
-            (sample * 32_768.0)
-                .round()
-                .clamp(f32::from(i16::MIN), f32::from(i16::MAX)) as i16
-        })
-        .collect())
-}
-
-#[allow(clippy::cast_possible_truncation)]
-fn rnnoise_frame(
-    denoiser: &mut DenoiseState<'static>,
-    input: &[i16],
-    first_frame: &mut bool,
-) -> Vec<i16> {
-    let input = input
-        .iter()
-        .map(|sample| f32::from(*sample))
-        .collect::<Vec<_>>();
-    let mut output = [0.0_f32; DenoiseState::FRAME_SIZE];
-    denoiser.process_frame(&mut output, &input);
-    if std::mem::take(first_frame) {
-        return vec![0; DenoiseState::FRAME_SIZE];
-    }
-    output
-        .into_iter()
-        .map(|sample| {
-            sample
-                .round()
-                .clamp(f32::from(i16::MIN), f32::from(i16::MAX)) as i16
-        })
-        .collect()
-}
-
-fn apply_denoiser_state(state: &mut AudioState, backend: DenoiserBackend) {
-    state.denoiser_active = state.preset == AudioPreset::Clear;
-    state.denoiser = state.denoiser_active.then(|| backend.name().to_owned());
-    state.processing_latency_ms = if state.denoiser_active {
-        backend.latency_ms()
-    } else {
-        0
-    };
 }
 
 #[allow(clippy::too_many_lines)]
@@ -3452,12 +3205,13 @@ fn processing_options(preset: AudioPreset) -> AudioProcessingOptions {
     }
 }
 
-fn source_processing_options(preset: AudioPreset) -> AudioSourceOptions {
-    let processing = processing_options(preset);
+fn source_processing_options(_preset: AudioPreset) -> AudioSourceOptions {
+    // NativeAudioSource goes straight to the encoder. Processing happens once,
+    // explicitly, in the audio worker, using the native speaker mix for AEC.
     AudioSourceOptions {
-        echo_cancellation: processing.echo_cancellation,
-        noise_suppression: processing.noise_suppression,
-        auto_gain_control: processing.auto_gain_control,
+        echo_cancellation: false,
+        noise_suppression: false,
+        auto_gain_control: false,
     }
 }
 
@@ -3685,11 +3439,10 @@ mod tests {
     }
 
     use super::{
-        AUDIO_FRAME_SAMPLES, NeuralDenoiser, VideoWatchSignal, create_deepfilter_model,
-        deepfilter_frame, i420_to_rgba_texture, pcm_level_percent, preferred_or_first,
-        processing_options, public_device_id, publishing_video_encoder, same_logical_device,
-        screen_share_resolution, source_processing_options, surface_quality, video_profile,
-        video_watch_targets_local,
+        AUDIO_FRAME_SAMPLES, VideoWatchSignal, i420_to_rgba_texture, pcm_level_percent,
+        preferred_or_first, processing_options, public_device_id, publishing_video_encoder,
+        same_logical_device, screen_share_resolution, source_processing_options, surface_quality,
+        video_profile, video_watch_targets_local,
     };
     use livekit::options::VideoEncoderBackend;
     use livekit::track::VideoQuality;
@@ -3783,52 +3536,9 @@ mod tests {
         let natural_source = source_processing_options(AudioPreset::Natural);
         let clear_source = source_processing_options(AudioPreset::Clear);
         let studio_source = source_processing_options(AudioPreset::Studio);
-        assert!(natural_source.echo_cancellation && natural_source.noise_suppression);
-        assert!(clear_source.echo_cancellation && !clear_source.noise_suppression);
+        assert!(!natural_source.echo_cancellation && !natural_source.noise_suppression);
+        assert!(!clear_source.echo_cancellation && !clear_source.noise_suppression);
         assert!(!studio_source.echo_cancellation && !studio_source.noise_suppression);
-    }
-
-    #[test]
-    fn deepfilternet_processes_real_ten_millisecond_frames() {
-        let mut denoiser = create_deepfilter_model().expect("embedded model should load");
-        let mut output = Vec::new();
-        let mut input = Vec::new();
-        for frame_index in 0..10 {
-            input = (0..AUDIO_FRAME_SAMPLES)
-                .map(|index| {
-                    if ((frame_index * AUDIO_FRAME_SAMPLES + index) / 24).is_multiple_of(2) {
-                        12_000
-                    } else {
-                        -12_000
-                    }
-                })
-                .collect::<Vec<_>>();
-            output = deepfilter_frame(&mut denoiser, &input).expect("frame should process");
-        }
-        assert_eq!(output.len(), AUDIO_FRAME_SAMPLES);
-        assert_ne!(output, input);
-    }
-
-    #[test]
-    fn deepfilternet_strength_zero_bypasses_noise_reduction() {
-        let model = create_deepfilter_model().expect("embedded model should load");
-        let mut denoiser = NeuralDenoiser::deepfilternet(model);
-        denoiser.set_strength(0);
-        let input = (0..AUDIO_FRAME_SAMPLES)
-            .map(|index| {
-                if index.is_multiple_of(2) {
-                    8_000
-                } else {
-                    -8_000
-                }
-            })
-            .collect::<Vec<_>>();
-
-        let output = denoiser
-            .process_frame(&input)
-            .expect("frame should process");
-
-        assert_eq!(output, input);
     }
 
     #[test]

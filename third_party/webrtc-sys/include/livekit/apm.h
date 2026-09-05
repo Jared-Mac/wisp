@@ -26,6 +26,11 @@
 
 namespace livekit_ffi {
 
+struct PlayoutReference;
+// Copies the WebRTC render mix without altering speaker audio. The consumer is
+// an explicit APM for external capture, which bypasses the ADM capture path.
+std::unique_ptr<webrtc::CustomProcessing> create_playout_reference_tap();
+
 struct AudioProcessingConfig {
   bool echo_canceller_enabled;
   bool gain_controller_enabled;
@@ -63,8 +68,14 @@ class AudioProcessingModule {
 
   int set_stream_delay_ms(int delay_ms);
 
+  void use_playout_reference(bool enabled);
+  uint64_t playout_reference_frames() const;
+  void enable_high_noise_suppression();
+
  private:
   webrtc::scoped_refptr<webrtc::AudioProcessing> apm_;
+  std::shared_ptr<PlayoutReference> playout_reference_;
+  uint64_t playout_reference_frames_ = 0;
 };
 
 std::unique_ptr<AudioProcessingModule> create_apm(

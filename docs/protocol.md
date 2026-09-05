@@ -156,7 +156,7 @@ Supported commands are `hello`, `status`, `set_presence`, `join_friend`,
 `join_hangout`, `leave`, `set_muted`, `toggle_muted`, `set_deafened`,
 `toggle_deafened`, `respond_knock`, `share`, `camera`, `watch_video`,
 `refresh_audio_devices`, `set_input_device`, `set_output_device`,
-`set_audio_preset`, `set_deepfilter_strength`, `refresh_video_devices`, `set_camera_device`,
+`set_audio_preset`, `refresh_video_devices`, `set_camera_device`,
 `set_video_quality`, `set_video_codec`, `set_push_to_talk`,
 `set_push_to_talk_shortcut`, `push_to_talk_press`, and
 `push_to_talk_release`. M4 adds `open_direct`, `send_direct`, `send_message`,
@@ -190,10 +190,13 @@ acceleration is actually active. Error codes are stable machine-readable
 categories; `error` remains suitable for direct display. The nested `audio`
 object contains input/output inventories, selected device IDs, the processing
 preset, and an integer `input_level` from 0–100. It also exposes
-`deepfilter_strength`, `processing_time_us`, cumulative
-`processing_deadline_misses`, and `capture_queue_ms`. Strength is an integer
-from 0–100 and can be changed live with `set_deepfilter_strength`; Clear has no
-secondary detector or post-denoise gate. While a call is active,
+`processing_time_us`, cumulative `processing_deadline_misses`, and
+`capture_queue_ms` (bounded to 60 ms), and `echo_reference_frames` (speaker-mix
+frames consumed by the echo canceller since its latest reset). The latter is
+additive and defaults to zero for older snapshots. Backend `denoiser` and
+algorithmic `processing_latency_ms` describe the selected neural processor,
+not network/device latency. Diagnostic telemetry clears when leaving a call.
+While a call is active,
 `wispd` detects device changes, switches to an available fallback, and restores
 the preferred device if it returns.
 

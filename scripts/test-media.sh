@@ -15,7 +15,8 @@ daemon_pid=""
 viewer_pid=""
 sim_pid=""
 expect_surface=true
-expect_input_level=true
+# A stationary test tone is noise to a speech model; test its meter in Studio.
+expect_input_level=false
 surface_args=()
 media_attempts=${WISP_MEDIA_ATTEMPTS:-200}
 if [[ -z "${WAYLAND_DISPLAY:-}" || -z "${XDG_RUNTIME_DIR:-}" ]]; then
@@ -167,7 +168,6 @@ for _ in $(seq 1 200); do
     .self.media.audio.denoiser_active == true and
     .self.media.audio.denoiser == "deepfilternet" and
     .self.media.audio.processing_latency_ms == 30 and
-    .self.media.audio.deepfilter_strength == 100 and
     (.self.media.audio.processing_time_us | type) == "number" and
     (.self.media.audio.processing_deadline_misses | type) == "number" and
     (.self.media.audio.capture_queue_ms | type) == "number" and
@@ -206,7 +206,6 @@ jq -e --argjson expect_input_level "$expect_input_level" '
   .self.media.audio.denoiser_active == true and
   .self.media.audio.denoiser == "deepfilternet" and
   .self.media.audio.processing_latency_ms == 30 and
-  .self.media.audio.deepfilter_strength == 100 and
   (.self.media.audio.processing_time_us | type) == "number" and
   (.self.media.audio.processing_deadline_misses | type) == "number" and
   (.self.media.audio.capture_queue_ms | type) == "number" and
@@ -217,6 +216,19 @@ jq -e --argjson expect_input_level "$expect_input_level" '
   jq '.self | {connection, push_to_talk, media}' <<<"$status_json" >&2
   exit 1
 }
+
+# Test actual microphone transmission through the unprocessed path. Clear is
+# allowed to remove the stationary synthetic tone completely.
+target/debug/wispctl --socket "$test_dir/wispd.sock" audio preset studio >/dev/null
+for _ in $(seq 1 "$media_attempts"); do
+  meter_json=$(target/debug/wispctl --socket "$test_dir/wispd.sock" status)
+  if jq -e '.self.media.audio.input_level > 0' <<<"$meter_json" >/dev/null \
+    && rg -q 'simulator received nonzero remote audio' "$test_dir/sim.log"; then break; fi
+  sleep 0.05
+done
+jq -e '.self.media.audio.input_level > 0' <<<"$meter_json" >/dev/null
+rg -q 'simulator received nonzero remote audio' "$test_dir/sim.log"
+target/debug/wispctl --socket "$test_dir/wispd.sock" audio preset clear >/dev/null
 
 video_devices_json=$(target/debug/wispctl --socket "$test_dir/wispd.sock" video devices)
 jq -e '(.devices | type) == "array"' <<<"$video_devices_json" >/dev/null
@@ -378,7 +390,9 @@ jq -e '
   ([.input_devices[].id] | all(. != "") and length == (unique | length)) and
   ([.output_devices[].id] | all(. != "") and length == (unique | length)) and
   (.selected_input_id | type) == "string" and
-  (.selected_output_id | type) == "string"
+  (.selected_output_id | type) == "string" and
+  .capture_queue_ms <= 60 and
+  .echo_reference_frames > 0
 ' <<<"$audio_json" >/dev/null
 input_id=$(jq -r '.selected_input_id' <<<"$audio_json")
 output_id=$(jq -r '.selected_output_id' <<<"$audio_json")
@@ -398,21 +412,14 @@ target/debug/wispctl --socket "$test_dir/wispd.sock" audio preset studio \
     .denoiser_active == false and
     .denoiser == null and
     .processing_latency_ms == 0 and
-    .deepfilter_strength == 100
+    (.processing_time_us | type) == "number"
   ' >/dev/null
 target/debug/wispctl --socket "$test_dir/wispd.sock" audio preset clear \
   | jq -e '
     .preset == "clear" and
     .denoiser_active == true and
     .denoiser == "deepfilternet" and
-    .processing_latency_ms == 30 and
-    .deepfilter_strength == 100
-  ' >/dev/null
-target/debug/wispctl --socket "$test_dir/wispd.sock" audio strength 25 \
-  | jq -e '
-    .preset == "clear" and
-    .deepfilter_strength == 25 and
-    .denoiser_active == true
+    .processing_latency_ms == 30
   ' >/dev/null
 
 target/debug/wispctl --socket "$test_dir/wispd.sock" ptt enable \

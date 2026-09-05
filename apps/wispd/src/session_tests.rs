@@ -289,3 +289,67 @@ async fn failed_media_is_latched_until_explicit_join_or_leave() {
     );
     server.abort();
 }
+
+#[tokio::test]
+async fn audio_failure_releases_media_and_latches_without_rejoining() {
+    let (url, server) = isolated_server().await;
+    let (api, mut snapshot) = ServerApi::connect_with_auth(
+        url.clone(),
+        AuthMethod::Development {
+            profile: "Owner".into(),
+        },
+    )
+    .await
+    .unwrap();
+    let room = uuid::Uuid::new_v4();
+    snapshot.self_state.hangout_id = Some(room);
+    snapshot.self_state.media.audio.echo_reference_frames = 123;
+    let view = ServerView {
+        id: "fixture".into(),
+        name: "Fixture".into(),
+        url,
+        connected: true,
+    };
+    let (media, _events) = MediaManager::new(false, None);
+    let generation = media.generation();
+    let daemon = Arc::new(Daemon::new(
+        "Owner".into(),
+        view.clone(),
+        vec![view],
+        api,
+        snapshot,
+        None,
+        media,
+        true,
+        Duration::from_secs(30),
+        ShortcutManager::from_environment(),
+    ));
+    let (tx, rx) = mpsc::unbounded_channel();
+    tx.send(MediaEvent::AudioFailed {
+        generation,
+        reason: "Microphone stopped".into(),
+    })
+    .unwrap();
+    // A delayed success notification from that session must not revive it.
+    tx.send(MediaEvent::Reconnected { generation }).unwrap();
+    drop(tx);
+    synchronize_media_events(daemon.clone(), rx).await;
+    assert_eq!(*daemon.failed_media_room.lock().await, Some(room));
+    let state = daemon.state.read().await;
+    assert_eq!(state.self_state.connection, ConnectionState::Failed);
+    assert_eq!(
+        state.self_state.media.error_code.as_deref(),
+        Some("audio_failed")
+    );
+    assert_eq!(state.self_state.media.audio.echo_reference_frames, 0);
+    assert!(!state.self_state.media.livekit_connected);
+    assert!(!state.self_state.media.microphone_published);
+    assert!(!state.self_state.media.camera.active);
+    drop(state);
+    daemon.reconcile_media().await.unwrap();
+    assert_eq!(
+        daemon.state.read().await.self_state.connection,
+        ConnectionState::Failed
+    );
+    server.abort();
+}
