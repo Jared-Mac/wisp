@@ -260,7 +260,11 @@ rules while rooms/friends remain neutral. Color identity assignments survive
 turning accents off and on. See [appearance and palettes](docs/appearance-and-palettes.md).
 
 Presence choices, microphone mute, and deafen stay pinned in the header in
-both windows, including outside a room and while scrolling. The current-call controls
+both windows, including outside a room and while scrolling. Open/Knock/Closed/Away
+is saved with your account on each server, including across client and server
+restarts. Hover or keyboard-focus a choice for its meaning; these options govern
+direct voice joins and knocks, without changing room permissions or text chat.
+The current-call controls
 sit directly below the room list, including while browsing another server. Its label and invitations always refer to the server hosting your call. Click the **Friends** header
 to collapse/expand the tray list. Use the star beside a friend to favorite them.
 Order is online favorites, offline favorites, online non-favorites, then offline
@@ -278,7 +282,7 @@ the keyboard, without shifting the name. Add Friend is deferred until the
 friend-invitation workflow is agreed.
 
 Friend access statuses use compact, theme-colored icons in both presentations:
-open door (Open), bell (Knock), padlock (Closed), and moon (Away), with hover labels
+open door (Open), bell (Knock), padlock (Closed), and moon (Away), with explanatory tooltips
 and accessible names. A filled green connection dot means online; a hollow dot
 means offline, without consuming name space with an additional text label.
 
@@ -563,7 +567,8 @@ compositors can bind the same press/release CLI commands manually.
 
 Friends whose presence is `knock` receive expiring join requests. The recipient
 gets Join/Later controls in the Wisp panel; the same flow is available from the
-CLI:
+CLI. Sending a knock from a friend row or a DM's Call button shows a confirmation
+only after the server acknowledges it. The tray stays open to show the result:
 
 ```bash
 cargo run -p wispctl -- join MemberA

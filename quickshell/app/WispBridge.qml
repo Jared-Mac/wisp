@@ -430,6 +430,8 @@ Item {
   property double invitationClock: Date.now()
   property var invitationRequests: ({})
   property string invitationFeedback: ""
+  property string knockFeedback: ""
+  Timer { id: knockFeedbackTimer; interval: 6000; onTriggered: root.knockFeedback = "" }
   readonly property var roomInvitations: (activeServerState.room_invitations || []).filter(function(i) { return Date.parse(i.expires_at) > root.invitationClock }).map(function(invite) { return Object.assign({},invite,{server_id:String(root.activeServer.id)}) })
   readonly property var currentVoiceRoom: voiceHangouts.filter(function(h) { return h.id === root.selfState.hangout_id })[0] || null
   Timer { interval: 1000; repeat: true; running: true; onTriggered: root.invitationClock = Date.now() }
@@ -510,7 +512,7 @@ Item {
   function callConversation(id) {
     var target = directCallTarget(id)
     if (target && target.connected && target.available && !target.current)
-      send("join_friend", {server_id:target.server_id,friend:target.friend_id})
+      requestFriendVoice(target.server_id, target.friend_id, target.name)
   }
   readonly property var temporaryCalls: hangouts.filter(function(call) {
     return !root.spots.some(function(room) { return room.active_hangout_id === call.id })
@@ -1119,7 +1121,12 @@ Item {
     delete requests[message.id]
     var value = message.value || ({})
     var conversationId = action.conversationId
-    if (action.kind === "privacyStatus" || action.kind === "privacySetup" || action.kind === "privacyExport") {
+    if (action.kind === "joinFriend") {
+      if (message.ok && value.status === "knock_sent") {
+        knockFeedback = "Knock sent to " + action.name + ". They'll need to accept before you join."
+        knockFeedbackTimer.restart()
+      }
+    } else if (action.kind === "privacyStatus" || action.kind === "privacySetup" || action.kind === "privacyExport") {
       if (privacyRequestId === message.id) privacyRequestId = ""
       if (action.serverId !== privacyServerId) return
       if (message.ok) {
@@ -1236,7 +1243,14 @@ Item {
     var id = send("delete_message", scopeForMessage(messageId))
     if (id) requests[id] = {kind: "delete", messageId: messageId}
   }
-  function joinFriend(name) { send("join_friend", {server_id:String(activeServer.id || ""), "friend": name }) }
+  function requestFriendVoice(serverId, friend, name) {
+    knockFeedback = ""
+    knockFeedbackTimer.stop()
+    var id = send("join_friend", {server_id:String(serverId || ""), friend:friend})
+    if (id) requests[id] = {kind:"joinFriend", name:String(name || "your friend")}
+    return id
+  }
+  function joinFriend(name) { return requestFriendVoice(activeServer.id, name, name) }
   function joinHangout(id) { send("join_hangout", {server_id:String(activeServer.id || ""), "hangout_id": id }) }
   function joinSpot(id) { send("join_spot", {server_id:String(activeServer.id || ""), "spot_id": id }) }
   function participantServer(person) {

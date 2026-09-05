@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import "../components"
+import "../PresenceText.js" as PresenceText
 
 Column {
   id: root
@@ -29,6 +30,10 @@ Column {
         activeFocusOnTab: true
         Accessible.role: Accessible.Button
         Accessible.name: "Who may join: " + modelData
+        Accessible.description: PresenceText.description(modelData, true)
+        ToolTip.visible: presenceMouse.containsMouse || activeFocus
+        ToolTip.delay: 500
+        ToolTip.text: Accessible.description
         Keys.onSpacePressed: root.bridge.setPresence(modelData)
         Keys.onReturnPressed: root.bridge.setPresence(modelData)
         width: presenceText.implicitWidth + root.theme.spacing.lg * 2

@@ -4,6 +4,8 @@ mod chat_identity;
 mod groups;
 mod invitation_privacy;
 mod invitations;
+#[cfg(test)]
+mod presence_tests;
 mod privacy;
 #[cfg(test)]
 mod privacy_tests;
@@ -115,19 +117,9 @@ struct PendingKnock {
     expires_at: chrono::DateTime<Utc>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 struct RuntimeUser {
-    presence: Presence,
     connections: usize,
-}
-
-impl Default for RuntimeUser {
-    fn default() -> Self {
-        Self {
-            presence: Presence::Open,
-            connections: 0,
-        }
-    }
 }
 
 #[derive(Debug)]
@@ -275,11 +267,12 @@ impl AppState {
         .await;
     }
 
+    #[allow(clippy::too_many_lines)]
     async fn snapshot(&self, self_id: UserId) -> Result<Snapshot, ApiError> {
         let knocks = self.incoming_knocks(self_id).await;
         let hangouts = load_hangouts(&self.pool, self_id).await?;
         let users = sqlx::query(
-            "SELECT u.id,u.display_name FROM users u WHERE u.id=? OR EXISTS(SELECT 1 FROM friendships f WHERE (f.first_user_id=? AND f.second_user_id=u.id) OR (f.second_user_id=? AND f.first_user_id=u.id)) ORDER BY u.display_name COLLATE NOCASE",
+            "SELECT u.id,u.display_name,u.presence FROM users u WHERE u.id=? OR EXISTS(SELECT 1 FROM friendships f WHERE (f.first_user_id=? AND f.second_user_id=u.id) OR (f.second_user_id=? AND f.first_user_id=u.id)) ORDER BY u.display_name COLLATE NOCASE",
         )
                 .bind(self_id.to_string())
                 .bind(self_id.to_string())
@@ -289,23 +282,28 @@ impl AppState {
                 .map_err(ApiError::internal)?;
         let runtime = self.runtime.read().await;
         let seq = runtime.seq;
-        let self_runtime = runtime.users.get(&self_id).cloned().unwrap_or_default();
+        let mut self_presence = Presence::default();
         let mut friends = Vec::new();
         let mut self_user = None;
         for row in users {
             let id = parse_uuid(&row.get::<String, _>("id"))?;
+            let presence = row
+                .get::<String, _>("presence")
+                .parse()
+                .map_err(ApiError::internal)?;
             let user = UserSummary {
                 id,
                 display_name: row.get("display_name"),
             };
             if id == self_id {
                 self_user = Some(user);
+                self_presence = presence;
                 continue;
             }
             let state = runtime.users.get(&id).cloned().unwrap_or_default();
             friends.push(FriendState {
                 user,
-                presence: state.presence,
+                presence,
                 online: state.connections > 0,
                 hangout_id: active_hangout_for(&self.pool, id)
                     .await?
@@ -347,7 +345,7 @@ impl AppState {
                 user: self_user,
                 server_owner,
                 server_admin,
-                presence: self_runtime.presence,
+                presence: self_presence,
                 connection: if self_hangout.is_some() {
                     ConnectionState::Connected
                 } else {
@@ -1356,15 +1354,10 @@ async fn set_presence(
     Json(request): Json<SetPresenceRequest>,
 ) -> Result<Json<Value>, ApiError> {
     let user_id = authenticate_headers(&state, &headers).await?;
-    state
-        .runtime
-        .write()
-        .await
-        .users
-        .entry(user_id)
-        .or_default()
-        .presence = request.presence;
-    sqlx::query("UPDATE users SET last_seen_at = ? WHERE id = ?")
+    // Presence is an account preference, not transient connection state. Store
+    // it before acknowledging the change so reconnects and restarts agree.
+    sqlx::query("UPDATE users SET presence = ?, last_seen_at = ? WHERE id = ?")
+        .bind(request.presence.to_string())
         .bind(Utc::now().to_rfc3339())
         .bind(user_id.to_string())
         .execute(&state.pool)
@@ -1401,7 +1394,15 @@ async fn join_friend(
         .get(&friend.id)
         .cloned()
         .unwrap_or_default();
-    match join_policy(friend_runtime.presence, friend_runtime.connections > 0) {
+    let presence: String = sqlx::query_scalar("SELECT presence FROM users WHERE id = ?")
+        .bind(friend.id.to_string())
+        .fetch_one(&state.pool)
+        .await
+        .map_err(ApiError::internal)?;
+    match join_policy(
+        presence.parse().map_err(ApiError::internal)?,
+        friend_runtime.connections > 0,
+    ) {
         JoinPolicy::Unavailable => {
             return Err(ApiError::bad_request(
                 "friend_unavailable",

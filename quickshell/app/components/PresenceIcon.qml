@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls
+import "../PresenceText.js" as PresenceText
 
 Item {
   id: root
@@ -27,7 +28,8 @@ Item {
   }
   Accessible.role: Accessible.StaticText
   Accessible.name: label
+  Accessible.description: PresenceText.description(presence, false)
   HoverHandler { id: hover }
   ToolTip.visible: hover.hovered
-  ToolTip.text: label
+  ToolTip.text: Accessible.description
 }

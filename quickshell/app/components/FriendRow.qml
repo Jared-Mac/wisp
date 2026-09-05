@@ -76,7 +76,7 @@ Item {
     cursorShape: root.canRequest ? Qt.PointingHandCursor : Qt.ArrowCursor
     onClicked: if (root.canRequest) {
       root.bridge.joinFriend(root.friend.display_name)
-      root.selected()
+      // Keep the panel visible for the server's knock acknowledgment or error.
     }
   }
 

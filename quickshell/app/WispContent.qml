@@ -130,6 +130,30 @@ FocusScope {
     anchors.margins: root.contentPadding
     z: 2000
   }
+  Rectangle {
+    objectName: "knockSentNotice"
+    visible: !!root.bridge.knockFeedback
+    anchors.right: parent.right; anchors.rightMargin: root.contentPadding
+    y: fixedHeader.y + fixedHeader.height + root.theme.spacing.sm
+    width: Math.min(knockNoticeText.implicitWidth + root.theme.spacing.lg * 2,
+      Math.max(1, root.width - root.contentPadding * 2))
+    height: knockNoticeText.contentHeight + root.theme.spacing.md * 2
+    radius: root.theme.cornerRadius
+    color: root.theme.surface
+    border.width: 1; border.color: root.theme.accent
+    z: 2000
+    Accessible.role: Accessible.AlertMessage
+    Accessible.name: root.bridge.knockFeedback || ""
+    Text {
+      id: knockNoticeText
+      x: root.theme.spacing.lg; y: root.theme.spacing.md
+      width: parent.width - root.theme.spacing.lg * 2
+      text: root.bridge.knockFeedback || ""
+      textFormat: Text.PlainText; wrapMode: Text.Wrap
+      color: root.theme.foreground
+      font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
+    }
+  }
   Connections {
     target: root.bridge
     function onSettingsSaved() { if (root.settingsOpen) savedStatus.showSaved() }
