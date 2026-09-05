@@ -26,6 +26,14 @@ monitor storage and expand it instead of silently deleting kept files.
    overlay-network, or hosted coordination dependency. Keep SSH public-key only;
    a private administration network is optional and is never required by clients.
    Certificate issuance exposes the hostname in certificate-transparency records.
+   Publish an AAAA record only after IPv6 is configured and reachable on the VPS.
+   Provider-assigned IPv6 addresses are not proof that the guest OS has configured
+   them. Check `ip -6 address`, the IPv6 route, and HTTPS on both 443 and 8443
+   from an external IPv6 client. A working IPv4 `curl` check alone can hide a
+   blackholed AAAA record. Wisp staggers IPv6/IPv4 connection attempts, but hosts
+   should still provide working records. For OVH, retrieve the assigned gateway
+   from its control panel and follow its [IPv6 setup guide](https://support.us.ovhcloud.com/hc/en-us/articles/4406638994067-Configuring-IPv6-on-a-VPS);
+   preserve IPv4/SSH configuration and back up networking files first.
 3. Install a reviewed Ubuntu-compatible Wisp build and a pinned, verified
    LiveKit release. Do not copy CachyOS-built binaries to Ubuntu without checking
    ABI compatibility. Create separate non-login `wisp` and `wisp-media` users.

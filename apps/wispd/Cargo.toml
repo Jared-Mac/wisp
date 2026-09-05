@@ -20,6 +20,8 @@ gstreamer-video.workspace = true
 ksni.workspace = true
 libc.workspace = true
 livekit.workspace = true
+livekit-api = "=0.6.4"
+livekit-net = { version = "=0.1.2", features = ["native-tokio"] }
 nnnoiseless.workspace = true
 ndarray.workspace = true
 pollster.workspace = true

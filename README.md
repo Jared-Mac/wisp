@@ -133,6 +133,12 @@ or provider account. A fresh server has no built-in users or rooms. Its one-time
 bootstrap creates the server owner account. Everyone else creates an account
 from an encoded friend or room invitation, or signs in to an existing account.
 Launching Wisp without saved account credentials opens the sign-in window.
+Restarting clears stale voice-room membership before initializing media; it never
+automatically rejoins a previous call. Failed media joins stop until an explicit
+leave/rejoin instead of retrying on every chat or presence update.
+Server events and voice signaling use bounded IPv6/IPv4 fallback, so an
+unreachable address family cannot prevent using the reachable one. Failed
+connections report their stage without exposing authentication tokens.
 Opening the Omarchy popup also starts this account-aware flow when its daemon
 is not running; its **Open app** action uses the same launcher. An already-running
 client is left alone when opening the popup, including while its server is offline.
@@ -610,6 +616,12 @@ wisp
 
 Release installation also backs up and refreshes an already-installed Omarchy
 adapter, without enabling a disabled adapter or adding one on other desktops.
+
+The desktop systemd service has a 2 GiB memory pressure threshold, a 4 GiB hard
+memory budget, and a 512 MiB swap budget to contain runaway media allocations.
+These protect the desktop, not limit file-transfer sizes. Advanced users can
+override them with `systemctl --user edit wisp.service`. Direct terminal launches
+outside the service do not receive these cgroup limits.
 
 The release job uses GitHub's short-lived repository token. It does not require
 or receive deployment credentials, LiveKit secrets, or a personal access token.

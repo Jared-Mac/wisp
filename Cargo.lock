@@ -3003,8 +3003,6 @@ checksum = "11d3d7f243d5c5a8b9bb5d6dd2b1602c0cb0b9db1621bafc7ed66e35ff9fe092"
 [[package]]
 name = "livekit"
 version = "0.8.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d591ed539d9d3f6a268c7b8c8636a1239882e99d453ae9ebbe19f9579d39cb44"
 dependencies = [
  "base64 0.22.1",
  "bmrng",
@@ -3120,8 +3118,6 @@ dependencies = [
 [[package]]
 name = "livekit-net"
 version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "46155c42ad7acccca96a0d8be2bd0f379565f93e85144fb3aa6fa406371fee22"
 dependencies = [
  "async-trait",
  "base64 0.21.7",
@@ -7650,6 +7646,8 @@ dependencies = [
  "ksni",
  "libc",
  "livekit",
+ "livekit-api",
+ "livekit-net",
  "ndarray",
  "nnnoiseless",
  "pollster",

@@ -9,12 +9,14 @@ members = [
   "native/video",
 ]
 resolver = "2"
-exclude = ["third_party/libwebrtc", "third_party/webrtc-sys"]
+exclude = ["third_party/libwebrtc", "third_party/webrtc-sys", "third_party/livekit", "third_party/livekit-net"]
 
 # Narrow local extension: expose WebRTC's existing per-track output gain.
 [patch.crates-io]
 libwebrtc = { path = "third_party/libwebrtc" }
 webrtc-sys = { path = "third_party/webrtc-sys" }
+livekit = { path = "third_party/livekit" }
+livekit-net = { path = "third_party/livekit-net" }
 
 [workspace.package]
 version = "0.1.0"

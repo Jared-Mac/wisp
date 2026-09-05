@@ -105,6 +105,7 @@ jobs:
           ./scripts/test-integration.sh
           ./scripts/test-knock.sh
           ./scripts/test-media.sh
+          WISP_TEST_LIVEKIT_BINARY="$PWD/.tools/livekit/livekit-server" cargo test -p wispd --locked failed_rtc_join_releases_resources_without_growth -- --ignored
           ./scripts/test-private-alpha.sh
           bash scripts/test-server-endpoint.sh
           bash scripts/test-private-host.sh

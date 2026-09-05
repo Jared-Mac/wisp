@@ -991,6 +991,10 @@ impl MediaManager {
             .context("configure audio processing")?;
 
         let mut room_options = RoomOptions::default();
+        // One attempt per explicit join. Wisp latches failures instead of
+        // repeatedly allocating RTC sessions on unrelated server events.
+        room_options.join_retries = 0;
+        room_options.connect_timeout = std::time::Duration::from_secs(10);
         room_options.auto_subscribe = true;
         room_options.dynacast = true;
         let e2ee_key = self
@@ -1012,7 +1016,7 @@ impl MediaManager {
         }
         let (room, events) = Room::connect(&credentials.url, &credentials.token, room_options)
             .await
-            .with_context(|| format!("connect to LiveKit room {}", credentials.room))?;
+            .map_err(|error| anyhow::anyhow!("connect to LiveKit: {}", safe_rtc_failure(&error)))?;
         if e2ee_key.is_some() {
             room.e2ee_manager().set_enabled(true);
         }
@@ -1032,11 +1036,17 @@ impl MediaManager {
         }
         self.capture_queue_samples.store(0, Ordering::Release);
         let (microphone_frames, captured_frames) = mpsc::unbounded_channel();
-        let microphone_capture = create_microphone_capture_pipeline(
+        let microphone_capture = match create_microphone_capture_pipeline(
             &microphone,
             microphone_frames.clone(),
             self.capture_queue_samples.clone(),
-        )?;
+        ) {
+            Ok(pipeline) => pipeline,
+            Err(error) => {
+                let _ = room.close().await;
+                return Err(error).context("create microphone capture");
+            }
+        };
         if let Err(error) = room
             .local_participant()
             .publish_track(
@@ -1052,6 +1062,7 @@ impl MediaManager {
             return Err(error).context("publish microphone to LiveKit");
         }
         if let Err(error) = microphone_capture.set_state(gst::State::Playing) {
+            let _ = microphone_capture.set_state(gst::State::Null);
             let _ = room.close().await;
             return Err(error).context("start microphone capture");
         }
@@ -2219,25 +2230,78 @@ fn validate_camera_start_target(
     Ok(())
 }
 
+fn safe_rtc_failure(error: &livekit::RoomError) -> String {
+    use livekit::{RoomError, rtc_engine::EngineError};
+    use livekit_api::signal_client::SignalError;
+    // Transport errors can contain authenticated URLs or server response bodies.
+    // Report the failure stage, never the raw token-bearing error chain.
+    match error {
+        RoomError::Engine(EngineError::Signal(error)) => match error {
+            SignalError::Client(status, _)
+            | SignalError::Server(status, _)
+            | SignalError::Handshake { status } => format!("signaling HTTP {}", status.as_u16()),
+            SignalError::TokenFormat => "invalid media access token format".into(),
+            SignalError::UrlParse(_) => "invalid media server URL".into(),
+            SignalError::Timeout(_) => "signaling connection timed out".into(),
+            SignalError::Connection(message) => {
+                if message.to_ascii_lowercase().contains("certificate") {
+                    "signaling TLS certificate validation failed".into()
+                } else {
+                    "signaling transport connection failed".into()
+                }
+            }
+            SignalError::TransportNotConfigured => "signaling transport is not configured".into(),
+            _ => "signaling connection failed".into(),
+        },
+        RoomError::Engine(EngineError::Connection(message))
+            if message.contains("timed out") || message.contains("timeout") =>
+        {
+            "media network (ICE) connection timed out".into()
+        }
+        RoomError::Engine(EngineError::Connection(_)) => "media network connection closed".into(),
+        RoomError::Engine(EngineError::Rtc(_)) | RoomError::Rtc(_) => {
+            "native WebRTC initialization failed".into()
+        }
+        _ => "media session initialization failed".into(),
+    }
+}
+
+fn discovered_capture_devices() -> anyhow::Result<Vec<gst::Device>> {
+    // PipeWire's provider probes device formats when a monitor starts. Repeating
+    // that every three seconds can retain native allocations and stall voice
+    // operations on faulty device caps. Keep one hotplug-aware monitor alive.
+    static MONITOR: Mutex<Option<gst::DeviceMonitor>> = Mutex::new(None);
+    gst::init().context("initialize GStreamer for device discovery")?;
+    let mut shared = MONITOR.lock().expect("device discovery lock poisoned");
+    if shared.is_none() {
+        let monitor = gst::DeviceMonitor::new();
+        monitor
+            .add_filter(Some("Video/Source"), None)
+            .context("configure camera discovery")?;
+        monitor
+            .add_filter(Some("Audio/Source"), None)
+            .context("configure microphone discovery")?;
+        monitor.start().context("start capture device discovery")?;
+        *shared = Some(monitor);
+    }
+    let monitor = shared.as_ref().expect("device monitor was initialized");
+    // No event consumer is installed; discard notices after the provider has
+    // updated its device list so hotplug messages cannot accumulate indefinitely.
+    while monitor.bus().pop().is_some() {}
+    Ok(monitor.devices().into_iter().collect())
+}
+
 fn enumerate_camera_devices() -> anyhow::Result<Vec<(VideoDevice, gst::Device)>> {
-    gst::init().context("initialize GStreamer for camera discovery")?;
-    let monitor = gst::DeviceMonitor::new();
-    monitor
-        .add_filter(Some("Video/Source"), None)
-        .context("configure camera device discovery")?;
-    monitor.start().context("start camera device discovery")?;
-    let devices = monitor
-        .devices()
+    Ok(discovered_capture_devices()?
         .into_iter()
+        .filter(|device| device.has_classes("Video/Source"))
         .enumerate()
         .map(|(index, device)| {
             let name = device.display_name().to_string();
             let id = camera_device_id(&device, index, &name);
             (VideoDevice { id, name }, device)
         })
-        .collect();
-    monitor.stop();
-    Ok(devices)
+        .collect())
 }
 
 fn camera_device_id(device: &gst::Device, index: usize, name: &str) -> String {
@@ -2413,22 +2477,14 @@ fn atomic_saturating_sub(counter: &AtomicU64, value: u64) {
 
 fn microphone_capture_source(microphone: &str) -> anyhow::Result<gst::Element> {
     let device_name = microphone.strip_prefix("default: ").unwrap_or(microphone);
-    let monitor = gst::DeviceMonitor::new();
-    monitor
-        .add_filter(Some("Audio/Source"), None)
-        .context("add the microphone device filter")?;
-    monitor.start().context("start microphone discovery")?;
-    let device = monitor
-        .devices()
-        .iter()
-        .filter(|device| device.display_name() == device_name)
+    let device = discovered_capture_devices()?
+        .into_iter()
+        .filter(|device| device.has_classes("Audio/Source") && device.display_name() == device_name)
         .max_by_key(|device| {
             device
                 .properties()
                 .is_some_and(|properties| properties.has_field("node.name"))
-        })
-        .cloned();
-    monitor.stop();
+        });
     let device = device.with_context(|| format!("GStreamer cannot capture {microphone}"))?;
     device
         .create_element(Some("wisp-microphone-source"))
@@ -3479,6 +3535,45 @@ async fn count_audio_frames(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn rtc_failure_reports_stage_without_credentials() {
+        use livekit::{RoomError, rtc_engine::EngineError};
+        use livekit_api::signal_client::SignalError;
+        let error = RoomError::Engine(EngineError::Signal(SignalError::Connection(
+            "invalid certificate for wss://example.invalid/rtc?access_token=private-test-value"
+                .into(),
+        )));
+        assert_eq!(
+            super::safe_rtc_failure(&error),
+            "signaling TLS certificate validation failed"
+        );
+        let error = RoomError::Engine(EngineError::Connection(
+            "wait_pc_connection timed out".into(),
+        ));
+        assert_eq!(
+            super::safe_rtc_failure(&error),
+            "media network (ICE) connection timed out"
+        );
+    }
+
+    #[test]
+    #[ignore = "local device metadata discovery only; requires desktop PipeWire, no capture"]
+    fn repeated_device_discovery_keeps_memory_bounded() {
+        super::discovered_capture_devices().unwrap();
+        let before = crate::session_tests::resident_bytes();
+        for _ in 0..600 {
+            super::discovered_capture_devices().unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let after = crate::session_tests::resident_bytes();
+        eprintln!(
+            "Device discovery RSS: {} -> {} MiB",
+            before / 1_048_576,
+            after / 1_048_576
+        );
+        assert!(after.saturating_sub(before) < 32 * 1024 * 1024);
+    }
+
     #[test]
     fn camera_confirmation_rejects_changed_room_or_device() {
         use super::validate_camera_start_target;

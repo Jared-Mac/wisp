@@ -9,6 +9,14 @@ ExecStart="@WISP_LAUNCH_EXEC@"
 KillMode=control-group
 Restart=on-failure
 RestartSec=3
+# Contain runaway native/media allocations rather than exhausting the desktop.
+# These are resource budgets, not attachment size limits. Users can override
+# them with `systemctl --user edit wisp.service` if their workload requires it.
+MemoryAccounting=yes
+MemoryHigh=2G
+MemoryMax=4G
+MemorySwapMax=512M
+OOMPolicy=stop
 StandardOutput=journal
 StandardError=journal
 

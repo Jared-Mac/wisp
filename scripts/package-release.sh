@@ -93,6 +93,8 @@ install -m 0644 "$repo_dir/LICENSE" "$repo_dir/README.md" "$package_dir/"
 mkdir -p "$package_dir/licenses"
 install -m 0644 "$repo_dir/third_party/LICENSE-APACHE" "$package_dir/licenses/"
 install -m 0644 "$repo_dir/third_party/webrtc-sys/NOTICE.md" "$package_dir/licenses/WebRTC-NOTICE.md"
+install -m 0644 "$repo_dir/third_party/livekit/NOTICE.md" "$package_dir/licenses/LiveKit-NOTICE.md"
+install -m 0644 "$repo_dir/third_party/livekit-net/NOTICE.md" "$package_dir/licenses/LiveKit-Net-NOTICE.md"
 
 mkdir -p "$dist_dir"
 archive="$dist_dir/$package_name.tar.gz"

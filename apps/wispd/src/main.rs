@@ -2,8 +2,16 @@ mod accounts;
 mod chat_images;
 mod chat_transfers;
 mod media;
+mod network;
+// Run the patched transport's deterministic dialer regressions in the workspace
+// test suite without resolving a separate lockfile for the vendored package.
+#[cfg(test)]
+#[path = "../../../third_party/livekit-net/src/dial.rs"]
+mod network_dial_tests;
 mod privacy;
 mod privacy_transfers;
+#[cfg(test)]
+mod session_tests;
 mod shortcut;
 mod surface;
 mod tray;
@@ -30,7 +38,7 @@ use tokio::{
     net::{UnixListener, UnixStream},
     sync::{Mutex, RwLock, broadcast, mpsc, watch},
 };
-use tokio_tungstenite::{connect_async, tungstenite::client::IntoClientRequest};
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tracing::{debug, error, info, warn};
 use tracing_subscriber::EnvFilter;
 use url::Url;
@@ -136,7 +144,20 @@ impl ServerApi {
             token: Arc::new(StdRwLock::new(token)),
             auth,
         };
-        let snapshot = api.snapshot().await?;
+        let mut snapshot = api.snapshot().await?;
+        // A new daemon/session must not silently resume voice after a crash or
+        // restart. Do this before exposing snapshots or initializing media,
+        // for primary and linked accounts alike. Failure keeps startup offline.
+        if snapshot.self_state.hangout_id.is_some() {
+            let audio = (snapshot.self_state.muted, snapshot.self_state.deafened);
+            api.leave().await.context("clear previous voice session")?;
+            snapshot = api.snapshot().await?;
+            ensure!(
+                snapshot.self_state.hangout_id.is_none(),
+                "Previous voice session is still active; refusing automatic rejoin"
+            );
+            (snapshot.self_state.muted, snapshot.self_state.deafened) = audio;
+        }
         Ok((api, snapshot))
     }
 
@@ -502,6 +523,7 @@ struct Daemon {
     events: broadcast::Sender<DaemonEnvelope>,
     media: MediaManager,
     media_reconcile: Mutex<()>,
+    failed_media_room: Mutex<Option<wisp_protocol::HangoutId>>,
     ptt_operation: Mutex<()>,
     ptt_lease_tx: watch::Sender<Option<Instant>>,
     ptt_lease_duration: Duration,
@@ -544,6 +566,7 @@ impl Daemon {
             events,
             media,
             media_reconcile: Mutex::new(()),
+            failed_media_room: Mutex::new(None),
             ptt_operation: Mutex::new(()),
             ptt_lease_tx,
             ptt_lease_duration,
@@ -714,6 +737,11 @@ impl Daemon {
     }
 
     async fn set_connection(&self, connection: ConnectionState, message: Option<&str>) {
+        // Explicit join commands can retry a failed room. Passive snapshot
+        // refreshes must not turn every server event into a new media attempt.
+        if connection == ConnectionState::Joining {
+            *self.failed_media_room.lock().await = None;
+        }
         let snapshot = {
             let mut state = self.state.write().await;
             state.self_state.connection = connection;
@@ -852,6 +880,7 @@ impl Daemon {
             return Ok(());
         }
         let Some(hangout_id) = hangout_id else {
+            *self.failed_media_room.lock().await = None;
             self.release_push_to_talk("push_to_talk_released").await;
             let (mut audio, camera, video) = {
                 let state = self.state.read().await;
@@ -888,16 +917,13 @@ impl Daemon {
         if self.media.is_connected_to(hangout_id).await {
             return Ok(());
         }
-
-        if (encryption_required
-            || privacy_active
-            || std::env::var("WISP_REQUIRE_MEDIA_E2EE").as_deref() == Ok("true"))
-            && !self.media.encryption_configured()
-        {
-            self.media.disconnect().await;
-            bail!(
-                "This private server requires a client-held media key; voice/video publication is blocked until it is configured"
-            );
+        if *self.failed_media_room.lock().await == Some(hangout_id) {
+            self.set_connection(
+                ConnectionState::Failed,
+                Some("Voice connection failed. Leave and join again to retry."),
+            )
+            .await;
+            return Ok(());
         }
 
         self.release_push_to_talk("push_to_talk_released").await;
@@ -914,6 +940,13 @@ impl Daemon {
         };
         self.set_connection(ConnectionState::Joining, None).await;
         let result = async {
+            if (encryption_required
+                || privacy_active
+                || std::env::var("WISP_REQUIRE_MEDIA_E2EE").as_deref() == Ok("true"))
+                && !self.media.encryption_configured()
+            {
+                bail!("This private server requires a client-held media key; voice/video publication is blocked until it is configured");
+            }
             let credentials = voice_api.livekit_token().await?;
             self.media
                 .connect(hangout_id, credentials, muted, deafened)
@@ -949,6 +982,7 @@ impl Daemon {
                 Ok(())
             }
             Err(error) => {
+                *self.failed_media_room.lock().await = Some(hangout_id);
                 let (code, message) = describe_media_failure(&error);
                 let audio = self.state.read().await.self_state.media.audio.clone();
                 self.set_media_state(
@@ -3328,7 +3362,7 @@ async fn synchronize_server(daemon: Arc<Daemon>) {
                 return;
             }
         };
-        match connect_async(request).await {
+        match network::connect_events(request).await {
             Ok((stream, _)) => {
                 attempt = 0;
                 info!("connected to wisp-server events");
@@ -3397,7 +3431,7 @@ async fn synchronize_linked_server(daemon: Arc<Daemon>, server: Arc<LinkedServer
                 return;
             }
         };
-        match connect_async(request).await {
+        match network::connect_events(request).await {
             Ok((stream, _)) => {
                 attempt = 0;
                 if let Err(error) = daemon.refresh_linked(&server, "server_reconnected").await {
@@ -4528,7 +4562,10 @@ fn describe_media_failure(error: &anyhow::Error) -> (String, String) {
     } else {
         ("media_connection", "Media connection failed")
     };
-    (code.into(), format!("{label}: {detail}"))
+    (
+        code.into(),
+        format!("{label}: {detail}. Automatic retries stopped; leave and join again to retry."),
+    )
 }
 
 fn describe_server_name_error(error: anyhow::Error) -> anyhow::Error {
