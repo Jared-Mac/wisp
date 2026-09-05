@@ -80,6 +80,10 @@ elif command -v update-desktop-database >/dev/null 2>&1; then
   update-desktop-database "$desktop_root" >/dev/null 2>&1 || true
 fi
 
+if command -v xdg-mime >/dev/null 2>&1; then
+  xdg-mime default dev.wisp.desktop x-scheme-handler/wisp-invite
+fi
+
 echo "Synced standalone Wisp UI to $destination"
 echo "Installed application launcher at $bin_root/wisp"
 echo "Installed UI control helper at $bin_root/wisp-ui"

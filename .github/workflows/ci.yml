@@ -124,6 +124,9 @@ jobs:
       - name: Build release binaries
         run: cargo build --workspace --release --locked
 
+      - name: Test invitation server discovery
+        run: python3 scripts/test-invite-discovery.py
+
       - name: Package Linux release
         run: |
           if [[ "$GITHUB_REF" == "refs/heads/main" ]]; then

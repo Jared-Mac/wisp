@@ -1154,8 +1154,8 @@ Item {
         serverSettingsFeedback = message.error ? String(message.error.message || "Could not update server") : "Could not update server"
       }
     } else if (action.kind === "accountInvite") {
-      if (message.ok) lastAccountInvite = value
-      else lastError = message.error ? String(message.error.message || "Could not create invite") : "Could not create invite"
+      if (message.ok && action.serverId === String(activeServer.id || "")) lastAccountInvite = value
+      else if (!message.ok) lastError = message.error ? String(message.error.message || "Could not create invite") : "Could not create invite"
     } else if (action.kind === "roomInvite" || action.kind === "roomInviteResponse") {
       invitationRequests = replaceEntry(invitationRequests, action.key, undefined)
       if (message.ok && action.kind === "roomInvite") {
@@ -1324,7 +1324,7 @@ Item {
       "conversation_id": scope.conversation_id,
       "expires_in_minutes": Number(expiresMinutes || 30)
     })
-    if (id) requests[id] = {kind:"accountInvite"}
+    if (id) requests[id] = {kind:"accountInvite",serverId:scope.server_id}
     return id || ""
   }
   function refreshDevices() { send("list_devices", {server_id:String(activeServer.id || "")}) }

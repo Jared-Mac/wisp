@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls
+import QtQml
 
 Item {
   id: root
@@ -7,7 +8,7 @@ Item {
   required property var theme
   property bool compact: false
   signal settingsRequested()
-  implicitHeight: selector.height
+  implicitHeight: selector.height + inviteButton.height + root.theme.spacing.xs
   TextMetrics { id: serverMetrics; font: selector.font; text: serverLabel.text }
   TextMetrics { id: settingsMetrics; font: selector.font; text: root.theme.tui ? "[settings]" : "settings" }
 
@@ -15,7 +16,7 @@ Item {
     id: settingsButton
     objectName: "serverSettingsShortcut"
     anchors.right: parent.right
-    anchors.verticalCenter: parent.verticalCenter
+    anchors.verticalCenter: selector.verticalCenter
     height: selector.height - 2
     theme: root.theme
     visible: root.bridge.canManageServer
@@ -104,4 +105,73 @@ Item {
       radius: root.theme.cornerRadius
     }
   }
+  Button {
+    id: inviteButton
+    objectName: "serverInviteFriend"
+    anchors.top: selector.bottom
+    anchors.topMargin: root.theme.spacing.xs
+    anchors.left: parent.left
+    anchors.right: parent.right
+    height: root.theme.space(28)
+    text: "Invite friend"
+    enabled: root.bridge.activeServer.connected !== false
+    font.family: root.theme.font.family
+    font.pixelSize: root.theme.font.caption
+    ThemeControlStyle { theme: root.theme; control: parent }
+    onClicked: {
+      root.bridge.lastAccountInvite = null
+      root.bridge.lastError = ""
+      invitePopup.copied = false
+      invitePopup.open()
+      root.bridge.createAccountInvite("friend", "", 30)
+    }
+  }
+  Connections { target: root.bridge; function onActiveServerChanged() { invitePopup.close() } }
+  Popup {
+    id: invitePopup
+    objectName: "serverInvitePopup"
+    property bool copied: false
+    width: Math.min(360, root.width)
+    y: root.height
+    padding: root.theme.spacing.md
+    closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+    background: Rectangle { color: root.theme.surface; border.color: root.theme.muted; radius: root.theme.cornerRadius }
+    contentItem: Column {
+      spacing: root.theme.spacing.sm
+      Text {
+        width: parent.width
+        text: "Invite a friend"
+        color: root.theme.foreground
+        font.family: root.theme.font.family
+        font.pixelSize: root.theme.font.body
+      }
+      Text {
+        width: parent.width
+        wrapMode: Text.Wrap
+        textFormat: Text.PlainText
+        text: root.bridge.lastAccountInvite ? "Send this one-use link to your friend. It expires in 30 minutes. Open it with Wisp installed, or paste it into Create account." : root.bridge.lastError || "Creating invitation…"
+        color: root.theme.muted
+        font.family: root.theme.font.family
+        font.pixelSize: root.theme.font.caption
+      }
+      TextField {
+        id: inviteLink
+        objectName: "serverInviteLink"
+        width: parent.width
+        visible: !!root.bridge.lastAccountInvite
+        readOnly: true
+        selectByMouse: true
+        text: root.bridge.lastAccountInvite ? String(root.bridge.lastAccountInvite.uri || root.bridge.lastAccountInvite.code) : ""
+        ThemeControlStyle { theme: root.theme; control: parent }
+      }
+      Button {
+        width: parent.width
+        text: invitePopup.copied ? "Copied!" : "Copy invite link"
+        enabled: !!root.bridge.lastAccountInvite
+        ThemeControlStyle { theme: root.theme; control: parent }
+        onClicked: { inviteLink.selectAll(); inviteLink.copy(); inviteLink.deselect(); invitePopup.copied = true }
+      }
+    }
+  }
+
 }
