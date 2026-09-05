@@ -10,6 +10,8 @@ Item {
   property string clientName: "quickshell"
   readonly property alias voiceRecovery: voiceRecovery
   WispVoiceRecovery { id: voiceRecovery; bridge: root }
+  readonly property alias chatExtras: chatExtras
+  WispChatExtras { id: chatExtras; bridge: root }
   readonly property alias workspaceLayout: workspaceLayout
   WispWorkspaceLayout {
     id: workspaceLayout
@@ -30,6 +32,7 @@ Item {
   }
   property string lastAppliedVolumes: ""
   onDaemonConnectedChanged: {
+    chatExtras.invalidate()
     lastAppliedVolumes = ""
     if (daemonConnected) applyParticipantVolumes()
     else { voiceRecovery.daemonLost(); privacySnapshotReady = false; privacyRequestId = ""; privacyBusy = false; profileBusy = false; profileReady = false; profileRequestId = "" }
@@ -985,6 +988,7 @@ Item {
       return
     }
     if (message.type === "event" && message.payload && message.payload.snapshot) {
+      if (message.name === "emojis_changed") chatExtras.invalidate()
       applySnapshot(message.payload.snapshot, message.name)
       return
     }
@@ -1136,7 +1140,9 @@ Item {
     delete requests[message.id]
     var value = message.value || ({})
     var conversationId = action.conversationId
-    if (action.kind === "voiceRecovery") {
+    if (action.kind === "chatExtras") {
+      chatExtras.reply(message, action)
+    } else if (action.kind === "voiceRecovery") {
       voiceRecovery.reply(message)
     } else if (action.kind === "joinFriend") {
       if (message.ok && value.status === "knock_sent") {

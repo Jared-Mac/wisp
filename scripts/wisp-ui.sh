@@ -59,7 +59,16 @@ lock_ui_start() {
   flock 8
 }
 
-if ! command -v qs >/dev/null 2>&1; then
+qs_bin=qs
+private_runtime="${XDG_BIN_HOME:-$HOME/.local/bin}/wisp-quickshell"
+if [[ -x "$private_runtime" ]]; then
+  qs_bin="$private_runtime"
+  export WISP_WEB_EMBEDS_READY=1
+  export QSG_RHI_BACKEND=opengl
+else
+  export WISP_WEB_EMBEDS_READY=0
+fi
+if ! command -v "$qs_bin" >/dev/null 2>&1; then
   echo "Quickshell is required to run the Wisp UI" >&2
   exit 1
 fi
@@ -75,11 +84,11 @@ export QML_IMPORT_PATH="$video_import_root${QML_IMPORT_PATH:+:$QML_IMPORT_PATH}"
 export WISP_SOUND_DIR="${video_import_root%/native}/assets"
 
 start_ui() {
-  qs "${selector[@]}" --daemonize >/dev/null 2>&1
+  "$qs_bin" "${selector[@]}" --daemonize >/dev/null 2>&1
 }
 
 call_ui() {
-  qs "${selector[@]}" ipc call "$@"
+  "$qs_bin" "${selector[@]}" ipc call "$@"
 }
 
 call_or_start() {

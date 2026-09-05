@@ -1,5 +1,7 @@
 // Index labels and aliases only; never search account fields or private content.
 var entries = [
+  {section:"profile",target:"accountEmojiLibrary",label:"My custom emojis",keywords:"account emoji library upload reactions"},
+  {section:"server",target:"serverEmojiLibrary",label:"Server custom emojis",keywords:"admin emoji library upload reactions"},
   {section:"media", target:"voiceReconnectSetting", label:"Automatically reconnect voice", keywords:"audio connection disconnect server restart network retry recovery"},
   {section:"profile", target:"profileDisplayName", label:"Display name", keywords:"account profile username nickname"},
   {section:"profile", target:"profileCurrentPassword", label:"Change password", keywords:"account profile login security"},

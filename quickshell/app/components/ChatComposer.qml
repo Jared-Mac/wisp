@@ -8,6 +8,7 @@ Column {
   required property string conversationId
   property bool spacious: false
   property bool autoGrow: false
+  readonly property alias emojiPicker: composerEmojiPicker
   signal editorFocused()
   property real maximumEditorHeight: theme.space(160)
   readonly property real naturalEditorHeight: Math.max(theme.space(40), editor.contentHeight + editor.topPadding + editor.bottomPadding + (theme.tui ? theme.spacing.sm : theme.spacing.lg) * 2)
@@ -17,6 +18,7 @@ Column {
   readonly property string destination: conversation && conversation.label ? (conversation.label === "Hangout" ? "Room" : String(conversation.label)) : ""
   readonly property bool busy: !!bridge.sendingConversations[conversationId] || !!bridge.importingConversations[conversationId]
   spacing: autoGrow ? theme.spacing.xs : theme.tui ? theme.spacing.sm : theme.spacing.lg
+
 
   Text {
     objectName: "terminalChatPrompt"
@@ -103,7 +105,7 @@ Column {
       anchors.fill: parent
       anchors.margins: root.theme.tui ? root.theme.spacing.sm : root.theme.spacing.lg
       anchors.leftMargin: root.theme.tui ? root.theme.space(24) : root.theme.spacing.lg
-      anchors.rightMargin: sendButton.width + root.theme.spacing.lg * 2
+      anchors.rightMargin: sendButton.width + emojiButton.width + root.theme.spacing.lg * 3
       TextArea {
         ThemeControlStyle { theme: root.theme; control: editor }
         id: editor
@@ -146,6 +148,16 @@ Column {
         }
       }
     }
+  ChatButton {
+    id:emojiButton;anchors.right:sendButton.left;anchors.bottom:parent.bottom;anchors.margins:root.theme.space(4);width:root.theme.space(36);height:root.theme.space(32)
+    objectName:"composerEmojiButton";theme:root.theme;text:"☺";enabled:!root.busy
+    onClicked:composerEmojiPicker.open()
+    EmojiPicker {
+      id:composerEmojiPicker;bridge:root.bridge;theme:root.theme;serverId:String((root.conversation || {}).server_id || root.bridge.activeServer.id)
+      width:Math.min(root.width,root.theme.space(340));y:-height
+      onPicked:emoji=>{editor.insert(editor.cursorPosition,emoji);editor.forceActiveFocus()}
+    }
+  }
     ChatButton {
       id: sendButton
       objectName: "composerSendButton"

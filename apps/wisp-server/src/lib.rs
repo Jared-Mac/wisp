@@ -1,5 +1,8 @@
 mod account_profile;
 mod attachments;
+mod chat_extras;
+#[cfg(test)]
+mod chat_extras_tests;
 mod chat_identity;
 mod groups;
 mod invitation_privacy;
@@ -363,6 +366,7 @@ impl AppState {
             knocks,
             room_invitations: invitations::load(&self.pool, self_id).await?,
             conversations,
+            reactions: chat_extras::load_reactions(&self.pool, &messages).await?,
             messages,
             spots,
             devices,
@@ -541,6 +545,20 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/v1/livekit/token", post(livekit_token))
         .route("/v1/e2ee/messages", text_body(post(privacy::send), &state))
+        .route(
+            "/v1/emojis",
+            get(chat_extras::emojis)
+                .merge(post(chat_extras::upload_emoji).layer(DefaultBodyLimit::max(3_000_000))),
+        )
+        .route(
+            "/v1/emojis/{id}",
+            get(chat_extras::emoji_image).delete(chat_extras::remove_emoji),
+        )
+        .route(
+            "/v1/messages/{id}/reactions",
+            text_body(put(chat_extras::react), &state),
+        )
+        .route("/v1/reactions/{id}", delete(chat_extras::unreact))
         .route("/v1/e2ee/state", get(chat_identity::directory))
         .route("/v1/e2ee/identity", post(chat_identity::publish))
         .route("/v1/e2ee/roster", post(chat_identity::update_roster))

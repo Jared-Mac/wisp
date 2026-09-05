@@ -168,7 +168,7 @@ ShellRoot {
       test.check(menu.searchResults.length === 0,"no matches has an empty result state")
       test.find(page,"clearSettingsSearch").clicked(); input.wait(60)
       test.check(!menu.searching && menu.section === "media","clearing search preserves current category")
-      test.check(Search.search("server admin",false,false).length === 0 && Search.search("server admin",true,false).length === 1,"server-only options respect permissions")
+      test.check(Search.search("server admin",false,false).length === 0 && Search.search("server admin",true,false).length >= 1,"server-only options respect permissions")
       Search.entries.forEach(function(entry) { test.check(!!menu.findSetting(menu,entry.target),"search target exists: " + entry.target) })
       test.check(!bridge.sent.some(function(c) { return /^(join|leave$|share$|camera$|knock|invite|send_message)/.test(c.name) }),"watching and searching never join voice or publish media")
       console.log(test.failed ? "STREAM_SEARCH_FAILED" : "STREAM_SEARCH_OK")

@@ -19,6 +19,10 @@ if [[ ! -f "$source_dir/shell.qml" ]]; then
   exit 1
 fi
 
+if [[ -f "$repo_dir/scripts/build-web-runtime.sh" ]]; then
+  bash "$repo_dir/scripts/build-web-runtime.sh"
+fi
+
 mkdir -p "$destination" "$onboarding_destination" "$bin_root" "$desktop_root" "$icon_root" "$service_root"
 
 if [[ -d "$repo_dir/native/video" ]]; then
@@ -44,6 +48,9 @@ if [[ -f "$repo_dir/target/video-ui/libwispvideo.so" ]]; then
 fi
 
 install -m 0755 "$repo_dir/scripts/wisp-ui.sh" "$bin_root/wisp-ui"
+if [[ -f "$repo_dir/scripts/build-web-runtime.sh" ]]; then
+  install -m 0755 "$repo_dir/scripts/build-web-runtime.sh" "$bin_root/wisp-web-runtime"
+fi
 install -m 0644 "$repo_dir/scripts/server-endpoint.sh" "$bin_root/wisp-server-endpoint"
 install -m 0755 "$repo_dir/scripts/wisp-client.sh" "$bin_root/wisp-client"
 install -m 0755 "$repo_dir/scripts/wisp-update.sh" "$bin_root/wisp-update"

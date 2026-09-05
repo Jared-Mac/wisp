@@ -425,4 +425,5 @@ Column {
   }
 
   Component.onCompleted: bridge.refreshServerSettings()
+  EmojiLibrary {objectName:"serverEmojiLibrary";width:parent.width;bridge:root.bridge;theme:root.theme;serverId:String(root.bridge.activeServer.id);scope:"server"}
 }

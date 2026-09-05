@@ -62,6 +62,7 @@ install -m 0755 "$repo_dir/target/video-ui/libwispvideo.so" "$package_dir/quicks
 install -m 0644 "$repo_dir/target/video-ui/qmldir" "$package_dir/quickshell/app/native/WispVideo/"
 for script in \
   app-sync.sh \
+  build-web-runtime.sh \
   backup-database.sh \
   install-host-services.sh \
   server-endpoint.sh \
@@ -88,9 +89,11 @@ install -m 0600 "$repo_dir/infra/local/server.env.example" "$package_dir/infra/l
 mkdir -p "$package_dir/infra/private-host" "$package_dir/docs"
 cp -a "$repo_dir/infra/private-host/." "$package_dir/infra/private-host/"
 install -m 0644 "$repo_dir/docs/privacy-hardening.md" "$repo_dir/docs/private-host-setup.md" "$package_dir/docs/"
+install -m 0644 "$repo_dir/docs/chat-extras.md" "$package_dir/docs/"
 install -m 0755 "$repo_dir/scripts/install-release.sh" "$package_dir/install.sh"
 install -m 0644 "$repo_dir/LICENSE" "$repo_dir/README.md" "$package_dir/"
 mkdir -p "$package_dir/licenses"
+cp -a "$repo_dir/third_party/quickshell-web-runtime" "$package_dir/licenses/"
 install -m 0644 "$repo_dir/third_party/LICENSE-APACHE" "$package_dir/licenses/"
 install -m 0644 "$repo_dir/third_party/webrtc-sys/NOTICE.md" "$package_dir/licenses/WebRTC-NOTICE.md"
 install -m 0644 "$repo_dir/third_party/livekit/NOTICE.md" "$package_dir/licenses/LiveKit-NOTICE.md"

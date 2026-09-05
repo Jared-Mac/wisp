@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls
+import "../ChatMarkup.js" as Markup
 
 Rectangle {
   id: root
@@ -12,6 +13,24 @@ Rectangle {
   property bool editingImage: false
   property bool savingEdit: false
   property string editError: ""
+  readonly property var incomingMessages: bridge.messagesFor(conversationId)
+  // Preserve delegates (including a playing embed) across unrelated snapshots.
+  ListModel {id:stableMessages;dynamicRoles:true}
+  function syncMessages() {
+    var incoming=incomingMessages || []
+    for(var i=0;i<incoming.length;i++) {
+      var id=String(incoming[i].id), found=-1
+      for(var j=i;j<stableMessages.count;j++) if(String(stableMessages.get(j).modelData.id)===id){found=j;break}
+      if(found<0) stableMessages.insert(i,{modelData:incoming[i]})
+      else {
+        if(found!==i) stableMessages.move(found,i,1)
+        if(JSON.stringify(stableMessages.get(i).modelData)!==JSON.stringify(incoming[i])) stableMessages.set(i,{modelData:incoming[i]})
+      }
+    }
+    if(stableMessages.count>incoming.length)stableMessages.remove(incoming.length,stableMessages.count-incoming.length)
+  }
+  onIncomingMessagesChanged:syncMessages()
+  Component.onCompleted:syncMessages()
   readonly property bool editOpen: editDialog.opened
   readonly property bool awayFromLatest: messages.count > 0 && !messages.atYEnd
     && messages.contentHeight + messages.originY - messages.contentY - messages.height > theme.space(4)
@@ -47,7 +66,7 @@ Rectangle {
     anchors.margins: root.theme.space(root.theme.cleanTui ? 12 : root.theme.tui ? 6 : 16)
     clip: true
     spacing: root.theme.space(root.theme.cleanTui ? 14 : root.theme.tui ? 12 : 18)
-    model: root.bridge.messagesFor(root.conversationId)
+    model: stableMessages
     property bool followBottom: true
     function followLatest() { if (followBottom && !moving && !messageScrollBar.pressed) positionViewAtEnd() }
     onMovementStarted: followBottom = false
@@ -68,9 +87,11 @@ Rectangle {
       readonly property bool ownMessage: modelData.sender.id === root.bridge.selfState.id
       readonly property string copyText: isImage ? String(modelData.payload.caption || "") : isFile ? String(modelData.payload.caption || modelData.payload.file_name || "") : isInvitation ? "" : String(modelData.payload || "")
       readonly property string imageUrl: root.bridge.chatImageUrls[String(modelData.id)] || ""
+      readonly property string serverId: String(modelData.server_id || root.bridge.activeServer.id)
       width: messages.width
       spacing: root.theme.tui ? root.theme.space(2) : root.theme.spacing.md
-      Component.onCompleted: if (isImage) root.bridge.loadChatImage(String(modelData.id))
+      Component.onCompleted: { if (isImage) root.bridge.loadChatImage(String(modelData.id));root.bridge.chatExtras.loadText(serverId,copyText) }
+      onCopyTextChanged:root.bridge.chatExtras.loadText(serverId,copyText)
       Row {
         spacing: root.theme.spacing.lg
         Text {
@@ -220,14 +241,22 @@ Rectangle {
         }
       }
       TextEdit {
+        objectName:"messageBody-"+String(message.modelData.id)
         width: parent.width
-        text: message.isImage || message.isFile ? String(message.modelData.payload.caption || "") : String(message.modelData.payload || "")
+        text: root.bridge.chatExtras.richText(message.serverId,message.copyText,Math.round(root.theme.font.body*1.5),root.theme.accent)
         visible: !message.isInvitation && text !== ""
         color: root.theme.foreground
         readOnly: true; selectByMouse: true
-        textFormat: TextEdit.PlainText
+        textFormat: TextEdit.RichText
+        selectedTextColor:root.theme.foreground
+        onLinkActivated:link=>{if(Markup.safeLink(link))Qt.openUrlExternally(link)}
         wrapMode: TextEdit.Wrap
         font.family: root.theme.font.family; font.pixelSize: root.theme.font.body
+      }
+      ReactionBar {width:parent.width;bridge:root.bridge;theme:root.theme;serverId:message.serverId;messageId:String(message.modelData.id)}
+      Repeater {
+        model:Markup.youtube(message.copyText)
+        VideoEmbed {required property string modelData;theme:root.theme;videoId:modelData}
       }
       Loader {
         width: parent.width

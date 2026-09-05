@@ -9,7 +9,7 @@ use wisp_protocol::{BeginEncryptedUpload, EncryptedMessageRequest, SendMessageRe
 /// Refuse a privacy-required startup with legacy content still present. This
 /// checks active rows, NOT freed `SQLite` pages, WAL files or historical backups.
 pub(super) async fn ensure_ciphertext_storage(pool: &sqlx::SqlitePool) -> anyhow::Result<()> {
-    let legacy: i64 = sqlx::query_scalar("SELECT (SELECT COUNT(*) FROM messages WHERE NOT (encryption_version=1 AND content_type='application/vnd.wisp.encrypted+json') AND content_type!='application/vnd.wisp.room-invitation+json') + (SELECT COUNT(*) FROM chat_images) + (SELECT COUNT(*) FROM chat_files WHERE length(data)>0) + (SELECT COUNT(*) FROM file_uploads WHERE encryption_version!=1)")
+    let legacy: i64 = sqlx::query_scalar("SELECT (SELECT COUNT(*) FROM messages WHERE NOT (encryption_version=1 AND content_type='application/vnd.wisp.encrypted+json') AND content_type!='application/vnd.wisp.room-invitation+json') + (SELECT COUNT(*) FROM chat_images) + (SELECT COUNT(*) FROM chat_files WHERE length(data)>0) + (SELECT COUNT(*) FROM file_uploads WHERE encryption_version!=1) + (SELECT COUNT(*) FROM message_reactions WHERE encryption_version!=1)")
         .fetch_one(pool).await?;
     anyhow::ensure!(
         legacy == 0,
@@ -73,7 +73,7 @@ pub(super) async fn validate_roster(
     Ok(())
 }
 
-fn validate(request: &EncryptedMessageRequest) -> Result<(), ApiError> {
+pub(super) fn validate(request: &EncryptedMessageRequest) -> Result<(), ApiError> {
     let bytes = STANDARD.decode(&request.ciphertext).map_err(|_| {
         ApiError::bad_request("invalid_envelope", "Invalid encrypted message encoding")
     })?;

@@ -4,6 +4,7 @@ mod audio;
 #[cfg(test)]
 #[path = "../../../third_party/livekit/src/platform_audio/device_count.rs"]
 mod audio_device_count_tests;
+mod chat_extras;
 mod chat_images;
 mod chat_transfers;
 mod media;
@@ -596,6 +597,7 @@ impl Daemon {
 
     fn scoped_state(server: ServerView, snapshot: &Snapshot) -> ServerStateView {
         ServerStateView {
+            reactions: snapshot.reactions.clone(),
             voice_moderation: snapshot.voice_moderation.clone(),
             server: Self::server_view_for_snapshot(server, snapshot),
             self_state: snapshot.self_state.clone(),
@@ -1422,6 +1424,30 @@ impl Daemon {
 
     #[allow(clippy::too_many_lines)]
     async fn run_command(&self, command: &CommandEnvelope) -> anyhow::Result<Option<Value>> {
+        if chat_extras::handles(&command.name) {
+            let server_id = command.args["server_id"]
+                .as_str()
+                .unwrap_or(&self.primary_server.id);
+            if server_id == self.primary_server.id {
+                let value = chat_extras::command(&self.api, &self.privacy, command).await?;
+                if command.name == "toggle_reaction" {
+                    self.refresh("reactions_changed").await?;
+                }
+                return Ok(Some(value));
+            }
+            let server = self
+                .linked_servers
+                .read()
+                .await
+                .get(server_id)
+                .cloned()
+                .context("Server is not connected")?;
+            let value = chat_extras::command(&server.api, &server.privacy, command).await?;
+            if command.name == "toggle_reaction" {
+                self.refresh_linked(&server, "reactions_changed").await?;
+            }
+            return Ok(Some(value));
+        }
         if matches!(
             command.name.as_str(),
             "join_spot" | "join_hangout" | "join_friend" | "respond_knock"

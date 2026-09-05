@@ -98,6 +98,23 @@ impl MessageContext {
 impl Content {
     pub fn validate(&self) -> anyhow::Result<()> {
         match self.content_type.as_str() {
+            "application/vnd.wisp.reaction+json" => {
+                ensure!(
+                    self.attachment.is_none(),
+                    "Reaction cannot contain an attachment"
+                );
+                let target = self.payload["target"]
+                    .as_str()
+                    .context("Missing reaction target")?;
+                target.parse::<Uuid>().context("Invalid reaction target")?;
+                let emoji = self.payload["emoji"]
+                    .as_str()
+                    .context("Missing reaction emoji")?;
+                ensure!(
+                    !emoji.is_empty() && emoji.len() <= 200 && !emoji.chars().any(char::is_control),
+                    "Invalid reaction emoji"
+                );
+            }
             "text/plain" => {
                 ensure!(
                     self.attachment.is_none(),

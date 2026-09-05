@@ -94,4 +94,5 @@ Column {
   }
   Label { text: "Two-factor authentication"; color: root.theme.foreground; font.bold: true }
   Label { objectName: "profileTwoFactorStatus"; text: "Planned for a future update. 2FA is not available yet." }
+  EmojiLibrary {objectName:"accountEmojiLibrary";width:parent.width;bridge:root.bridge;theme:root.theme;serverId:root.serverId;scope:"account"}
 }

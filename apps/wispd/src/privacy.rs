@@ -722,6 +722,10 @@ impl Privacy {
         if !snapshot.chat_encryption_required
             && matches!(self.active(), Ok(None))
             && !snapshot.messages.iter().any(|m| m.encryption_version != 0)
+            && !snapshot
+                .reactions
+                .iter()
+                .any(|r| r.message.encryption_version != 0)
             && !snapshot.conversations.iter().any(|c| {
                 c.last_message
                     .as_ref()
@@ -832,6 +836,14 @@ impl Privacy {
         for message in &mut snapshot.messages {
             decode_message(message);
         }
+        for reaction in &mut snapshot.reactions {
+            decode_message(&mut reaction.message);
+        }
+        snapshot.reactions.retain(|reaction| {
+            reaction.message.content_type == wisp_protocol::REACTION_CONTENT_TYPE
+                && reaction.message.payload["target"].as_str()
+                    == Some(&reaction.target_id.to_string())
+        });
         for conversation in &mut snapshot.conversations {
             if let Some(message) = conversation.last_message.as_mut() {
                 decode_message(message);
@@ -878,6 +890,9 @@ impl Privacy {
         }
         for message in &mut snapshot.messages {
             restore(&mut message.sender);
+        }
+        for reaction in &mut snapshot.reactions {
+            restore(&mut reaction.message.sender);
         }
         for invite in &mut snapshot.room_invitations {
             restore(&mut invite.from);

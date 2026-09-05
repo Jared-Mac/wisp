@@ -337,6 +337,7 @@ async fn two_clients_encrypt_restore_and_admit_a_friend_without_manual_verificat
             .payload,
         "Private integration test"
     );
+    reaction_roundtrip(&alice, &bob, &av, &bv, stored.id).await;
     let mut injected = bob.snapshot().await.unwrap();
     injected.chat_encryption_required = false; // A server flag is not trusted to downgrade an enrolled client.
     injected.messages[0].encryption_version = 0;
@@ -714,4 +715,57 @@ async fn attachment_roundtrip(
             "Failed download leaves no private partial files"
         );
     }
+}
+
+async fn reaction_roundtrip(
+    alice: &ServerApi,
+    bob: &ServerApi,
+    av: &Privacy,
+    bv: &Privacy,
+    target: Uuid,
+) {
+    let command = wisp_protocol::CommandEnvelope::new(
+        "reaction-test",
+        "toggle_reaction",
+        json!({"message_id":target,"emoji":":wisp_love:"}),
+    );
+    let added = crate::chat_extras::command(bob, bv, &command)
+        .await
+        .unwrap();
+    assert_eq!(added["added"], true);
+    let raw = alice.snapshot().await.unwrap();
+    assert_eq!(raw.reactions.len(), 1);
+    assert_eq!(raw.reactions[0].message.encryption_version, 1);
+    assert!(
+        !raw.reactions[0]
+            .message
+            .payload
+            .to_string()
+            .contains("wisp_love")
+    );
+    let mut decoded = raw.clone();
+    av.decrypt_snapshot(alice, &mut decoded).await;
+    assert_eq!(decoded.reactions[0].message.payload["emoji"], ":wisp_love:");
+    let mut tampered = raw;
+    tampered.reactions[0].target_id = Uuid::new_v4();
+    av.decrypt_snapshot(alice, &mut tampered).await;
+    assert!(
+        tampered.reactions.is_empty(),
+        "A server cannot move an authenticated reaction to another message"
+    );
+    let legacy = bob
+        .request(
+            reqwest::Method::PUT,
+            &format!("/v1/messages/{target}/reactions"),
+        )
+        .json(&json!({"id":Uuid::new_v4(),"emoji":"🔥"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(legacy.status(), reqwest::StatusCode::FORBIDDEN);
+    let removed = crate::chat_extras::command(bob, bv, &command)
+        .await
+        .unwrap();
+    assert_eq!(removed["added"], false);
+    assert!(alice.snapshot().await.unwrap().reactions.is_empty());
 }

@@ -1,0 +1,50 @@
+# Links, emojis, reactions and video
+
+Web links in message text and attachment captions open in the default browser.
+Chat remains plain text on the wire; clients escape markup before displaying
+links and emoji images. Pasted HTML never becomes executable content.
+
+The composer’s smile button opens a searchable picker containing standard
+Unicode emojis, twelve bundled Wisp emojis, the account library and server
+emojis. Click the reaction button below a message to add a reaction; click a
+selected reaction again to remove yours. Counts are per person, and hovering
+shows who reacted. Reactions are encrypted and signed with the same account
+keys as chat, bound to the original message and its original audience (restricted
+to people who still belong to the conversation). The server sees routing
+metadata, not which emoji was chosen, for encrypted reactions.
+
+Manage personal emojis in Settings → Profile → My emojis. Server administrators
+manage shared emojis in Settings → Server → Server emojis. Both libraries have
+no count limit and use paged API retrieval. Names contain 2–32 letters, digits
+or underscores. PNG, JPEG, GIF and WebP inputs up to 2 MB are normalized into
+static 128-pixel PNGs. Removing an emoji hides it from the library; its existing
+uses in chat remain readable. Emoji artwork is account/server asset data, not
+encrypted chat content. Schema migration 22 adds the asset and reaction tables.
+
+YouTube watch, short-link, Shorts, live and embed URLs expose a **play here**
+button. Nothing contacts YouTube until it is clicked. A private, off-the-record
+Qt WebEngine view hosts the official YouTube player inside the chat. Audio,
+camera, location and file permission requests are refused. Close video stops
+playback; opening the original link in a browser remains available if YouTube
+disallows embedded playback. The application identifier `dev.wisp`, rather than
+the user’s server address, identifies the player’s origin and referrer, following
+[YouTube’s embedded-player guidance](https://developers.google.com/youtube/terms/required-minimum-functionality#embedded-player-api-client-identity).
+
+## Linux web runtime
+
+Inline video needs Qt WebEngine 6.8 or newer. Quickshell 0.3.1 constructs its Qt
+application with `argc=0`, which crashes Chromium initialization. Wisp builds a
+private copy with `argc=1` and `AA_ShareOpenGLContexts` enabled before creating
+the application. It does not replace the desktop’s Quickshell. Source, checksum,
+build flags and installation logic are in `scripts/build-web-runtime.sh`.
+
+On Arch/Omarchy, the additional build dependencies are `cmake`, `ninja`, `gcc`,
+`cli11`, `wayland-protocols` and `qt6-webengine`. UI sync builds the runtime once,
+then reuses it until Qt or the runtime version changes. The same builder is
+installed as `wisp-web-runtime` for adding missing dependencies later. If those
+dependencies are unavailable, links still open in the browser and **play here**
+explains the missing runtime. The rest of Wisp does not depend on WebEngine.
+
+Run `scripts/test-chat-extras.sh` for offline UI checks, `cargo test -p wisp-server
+chat_extras_tests` for permissions/storage, and the daemon’s encrypted two-client
+integration test for reaction authenticity and original-audience handling.

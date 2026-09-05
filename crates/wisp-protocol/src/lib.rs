@@ -467,6 +467,8 @@ pub struct ServerView {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ServerStateView {
     #[serde(default)]
+    pub reactions: Vec<MessageReaction>,
+    #[serde(default)]
     pub voice_moderation: std::collections::BTreeMap<UserId, VoiceModeration>,
     pub server: ServerView,
     #[serde(rename = "self")]
@@ -580,6 +582,8 @@ pub struct ModerateVoiceRequest {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Snapshot {
+    #[serde(default)]
+    pub reactions: Vec<MessageReaction>,
     #[serde(default)]
     pub voice_moderation: std::collections::BTreeMap<UserId, VoiceModeration>,
     #[serde(default)]
@@ -996,6 +1000,23 @@ pub struct Message {
     pub encryption_version: i64,
     #[serde(default)]
     pub edited_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MessageReaction {
+    pub target_id: MessageId,
+    pub message: Message,
+}
+
+pub const REACTION_CONTENT_TYPE: &str = "application/vnd.wisp.reaction+json";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReactionRequest {
+    pub id: MessageId,
+    #[serde(default)]
+    pub emoji: Option<String>,
+    #[serde(default)]
+    pub encrypted: Option<EncryptedMessageRequest>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
