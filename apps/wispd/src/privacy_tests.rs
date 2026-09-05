@@ -17,6 +17,149 @@ async fn client(server: &str, profile: &str) -> ServerApi {
 
 #[tokio::test]
 #[allow(clippy::too_many_lines)]
+async fn automatic_enrollment_persists_retries_and_requires_recovery_on_another_device() {
+    let state = wisp_server::AppState::new(wisp_server::AppConfig {
+        database_url: "sqlite::memory:".into(),
+        public_url: Some("https://wisp.invalid".into()),
+        livekit_url: "ws://127.0.0.1:1".into(),
+        livekit_api_key: "test".into(),
+        livekit_api_secret: "isolated-test-no-media".into(),
+        knock_ttl: std::time::Duration::from_secs(30),
+        allow_dev_sessions: true,
+        bootstrap_token: None,
+        require_chat_e2ee: true,
+    })
+    .await
+    .unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let server = format!("http://{}", listener.local_addr().unwrap());
+    let task = tokio::spawn(async move {
+        axum::serve(listener, wisp_server::router(state))
+            .await
+            .unwrap();
+    });
+    let api = client(&server, "Owner").await;
+    let mut snapshot = api.snapshot().await.unwrap();
+    let account = snapshot.self_state.user.id;
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("first");
+    let privacy = Privacy::at(root.clone(), &server, account);
+    assert_eq!(privacy.status()["configured"], false);
+    crate::prepare_private_account(&api, &privacy, &mut snapshot).await;
+    assert_eq!(privacy.status()["configured"], true);
+    let vault = privacy.active().unwrap().unwrap();
+    let identity = vault.ring.identity().public();
+    let key_path = root
+        .join(vault.network.to_string())
+        .join(account.to_string())
+        .join("recovery.key");
+    assert_eq!(
+        fs::metadata(&key_path).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+    assert_eq!(
+        fs::metadata(&root).unwrap().permissions().mode() & 0o777,
+        0o700
+    );
+    let original = fs::read(&key_path).unwrap();
+    let (one, two) = tokio::join!(privacy.initialize(&api), privacy.initialize(&api));
+    one.unwrap();
+    two.unwrap();
+    let restarted = Privacy::at(root.clone(), &server, account);
+    restarted.initialize(&api).await.unwrap();
+    assert_eq!(
+        restarted
+            .active()
+            .unwrap()
+            .unwrap()
+            .ring
+            .identity()
+            .public(),
+        identity
+    );
+
+    // A crash after publication but before binding must reuse the durable key.
+    fs::remove_file(&privacy.binding).unwrap();
+    let interrupted = Privacy::at(root.clone(), &server, account);
+    interrupted.initialize(&api).await.unwrap();
+    assert_eq!(
+        interrupted
+            .active()
+            .unwrap()
+            .unwrap()
+            .ring
+            .identity()
+            .public(),
+        identity
+    );
+    assert_eq!(fs::read(&key_path).unwrap(), original);
+
+    let other_root = temp.path().join("second");
+    let other = Privacy::at(other_root.clone(), &server, account);
+    assert!(other.initialize(&api).await.is_err());
+    assert_eq!(other.status()["configured"], false);
+    assert!(
+        other.status()["error"]
+            .as_str()
+            .unwrap()
+            .contains("Restore recovery")
+    );
+    assert!(
+        !other_root
+            .join(vault.network.to_string())
+            .join(account.to_string())
+            .exists()
+    );
+    let directory: Directory = decode(
+        api.request(reqwest::Method::GET, "/v1/e2ee/state")
+            .send()
+            .await
+            .unwrap(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(directory.identities[&account], identity);
+
+    let backup = temp.path().join("backup.key");
+    vault.ring.export_recovery(&backup).unwrap();
+    other
+        .enable(
+            &api,
+            &temp.path().join("restored-backup.key"),
+            Some(&backup),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        other.active().unwrap().unwrap().ring.identity().public(),
+        identity
+    );
+    assert!(other.status()["error"].is_null());
+
+    // A damaged local identity never becomes a new identity on startup.
+    fs::remove_file(&key_path).unwrap();
+    let damaged = Privacy::at(root, &server, account);
+    assert!(damaged.initialize(&api).await.is_err());
+    assert!(!key_path.exists());
+
+    // A transient request failure leaves setup retryable, not marked ready.
+    let bob = client(&server, "MemberA").await;
+    let bob_id = bob.snapshot().await.unwrap().self_state.user.id;
+    let retry = Privacy::at(temp.path().join("retry"), &server, bob_id);
+    let mut unavailable = bob.clone();
+    unavailable.base_url = "http://127.0.0.1:1".into();
+    assert!(retry.initialize(&unavailable).await.is_err());
+    assert_eq!(retry.status()["configured"], false);
+    let (one, two) = tokio::join!(retry.initialize(&bob), retry.initialize(&bob));
+    one.unwrap();
+    two.unwrap();
+    assert_eq!(retry.status()["configured"], true);
+    assert!(retry.status()["error"].is_null());
+    task.abort();
+}
+
+#[tokio::test]
+#[allow(clippy::too_many_lines)]
 async fn two_clients_encrypt_restore_and_admit_a_friend_without_manual_verification() {
     let state = wisp_server::AppState::new(wisp_server::AppConfig {
         database_url: "sqlite::memory:".into(),
@@ -46,9 +189,7 @@ async fn two_clients_encrypt_restore_and_admit_a_friend_without_manual_verificat
     let av = Privacy::at(temp.path().join("alice"), &server, a);
     let bv = Privacy::at(temp.path().join("bob"), &server, b);
     let backup = temp.path().join("bob-recovery.key");
-    av.enable(&alice, &temp.path().join("alice-recovery.key"), None)
-        .await
-        .unwrap();
+    av.initialize(&alice).await.unwrap();
     bv.enable(&bob, &backup, None).await.unwrap();
     let conversation = alice.create_direct("Owner".into()).await.unwrap();
     let (vault, roster) = av.recipients(&alice, &conversation).await.unwrap();

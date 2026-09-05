@@ -26,12 +26,12 @@ Column {
   }
   Text {
     width: parent.width; wrapMode: Text.Wrap
-    text: "Privacy rollout is in progress. Do not migrate existing chat storage to a hosting provider yet."
-    color: root.theme.warning; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
+    text: "Encryption is set up automatically when your account connects. Private keys are saved only on this device."
+    color: root.theme.muted; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
   }
   Text {
     width: parent.width; wrapMode: Text.Wrap
-    text: root.status.error || (root.status.configured ? "New chat content is encrypted on this device before upload." : "Not configured. Chat encryption is separate from voice/video encryption.")
+    text: root.status.error || (root.status.configured ? "New chat content is encrypted on this device before upload." : "Waiting for automatic encryption setup. Chat is blocked until encryption is ready.")
     color: root.status.error ? root.theme.danger : root.status.configured ? root.theme.accent : root.theme.warning
     font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
   }
@@ -53,12 +53,6 @@ Column {
       onClicked: root.bridge.refreshPrivacy()
     }
     ChatButton {
-      theme: root.theme; text: "Set up encryption…"
-      visible: !root.status.configured
-      enabled: !!root.bridge.daemonConnected && !root.bridge.privacyBusy
-      onClicked: {root.recoveryFile=""; backupPicker.open()}
-    }
-    ChatButton {
       theme: root.theme; text: "Restore recovery file…"
       visible: !root.status.configured || !!root.status.error
       enabled: !!root.bridge.daemonConnected && !root.bridge.privacyBusy
@@ -68,8 +62,13 @@ Column {
       theme: root.theme; text: "Back up recovery file…"
       visible: !!root.status.configured && !root.status.error
       enabled: !root.bridge.privacyBusy
-      onClicked: backupPicker.open()
+      onClicked: {root.recoveryFile=""; backupPicker.open()}
     }
+  }
+  Text {
+    width: parent.width; wrapMode: Text.Wrap
+    text: "Back up your recovery file to another safe location to keep access if this device is lost. On a new device, restore that file if this account already has encryption keys."
+    color: root.theme.muted; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
   }
   Text {
     width: parent.width; wrapMode: Text.WrapAnywhere

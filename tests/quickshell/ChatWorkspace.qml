@@ -1500,7 +1500,8 @@ ShellRoot {
         test.check(firstTab && !firstTab.primary, "Other settings tabs are not selected")
         var privacyView = test.findItem(settingsSurface, "privacySettingsView")
         test.check(privacyView && privacyView.visible, "Privacy settings are visible")
-        test.check(!!test.findText(settingsSurface, "Not configured. Chat encryption is separate from voice/video encryption."), "Unconfigured encryption is never described as protected")
+        test.check(!!test.findText(settingsSurface, "Waiting for automatic encryption setup. Chat is blocked until encryption is ready."), "Pending encryption is never described as protected")
+        test.check(!test.findText(settingsSurface, "Set up encryption…"), "Automatic encryption requires no manual setup button")
         test.check(!bridge.sent.some(function(command) { return command.name === "privacy_enable" || command.name === "privacy_export" }), "Opening Privacy never creates or exports keys")
       }
       if (test.mode === "serversettings" || test.mode === "panelserversettings") {

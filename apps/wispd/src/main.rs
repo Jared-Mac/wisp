@@ -634,6 +634,7 @@ impl Daemon {
     }
 
     async fn merge_server_snapshot(&self, mut incoming: Snapshot, event_name: &str) {
+        prepare_private_account(&self.api, &self.privacy, &mut incoming).await;
         if std::env::var("WISP_REQUIRE_CHAT_E2EE").as_deref() == Ok("true") {
             incoming.chat_encryption_required = true;
         }
@@ -746,6 +747,7 @@ impl Daemon {
         event_name: &str,
     ) -> anyhow::Result<()> {
         let mut snapshot = server.api.snapshot().await?;
+        prepare_private_account(&server.api, &server.privacy, &mut snapshot).await;
         if server
             .privacy
             .reconcile_pending_admissions(&server.api, &snapshot)
@@ -1309,14 +1311,18 @@ impl Daemon {
             let encryption = self.privacy.active()?;
             if encryption.is_none() && self.state.read().await.chat_encryption_required {
                 bail!(
-                    "This server requires encrypted chat. Set it up in Settings → Privacy before sending."
+                    "Chat encryption is not ready. Check Settings → Privacy for connection or recovery details."
                 );
             }
         }
         match command.name.as_str() {
             "hello" => Ok(None),
             "status" => Ok(Some(serde_json::to_value(self.state.read().await.clone())?)),
-            "privacy_status" => Ok(Some(self.privacy.status())),
+            "privacy_status" => {
+                let mut snapshot = self.state.read().await.clone();
+                prepare_private_account(&self.api, &self.privacy, &mut snapshot).await;
+                Ok(Some(self.privacy.status()))
+            }
             "privacy_enable" => {
                 let backup = privacy::local_path(&string_arg(&command.args, "backup_file")?)?;
                 let recovery = command
@@ -2290,10 +2296,16 @@ impl Daemon {
             && server.privacy.active()?.is_none()
             && server.state.read().await.chat_encryption_required
         {
-            bail!("This server requires encrypted chat. Configure Privacy for this server first.");
+            bail!(
+                "Chat encryption is not ready. Check Settings → Privacy for connection or recovery details."
+            );
         }
         let value = match command.name.as_str() {
-            "privacy_status" => Some(server.privacy.status()),
+            "privacy_status" => {
+                let mut snapshot = server.state.read().await.clone();
+                prepare_private_account(&server.api, &server.privacy, &mut snapshot).await;
+                Some(server.privacy.status())
+            }
             "privacy_enable" => {
                 let backup = privacy::local_path(&string_arg(&args, "backup_file")?)?;
                 let recovery = args
@@ -4409,6 +4421,26 @@ async fn connect_with_tray(
                     }
                 }
             }
+        }
+    }
+}
+
+/// Real accounts always enroll locally before chat becomes usable. Legacy
+/// development sessions retain their plaintext test workflow unless strict.
+async fn prepare_private_account(
+    api: &ServerApi,
+    privacy: &privacy::Privacy,
+    snapshot: &mut Snapshot,
+) {
+    if matches!(&api.auth, AuthMethod::Device { .. })
+        || snapshot.chat_encryption_required
+        || std::env::var("WISP_REQUIRE_CHAT_E2EE").as_deref() == Ok("true")
+    {
+        snapshot.chat_encryption_required = true;
+        if let Err(error) = privacy.initialize(api).await {
+            // Keep the account usable for presence/recovery, but fail closed
+            // for chat. The Privacy screen exposes the actionable setup error.
+            warn!(%error, "automatic chat encryption setup needs attention");
         }
     }
 }

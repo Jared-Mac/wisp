@@ -26,7 +26,11 @@ Item {
     onSaved: root.settingsSaved()
   }
   property string lastAppliedVolumes: ""
-  onDaemonConnectedChanged: { lastAppliedVolumes = ""; if (daemonConnected) { applyParticipantVolumes(); refreshPrivacy() } }
+  onDaemonConnectedChanged: {
+    lastAppliedVolumes = ""
+    if (daemonConnected) applyParticipantVolumes()
+    else { privacySnapshotReady = false; privacyRequestId = ""; privacyBusy = false }
+  }
   onVoiceFriendsChanged: applyParticipantVolumes()
   onVoiceHangoutsChanged: applyParticipantVolumes()
   function applyParticipantVolumes() {
@@ -113,6 +117,16 @@ Item {
   property var privacyStatus: ({configured:false})
   property bool privacyBusy: false
   property string privacyFeedback: ""
+  property bool privacySnapshotReady: false
+  property string privacyRequestId: ""
+  readonly property string privacyServerId: (snapshot.servers || []).length ? String(activeServer.id || "") : ""
+  onPrivacyServerIdChanged: {
+    privacyStatus = ({configured:false})
+    privacyFeedback = ""
+    privacyRequestId = ""
+    privacyBusy = false
+    Qt.callLater(refreshPrivacy)
+  }
   property var serverSettings: ({name:"",role:"",members:[],categories:[],channels:[],rooms:[]})
   property bool serverSettingsBusy: false
   property string serverSettingsFeedback: ""
@@ -125,16 +139,17 @@ Item {
     }
   }
   function refreshPrivacy() {
-    var id = send("privacy_status", {server_id:String(activeServer.id || "")})
-    if (id) requests[id] = {kind:"privacyStatus"}
+    if (!daemonConnected || !privacySnapshotReady || privacyRequestId || privacyBusy) return
+    var id = send("privacy_status", {server_id:privacyServerId})
+    if (id) { privacyRequestId = id; requests[id] = {kind:"privacyStatus",serverId:privacyServerId} }
   }
   function configurePrivacy(backup, recovery) {
-    var id = send("privacy_enable", {server_id:String(activeServer.id || ""),backup_file:String(backup),recovery_file:String(recovery || "")})
-    if (id) { requests[id] = {kind:"privacySetup"}; privacyBusy = true; privacyFeedback = "" }
+    var id = send("privacy_enable", {server_id:privacyServerId,backup_file:String(backup),recovery_file:String(recovery || "")})
+    if (id) { requests[id] = {kind:"privacySetup",serverId:privacyServerId}; privacyBusy = true; privacyFeedback = "" }
   }
   function exportPrivacy(backup) {
-    var id = send("privacy_export", {server_id:String(activeServer.id || ""),backup_file:String(backup)})
-    if (id) { requests[id] = {kind:"privacyExport"}; privacyBusy = true; privacyFeedback = "" }
+    var id = send("privacy_export", {server_id:privacyServerId,backup_file:String(backup)})
+    if (id) { requests[id] = {kind:"privacyExport",serverId:privacyServerId}; privacyBusy = true; privacyFeedback = "" }
   }
   function refreshServerSettings() {
     if (!daemonConnected || !canManageServer || serverSettingsBusy) return
@@ -774,6 +789,8 @@ Item {
       return Date.parse(i.expires_at) > Date.now() && knownInvites.indexOf(String(i.server_id)+":"+String(i.id)) < 0
     })
     snapshot = next
+    privacySnapshotReady = true
+    Qt.callLater(refreshPrivacy)
     pendingCreatedConversations = pendingCreatedConversations.filter(function(pending) {
       return !nextFlat.conversations.some(function(current) { return String(current.id)===String(pending.id) })
     })
@@ -1020,8 +1037,11 @@ Item {
     var value = message.value || ({})
     var conversationId = action.conversationId
     if (action.kind === "privacyStatus" || action.kind === "privacySetup" || action.kind === "privacyExport") {
+      if (privacyRequestId === message.id) privacyRequestId = ""
+      if (action.serverId !== privacyServerId) return
       if (message.ok) {
         if (action.kind !== "privacyExport") privacyStatus = value
+        privacyFeedback = ""
         if (action.kind === "privacySetup") { privacyFeedback = "Encryption configured; recovery file saved locally."; settingsSaved() }
         if (action.kind === "privacyExport") privacyFeedback = "Recovery file saved locally. Keep it private."
       } else privacyFeedback = message.error ? String(message.error.message) : "Privacy operation failed"

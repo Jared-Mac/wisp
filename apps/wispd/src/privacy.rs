@@ -64,6 +64,8 @@ pub(super) struct Privacy {
     active: RwLock<Result<Option<Arc<Vault>>, String>>,
     decrypted: Mutex<BTreeMap<Uuid, Content>>,
     last_error: Mutex<Option<String>>,
+    setup_error: Mutex<Option<String>>,
+    enrollment: tokio::sync::Mutex<()>,
 }
 
 pub(super) fn local_path(value: &str) -> anyhow::Result<PathBuf> {
@@ -162,6 +164,8 @@ impl Privacy {
             active: RwLock::new(active),
             decrypted: Mutex::new(BTreeMap::new()),
             last_error: Mutex::new(None),
+            setup_error: Mutex::new(None),
+            enrollment: tokio::sync::Mutex::new(()),
         }
     }
 
@@ -195,7 +199,7 @@ impl Privacy {
                 json!({"configured":true,"error":self.last_error.lock().expect("privacy error lock").clone(),"fingerprint":vault.ring.identity().public().fingerprint().ok(),"network":vault.network,"trust":"first_use","warning":"Recovery keys and this device must remain private. Old plaintext history is not encrypted retroactively."})
             }
             Ok(None) => {
-                json!({"configured":false,"warning":"Chat encryption is not configured. Media encryption is separate."})
+                json!({"configured":false,"error":self.setup_error.lock().expect("privacy setup lock").clone(),"warning":"Chat encryption is set up automatically when this account connects. Private keys stay on this device."})
             }
             Err(_) => {
                 json!({"configured":true,"error":"Encryption identity could not be loaded. Restore its recovery key; sending is blocked."})
@@ -203,11 +207,36 @@ impl Privacy {
         }
     }
 
-    #[allow(clippy::too_many_lines)]
+    /// Enroll a new account without a file picker. `Keyring::create` persists the
+    /// private recovery identity before its public identity is registered.
+    /// Retrying interrupted enrollment reuses that same identity.
+    pub async fn initialize(&self, api: &ServerApi) -> anyhow::Result<()> {
+        let _enrollment = self.enrollment.lock().await;
+        let result = match self.active() {
+            Ok(Some(_)) => Ok(()),
+            Ok(None) => self.enable_inner(api, None, None).await.map(|_| ()),
+            Err(error) => Err(error.context("Restore this account's existing recovery file")),
+        };
+        *self.setup_error.lock().expect("privacy setup lock") =
+            result.as_ref().err().map(ToString::to_string);
+        result
+    }
+
     pub async fn enable(
         &self,
         api: &ServerApi,
         backup: &Path,
+        recovery: Option<&Path>,
+    ) -> anyhow::Result<Value> {
+        let _enrollment = self.enrollment.lock().await;
+        self.enable_inner(api, Some(backup), recovery).await
+    }
+
+    #[allow(clippy::too_many_lines)]
+    async fn enable_inner(
+        &self,
+        api: &ServerApi,
+        backup: Option<&Path>,
         recovery: Option<&Path>,
     ) -> anyhow::Result<Value> {
         let url = url::Url::parse(&api.base_url)?;
@@ -222,7 +251,7 @@ impl Privacy {
                 .await?,
         )
         .await?;
-        // Enrollment is explicit. It never changes an already pinned network.
+        // Enrollment never changes an already pinned network.
         if let Ok(Some(existing)) = self.active() {
             ensure!(
                 existing.network == directory.network,
@@ -263,10 +292,22 @@ impl Privacy {
                 !directory.identities.contains_key(&self.account),
                 "This account already has encryption keys. Choose Restore recovery file instead of creating new keys."
             );
+            ensure!(
+                !network.join(self.account.to_string()).try_exists()?,
+                "This device's encryption keys are missing. Restore its existing recovery file."
+            );
             Keyring::create(&network, self.account)?
         };
-        ring.export_recovery(backup)?;
         let identity = ring.identity().public();
+        if let Some(registered) = directory.identities.get(&self.account) {
+            ensure!(
+                registered == &identity,
+                "This account uses different encryption keys. Restore its existing recovery file."
+            );
+        }
+        if let Some(backup) = backup {
+            ring.export_recovery(backup)?;
+        }
         let signature = ring.identity().sign_statement(
             "wisp-account-key-v1",
             &serde_json::to_vec(&(directory.network, self.account, &identity))?,
@@ -303,6 +344,7 @@ impl Privacy {
         }
         *self.active.write().expect("privacy state lock") =
             Ok(Some(Arc::new(Self::load(&self.root, &setup)?)));
+        *self.setup_error.lock().expect("privacy setup lock") = None;
         Ok(self.status())
     }
 

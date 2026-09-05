@@ -87,8 +87,12 @@ messages have no product-level character cap.
   signed membership validation and ciphertext upload storage/expiry.
 - Isolated tests cover two clients, recovery, signed admission with no old-history
   disclosure, tampering, wrong keys, private files, legacy rejection and chunk uploads.
-- Privacy is a separate Settings tab. Tabs have explicit borders and selected
-  markers across presentations. Opening Settings never creates or exports a key.
+- Authenticated accounts initialize chat encryption automatically on connection.
+  Private keys are durably saved locally before publishing the public identity;
+  setup retries reuse the same keys. Missing or different existing identities
+  require recovery, never silent replacement. Chat remains blocked until ready.
+- Privacy is a separate Settings tab with status, optional recovery export, and
+  recovery import. Opening Settings never exports a key or asks for a backup path.
 - The fresh server, owner account, local recovery identity, public TLS endpoint,
   and strict ciphertext-only history are active. Bootstrap enrollment is disabled.
 

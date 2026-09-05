@@ -146,6 +146,14 @@ login, Wisp saves a revocable device credential in
 on future starts. The account password is not saved locally. Chat recovery keys
 and media keys remain client-side and are separate from account authentication.
 
+Chat encryption sets itself up when an authenticated account connects. Wisp
+creates and saves private keys on the device, then registers only the public
+identity with the server; no setup button or backup file picker is required.
+Chat stays blocked if setup fails. **Settings → Privacy → Back up recovery
+file…** lets you save a separate recovery copy. Keep that copy somewhere safe
+away from the server. A second or reinstalled device must restore the account's
+existing recovery file; Wisp never silently replaces an existing identity.
+
 The desktop daemon also maintains a private `~/.config/wisp/accounts.json`
 registry. Each accepted invite or login adds or updates one independently
 hosted server account; credentials are never shared between servers. The
