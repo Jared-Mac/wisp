@@ -15,6 +15,20 @@ Column {
   readonly property bool shortcutSupported: !!bridge.pushToTalkState.shortcut_backend
   readonly property var replacedShortcuts: bridge.pushToTalkState.shortcut_replaced || []
   property bool capturingShortcut: false
+  readonly property var testState: bridge.audioTestState || ({phase:"idle"})
+  readonly property bool inRoom: !!bridge.mediaState.livekit_connected || !!bridge.currentVoiceRoom
+  property bool ownsTest: false
+  function discardTest() {
+    if (ownsTest) { ownsTest = false; bridge.audioTest("clear") }
+  }
+  onVisibleChanged: if (!visible) discardTest()
+  Component.onDestruction: discardTest()
+  Timer {
+    interval: 250
+    running: root.visible && root.ownsTest
+    repeat: true
+    onTriggered: root.bridge.audioTest("status")
+  }
 
   width: parent ? parent.width : 0
   spacing: root.theme.spacing.sm
@@ -360,9 +374,116 @@ Column {
         readonly property bool delayed: processingMs > 10 || queueMs > 20
         text: root.bridge.mediaState.livekit_connected
           ? (delayed ? "Audio is catching up" : "Ready for clear conversation")
-          : "Applies when you join a voice room"
+          : "Applies to calls and microphone tests"
         elide: Text.ElideRight
         color: delayed ? root.theme.warning : root.theme.muted
+        font.family: root.theme.font.family
+        font.pixelSize: root.theme.font.caption
+      }
+    }
+  }
+
+  Rectangle {
+    width: parent.width
+    height: testContent.implicitHeight + root.theme.spacing.lg * 2
+    radius: root.theme.cornerRadius
+    color: root.theme.alpha(root.theme.foreground, 0.045)
+
+    Column {
+      id: testContent
+      x: root.theme.spacing.lg
+      y: root.theme.spacing.lg
+      width: parent.width - root.theme.spacing.lg * 2
+      spacing: root.theme.spacing.sm
+
+      Text {
+        text: "Hear yourself"
+        color: root.theme.foreground
+        font.family: root.theme.font.family
+        font.pixelSize: root.theme.font.caption
+        font.weight: Font.DemiBold
+      }
+      Text {
+        width: parent.width
+        text: root.inRoom ? "Leave your voice room to test privately."
+          : "Record up to 8 seconds, then compare your original and cleaned-up voice. Uses your selected microphone and speaker."
+        wrapMode: Text.WordWrap
+        color: root.theme.muted
+        font.family: root.theme.font.family
+        font.pixelSize: root.theme.font.caption
+      }
+      Text {
+        width: parent.width
+        text: root.testState.phase === "recording"
+          ? "Recording · " + (Number(root.testState.duration_ms || 0) / 1000).toFixed(1) + " / 8 seconds"
+          : root.testState.phase === "playing"
+            ? (root.testState.playback === "original" ? "Playing original microphone" : "Playing processed voice")
+            : Number(root.testState.duration_ms || 0) > 0 ? "Sample ready · " + (Number(root.testState.duration_ms) / 1000).toFixed(1) + " seconds" : "Your sample stays in memory and is discarded when you close Audio settings."
+        wrapMode: Text.WordWrap
+        color: root.testState.phase === "recording" ? root.theme.accent : root.theme.muted
+        font.family: root.theme.font.family
+        font.pixelSize: root.theme.font.caption
+      }
+      Rectangle {
+        visible: root.testState.phase === "recording"
+        width: parent.width
+        height: root.theme.space(6)
+        radius: height / 2
+        color: root.theme.alpha(root.theme.foreground, 0.08)
+        Rectangle {
+          width: parent.width * Math.min(100, Number(root.testState.input_level || 0)) / 100
+          height: parent.height
+          radius: parent.radius
+          color: root.theme.accent
+          Behavior on width { NumberAnimation { duration: 80 } }
+        }
+      }
+      Flow {
+        width: parent.width
+        spacing: root.theme.spacing.sm
+        Repeater {
+          model: [
+            {label: root.testState.phase === "recording" ? "Finish recording" : root.testState.phase === "playing" ? "Stop playback" : "Record sample", action: root.testState.phase === "recording" || root.testState.phase === "playing" ? "stop" : "record"},
+            {label:"Play processed", action:"play_processed"},
+            {label:"Play original", action:"play_original"},
+            {label:"Discard", action:"clear"}
+          ]
+          delegate: Rectangle {
+            required property var modelData
+            readonly property bool usable: !root.inRoom && !root.bridge.audioTestBusy && (modelData.action === "record" || modelData.action === "stop" || (root.testState.phase === "ready" && Number(root.testState.duration_ms || 0) > 0))
+            width: testButtonLabel.implicitWidth + root.theme.spacing.lg * 2
+            height: root.theme.space(29)
+            radius: root.theme.cornerRadius
+            opacity: usable ? 1 : 0.4
+            color: root.theme.alpha(root.theme.accent, testMouse.containsMouse ? 0.4 : 0.22)
+            Text {
+              id: testButtonLabel
+              anchors.centerIn: parent
+              text: modelData.label
+              color: root.theme.foreground
+              font.family: root.theme.font.family
+              font.pixelSize: root.theme.font.caption
+            }
+            MouseArea {
+              id: testMouse
+              anchors.fill: parent
+              enabled: parent.usable
+              hoverEnabled: true
+              cursorShape: Qt.PointingHandCursor
+              onClicked: {
+                root.ownsTest = true
+                root.bridge.audioTest(modelData.action)
+              }
+            }
+          }
+        }
+      }
+      Text {
+        visible: text.length > 0
+        width: parent.width
+        text: String(root.bridge.audioTestError || root.testState.error || "")
+        wrapMode: Text.WordWrap
+        color: root.theme.danger
         font.family: root.theme.font.family
         font.pixelSize: root.theme.font.caption
       }

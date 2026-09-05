@@ -156,7 +156,7 @@ Supported commands are `hello`, `status`, `set_presence`, `join_friend`,
 `join_hangout`, `leave`, `set_muted`, `toggle_muted`, `set_deafened`,
 `toggle_deafened`, `respond_knock`, `share`, `camera`, `watch_video`,
 `refresh_audio_devices`, `set_input_device`, `set_output_device`,
-`set_audio_preset`, `refresh_video_devices`, `set_camera_device`,
+`set_audio_preset`, `audio_test`, `refresh_video_devices`, `set_camera_device`,
 `set_video_quality`, `set_video_codec`, `set_push_to_talk`,
 `set_push_to_talk_shortcut`, `push_to_talk_press`, and
 `push_to_talk_release`. M4 adds `open_direct`, `send_direct`, `send_message`,
@@ -167,6 +167,12 @@ device `id`; audio presets are `natural`, `clear`, or `studio`. Repeating
 `push_to_talk_press` renews the daemon-owned lease without emitting another
 state event. Invalid versions, JSON, or commands return a structured error and
 do not terminate the IPC connection.
+
+`audio_test` is local-only. Its `action` is `status`, `record`, `stop`,
+`play_original`, `play_processed`, or `clear`. Recording and playback require
+being outside a voice room. Results contain `phase` (`idle`, `recording`, `ready`,
+`playing`), `duration_ms`, `input_level`, `preset`, `playback`, and `error`.
+Samples stay in daemon memory; no PCM or recording path is exposed over IPC.
 
 `respond_knock` takes a `knock_id` and a response of `accept` or `later`.
 Pending incoming knocks are included in the snapshot's `knocks` array with the

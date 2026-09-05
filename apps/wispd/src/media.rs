@@ -289,6 +289,7 @@ struct CameraSession {
 pub(crate) struct MediaManager {
     pub(crate) video_bridge: crate::video_bridge::VideoBridge,
     operation: AsyncMutex<()>,
+    audio_test: crate::audio_test::AudioTest,
     session: AsyncMutex<Option<MediaSession>>,
     generation: AtomicU64,
     connected: Arc<AtomicBool>,
@@ -354,6 +355,7 @@ impl MediaManager {
             Self {
                 video_bridge: crate::video_bridge::VideoBridge::default(),
                 operation: AsyncMutex::new(()),
+                audio_test: crate::audio_test::AudioTest::default(),
                 session: AsyncMutex::new(None),
                 generation: AtomicU64::new(0),
                 connected: Arc::new(AtomicBool::new(false)),
@@ -399,6 +401,41 @@ impl MediaManager {
             .as_ref()
             .expect("platform audio was initialized")
             .clone())
+    }
+
+    pub(crate) async fn audio_test_command(
+        &self,
+        action: &str,
+    ) -> anyhow::Result<crate::audio_test::TestStatus> {
+        let _operation = self.operation.lock().await;
+        match action {
+            "status" => {}
+            "stop" => self.audio_test.stop(false).await,
+            "clear" => self.audio_test.stop(true).await,
+            "record" | "play_original" | "play_processed" => {
+                if self.is_active().await {
+                    bail!("Leave the voice room before testing your microphone");
+                }
+                let platform = self.platform_audio()?;
+                let inventory = self.reconcile_audio_devices(&platform, false, false);
+                if let Some(error) = inventory.error {
+                    bail!(error);
+                }
+                if action == "record" {
+                    let microphone = inventory.microphone.context("No microphone is available")?;
+                    self.audio_test
+                        .record(&microphone, inventory.state.preset, self.denoiser.clone())
+                        .await?;
+                } else {
+                    let speaker = inventory.speaker.context("No speaker is available")?;
+                    self.audio_test
+                        .play(&speaker, action == "play_original")
+                        .await?;
+                }
+            }
+            _ => bail!("Unknown microphone test action"),
+        }
+        Ok(self.audio_test.status())
     }
 
     pub(crate) async fn is_active(&self) -> bool {
@@ -459,6 +496,7 @@ impl MediaManager {
 
     pub(crate) async fn select_input_device(&self, id: &str) -> anyhow::Result<AudioInventory> {
         let _operation = self.operation.lock().await;
+        self.audio_test.stop(true).await;
         let audio = self.platform_audio()?;
         let device = audio
             .recording_devices()
@@ -494,6 +532,7 @@ impl MediaManager {
 
     pub(crate) async fn select_output_device(&self, id: &str) -> anyhow::Result<AudioInventory> {
         let _operation = self.operation.lock().await;
+        self.audio_test.stop(true).await;
         let audio = self.platform_audio()?;
         let device = audio
             .playout_devices()
@@ -521,6 +560,7 @@ impl MediaManager {
         preset: AudioPreset,
     ) -> anyhow::Result<AudioInventory> {
         let _operation = self.operation.lock().await;
+        self.audio_test.stop(true).await;
         let audio = self.platform_audio()?;
         audio
             .configure_audio_processing(processing_options(preset))
@@ -796,6 +836,7 @@ impl MediaManager {
         if self.is_connected_to(hangout_id).await {
             bail!("already connected to this room");
         }
+        self.audio_test.stop(true).await;
         self.disconnect_session().await;
 
         let platform_audio = self.platform_audio()?;
@@ -2174,7 +2215,7 @@ fn safe_rtc_failure(error: &livekit::RoomError) -> String {
     }
 }
 
-fn discovered_capture_devices() -> anyhow::Result<Vec<gst::Device>> {
+pub(crate) fn discovered_capture_devices() -> anyhow::Result<Vec<gst::Device>> {
     // PipeWire's provider probes device formats when a monitor starts. Repeating
     // that every three seconds can retain native allocations and stall voice
     // operations on faulty device caps. Keep one hotplug-aware monitor alive.
@@ -2189,6 +2230,9 @@ fn discovered_capture_devices() -> anyhow::Result<Vec<gst::Device>> {
         monitor
             .add_filter(Some("Audio/Source"), None)
             .context("configure microphone discovery")?;
+        monitor
+            .add_filter(Some("Audio/Sink"), None)
+            .context("configure speaker discovery")?;
         monitor.start().context("start capture device discovery")?;
         *shared = Some(monitor);
     }
@@ -2315,7 +2359,7 @@ fn select_playout_device(
     Ok(())
 }
 
-fn create_microphone_capture_pipeline(
+pub(crate) fn create_microphone_capture_pipeline(
     microphone: &str,
     frames: Arc<CaptureQueue>,
 ) -> anyhow::Result<(gst::Pipeline, u64)> {

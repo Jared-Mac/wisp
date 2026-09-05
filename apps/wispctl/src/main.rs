@@ -129,11 +129,22 @@ enum PrivacyCommand {
 
 #[derive(Debug, Subcommand)]
 enum AudioCommand {
+    /// Record or replay a local microphone sample (outside voice rooms).
+    Test {
+        #[arg(value_parser = ["status", "record", "stop", "clear", "play_original", "play_processed"])]
+        action: String,
+    },
     Devices,
     Refresh,
-    Input { id: String },
-    Output { id: String },
-    Preset { preset: AudioPreset },
+    Input {
+        id: String,
+    },
+    Output {
+        id: String,
+    },
+    Preset {
+        preset: AudioPreset,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -230,6 +241,9 @@ impl Command {
             Self::Surface {
                 command: SurfaceCommand::Close,
             } => ("close_surface", json!({})),
+            Self::Audio {
+                command: AudioCommand::Test { action },
+            } => ("audio_test", json!({"action": action})),
             Self::Audio {
                 command: AudioCommand::Devices | AudioCommand::Refresh,
             } => ("refresh_audio_devices", json!({})),

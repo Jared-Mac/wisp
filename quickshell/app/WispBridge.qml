@@ -1144,6 +1144,11 @@ Item {
       chatExtras.reply(message, action)
     } else if (action.kind === "voiceRecovery") {
       voiceRecovery.reply(message)
+    } else if (action.kind === "audioTest") {
+      audioTestBusy = false
+      if (message.ok) audioTestState = value
+      else audioTestError = message.error ? String(message.error.message) : "Microphone test failed"
+      if (audioTestClearPending) { audioTestClearPending = false; audioTest("clear") }
     } else if (action.kind === "joinFriend") {
       if (message.ok && value.status === "knock_sent") {
         knockFeedback = "Knock sent to " + action.name + ". They'll need to accept before you join."
@@ -1380,6 +1385,19 @@ Item {
   }
   function pushToTalkPress() { send("push_to_talk_press", {}) }
   function pushToTalkRelease() { send("push_to_talk_release", {}) }
+  property var audioTestState: ({phase:"idle", duration_ms:0, input_level:0})
+  property bool audioTestBusy: false
+  property string audioTestError: ""
+  property bool audioTestClearPending: false
+  function audioTest(action) {
+    if (audioTestBusy) { if (action === "clear") audioTestClearPending = true; return }
+    var id = send("audio_test", {action:action})
+    if (id) {
+      requests[id] = {kind:"audioTest", action:action}
+      audioTestBusy = true
+      if (action !== "status") audioTestError = ""
+    }
+  }
   function refreshAudioDevices() { send("refresh_audio_devices", {}) }
   function setInputDevice(id) { saveSetting("set_input_device", { "id": id }) }
   function setOutputDevice(id) { saveSetting("set_output_device", { "id": id }) }
@@ -1437,6 +1455,9 @@ Item {
         } else {
           root.receivedSnapshot = false
           root.requests = ({})
+          root.audioTestBusy = false
+          root.audioTestState = {phase:"idle", duration_ms:0}
+          root.audioTestClearPending = false
           root.invitationRequests = ({})
           root.sendingConversations = ({})
           root.importingConversations = ({})

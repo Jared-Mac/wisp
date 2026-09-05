@@ -10,7 +10,8 @@ Playback stays on WebRTC's native mixer, including per-person volume and deafen.
 
 - **Clear voice** (`clear`, default): WebRTC AEC3 with the speaker mix as its
   reference, high-pass rumble removal, embedded DeepFilterNet3, then peak
-  protection. DeepFilterNet adds 30 ms of algorithmic lookahead.
+  protection. Both trained neural stages run on every frame; the runtime SNR
+  shortcuts that skip reconstruction or force silence are disabled. DeepFilterNet adds 30 ms of algorithmic lookahead.
 - **Light cleanup** (`natural`): AEC3, high-pass filtering, WebRTC's moderate noise
   suppression, and peak protection. No neural inference.
 - **Unprocessed** (`studio`): bit-exact PCM bypass after device conversion. No AEC,
@@ -46,6 +47,24 @@ APM's reverse stream before processing microphone input. AEC3 estimates acoustic
 and device delay from that reference. This reference covers Wisp playback;
 unrelated applications' audio is not included.
 
+## Continuous speech correction
+
+DeepFilterNet's Rust runtime defaults are compute-saving heuristics: below
+-10 dB estimated local SNR they force a zero mask; above 20 dB they retain the
+attenuating mask but skip deep-filter reconstruction; above 30 dB they bypass
+both stages. Crossings were causing abrupt cuts during continuous speech.
+Wisp now always runs both trained stages. Neural masks still suppress noise;
+there is no dry-signal mix or automatic gain boost added by this correction.
+
+An offline comparison of the same local speech capture isolated the drops to
+the neural stage. In the affected 1.5-second region, original/APM/old/new levels
+were approximately -13.0/-13.3/-18.2/-13.1 dBFS. These are sample-specific energy
+measurements, not a listening-quality score. The fixed pipeline's deterministic
+stationary-noise test measured 43.3 dB attenuation while retaining its existing
+30 ms lookahead and realtime-overload fallback. Media integration accepts either
+backend with its matching latency; CPU contention during a build can legitimately
+activate the fallback.
+
 ## Bounded lifetime and latency
 
 The capture queue holds at most 60 ms across complete and partial frames.
@@ -62,6 +81,33 @@ boundaries and capture discontinuities. Muted audio is replaced with silence
 without neural processing. Leaving releases the echo reference and DSP history.
 A three-second capture watchdog reports a stopped microphone as a visible media
 failure requiring rejoin. It does not automatically join or reopen a room.
+
+## Hear yourself
+
+Audio settings includes an explicit local microphone test outside voice rooms.
+Record up to eight seconds, finish early if desired, then replay the original
+capture or the selected processing mode through the selected speaker. The test
+uses the same capture conversion and dedicated speech worker as calls. It closes
+capture before playback, avoiding a live monitoring feedback loop. Playback
+queues individually timestamped 10 ms buffers; large recording-sized buffers
+can be silently dropped by PipeWire sinks. This previews
+microphone processing, not Opus/network effects or a room's acoustic echo.
+
+PCM stays in bounded memory; no recording file, upload, room, or publication is
+created. Recording stops automatically at eight seconds, with a three-second
+no-input watchdog and twelve-second overall timeout. Stop cancels playback.
+Closing the settings view, changing device/mode, or joining a room stops the test
+and discards its sample. Call mute/deafen and push-to-talk preferences are not
+changed. Clicking Record explicitly opens the test microphone even if call mute
+is enabled.
+
+The local IPC command `audio_test` accepts `action`: `status`, `record`, `stop`,
+`play_original`, `play_processed`, or `clear`. It returns only phase, duration,
+meter, preset, playback selection, and error metadata. PCM is never returned.
+`wispctl audio test <action>` provides the same interface. Run
+`scripts/test-audio-test.sh` for generated capture and silent virtual-speaker
+playback checks, including measured nonzero PCM at the isolated sink monitor
+for both playback buttons, and `scripts/test-audio-settings.sh` for the UI controls.
 
 ## Verification
 

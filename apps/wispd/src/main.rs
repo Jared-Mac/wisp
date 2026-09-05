@@ -4,6 +4,7 @@ mod audio;
 #[cfg(test)]
 #[path = "../../../third_party/livekit/src/platform_audio/device_count.rs"]
 mod audio_device_count_tests;
+mod audio_test;
 mod chat_extras;
 mod chat_images;
 mod chat_transfers;
@@ -1554,6 +1555,22 @@ impl Daemon {
                     .await,
             )),
             "toggle_deafened" => Ok(Some(self.update_deafened(None).await)),
+            "audio_test" => {
+                ensure!(self.media_enabled, "media is disabled");
+                let action = string_arg(&command.args, "action")?;
+                if matches!(
+                    action.as_str(),
+                    "record" | "play_original" | "play_processed"
+                ) {
+                    ensure!(
+                        self.state.read().await.self_state.hangout_id.is_none(),
+                        "Leave the voice room before testing your microphone"
+                    );
+                }
+                Ok(Some(serde_json::to_value(
+                    self.media.audio_test_command(&action).await?,
+                )?))
+            }
             "refresh_audio_devices"
             | "set_input_device"
             | "set_output_device"

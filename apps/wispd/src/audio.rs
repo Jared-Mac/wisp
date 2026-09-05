@@ -276,10 +276,15 @@ impl NeuralDenoiser {
 }
 
 fn create_deepfilter_model() -> anyhow::Result<DfTract> {
-    // Preserve the trained full-band model and its defaults. Layering a gate or
-    // a second suppressor after it damages consonants and low-volume speech.
-    let model = DfTract::new(DfParams::default(), &RuntimeParams::default())
-        .context("load embedded DeepFilterNet model")?;
+    // Keep both trained enhancement stages running on every frame. The runtime's
+    // default SNR shortcuts hard-zero low-SNR frames and skip deep filtering
+    // above 20 dB, leaving only the attenuating mask. Crossing those thresholds
+    // was cutting continuous speech by 10+ dB. Let the model estimate its masks
+    // and reconstruction coefficients continuously instead of switching stages.
+    let params =
+        RuntimeParams::default().with_thresholds(f32::NEG_INFINITY, f32::INFINITY, f32::INFINITY);
+    let model =
+        DfTract::new(DfParams::default(), &params).context("load embedded DeepFilterNet model")?;
     if model.sr != AUDIO_SAMPLE_RATE as usize || model.hop_size != AUDIO_FRAME_SAMPLES {
         bail!("unsupported DeepFilterNet frame format");
     }

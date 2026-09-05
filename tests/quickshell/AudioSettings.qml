@@ -15,6 +15,18 @@ ShellRoot {
     property var voiceRecovery: ({enabledSetting:true})
     property var mediaState: ({livekit_connected: false})
     property var pushToTalkState: ({enabled: false, shortcut_backend: "test", shortcut: ""})
+    property var audioTestState: ({phase:"idle", duration_ms:0})
+    property bool audioTestBusy: false
+    property string audioTestError: ""
+    property var currentVoiceRoom: null
+    property string testAction: ""
+    function audioTest(action) {
+      testAction = action
+      if (action === "record") audioTestState = {phase:"recording", duration_ms:500, input_level:30}
+      if (action === "stop") audioTestState = {phase:"ready", duration_ms:500}
+      if (action === "play_processed" || action === "play_original") audioTestState = {phase:"playing", duration_ms:500, playback:action === "play_original" ? "original" : "processed"}
+      if (action === "clear") audioTestState = {phase:"idle", duration_ms:0}
+    }
     property var commands: []
     function setAudioPreset(value) {
       commands.push(value)
@@ -32,7 +44,7 @@ ShellRoot {
     id: window
     visible: true
     implicitWidth: 450
-    implicitHeight: 650
+    implicitHeight: 920
     color: theme.background
     Rectangle {
       id: canvas
@@ -59,6 +71,24 @@ ShellRoot {
       mouseClick(item.parent,item.parent.width/2,item.parent.height/2)
       wait(20)
     }
+    function test_microphone_sample() {
+      choose("Record sample")
+      compare(bridge.audioTestState.phase, "recording")
+      choose("Finish recording")
+      choose("Play processed")
+      compare(bridge.audioTestState.playback, "processed")
+      choose("Stop playback")
+      choose("Play original")
+      compare(bridge.audioTestState.playback, "original")
+      choose("Stop playback")
+      settings.visible = false
+      compare(bridge.audioTestState.phase, "idle")
+      settings.visible = true
+      bridge.currentVoiceRoom = {id:"room"}
+      choose("Record sample")
+      compare(bridge.audioTestState.phase, "idle")
+      bridge.currentVoiceRoom = null
+    }
     function test_modes() {
       wait(100)
       verify(!!label(settings,"Voice cleanup · full quality"))
@@ -72,7 +102,7 @@ ShellRoot {
       var state=JSON.parse(JSON.stringify(bridge.audioState)); state.denoiser="webrtc"; bridge.audioState=state
       wait(20)
       verify(!!label(settings,"Voice cleanup · lightweight mode"))
-      verify(!!label(settings,"Applies when you join a voice room"))
+      verify(!!label(settings,"Applies to calls and microphone tests"))
       state.denoiser="deepfilternet"; bridge.audioState=JSON.parse(JSON.stringify(state))
       wait(20)
       canvas.grabToImage(function(result) {

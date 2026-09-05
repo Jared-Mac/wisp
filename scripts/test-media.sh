@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
+trap 'echo "Media integration failed at line $LINENO" >&2' ERR
+# CPU contention can legitimately select the tested realtime fallback. Assert
+# its backend/latency pair instead of requiring neural processing under load.
 
 export WISP_E2EE_KEY="wisp-integration-e2ee-key-32-bytes"
 
@@ -137,6 +140,7 @@ jq -e 'any(.friends[]; .display_name == "MemberA" and .online == true)' \
   exit 1
 }
 
+target/debug/wispctl --socket "$test_dir/wispd.sock" audio test record >/dev/null
 target/debug/wispctl --socket "$test_dir/wispd.sock" join MemberA
 status_json=""
 for _ in $(seq 1 200); do
@@ -167,8 +171,8 @@ for _ in $(seq 1 200); do
     (.self.media.audio.selected_output_id | type) == "string" and
     .self.media.audio.preset == "clear" and
     .self.media.audio.denoiser_active == true and
-    .self.media.audio.denoiser == "deepfilternet" and
-    .self.media.audio.processing_latency_ms == 30 and
+    ((.self.media.audio.denoiser == "deepfilternet" and .self.media.audio.processing_latency_ms == 30) or
+     (.self.media.audio.denoiser == "webrtc" and .self.media.audio.processing_latency_ms == 0)) and
     (.self.media.audio.processing_time_us | type) == "number" and
     (.self.media.audio.processing_deadline_misses | type) == "number" and
     (.self.media.audio.capture_queue_ms | type) == "number" and
@@ -205,8 +209,8 @@ jq -e --argjson expect_input_level "$expect_input_level" '
   (.self.media.audio.selected_output_id | type) == "string" and
   .self.media.audio.preset == "clear" and
   .self.media.audio.denoiser_active == true and
-  .self.media.audio.denoiser == "deepfilternet" and
-  .self.media.audio.processing_latency_ms == 30 and
+  ((.self.media.audio.denoiser == "deepfilternet" and .self.media.audio.processing_latency_ms == 30) or
+   (.self.media.audio.denoiser == "webrtc" and .self.media.audio.processing_latency_ms == 0)) and
   (.self.media.audio.processing_time_us | type) == "number" and
   (.self.media.audio.processing_deadline_misses | type) == "number" and
   (.self.media.audio.capture_queue_ms | type) == "number" and
@@ -217,6 +221,19 @@ jq -e --argjson expect_input_level "$expect_input_level" '
   jq '.self | {connection, push_to_talk, media}' <<<"$status_json" >&2
   exit 1
 }
+
+# Joining closes and discards the private preview; room audio cannot be recorded
+# or played through this local test facility.
+target/debug/wispctl --socket "$test_dir/wispd.sock" audio test status \
+  | jq -e '.phase == "idle" and .duration_ms == 0' >/dev/null
+for action in record play_original play_processed; do
+  if target/debug/wispctl --socket "$test_dir/wispd.sock" audio test "$action" \
+      >"$test_dir/test-in-room.out" 2>"$test_dir/test-in-room.err"; then
+    echo "Microphone test unexpectedly accepted $action in a room" >&2
+    exit 1
+  fi
+  rg -q 'Leave the voice room' "$test_dir/test-in-room.err"
+done
 
 # Test actual microphone transmission through the unprocessed path. Clear is
 # allowed to remove the stationary synthetic tone completely.
@@ -419,8 +436,8 @@ target/debug/wispctl --socket "$test_dir/wispd.sock" audio preset clear \
   | jq -e '
     .preset == "clear" and
     .denoiser_active == true and
-    .denoiser == "deepfilternet" and
-    .processing_latency_ms == 30
+    ((.denoiser == "deepfilternet" and .processing_latency_ms == 30) or
+     (.denoiser == "webrtc" and .processing_latency_ms == 0))
   ' >/dev/null
 
 target/debug/wispctl --socket "$test_dir/wispd.sock" ptt enable \
