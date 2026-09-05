@@ -147,6 +147,20 @@ Choose **[create account]** there to enter an invitation and register, or
 **[new server]** to bootstrap a server you own. Closing the prompt exits Wisp;
 it does not reopen repeatedly. Saved credentials still sign in automatically.
 
+**Invite friend** below the server selector creates a one-use invitation with a
+**Copy invite link** button. With Wisp installed, opening a `wisp-invite:` link
+shows **Accept invitation** with the server filled in. Choose your name, adjust
+the suggested username if needed, and set a password. Existing users can choose
+**already have an account**. Pasting the link into **create account** opens the
+same focused flow. Some messengers do not hyperlink custom schemes; copying
+and pasting remains supported. This desktop flow requires Wisp to be installed;
+it does not yet include a web download/installation handoff.
+
+Accepting an invitation adds the server without joining voice or starting media.
+A running client discovers newly enrolled servers automatically, without
+interrupting a call. The existing sign-in and owner bootstrap flows remain
+available when opening Wisp normally.
+
 Passwords are stored by the server only as Argon2id hashes. After a successful
 login, Wisp saves a revocable device credential in
 `~/.config/wisp/account.env` with user-only permissions and logs in automatically

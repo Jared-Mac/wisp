@@ -626,6 +626,11 @@ impl Daemon {
                 .then_with(|| left.server.id.cmp(&right.server.id))
         });
         let mut servers = self.configured_servers.clone();
+        for server in &linked {
+            if !servers.iter().any(|view| view.id == server.view.id) {
+                servers.push(server.view.clone());
+            }
+        }
         for server in &mut servers {
             server.connected = server.id == self.primary_server.id
                 || linked.iter().any(|linked| {
@@ -4741,6 +4746,34 @@ async fn main() -> anyhow::Result<()> {
                 .into_iter()
                 .filter(|account| account.id != primary_server.id),
         );
+    }
+    // Invitations can enroll another server while this daemon is running.
+    // Add new connections without restarting or changing the active voice room.
+    if let Some(path) = registry_path {
+        let daemon = daemon.clone();
+        tokio::spawn(async move {
+            let mut known: std::collections::HashSet<String> = daemon
+                .configured_servers
+                .iter()
+                .map(|server| server.id.clone())
+                .collect();
+            let mut interval = tokio::time::interval(Duration::from_secs(2));
+            loop {
+                interval.tick().await;
+                let Ok(registry) = accounts::AccountRegistry::load(&path) else {
+                    continue;
+                };
+                let added: Vec<_> = registry
+                    .servers
+                    .into_iter()
+                    .filter(|account| known.insert(account.id.clone()))
+                    .collect();
+                if !added.is_empty() {
+                    *daemon.selected_server_id.write().await = registry.selected_server_id;
+                    start_linked_accounts(&daemon, added);
+                }
+            }
+        });
     }
     let video_listener = bind_socket(&socket_path.with_extension("video")).await?;
     let video_daemon = daemon.clone();
