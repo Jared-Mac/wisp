@@ -43,6 +43,10 @@ pub mod ffi {
 
         fn set_stream_delay_ms(self: Pin<&mut AudioProcessingModule>, delay: i32) -> i32;
 
+        fn use_playout_reference(self: Pin<&mut AudioProcessingModule>, enabled: bool);
+        fn playout_reference_frames(self: &AudioProcessingModule) -> u64;
+        fn enable_high_noise_suppression(self: Pin<&mut AudioProcessingModule>);
+
         fn create_apm(
             echo_canceller_enabled: bool,
             gain_controller_enabled: bool,

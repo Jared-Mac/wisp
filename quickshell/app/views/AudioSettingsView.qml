@@ -11,13 +11,10 @@ Column {
   readonly property var inputDevices: audio.input_devices || []
   readonly property var outputDevices: audio.output_devices || []
   readonly property int inputLevel: Math.max(0, Math.min(100, Number(audio.input_level || 0)))
-  readonly property int deepfilterStrength: Math.max(0, Math.min(100,
-    Number(audio.deepfilter_strength === undefined ? 100 : audio.deepfilter_strength)))
   readonly property string pttShortcut: String(bridge.pushToTalkState.shortcut || "")
   readonly property bool shortcutSupported: !!bridge.pushToTalkState.shortcut_backend
   readonly property var replacedShortcuts: bridge.pushToTalkState.shortcut_replaced || []
   property bool capturingShortcut: false
-  property int pendingDeepfilterStrength: 100
 
   width: parent ? parent.width : 0
   spacing: root.theme.spacing.sm
@@ -39,18 +36,6 @@ Column {
     width: parent.width; wrapMode: Text.Wrap
     text: "Up to 6 attempts within 2 minutes. Disconnecting, joining another room, or exiting Wisp cancels retries. Camera and sharing stay off."
     color: root.theme.muted; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
-  }
-
-  function commitDeepfilterStrength() {
-    strengthUpdate.stop()
-    if (root.pendingDeepfilterStrength !== root.deepfilterStrength)
-      root.bridge.setDeepfilterStrength(root.pendingDeepfilterStrength)
-  }
-
-  Timer {
-    id: strengthUpdate
-    interval: 90
-    onTriggered: root.commitDeepfilterStrength()
   }
 
   function shortcutKeyName(event) {
@@ -286,7 +271,7 @@ Column {
 
   Text {
     topPadding: root.theme.spacing.sm
-    objectName: "settingsProcessing"; text: "Processing"
+    objectName: "settingsProcessing"; text: "Voice cleanup"
     color: root.theme.foreground
     font.family: root.theme.font.family
     font.pixelSize: root.theme.font.caption
@@ -297,7 +282,7 @@ Column {
     spacing: root.theme.spacing.sm
 
     Repeater {
-      model: ["natural", "clear", "studio"]
+      model: ["clear", "natural", "studio"]
       delegate: Rectangle {
         required property string modelData
         readonly property bool selected: String(root.audio.preset || "clear") === modelData
@@ -311,7 +296,7 @@ Column {
         Text {
           id: presetText
           anchors.centerIn: parent
-          text: modelData.charAt(0).toUpperCase() + modelData.slice(1)
+          text: modelData === "clear" ? "Clear voice" : modelData === "natural" ? "Light cleanup" : "Unprocessed"
           color: root.theme.foreground
           font.family: root.theme.font.family
           font.pixelSize: root.theme.font.caption
@@ -330,68 +315,15 @@ Column {
 
   Text {
     width: parent.width
-    text: "Natural uses WebRTC cleanup · Clear uses continuous DeepFilterNet suppression · Studio is unprocessed"
+    text: String(root.audio.preset || "clear") === "studio"
+      ? "Original microphone sound. Best with headphones in a quiet room."
+      : String(root.audio.preset || "clear") === "natural"
+        ? "Light noise reduction and echo cancellation for quiet spaces."
+        : "Recommended for speech. Reduces background noise, room rumble, and speaker echo while keeping quiet words."
     wrapMode: Text.WordWrap
     color: root.theme.muted
     font.family: root.theme.font.family
     font.pixelSize: root.theme.font.caption
-  }
-
-  Rectangle {
-    visible: String(root.audio.preset || "clear") === "clear"
-      && String(root.audio.denoiser || "deepfilternet") === "deepfilternet"
-    width: parent.width
-    height: visible ? root.theme.space(72) : 0
-    radius: root.theme.cornerRadius
-    color: root.theme.alpha(root.theme.foreground, 0.045)
-
-    Column {
-      anchors.fill: parent
-      anchors.leftMargin: root.theme.spacing.lg
-      anchors.rightMargin: root.theme.spacing.lg
-      anchors.topMargin: root.theme.spacing.sm
-      anchors.bottomMargin: root.theme.spacing.sm
-      spacing: root.theme.spacing.xs
-
-      Item {
-        width: parent.width
-        height: strengthLabel.implicitHeight
-
-        Text {
-          id: strengthLabel
-          anchors.left: parent.left
-          text: "DeepFilterNet strength"
-          color: root.theme.foreground
-          font.family: root.theme.font.family
-          font.pixelSize: root.theme.font.caption
-          font.weight: Font.DemiBold
-        }
-
-        Text {
-          anchors.right: parent.right
-          text: Math.round(strengthSlider.value) + "%"
-          color: root.theme.accent
-          font.family: root.theme.font.family
-          font.pixelSize: root.theme.font.caption
-        }
-      }
-
-      Slider {
-        id: strengthSlider
-        width: parent.width
-        height: root.theme.space(28)
-        from: 0
-        to: 100
-        stepSize: 1
-        value: root.deepfilterStrength
-        onMoved: {
-          root.pendingDeepfilterStrength = Math.round(value)
-          strengthUpdate.restart()
-        }
-        onPressedChanged: if (!pressed) root.commitDeepfilterStrength()
-        ThemeControlStyle { theme: root.theme; control: strengthSlider }
-      }
-    }
   }
 
   Rectangle {
@@ -411,8 +343,9 @@ Column {
 
       Text {
         width: parent.width
-        text: "Neural denoiser · " + String(root.audio.denoiser || "deepfilternet")
-          + " · " + String(root.audio.processing_latency_ms || 30) + " ms latency"
+        text: String(root.audio.denoiser || "deepfilternet") === "webrtc"
+          ? "Voice cleanup · lightweight mode"
+          : "Voice cleanup · full quality"
         elide: Text.ElideRight
         color: root.theme.accent
         font.family: root.theme.font.family
@@ -425,11 +358,9 @@ Column {
         readonly property real processingMs: Number(root.audio.processing_time_us || 0) / 1000
         readonly property real queueMs: Number(root.audio.capture_queue_ms || 0)
         readonly property bool delayed: processingMs > 10 || queueMs > 20
-        text: "Compute " + processingMs.toFixed(1) + " ms"
-          + " · queue " + queueMs.toFixed(0) + " ms"
-          + (Number(root.audio.processing_deadline_misses || 0) > 0
-            ? " · " + String(root.audio.processing_deadline_misses) + " late total"
-            : "")
+        text: root.bridge.mediaState.livekit_connected
+          ? (delayed ? "Audio is catching up" : "Ready for clear conversation")
+          : "Applies when you join a voice room"
         elide: Text.ElideRight
         color: delayed ? root.theme.warning : root.theme.muted
         font.family: root.theme.font.family

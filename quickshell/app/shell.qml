@@ -208,6 +208,7 @@ ShellRoot {
     function anchor(position: string): void { app.setAnchor(position) }
     function desktop(): string { return app.appDesktop() }
     function quit(): void { app.quitGracefully() }
+    function quitForSocket(socket: string): void { if (socket === bridge.socketPath) app.quitGracefully() }
   }
 
   IpcHandler {

@@ -25,14 +25,16 @@ and uses LiveKit's live switch operations so a headset unplug does not leave the
 room. Active calls refresh device inventory every two seconds; opening either
 frontend refreshes it immediately. The daemon exposes Natural, Clear, and
 Studio processing presets plus a throttled local input level through the same
-snapshot/event stream. Clear defaults to an embedded DeepFilterNet3 model on a
-dedicated bounded worker and exposes DeepFilterNet's attenuation limit as a
-live 0–100 strength setting. Clear continuously publishes the model output with
-no secondary detector or post-denoise gate, so a classifier cannot clip quiet
-words or consonants. RNNoise remains only as an automatic denoiser fallback.
-Inference state stays off the async networking/UI executor. The daemon also
-reports per-window peak processing time, cumulative 10 ms deadline misses, and
-capture-queue depth.
+snapshot/event stream. `audio.rs` owns fixed 10 ms framing, a 60 ms capture
+queue, and a dedicated speech worker. The native render mix feeds an explicit
+WebRTC AEC3/high-pass stage before DeepFilterNet3 in Clear mode or WebRTC noise
+suppression in Natural mode. Studio is bit-exact bypass. An attenuation-only
+peak limiter protects processed output; there is no speech gate or gain boost.
+NativeAudioSource flags are disabled: external capture bypasses the ADM APM,
+so source flags alone cannot clean microphone samples. A bounded native render
+tap supplies the actual WebRTC speaker mix to the external processor. Processing
+state resets on mute release, device/preset changes, and capture discontinuities.
+See [audio-pipeline.md](audio-pipeline.md) for buffer and fallback behavior.
 
 Push-to-talk is a daemon-owned microphone gate rather than a UI-only button.
 Manual mute always wins. Presses carry a renewable 30-second lease, and the

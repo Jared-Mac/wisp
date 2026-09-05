@@ -15,7 +15,8 @@ daemon_pid=""
 viewer_pid=""
 sim_pid=""
 expect_surface=true
-expect_input_level=true
+# A stationary test tone is noise to a speech model; test its meter in Studio.
+expect_input_level=false
 surface_args=()
 media_attempts=${WISP_MEDIA_ATTEMPTS:-200}
 if [[ -z "${WAYLAND_DISPLAY:-}" || -z "${XDG_RUNTIME_DIR:-}" ]]; then
@@ -64,6 +65,7 @@ cleanup() {
   return "$status"
 }
 trap cleanup EXIT INT TERM
+trap 'printf "Media test failed at line %s: %s\n" "$LINENO" "$BASH_COMMAND" >&2' ERR
 
 livekit_port=$(shuf -i 22000-28000 -n 1)
 livekit_tcp_port=$((livekit_port + 1))
@@ -167,7 +169,6 @@ for _ in $(seq 1 200); do
     .self.media.audio.denoiser_active == true and
     .self.media.audio.denoiser == "deepfilternet" and
     .self.media.audio.processing_latency_ms == 30 and
-    .self.media.audio.deepfilter_strength == 100 and
     (.self.media.audio.processing_time_us | type) == "number" and
     (.self.media.audio.processing_deadline_misses | type) == "number" and
     (.self.media.audio.capture_queue_ms | type) == "number" and
@@ -206,7 +207,6 @@ jq -e --argjson expect_input_level "$expect_input_level" '
   .self.media.audio.denoiser_active == true and
   .self.media.audio.denoiser == "deepfilternet" and
   .self.media.audio.processing_latency_ms == 30 and
-  .self.media.audio.deepfilter_strength == 100 and
   (.self.media.audio.processing_time_us | type) == "number" and
   (.self.media.audio.processing_deadline_misses | type) == "number" and
   (.self.media.audio.capture_queue_ms | type) == "number" and
@@ -217,6 +217,19 @@ jq -e --argjson expect_input_level "$expect_input_level" '
   jq '.self | {connection, push_to_talk, media}' <<<"$status_json" >&2
   exit 1
 }
+
+# Test actual microphone transmission through the unprocessed path. Clear is
+# allowed to remove the stationary synthetic tone completely.
+target/debug/wispctl --socket "$test_dir/wispd.sock" audio preset studio >/dev/null
+for _ in $(seq 1 "$media_attempts"); do
+  meter_json=$(target/debug/wispctl --socket "$test_dir/wispd.sock" status)
+  if jq -e '.self.media.audio.input_level > 0' <<<"$meter_json" >/dev/null \
+    && rg -q 'simulator received nonzero remote audio' "$test_dir/sim.log"; then break; fi
+  sleep 0.05
+done
+jq -e '.self.media.audio.input_level > 0' <<<"$meter_json" >/dev/null
+rg -q 'simulator received nonzero remote audio' "$test_dir/sim.log"
+target/debug/wispctl --socket "$test_dir/wispd.sock" audio preset clear >/dev/null
 
 video_devices_json=$(target/debug/wispctl --socket "$test_dir/wispd.sock" video devices)
 jq -e '(.devices | type) == "array"' <<<"$video_devices_json" >/dev/null
@@ -378,7 +391,9 @@ jq -e '
   ([.input_devices[].id] | all(. != "") and length == (unique | length)) and
   ([.output_devices[].id] | all(. != "") and length == (unique | length)) and
   (.selected_input_id | type) == "string" and
-  (.selected_output_id | type) == "string"
+  (.selected_output_id | type) == "string" and
+  .capture_queue_ms <= 60 and
+  .echo_reference_frames > 0
 ' <<<"$audio_json" >/dev/null
 input_id=$(jq -r '.selected_input_id' <<<"$audio_json")
 output_id=$(jq -r '.selected_output_id' <<<"$audio_json")
@@ -398,21 +413,14 @@ target/debug/wispctl --socket "$test_dir/wispd.sock" audio preset studio \
     .denoiser_active == false and
     .denoiser == null and
     .processing_latency_ms == 0 and
-    .deepfilter_strength == 100
+    (.processing_time_us | type) == "number"
   ' >/dev/null
 target/debug/wispctl --socket "$test_dir/wispd.sock" audio preset clear \
   | jq -e '
     .preset == "clear" and
     .denoiser_active == true and
     .denoiser == "deepfilternet" and
-    .processing_latency_ms == 30 and
-    .deepfilter_strength == 100
-  ' >/dev/null
-target/debug/wispctl --socket "$test_dir/wispd.sock" audio strength 25 \
-  | jq -e '
-    .preset == "clear" and
-    .deepfilter_strength == 25 and
-    .denoiser_active == true
+    .processing_latency_ms == 30
   ' >/dev/null
 
 target/debug/wispctl --socket "$test_dir/wispd.sock" ptt enable \
@@ -652,59 +660,41 @@ target/debug/wispctl --socket "$test_dir/wispd.sock" unmute \
 target/debug/wispctl --socket "$test_dir/wispd.sock" undeafen \
   | jq -e '.deafened == false' >/dev/null
 
-pre_restart_json=$(target/debug/wispctl --socket "$test_dir/wispd.sock" status)
-video_frames_before_restart=$(jq -r '.self.media.received_video_frames' <<<"$pre_restart_json")
-audio_markers_before_restart=$(rg -c 'simulator audio still flowing' "$test_dir/sim.log" || true)
+# The desktop owns the bounded retry policy. Headless daemons must stop media
+# on an outage, then accept an explicit retry without restoring watched streams.
 kill -KILL "$livekit_pid"
 wait "$livekit_pid" 2>/dev/null || true
 livekit_pid=""
-sleep 0.3
+for _ in $(seq 1 200); do
+  outage_json=$(target/debug/wispctl --socket "$test_dir/wispd.sock" status)
+  if jq -e '.self.media.livekit_connected == false' <<<"$outage_json" >/dev/null; then break; fi
+  sleep 0.1
+done
+jq -e '.self.media.livekit_connected == false and .self.media.microphone_published == false' <<<"$outage_json" >/dev/null
 
 "$repo_dir/.tools/livekit/livekit-server" --node-ip 127.0.0.1 \
-  --config "$test_dir/livekit.yaml" \
-  >>"$test_dir/livekit.log" 2>&1 &
+  --config "$test_dir/livekit.yaml" >>"$test_dir/livekit.log" 2>&1 &
 livekit_pid=$!
 for _ in $(seq 1 100); do
   if ss -ltn | rg -q ":$livekit_port\\b"; then break; fi
   sleep 0.05
 done
 ss -ltn | rg -q ":$livekit_port\\b"
-
-reconnected_json=""
+sleep 1
+target/debug/wispctl --socket "$test_dir/wispd.sock" status \
+  | jq -e '.self.media.livekit_connected == false' >/dev/null
+target/debug/wispctl --socket "$test_dir/wispd.sock" join MemberA >/dev/null
 for _ in $(seq 1 200); do
   reconnected_json=$(target/debug/wispctl --socket "$test_dir/wispd.sock" status)
-  if jq -e --argjson video_before "$video_frames_before_restart" '
-    .self.connection == "connected" and
-    .self.media.livekit_connected == true and
-    .self.media.received_video_frames > $video_before and
-    .self.media.remote_video_participants == ["MemberA"] and
-    any(.self.media.remote_videos[];
-      .source == "screen_share" and .subscribed and .received_frames > 0) and
-    any(.self.media.remote_videos[];
-      .source == "camera" and (.subscribed | not))
-  ' <<<"$reconnected_json" >/dev/null; then
-    break
-  fi
+  if jq -e '.self.media.livekit_connected and .self.media.microphone_published and .self.media.received_audio_frames > 0' <<<"$reconnected_json" >/dev/null; then break; fi
   sleep 0.1
 done
-jq -e --argjson video_before "$video_frames_before_restart" '
-  .self.connection == "connected" and
-  .self.media.livekit_connected == true and
-  .self.media.received_video_frames > $video_before and
-  .self.media.remote_video_participants == ["MemberA"] and
-  any(.self.media.remote_videos[];
-    .source == "screen_share" and .subscribed and .received_frames > 0) and
-  any(.self.media.remote_videos[];
-    .source == "camera" and (.subscribed | not))
+jq -e '
+  .self.connection == "connected" and .self.media.livekit_connected and
+  .self.media.microphone_published and .self.media.received_audio_frames > 0 and
+  .self.media.camera.active == false and .self.media.screen_share.active == false and
+  ([.self.media.remote_videos[].subscribed] | all(. == false))
 ' <<<"$reconnected_json" >/dev/null
-for _ in $(seq 1 200); do
-  current_audio_markers=$(rg -c 'simulator audio still flowing' "$test_dir/sim.log" || true)
-  if (( current_audio_markers > audio_markers_before_restart )); then break; fi
-  sleep 0.1
-done
-(( current_audio_markers > audio_markers_before_restart ))
-rg -q 'LiveKit media reconnecting' "$test_dir/daemon.log"
-rg -q 'LiveKit media reconnected' "$test_dir/daemon.log"
 
 target/debug/wispctl --socket "$test_dir/wispd.sock" leave
 final_json=$(target/debug/wispctl --socket "$test_dir/wispd.sock" status)

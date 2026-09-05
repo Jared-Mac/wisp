@@ -81,6 +81,8 @@ echo "end $name" >> "$WISP_EXIT_SOUND_LOG"
                     time.sleep(0.05)
                 else:
                     raise AssertionError("Exit fixture did not become ready: " + log.read_text())
+                subprocess.run(["qs", "--path", str(app), "ipc", "call", "dev.wisp", "quitForSocket", str(root / "another.sock")], env=env, check=True, capture_output=True, timeout=2)
+                assert process.poll() is None, "Another daemon must not close this UI"
                 subprocess.run(["bash", str(REPO / "scripts/wisp-ui.sh"), "quit"], env=env,
                                check=True, capture_output=True, timeout=7)
                 process.wait(timeout=2)

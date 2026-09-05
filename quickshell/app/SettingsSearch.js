@@ -10,7 +10,7 @@ var entries = [
   {section:"media", target:"settingsVideoCodec", label:"Video codec", keywords:"audio stream encoding h264 vp8 av1 hardware"},
   {section:"media", target:"settingsMicrophone", label:"Microphone", keywords:"audio input device volume level mic"},
   {section:"media", target:"settingsSpeaker", label:"Speaker", keywords:"audio output device headphones sound"},
-  {section:"media", target:"settingsProcessing", label:"Audio processing and DeepFilterNet strength", keywords:"microphone noise suppression denoiser filter natural clear studio deepfilter deepnet"},
+  {section:"media", target:"settingsProcessing", label:"Audio processing and echo cancellation", keywords:"microphone noise suppression denoiser filter natural clear studio deepfilter deepnet aec echo cancellation"},
   {section:"media", target:"settingsPushToTalk", label:"Push to talk", keywords:"audio microphone ptt mute"},
   {section:"media", target:"settingsShortcut", label:"Push-to-talk shortcut", keywords:"audio ptt global keyboard hotkey keybind"},
   {section:"appearance", target:"settingsAppearance", label:"Interface style", keywords:"appearance theme clean tui performative herdr terminal"},

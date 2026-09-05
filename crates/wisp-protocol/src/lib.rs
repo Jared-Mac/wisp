@@ -101,13 +101,7 @@ pub struct AudioDevice {
     pub name: String,
 }
 
-pub const DEFAULT_DEEPFILTER_STRENGTH: u8 = 100;
-
-const fn default_deepfilter_strength() -> u8 {
-    DEFAULT_DEEPFILTER_STRENGTH
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AudioState {
     #[serde(default)]
     pub input_devices: Vec<AudioDevice>,
@@ -121,8 +115,8 @@ pub struct AudioState {
     pub preset: AudioPreset,
     #[serde(default)]
     pub input_level: u8,
-    /// Whether microphone frames are currently routed through the neural
-    /// denoiser before publication.
+    /// Whether Clear mode's automatic cleanup is selected. The backend may
+    /// switch from neural suppression to lightweight WebRTC processing.
     #[serde(default)]
     pub denoiser_active: bool,
     /// Stable implementation name for diagnostics and UI copy.
@@ -131,10 +125,6 @@ pub struct AudioState {
     /// Algorithmic frame latency introduced by the selected processor.
     #[serde(default)]
     pub processing_latency_ms: u16,
-    /// `DeepFilterNet`'s maximum attenuation in dB on Wisp's 0–100 strength
-    /// scale. Zero bypasses noise reduction and 100 allows full attenuation.
-    #[serde(default = "default_deepfilter_strength")]
-    pub deepfilter_strength: u8,
     /// Slowest microphone processing frame observed in the latest meter window.
     #[serde(default)]
     pub processing_time_us: u32,
@@ -144,26 +134,9 @@ pub struct AudioState {
     /// Approximate amount of microphone audio waiting to be processed.
     #[serde(default)]
     pub capture_queue_ms: u16,
-}
-
-impl Default for AudioState {
-    fn default() -> Self {
-        Self {
-            input_devices: Vec::new(),
-            output_devices: Vec::new(),
-            selected_input_id: None,
-            selected_output_id: None,
-            preset: AudioPreset::default(),
-            input_level: 0,
-            denoiser_active: false,
-            denoiser: None,
-            processing_latency_ms: 0,
-            deepfilter_strength: DEFAULT_DEEPFILTER_STRENGTH,
-            processing_time_us: 0,
-            processing_deadline_misses: 0,
-            capture_queue_ms: 0,
-        }
-    }
+    /// Speaker-mix frames consumed by the explicit echo canceller since reset.
+    #[serde(default)]
+    pub echo_reference_frames: u64,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -1302,7 +1275,6 @@ mod tests {
         assert_eq!(state.rendered_video_frames, 0);
         assert!(!state.surface_open);
         assert_eq!(state.audio, AudioState::default());
-        assert_eq!(state.audio.deepfilter_strength, DEFAULT_DEEPFILTER_STRENGTH);
         assert_eq!(state.audio.processing_time_us, 0);
         assert_eq!(state.audio.processing_deadline_misses, 0);
         assert_eq!(state.audio.capture_queue_ms, 0);

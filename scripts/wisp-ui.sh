@@ -174,7 +174,13 @@ case "$surface" in
     call_ui dev.wisp.bridge status
     ;;
   quit)
-    if call_ui dev.wisp quit >/dev/null 2>&1; then
+    quit_action=quit
+    quit_args=()
+    if [[ -n "${2:-}" ]]; then
+      quit_action=quitForSocket
+      quit_args=("$2")
+    fi
+    if call_ui dev.wisp "$quit_action" "${quit_args[@]}" >/dev/null 2>&1; then
       # The UI leaves voice and drains its disconnect cue before exiting.
       # Wait here so a supervisor/update cannot kill its sound player early.
       for _ in {1..70}; do

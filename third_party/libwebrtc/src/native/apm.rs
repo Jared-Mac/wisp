@@ -22,6 +22,22 @@ pub struct AudioProcessingModule {
 }
 
 impl AudioProcessingModule {
+    /// Feed this external-capture processor the runtime's native speaker mix.
+    /// Call only for the microphone associated with the singleton RTC runtime.
+    /// References are bounded and expire; disabling releases all queued audio.
+    pub fn use_playout_reference(&mut self, enabled: bool) {
+        self.sys_handle.pin_mut().use_playout_reference(enabled);
+    }
+
+    pub fn playout_reference_frames(&self) -> u64 {
+        self.sys_handle.playout_reference_frames()
+    }
+
+    /// Enable the high suppression setting while retaining the echo history.
+    pub fn enable_high_noise_suppression(&mut self) {
+        self.sys_handle.pin_mut().enable_high_noise_suppression();
+    }
+
     pub fn new(
         echo_canceller_enabled: bool,
         gain_controller_enabled: bool,

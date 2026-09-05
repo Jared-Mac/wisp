@@ -1,5 +1,6 @@
 mod account_profile;
 mod accounts;
+mod audio;
 #[cfg(test)]
 #[path = "../../../third_party/livekit/src/platform_audio/device_count.rs"]
 mod audio_device_count_tests;
@@ -1154,6 +1155,8 @@ impl Daemon {
             inventory.state.processing_deadline_misses =
                 state.self_state.media.audio.processing_deadline_misses;
             inventory.state.capture_queue_ms = state.self_state.media.audio.capture_queue_ms;
+            inventory.state.echo_reference_frames =
+                state.self_state.media.audio.echo_reference_frames;
             let next_error = inventory
                 .error
                 .as_ref()
@@ -1528,8 +1531,7 @@ impl Daemon {
             "refresh_audio_devices"
             | "set_input_device"
             | "set_output_device"
-            | "set_audio_preset"
-            | "set_deepfilter_strength" => self.audio_command(command).await,
+            | "set_audio_preset" => self.audio_command(command).await,
             "refresh_video_devices"
             | "set_camera_device"
             | "set_video_quality"
@@ -2900,13 +2902,6 @@ impl Daemon {
                     "audio_preset_changed",
                 )
             }
-            "set_deepfilter_strength" => {
-                let strength = u8_arg(&command.args, "strength")?;
-                (
-                    self.media.set_deepfilter_strength(strength).await?,
-                    "deepfilter_strength_changed",
-                )
-            }
             _ => unreachable!("only audio commands are dispatched here"),
         };
         let audio = self.apply_audio_inventory(inventory, event_name).await;
@@ -3244,13 +3239,6 @@ fn boolean_arg(args: &Value, name: &str) -> anyhow::Result<bool> {
         .with_context(|| format!("{name} must be a boolean"))
 }
 
-fn u8_arg(args: &Value, name: &str) -> anyhow::Result<u8> {
-    args.get(name)
-        .and_then(Value::as_u64)
-        .and_then(|value| u8::try_from(value).ok())
-        .with_context(|| format!("{name} must be an integer between 0 and 255"))
-}
-
 fn string_arg(args: &Value, name: &str) -> anyhow::Result<String> {
     args.get(name)
         .and_then(Value::as_str)
@@ -3297,6 +3285,7 @@ fn clear_audio_telemetry(audio: &mut wisp_protocol::AudioState) {
     audio.processing_time_us = 0;
     audio.processing_deadline_misses = 0;
     audio.capture_queue_ms = 0;
+    audio.echo_reference_frames = 0;
 }
 
 fn update_remote_mute_state(media: &mut MediaState, participant: &str, muted: bool) {
@@ -3576,6 +3565,7 @@ async fn synchronize_media_events(
             | MediaEvent::Reconnecting { generation }
             | MediaEvent::Reconnected { generation }
             | MediaEvent::Disconnected { generation, .. }
+            | MediaEvent::AudioFailed { generation, .. }
             | MediaEvent::AudioSubscribed { generation, .. }
             | MediaEvent::AudioUnsubscribed { generation, .. }
             | MediaEvent::RemoteMuteChanged { generation, .. }
@@ -3719,6 +3709,50 @@ async fn synchronize_media_events(
             | MediaEvent::SurfaceError { .. }) => {
                 synchronize_surface_event(&daemon, surface_event).await;
             }
+            MediaEvent::AudioFailed { generation, reason } => {
+                // Serialize with room changes, then recheck generation: a failure
+                // from an old device/session must never stop a newly joined room.
+                let _reconcile = daemon.media_reconcile.lock().await;
+                if generation != daemon.media.generation() {
+                    continue;
+                }
+                let (room, mut audio, camera, video) = {
+                    let state = daemon.state.read().await;
+                    (
+                        state.self_state.hangout_id,
+                        state.self_state.media.audio.clone(),
+                        CameraState {
+                            devices: state.self_state.media.camera.devices.clone(),
+                            selected_device_id: state
+                                .self_state
+                                .media
+                                .camera
+                                .selected_device_id
+                                .clone(),
+                            ..CameraState::default()
+                        },
+                        state.self_state.media.video.clone(),
+                    )
+                };
+                *daemon.failed_media_room.lock().await = room;
+                daemon.release_push_to_talk("push_to_talk_released").await;
+                daemon.media.disconnect().await;
+                clear_audio_telemetry(&mut audio);
+                daemon
+                    .set_media_state(
+                        MediaState {
+                            audio,
+                            camera,
+                            video,
+                            error_code: Some("audio_failed".into()),
+                            error: Some(reason.clone()),
+                            ..MediaState::default()
+                        },
+                        ConnectionState::Failed,
+                        Some(&reason),
+                    )
+                    .await;
+            }
             MediaEvent::Disconnected { reason, .. } => {
                 warn!(%reason, "LiveKit media disconnected");
                 let server_id = daemon.voice_server_id.read().await.clone();
@@ -3794,6 +3828,7 @@ async fn synchronize_track_event(daemon: &Daemon, event: MediaEvent) {
             processing_time_us,
             processing_deadline_misses,
             capture_queue_ms,
+            echo_reference_frames,
             ..
         } => {
             daemon
@@ -3802,6 +3837,7 @@ async fn synchronize_track_event(daemon: &Daemon, event: MediaEvent) {
                     media.audio.processing_time_us = processing_time_us;
                     media.audio.processing_deadline_misses = processing_deadline_misses;
                     media.audio.capture_queue_ms = capture_queue_ms;
+                    media.audio.echo_reference_frames = echo_reference_frames;
                 })
                 .await;
         }
@@ -4270,9 +4306,9 @@ async fn control_ui(arguments: Vec<String>) {
     }
 }
 
-async fn quit_all_ui_instances() {
+async fn quit_all_ui_instances(socket_path: &Path) {
     let root = repository_root();
-    let arguments = vec!["quit".into()];
+    let arguments = vec!["quit".into(), socket_path.to_string_lossy().into_owned()];
     let repository_script = root.join("scripts/wisp-ui.sh");
     let repository_ui = root.join("quickshell/app");
     if let Some(selector) = std::env::var_os("WISP_QUICKSHELL_PATH").map(PathBuf::from)
@@ -4351,7 +4387,7 @@ async fn synchronize_tray_state(daemon: Arc<Daemon>, handle: ksni::Handle<tray::
     }
 }
 
-async fn handle_tray_action(action: TrayAction, daemon: &Arc<Daemon>) -> bool {
+async fn handle_tray_action(action: TrayAction, daemon: &Arc<Daemon>, socket_path: &Path) -> bool {
     match action {
         TrayAction::Activate { x, y } => {
             tokio::spawn(control_ui(vec![
@@ -4407,7 +4443,7 @@ async fn handle_tray_action(action: TrayAction, daemon: &Arc<Daemon>) -> bool {
         }
         TrayAction::Exit => {
             info!("exit requested from system tray");
-            quit_all_ui_instances().await;
+            quit_all_ui_instances(socket_path).await;
             return false;
         }
     }
@@ -4458,7 +4494,6 @@ async fn handle_connecting_tray_action(
         }
         TrayAction::Exit => {
             info!("exit requested from system tray while connecting");
-            quit_all_ui_instances().await;
             return false;
         }
     }
@@ -4808,6 +4843,7 @@ async fn main() -> anyhow::Result<()> {
     .await
     .with_context(|| format!("connect profile {} to wisp-server", args.profile))?
     else {
+        quit_all_ui_instances(&socket_path).await;
         drop(listener);
         if let Err(error) = tokio::fs::remove_file(&socket_path).await {
             warn!(%error, "could not remove IPC socket");
@@ -4929,14 +4965,14 @@ async fn main() -> anyhow::Result<()> {
                     tray_actions = None;
                     continue;
                 };
-                if !handle_tray_action(action, &daemon).await {
+                if !handle_tray_action(action, &daemon, &socket_path).await {
                     break;
                 }
             }
         }
     }
     daemon.leave_voice_locally().await;
-    quit_all_ui_instances().await;
+    quit_all_ui_instances(&socket_path).await;
     daemon.media.disconnect().await;
     daemon.media.shutdown_surface();
     drop(listener);

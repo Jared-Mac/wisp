@@ -134,7 +134,6 @@ enum AudioCommand {
     Input { id: String },
     Output { id: String },
     Preset { preset: AudioPreset },
-    Strength { strength: u8 },
 }
 
 #[derive(Debug, Subcommand)]
@@ -243,9 +242,6 @@ impl Command {
             Self::Audio {
                 command: AudioCommand::Preset { preset },
             } => ("set_audio_preset", json!({"preset": preset})),
-            Self::Audio {
-                command: AudioCommand::Strength { strength },
-            } => ("set_deepfilter_strength", json!({"strength": strength})),
             Self::Video {
                 command: VideoCommand::Devices | VideoCommand::Refresh,
             } => ("refresh_video_devices", json!({})),

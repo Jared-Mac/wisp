@@ -1,0 +1,3 @@
+# Terminal artwork intentionally preserves its fixed-width canvas padding.
+wisp.txt whitespace=-blank-at-eol
+wisp.ansi -diff whitespace=-blank-at-eol
