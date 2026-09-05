@@ -1,4 +1,7 @@
 mod accounts;
+#[cfg(test)]
+#[path = "../../../third_party/livekit/src/platform_audio/device_count.rs"]
+mod audio_device_count_tests;
 mod chat_images;
 mod chat_transfers;
 mod media;

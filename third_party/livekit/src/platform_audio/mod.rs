@@ -109,6 +109,7 @@
 //!
 //! [`NativeAudioSource`]: crate::webrtc::audio_source::native::NativeAudioSource
 
+mod device_count;
 mod error;
 mod processing;
 
@@ -598,11 +599,11 @@ impl PlatformAudio {
     }
 
     fn recording_device_count(&self) -> usize {
-        self.handle.runtime.recording_devices() as usize
+        device_count::checked_device_count(self.handle.runtime.recording_devices())
     }
 
     fn playout_device_count(&self) -> usize {
-        self.handle.runtime.playout_devices() as usize
+        device_count::checked_device_count(self.handle.runtime.playout_devices())
     }
 
     fn recording_device_info(&self, index: usize) -> Option<RecordingDeviceInfo> {
