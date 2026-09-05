@@ -60,7 +60,7 @@ Rectangle {
       Repeater {
         model: root.hangout.members || []
 
-        delegate: Row {
+        delegate: Flow {
           id: memberRow
           objectName: "roomMember-" + index
           required property var modelData
@@ -79,32 +79,42 @@ Rectangle {
             acceptedButtons: Qt.LeftButton | Qt.RightButton
             onClicked: participantMenu.showPerson(memberRow.person,memberRow)
           }
-          readonly property real iconSpace: voiceStatus.visible ? voiceStatus.width + spacing : 0
-          width: Math.min(hangoutInfo.width, memberName.implicitWidth + iconSpace)
+          width: Math.min(hangoutInfo.width, memberIdentity.width + (streams.visible ? streams.width + spacing : 0))
 
-          Text {
-            id: memberName
-            objectName: "roomMemberName-" + index
-            width: Math.max(1, memberRow.width - memberRow.iconSpace)
-            wrapMode: Text.WrapAnywhere
-            anchors.verticalCenter: parent.verticalCenter
-            text: (index > 0 ? " + " : "")
-              + (root.memberSpeaking(modelData.display_name) ? "● " : "")
-              + String(modelData.display_name || "")
-            color: root.memberSpeaking(modelData.display_name)
-              ? root.theme.accent : root.theme.foreground
-            font.family: root.theme.font.family
-            font.pixelSize: root.theme.font.body
-            font.weight: Font.DemiBold
+          Row {
+            id: memberIdentity; spacing: root.theme.spacing.xs
+            readonly property real iconSpace: voiceStatus.visible ? voiceStatus.width + spacing : 0
+            width: Math.min(hangoutInfo.width, memberName.implicitWidth + iconSpace)
+            height: Math.max(implicitHeight, streams.visible ? root.theme.space(22) : 0)
+            Text {
+              id: memberName
+              objectName: "roomMemberName-" + index
+              width: Math.max(1, memberIdentity.width - memberIdentity.iconSpace)
+              anchors.verticalCenter: parent.verticalCenter
+              wrapMode: Text.WrapAnywhere
+              text: (index > 0 ? " + " : "")
+                + (root.memberSpeaking(modelData.display_name) ? "● " : "")
+                + String(modelData.display_name || "")
+              color: root.memberSpeaking(modelData.display_name)
+                ? root.theme.accent : root.theme.foreground
+              font.family: root.theme.font.family
+              font.pixelSize: root.theme.font.body
+              font.weight: Font.DemiBold
+            }
+
+            ParticipantVoiceStatus {
+              id: voiceStatus; theme: root.theme
+              anchors.verticalCenter: parent.verticalCenter
+              moderation: root.bridge.participantModeration(memberRow.person)
+              muted: root.current && (memberRow.self ? root.bridge.effectiveMuted : (root.bridge.remoteMutedParticipants || []).indexOf(modelData.display_name) >= 0)
+              deafened: root.current && memberRow.self && root.bridge.selfState.deafened
+              localMuted: !memberRow.self && root.bridge.participantVolumes.isMuted(memberRow.person)
+            }
           }
-
-          ParticipantVoiceStatus {
-            id: voiceStatus; theme: root.theme
-            anchors.verticalCenter: parent.verticalCenter
-            moderation: root.bridge.participantModeration(memberRow.person)
-            muted: root.current && (memberRow.self ? root.bridge.effectiveMuted : (root.bridge.remoteMutedParticipants || []).indexOf(modelData.display_name) >= 0)
-            deafened: root.current && memberRow.self && root.bridge.selfState.deafened
-            localMuted: !memberRow.self && root.bridge.participantVolumes.isMuted(memberRow.person)
+          ParticipantStreams {
+            id: streams; bridge: root.bridge; theme: root.theme
+            person: memberRow.person; current: root.current && !memberRow.self
+            width: Math.min(hangoutInfo.width, implicitWidth)
           }
         }
       }

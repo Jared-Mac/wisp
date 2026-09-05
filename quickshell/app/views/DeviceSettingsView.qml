@@ -15,7 +15,7 @@ Column {
       width: parent.width - refreshButton.width
 
       Text {
-        text: "Devices"
+        objectName: "settingsDevices"; text: "Devices"
         color: root.theme.foreground
         font.family: root.theme.font.family
         font.pixelSize: root.theme.font.body
@@ -113,7 +113,7 @@ Column {
     spacing: root.theme.spacing.sm
 
     Text {
-      text: "Invite a friend"
+      objectName: "settingsAccountInvite"; text: "Invite a friend"
       color: root.theme.foreground
       font.family: root.theme.font.family
       font.pixelSize: root.theme.font.caption

@@ -292,14 +292,14 @@ Item {
           objectName: "chatPopout-" + tileHost.nodeKey
           visible: tileHost.detached
           title: (tileHost.video ? tileHost.video.participant + " · " + tileHost.video.source : workspace.current ? workspace.label(workspace.current) : "Chat") + " — Wisp"
-          implicitWidth: root.theme.space(640); implicitHeight: root.theme.space(720)
+          implicitWidth: root.theme.space(tileHost.video ? 800 : 640); implicitHeight: root.theme.space(tileHost.video ? 500 : 720)
           minimumSize: Qt.size(root.minWidth,root.minHeight)
           color: root.theme.background
           function reveal() {
             minimized=false
             Qt.callLater(function() { if (popout.contentItem.Window.window) popout.contentItem.Window.window.requestActivate() })
           }
-          onClosed: root.attach(tileHost.nodeKey)
+          onClosed: if (tileHost.video) root.closePane(tileHost.nodeKey); else root.attach(tileHost.nodeKey)
           onVisibleChanged: if (visible) reveal()
         }
         ConversationWorkspace {

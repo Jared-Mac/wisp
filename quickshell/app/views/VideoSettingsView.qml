@@ -14,8 +14,9 @@ Column {
   readonly property bool publishing: root.bridge.sharing || root.bridge.cameraActive
   CheckBox {
     id: tilePreference
+    objectName: "streamsAsTilesSetting"
     width: parent.width
-    text: "Open watched streams as tiles when the main window is open"
+    text: "Open streams as tiles when the main window is open"
     checked: root.bridge.workspaceLayout.streamsAsTiles
     onToggled: root.bridge.workspaceLayout.setStreamsAsTiles(checked)
     ThemeControlStyle { theme: root.theme; control: tilePreference }
@@ -24,6 +25,12 @@ Column {
       leftPadding: tilePreference.indicator.width + tilePreference.spacing
       color: root.theme.foreground; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
     }
+  }
+
+  Text {
+    width: parent.width; wrapMode: Text.Wrap
+    text: "Otherwise, streams open in a separate window. Use [tile] or [window] to move a stream."
+    color: root.theme.muted; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
   }
 
   Item {
@@ -70,7 +77,7 @@ Column {
   }
 
   Text {
-    text: "Camera"
+    objectName: "settingsCamera"; text: "Camera"
     color: root.theme.foreground
     font.family: root.theme.font.family
     font.pixelSize: root.theme.font.caption
@@ -125,7 +132,7 @@ Column {
 
   Text {
     topPadding: root.theme.spacing.sm
-    text: "Publishing quality"
+    objectName: "settingsVideoQuality"; text: "Publishing quality"
     color: root.theme.foreground
     font.family: root.theme.font.family
     font.pixelSize: root.theme.font.caption
@@ -176,7 +183,7 @@ Column {
 
   Text {
     topPadding: root.theme.spacing.sm
-    text: "Codec"
+    objectName: "settingsVideoCodec"; text: "Codec"
     color: root.theme.foreground
     font.family: root.theme.font.family
     font.pixelSize: root.theme.font.caption

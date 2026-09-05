@@ -39,14 +39,14 @@ Rectangle {
       color: root.theme.accent; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
     }
     ChatButton {
-      id: dock; theme: root.theme; width: root.theme.space(32)
-      text: root.detached ? "⚓" : "↗"
-      Accessible.name: root.detached ? "Return to main window" : "Pop out stream"
+      id: dock; objectName: "streamPlacementButton"; theme: root.theme
+      text: root.detached ? "tile" : "window"
+      Accessible.name: root.detached ? "Move stream into a tile" : "Pop out stream"
       ToolTip.visible: hovered; ToolTip.text: Accessible.name
       onClicked: root.detached ? root.dockRequested() : root.popOutRequested()
     }
     ChatButton {
-      id: close; theme: root.theme; text: "×"; width: root.theme.space(28)
+      id: close; objectName: "leaveStreamButton"; theme: root.theme; text: "leave"
       Accessible.name: "Stop watching"
       onClicked: root.closeRequested()
     }

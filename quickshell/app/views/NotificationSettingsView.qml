@@ -43,7 +43,7 @@ Column {
   Text {
     Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
     Binding on font.pixelSize { when: root.theme.terminal; value: root.theme.font.body; restoreMode: Binding.RestoreBindingOrValue }
-     text: "Notifications · this device"; color: root.theme.foreground; font.bold: true }
+     objectName: "settingsNotifications"; text: "Notifications · this device"; color: root.theme.foreground; font.bold: true }
   Text {
     Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
     width: parent.width
@@ -81,7 +81,7 @@ Column {
     Text {
       Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
       Binding on font.pixelSize { when: root.theme.terminal; value: root.theme.font.body; restoreMode: Binding.RestoreBindingOrValue }
-       text: "Volume"; color: root.theme.foreground; anchors.verticalCenter: parent.verticalCenter }
+       objectName: "settingsNotificationVolume"; text: "Volume"; color: root.theme.foreground; anchors.verticalCenter: parent.verticalCenter }
     Slider {
       id: trialControl0
       ThemeControlStyle { theme: root.theme; control: trialControl0 }
@@ -134,7 +134,7 @@ Column {
     }
     onRejected: root.selectedSoundEvent = ""
   }
-  Text { text: "Room sounds"; color: root.theme.foreground; font.family: root.theme.font.family; font.pixelSize: root.theme.font.body; font.bold: true }
+  Text { objectName: "settingsRoomSounds"; text: "Room sounds"; color: root.theme.foreground; font.family: root.theme.font.family; font.pixelSize: root.theme.font.body; font.bold: true }
   Text {
     width: parent.width; wrapMode: Text.Wrap
     text: "Distinct sounds for your own joins/leaves and other people entering/leaving your room. Room sounds also play while Wisp is focused. Custom files and preferences stay on this device."
@@ -175,7 +175,7 @@ Column {
       }
     }
   }
-  Text { text: "Chat notifications"; color: root.theme.foreground; font.family: root.theme.font.family; font.pixelSize: root.theme.font.body; font.bold: true }
+  Text { objectName: "settingsChatNotifications"; text: "Chat notifications"; color: root.theme.foreground; font.family: root.theme.font.family; font.pixelSize: root.theme.font.body; font.bold: true }
   Repeater {
     model: root.bridge.conversations
     ChatButton {

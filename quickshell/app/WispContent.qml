@@ -356,6 +356,21 @@ FocusScope {
         }
       }
 
+      Row {
+        width: parent.width; spacing: root.theme.spacing.sm
+        visible: root.bridge.voiceRecovery.statusText !== ""
+        Text {
+          width: parent.width - (cancelRecovery.visible ? cancelRecovery.width + parent.spacing : 0)
+          text: root.bridge.voiceRecovery.statusText; wrapMode: Text.Wrap
+          color: root.theme.muted; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
+        }
+        ChatButton {
+          id: cancelRecovery; objectName: "cancelVoiceReconnect"
+          visible: root.bridge.voiceRecovery.pending; theme: root.theme; text: "cancel"
+          onClicked: root.bridge.voiceRecovery.cancel("", true)
+        }
+      }
+
       SettingsMenu {
         id: settingsMenu
         // Incoming invites remain reachable even when Activity is collapsed.
@@ -364,6 +379,11 @@ FocusScope {
         bridge: root.bridge
         theme: root.theme
         anchorController: root.anchorController
+        onRevealSetting: function(item) {
+          var position = item.mapToItem(scrollView.contentItem, 0, 0)
+          scrollView.contentY = Math.max(0, Math.min(position.y - root.theme.spacing.lg,
+            scrollView.contentHeight - scrollView.height))
+        }
       }
 
       Flow {

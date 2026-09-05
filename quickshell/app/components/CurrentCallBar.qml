@@ -6,6 +6,10 @@ Rectangle {
   required property var bridge
   required property var theme
   property real maximumHeight: theme.space(210)
+  property bool roomInvitesInHeader: false
+  readonly property bool inviteInRoomHeader: roomInvitesInHeader
+    && bridge.voiceServerId === String(bridge.activeServer.id)
+    && (bridge.spots || []).some(function(room) { return !!room.active_hangout_id && room.active_hangout_id === root.bridge.selfState.hangout_id })
   signal cameraRequested()
   readonly property bool inCall: !!bridge.currentVoiceRoom
   visible: inCall
@@ -57,6 +61,7 @@ Rectangle {
     ScrollBar.vertical: ScrollBar {}
     MediaControls {
       id: controls; width: parent.width; bridge: root.bridge; theme: root.theme; showLeave: false
+      showInvite: !root.inviteInRoomHeader
       onCameraRequested: root.cameraRequested()
     }
   }

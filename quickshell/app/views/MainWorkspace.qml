@@ -69,10 +69,11 @@ Item {
           width: parent.width; bridge: root.bridge; theme: root.theme
           onCreateRequested: root.createRoomRequested()
         }
-        SpotsView { width: parent.width; bridge: root.bridge; theme: root.theme }
+        SpotsView { width: parent.width; bridge: root.bridge; theme: root.theme; mainApp: true }
         CurrentCallBar {
           width: parent.width; height: visible ? implicitHeight : 0
           bridge: root.bridge; theme: root.theme
+          roomInvitesInHeader: true
           onCameraRequested: root.cameraRequested()
         }
         ServerChannelsView { width: parent.width; bridge: root.bridge; theme: root.theme; showHeader: true }

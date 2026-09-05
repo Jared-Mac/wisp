@@ -23,6 +23,24 @@ Column {
   spacing: root.theme.spacing.sm
   focus: root.capturingShortcut
 
+  CheckBox {
+    id: voiceReconnect; objectName: "voiceReconnectSetting"
+    width: parent.width; text: "Automatically reconnect voice"
+    checked: root.bridge.voiceRecovery.enabledSetting
+    onToggled: root.bridge.voiceRecovery.enabledSetting = checked
+    ThemeControlStyle { theme: root.theme; control: voiceReconnect }
+    contentItem: Text {
+      text: voiceReconnect.text; wrapMode: Text.Wrap
+      leftPadding: voiceReconnect.indicator.width + voiceReconnect.spacing
+      color: root.theme.foreground; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
+    }
+  }
+  Text {
+    width: parent.width; wrapMode: Text.Wrap
+    text: "Up to 6 attempts within 2 minutes. Disconnecting, joining another room, or exiting Wisp cancels retries. Camera and sharing stay off."
+    color: root.theme.muted; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
+  }
+
   function commitDeepfilterStrength() {
     strengthUpdate.stop()
     if (root.pendingDeepfilterStrength !== root.deepfilterStrength)
@@ -132,7 +150,7 @@ Column {
   }
 
   Text {
-    text: "Microphone"
+    objectName: "settingsMicrophone"; text: "Microphone"
     color: root.theme.foreground
     font.family: root.theme.font.family
     font.pixelSize: root.theme.font.caption
@@ -216,7 +234,7 @@ Column {
 
   Text {
     topPadding: root.theme.spacing.sm
-    text: "Speaker"
+    objectName: "settingsSpeaker"; text: "Speaker"
     color: root.theme.foreground
     font.family: root.theme.font.family
     font.pixelSize: root.theme.font.caption
@@ -268,7 +286,7 @@ Column {
 
   Text {
     topPadding: root.theme.spacing.sm
-    text: "Processing"
+    objectName: "settingsProcessing"; text: "Processing"
     color: root.theme.foreground
     font.family: root.theme.font.family
     font.pixelSize: root.theme.font.caption
@@ -433,7 +451,7 @@ Column {
       spacing: root.theme.spacing.xs
 
       Text {
-        text: "Push to talk"
+        objectName: "settingsPushToTalk"; text: "Push to talk"
         color: root.theme.foreground
         font.family: root.theme.font.family
         font.pixelSize: root.theme.font.caption
@@ -494,7 +512,7 @@ Column {
       spacing: root.theme.spacing.xs
 
       Text {
-        text: "Global shortcut"
+        objectName: "settingsShortcut"; text: "Global shortcut"
         color: root.theme.foreground
         font.family: root.theme.font.family
         font.pixelSize: root.theme.font.caption

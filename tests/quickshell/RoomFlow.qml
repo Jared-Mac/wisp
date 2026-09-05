@@ -129,7 +129,8 @@ ShellRoot {
       test.click(directJoin); input.wait(50)
       test.check(test.last().name==="join_spot" && test.last().args.spot_id==="lounge" && bridge.activeConversationId===selectedBefore,"room-row join works directly without switching chat")
       var firstPerson=test.find(lounge,"roomParticipant-self"), secondPerson=test.find(lounge,"roomParticipant-friend")
-      test.check(firstPerson.visible && secondPerson.visible && firstPerson.y===secondPerson.y,"participants are visible together without expanding")
+      var firstY=firstPerson.mapToItem(lounge,0,0).y, secondY=secondPerson.mapToItem(lounge,0,0).y
+      test.check(firstPerson.visible && secondPerson.visible && (test.compact ? firstY===secondY : secondY>=firstY+firstPerson.height),"main app lists one participant per line; tray keeps its compact row")
       var beforePerson = bridge.sent.length
       test.click(secondPerson); input.wait(80)
       var participantMenu=test.object(lounge,"participantMenu",[])
@@ -160,9 +161,19 @@ ShellRoot {
       bridge.applySnapshot(data);input.wait(120)
       lounge=test.find(page,"savedRoom-lounge");quiet=test.find(page,"savedRoom-quiet")
       test.check(test.find(lounge,"roomParticipant-friend").visible,"participants stay visible after snapshots")
-      test.check(!test.find(lounge,"joinRoom-lounge").visible,"current room hides redundant join")
+      var roomAction=test.find(lounge,"joinRoom-lounge")
+      test.check(test.compact ? !roomAction.visible : roomAction.visible && roomAction.text==="inv","main app replaces join with inv; tray hides redundant join")
+      if (!test.compact) {
+        var beforeInvite=bridge.sent.length
+        test.click(roomAction); input.wait(50)
+        var roomPicker=test.object(lounge,"roomCallInvitePicker",[])
+        test.check(roomPicker && roomPicker.opened,"room-row inv opens the invite picker")
+        test.check(bridge.sent.length===beforeInvite,"opening inv does not join voice or send an invitation")
+        if (roomPicker) roomPicker.close()
+      }
       test.check(lounge.y<quiet.y && test.find(lounge,"roomName").text==="#Lounge /2","joining preserves room order and name")
       var bar=test.find(page,"currentCallBar")
+      test.check(test.compact ? !!test.find(bar,"mediaAction-invite") : !test.find(bar,"mediaAction-invite"),"main room invite moves out of the media controls; tray retains it")
       var disconnect=test.find(bar,"currentCallDisconnect"), location=test.find(bar,"currentCallLocation"), connection=test.find(bar,"currentCallConnection")
       test.check(disconnect && Math.abs(disconnect.mapToItem(bar,0,disconnect.height/2).y-location.mapToItem(bar,0,location.height/2).y)<1,"disconnect aligns vertically with the room status")
       test.check(location.y===connection.y && connection.text==="· connected","room and connection status share one line")
@@ -170,6 +181,10 @@ ShellRoot {
       test.check(bar.visible && test.find(bar,"currentCallLocation").text==="Lounge","call area identifies current room")
       test.check(test.visibleItems(page,"mediaAction-share",[]).length===1,"only one set of call controls")
       test.check(bar.mapToItem(page,0,0).y>=quiet.mapToItem(page,0,quiet.height).y,"call controls follow the saved room list")
+      var privateCall=JSON.parse(JSON.stringify(data));privateCall.self.hangout_id="private";privateCall.server_states[0].self=privateCall.self
+      bridge.applySnapshot(privateCall);input.wait(50)
+      test.check(!!test.find(bar,"mediaAction-invite"),"direct calls retain an invitation control")
+      bridge.applySnapshot(data);input.wait(50)
       data=JSON.parse(JSON.stringify(data))
       data.server_states[0].voice_moderation={friend:{muted:true,deafened:true}}
       bridge.participantVolumes.setMuted(person,true)
@@ -202,6 +217,7 @@ ShellRoot {
       bridge.selectServer("second");input.wait(100)
       lounge=test.find(page,"savedRoom-lounge")
       test.check(!lounge.current,"matching room IDs on another server do not show current voice")
+      test.check(test.find(lounge,"joinRoom-lounge").text==="join","another server's room keeps its join action")
 
       test.check(test.find(bar,"currentCallLocation").text==="Home / Lounge","browsing another server keeps original call location")
       open=test.find(page,"openRoom-lounge");test.click(open);input.wait(100)
@@ -241,6 +257,7 @@ ShellRoot {
       bridge.applySnapshot(data);bridge.selectServer("local");input.wait(100)
       lounge=test.find(page,"savedRoom-lounge")
       test.check(!bar.visible && bar.height===0,"call controls release space after leaving")
+      test.check(test.find(lounge,"joinRoom-lounge").visible && test.find(lounge,"joinRoom-lounge").text==="join","leaving restores the room's join action")
       test.check(lounge && test.find(lounge,"roomName").text==="#Lounge /0" && lounge.height<=rowHeight,"empty room keeps its name with a zero count")
       before=bridge.sent.length
       var create=test.find(page,"createRoomButton");test.click(create);input.wait(60)

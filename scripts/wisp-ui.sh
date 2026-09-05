@@ -174,7 +174,14 @@ case "$surface" in
     call_ui dev.wisp.bridge status
     ;;
   quit)
-    call_ui dev.wisp quit >/dev/null 2>&1 || true
+    if call_ui dev.wisp quit >/dev/null 2>&1; then
+      # The UI leaves voice and drains its disconnect cue before exiting.
+      # Wait here so a supervisor/update cannot kill its sound player early.
+      for _ in {1..70}; do
+        call_ui dev.wisp.app desktop >/dev/null 2>&1 || break
+        sleep 0.05
+      done
+    fi
     ;;
   open|show|close|hide|toggle)
     # Compatibility: the historical standalone commands now address the app.

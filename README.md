@@ -65,8 +65,11 @@ items, and compact icons in the panel. Microphone mute is orange; deafen is red
 and always forces microphone mute. Clicking the headset again leaves the
 microphone muted; clicking the microphone while deafened clears both states.
 The current-call area below the room list places **[d/c]** beside the room and
-connection status, with sharing, camera, and invitations underneath. Participant
-names and speaking/mute status remain visible below each room name.
+connection status, with sharing and camera underneath. In the main app, the
+connected room's **[join]** becomes **[inv]**; invitations stay in the call controls
+for the tray, direct calls, and when browsing another server. Participant names
+and speaking/mute status remain visible below each room name, one person per line
+in the main app and in compact rows in the tray.
 The panel always opens on the operating system's primary display and remembers
 its corner choice under **Settings → Desktop position**. Auto uses the tray
 click's edge when the tray is on the primary display and otherwise falls back
@@ -105,7 +108,18 @@ revokes its portal session and unpublishes the track.
 **Exit Wisp** closes the Quickshell UI and the tray-owning daemon. When Wisp
 was started with `just dev`, that daemon exit also makes the development
 supervisor stop its local server and LiveKit children, leaving no Wisp
-background processes behind.
+background processes behind. Normal exits and updates let the disconnect cue finish
+before the UI stops; closing only the main window still leaves Wisp in the tray.
+Disconnect and connection cues follow actual voice loss/restoration, including
+server outages, and respect the existing sound mute/volume preferences.
+
+**Settings → Audio / Video → Automatically reconnect voice** is enabled by default.
+After an unexpected server or media outage, the current desktop session retries
+up to six times within two minutes. It waits for the server to return, backs off
+between attempts, and stops when access is denied or the room no longer exists.
+Disconnecting, joining another room/server, turning the setting off, or exiting
+Wisp cancels recovery. A new app session never inherits a room to rejoin. Mute and
+deafen are preserved; screen sharing, camera, and stream watching stay off.
 
 ## Optional Omarchy integration
 
@@ -182,6 +196,18 @@ voice on that account's devices before renaming. The sign-in username stays the
 same. Password changes require the current password and keep existing device
 credentials signed in; revoke unwanted devices under **Settings → Devices**.
 Two-factor authentication is planned and is not available yet.
+
+Settings includes a search for individual options, with aliases such as
+“DeepFilter,” “stream default,” and “push to talk.” Select a result to open its
+category and scroll to the matching control.
+
+While connected to voice, each broadcaster's name in the room list has a **live**
+or **cam** indicator and **[watch]**. Watching opens a separate window by default;
+**[tile]** moves it into the main app, and **[window]** pops it out again.
+**Settings → Audio / Video** can make tiles the default when the main window is
+open. The participant's button becomes **[leave]** while watching. Either that
+button, the stream's **[leave]**, or closing its window stops watching without
+disconnecting voice. Streams are never automatically reopened after a restart.
 
 Right-click an active or empty saved room for **[room settings]** above the local
 participant-volume sliders. Use the separate button beside the server selector for **[settings]**
@@ -401,8 +427,10 @@ their name and list position whether empty or occupied. Click a room to open
 its chat; **[join]** on the room row or **Join voice** in the chat header
 explicitly starts voice. Rooms are listed once, separately from dedicated text
 channels. Temporary friend calls appear under **Calls** beside Friends. Room
-headings show occupancy as **#name /2**, with participants in compact wrapping
-rows below. Room context menus include **Open chat in new pane**. The chat header
+headings show occupancy as **#name /2**, with participants on separate lines in
+the main app and compact wrapping rows in the tray. A connected room replaces
+**[join]** with **[inv]** in the main app. Room context menus include
+**Open chat in new pane**. The chat header
 places the alternate **Join voice** beside its options menu; DMs offer **Call**,
 respecting the peer’s Open/Knock/Closed presence.
 

@@ -6,6 +6,18 @@ import Quickshell.Io
 
 ShellRoot {
   id: app
+  property bool quitting: false
+  property double quitDeadline: 0
+  function quitGracefully() {
+    if (quitting) return
+    quitting = true; quitDeadline = Date.now() + 3000
+    bridge.voiceRecovery.beginShutdown()
+    appWindow.visible = false; panelWindow.visible = false; previewWindow.visible = false
+  }
+  Timer {
+    interval: 50; repeat: true; running: app.quitting
+    onTriggered: if ((!bridge.exitSoundBusy && !bridge.soundPlaybackBusy && bridge.soundQueue.length === 0) || Date.now() >= app.quitDeadline) Qt.quit()
+  }
 
   function openApp() {
     panelWindow.visible = false
@@ -195,7 +207,7 @@ ShellRoot {
     function activate(x: int, y: int): void { app.activateFromTray(x, y) }
     function anchor(position: string): void { app.setAnchor(position) }
     function desktop(): string { return app.appDesktop() }
-    function quit(): void { Qt.quit() }
+    function quit(): void { app.quitGracefully() }
   }
 
   IpcHandler {

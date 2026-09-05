@@ -289,3 +289,80 @@ async fn failed_media_is_latched_until_explicit_join_or_leave() {
     );
     server.abort();
 }
+
+#[tokio::test]
+async fn outage_suspends_publication_and_passive_refresh_cannot_rejoin() {
+    let (url, server) = isolated_server().await;
+    let (api, mut snapshot) = ServerApi::connect_with_auth(
+        url.clone(),
+        AuthMethod::Development {
+            profile: "Owner".into(),
+        },
+    )
+    .await
+    .unwrap();
+    let room = uuid::Uuid::new_v4();
+    snapshot.self_state.hangout_id = Some(room);
+    snapshot.self_state.muted = true;
+    snapshot.self_state.deafened = true;
+    snapshot.self_state.sharing = true;
+    snapshot.self_state.media.livekit_connected = true;
+    snapshot.self_state.media.microphone_published = true;
+    snapshot.self_state.media.camera.active = true;
+    snapshot.self_state.media.screen_share.active = true;
+    let view = ServerView {
+        id: "fixture".into(),
+        name: "Fixture".into(),
+        url,
+        connected: true,
+    };
+    let (media, _) = MediaManager::new(false, None);
+    let daemon = Daemon::new(
+        "Owner".into(),
+        view.clone(),
+        vec![view],
+        api,
+        snapshot,
+        None,
+        media,
+        true,
+        Duration::from_secs(30),
+        ShortcutManager::from_environment(),
+    );
+    daemon.suspend_voice("another-server").await;
+    assert!(
+        daemon.state.read().await.self_state.media.livekit_connected,
+        "an unrelated server outage must not interrupt voice"
+    );
+    daemon.primary_connected.store(false, Ordering::Release);
+    let mut events = daemon.events.subscribe();
+    daemon.suspend_voice("fixture").await;
+    assert!(daemon.voice_recovery_blocked.load(Ordering::Acquire));
+    let state = daemon.state.read().await.clone();
+    assert!(state.self_state.muted && state.self_state.deafened);
+    assert!(!state.self_state.sharing && !state.self_state.media.microphone_published);
+    assert!(!state.self_state.media.camera.active && !state.self_state.media.screen_share.active);
+    assert!(!state.self_state.media.livekit_connected);
+    let mut decorated = state;
+    daemon.decorate_snapshot(&mut decorated).await;
+    assert!(!decorated.servers[0].connected && !decorated.server_states[0].server.connected);
+    assert!(
+        matches!(events.recv().await.unwrap(), DaemonEnvelope::Event { name, .. } if name == "voice_connection_lost")
+    );
+    // No token request, microphone capture, or implicit retry is allowed.
+    for _ in 0..3 {
+        daemon.reconcile_media().await.unwrap();
+    }
+    assert!(!daemon.state.read().await.self_state.media.livekit_connected);
+    daemon.leave_voice_locally().await;
+    assert!(daemon.state.read().await.self_state.hangout_id.is_none());
+    let mut outdated = daemon.state.read().await.clone();
+    outdated.self_state.hangout_id = Some(room);
+    daemon.decorate_snapshot(&mut outdated).await;
+    assert!(
+        outdated.self_state.hangout_id.is_none()
+            && outdated.server_states[0].self_state.hangout_id.is_none(),
+        "stale snapshots cannot undo an offline manual disconnect"
+    );
+    server.abort();
+}

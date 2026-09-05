@@ -118,7 +118,7 @@ Column {
   Column {
     width: parent.width; spacing: root.theme.spacing.sm
     Text {
-      text: "People and roles"
+      objectName: "settingsServerRoles"; text: "People and roles"
       color: root.theme.foreground
       font.family: root.theme.font.family; font.pixelSize: root.theme.font.body; font.bold: true
     }
@@ -343,7 +343,7 @@ Column {
   Column {
     width: parent.width; spacing: root.theme.spacing.sm
     Text {
-      text: "Voice rooms"
+      objectName: "settingsServerRooms"; text: "Voice rooms"
       color: root.theme.foreground
       font.family: root.theme.font.family; font.pixelSize: root.theme.font.body; font.bold: true
     }

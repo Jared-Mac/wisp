@@ -8,6 +8,8 @@ Item {
   id: root
 
   property string clientName: "quickshell"
+  readonly property alias voiceRecovery: voiceRecovery
+  WispVoiceRecovery { id: voiceRecovery; bridge: root }
   readonly property alias workspaceLayout: workspaceLayout
   WispWorkspaceLayout {
     id: workspaceLayout
@@ -30,7 +32,7 @@ Item {
   onDaemonConnectedChanged: {
     lastAppliedVolumes = ""
     if (daemonConnected) applyParticipantVolumes()
-    else { privacySnapshotReady = false; privacyRequestId = ""; privacyBusy = false; profileBusy = false; profileReady = false; profileRequestId = "" }
+    else { voiceRecovery.daemonLost(); privacySnapshotReady = false; privacyRequestId = ""; privacyBusy = false; profileBusy = false; profileReady = false; profileRequestId = "" }
   }
   onVoiceFriendsChanged: applyParticipantVolumes()
   onVoiceHangoutsChanged: applyParticipantVolumes()
@@ -71,6 +73,7 @@ Item {
     return !!conversation && (!!conversation.server_channel || !!conversation.spot_id)
   }
   property var watchedMedia: ({})
+  property var mediaWatchRequests: ({})
   signal mediaWatchReady(var video)
   readonly property string videoSocketPath: socketPath.replace(/\.[^/.]+$/, "") + ".video"
   property int imageViewerSerial: 0
@@ -733,10 +736,21 @@ Item {
     }
   }
 
+  readonly property bool exitSoundBusy: exitPlayer.running
+  property bool interruptedSound: false
+  Process { id: exitPlayer }
+  function playExitDisconnectSound() {
+    var command = notificationSoundCommand("self_leave")
+    soundQueue = []
+    if (notificationPlayer.running) { interruptedSound = true; notificationPlayer.running = false }
+    if (command.length) { exitPlayer.command = command; exitPlayer.running = true }
+  }
+
   Process {
     id: notificationPlayer
     onExited: function(exitCode, exitStatus) {
-      if (exitCode !== 0) root.notificationError = "Could not play this sound. Choose a readable audio file and check that pw-play is installed."
+      if (exitCode !== 0 && !root.interruptedSound) root.notificationError = "Could not play this sound. Choose a readable audio file and check that pw-play is installed."
+      root.interruptedSound = false
       if (root.soundQueue.length) {
         var next=root.soundQueue[0]; root.soundQueue=root.soundQueue.slice(1)
         Qt.callLater(function() { root.soundPlaybackBusy = false; root.playNotificationSound(next) })
@@ -744,26 +758,26 @@ Item {
     }
   }
 
+  function notificationSoundCommand(kind) {
+    if (notificationMuted || notificationVolume <= 0) return []
+    if (kind.indexOf("self_") === 0 && !selfRoomNotificationSounds) return []
+    if (kind.indexOf("member_") === 0 && !roomNotificationSounds) return []
+    var soundDirectory = Quickshell.env("WISP_SOUND_DIR") || configHome + "/quickshell/wisp/assets"
+    var path = String((kind === "message" ? notificationSoundPath : eventSoundPaths[kind]) || soundDirectory + "/" + kind + ".wav")
+    if (path.indexOf("file://") === 0) path = decodeURIComponent(path.slice(7))
+    if (path.charAt(0) !== "/") { notificationError = "Choose an absolute path to a local audio file."; return [] }
+    return ["pw-play", "--volume", String(Math.max(0, Math.min(100, notificationVolume)) / 100), path]
+  }
   function playNotificationSound(kind) {
     kind = kind || "message"
-    if (notificationMuted || notificationVolume <= 0) return
-    if (kind.indexOf("self_") === 0 && !selfRoomNotificationSounds) return
-    if (kind.indexOf("member_") === 0 && !roomNotificationSounds) return
+    var command = notificationSoundCommand(kind)
+    if (!command.length) return
     if (soundPlaybackBusy) {
       if (soundQueue.length < 6 && soundQueue.indexOf(kind) < 0) soundQueue = soundQueue.concat([kind])
       return
     }
     notificationError = ""
-    // Process arguments need a real path, not Quickshell's virtual qs: URL.
-    var soundDirectory = Quickshell.env("WISP_SOUND_DIR") || configHome + "/quickshell/wisp/assets"
-    var path = String((kind === "message" ? notificationSoundPath : eventSoundPaths[kind]) || soundDirectory + "/" + kind + ".wav")
-    if (path.indexOf("file://") === 0) path = decodeURIComponent(path.slice(7))
-    if (path.charAt(0) !== "/") {
-      notificationError = "Choose an absolute path to a local audio file."
-      return
-    }
-    notificationPlayer.command = ["pw-play", "--volume",
-      String(Math.max(0, Math.min(100, notificationVolume)) / 100), path]
+    notificationPlayer.command = command
     soundPlaybackBusy = true
     notificationPlayer.running = true
   }
@@ -888,7 +902,8 @@ Item {
     }
     receivedSnapshot = true
     if (notificationSoundsEnabled && newInvite) playNotificationSound("room_invite")
-    if (notificationSoundsEnabled) roomEvents.forEach(function(kind) { root.playNotificationSound(kind) })
+    if (notificationSoundsEnabled) roomEvents.forEach(function(kind) { if (kind.indexOf("self_") !== 0) root.playNotificationSound(kind) })
+    voiceRecovery.observe(next, eventName)
     if (notificationSoundsEnabled && incoming.some(function(id) {
       return ChatLogic.shouldNotifyChat(id, root.focusedConversationId, root.appFocused,
         root.notificationPolicy, root.mutedNotificationChats, root.notificationMuted, root.notificationVolume)
@@ -975,8 +990,9 @@ Item {
       applySnapshot(message.payload.snapshot, message.name)
       return
     }
+    var recoveryReply = message.type === "result" && (requests[message.id] || {}).kind === "voiceRecovery"
     if (message.type === "result") finishRequest(message)
-    if (message.type === "result" && message.ok !== true && message.error) {
+    if (message.type === "result" && !recoveryReply && message.ok !== true && message.error) {
       lastError = String(message.error.message || "Wisp command failed")
       commandFailed(lastError)
     }
@@ -997,6 +1013,7 @@ Item {
   }
 
   function send(name, args) {
+    voiceRecovery.manualCommand(name, args || {})
     var socket = activeSocket
     if (!socket || !socket.connected) {
       lastError = "wispd is not running"
@@ -1121,7 +1138,9 @@ Item {
     delete requests[message.id]
     var value = message.value || ({})
     var conversationId = action.conversationId
-    if (action.kind === "joinFriend") {
+    if (action.kind === "voiceRecovery") {
+      voiceRecovery.reply(message)
+    } else if (action.kind === "joinFriend") {
       if (message.ok && value.status === "knock_sent") {
         knockFeedback = "Knock sent to " + action.name + ". They'll need to accept before you join."
         knockFeedbackTimer.restart()
@@ -1173,7 +1192,12 @@ Item {
     } else if (action.kind === "copyImage") {
       imageCopyFinished(String(message.id),!!message.ok,message.error ? String(message.error.message || "Could not copy image") : "")
     } else if (action.kind === "watchVideo") {
-      if (message.ok && action.open) {
+      // A delayed Watch reply must not reopen a stream after Leave or a room switch.
+      if (mediaWatchRequests[action.key] !== String(message.id)) return
+      mediaWatchRequests = replaceEntry(mediaWatchRequests, action.key, undefined)
+      if (message.ok && action.open && action.serverId === voiceServerId
+          && action.hangoutId === selfState.hangout_id
+          && remoteVideos.some(function(video) { return video.participant === action.video.participant && video.source === action.video.source })) {
         watchedMedia = replaceEntry(watchedMedia, action.key, action.video)
         mediaWatchReady(action.video)
       } else if (!action.open || !message.ok) watchedMedia = replaceEntry(watchedMedia, action.key, undefined)
@@ -1376,7 +1400,11 @@ Item {
       "hosted": !!mediaTileHost,
       "open": open
     })
-    if (id && mediaTileHost) requests[id] = {kind: "watchVideo", key: key, video: video, open: open}
+    if (id && mediaTileHost) {
+      mediaWatchRequests = replaceEntry(mediaWatchRequests, key, String(id))
+      requests[id] = {kind: "watchVideo", key: key, video: video, open: open,
+        serverId: voiceServerId, hangoutId: selfState.hangout_id}
+    }
     if (!open) watchedMedia = replaceEntry(watchedMedia, key, undefined)
   }
   function leave() { send("leave", {}) }

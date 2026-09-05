@@ -53,7 +53,7 @@ Item {
       property real roomsRatio: 0 // Fit the room list until its divider is moved.
       property bool trayRoomsCollapsed: false
       property string chatTiles: "" // Main-window split tree; no message content.
-      property bool streamsAsTiles: true
+      property bool streamsAsTiles: false
       property bool channelsAsTiles: true
       property string selectedServerId: ""
     }

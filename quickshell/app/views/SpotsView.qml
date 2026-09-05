@@ -5,11 +5,12 @@ Column {
   id: root
   required property var bridge
   required property var theme
+  property bool mainApp: false
   width: parent ? parent.width : 0
   spacing: root.theme.spacing.xs
   Repeater {
     model: root.bridge.spots || []
-    RoomCard { required property var modelData; width: root.width; room: modelData; bridge: root.bridge; theme: root.theme }
+    RoomCard { required property var modelData; width: root.width; room: modelData; bridge: root.bridge; theme: root.theme; mainApp: root.mainApp }
   }
   Text {
     width: parent.width; wrapMode: Text.Wrap

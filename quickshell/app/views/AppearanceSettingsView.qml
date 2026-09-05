@@ -9,7 +9,7 @@ Column {
   spacing: theme.spacing.lg
 
   Text {
-    text: "Appearance · this device"
+    objectName: "settingsAppearance"; text: "Appearance · this device"
     color: root.theme.foreground
     font.family: root.theme.font.family; font.pixelSize: root.theme.font.body; font.bold: true
   }
@@ -43,7 +43,7 @@ Column {
     font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
   }
   Text {
-    text: "Color palette"
+    objectName: "settingsPalette"; text: "Color palette"
     color: root.theme.muted
     font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
   }
@@ -68,7 +68,7 @@ Column {
     font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
   }
   Text {
-    text: "Color accents"
+    objectName: "settingsAccents"; text: "Color accents"
     color: root.theme.foreground
     font.family: root.theme.font.family; font.pixelSize: root.theme.font.body; font.bold: true
   }

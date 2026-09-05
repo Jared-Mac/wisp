@@ -62,6 +62,8 @@ trap - EXIT
 service_contents=$(<"$service_template")
 launch_exec="$bin_root/wisp-launch"
 service_contents=${service_contents//@WISP_LAUNCH_EXEC@/$launch_exec}
+ui_exec="$bin_root/wisp-ui"
+service_contents=${service_contents//@WISP_UI_EXEC@/$ui_exec}
 service_file=$(mktemp "$service_root/wisp.service.XXXXXX")
 trap 'rm -f -- "$service_file"' EXIT
 printf '%s\n' "$service_contents" >"$service_file"

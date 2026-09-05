@@ -1,4 +1,6 @@
 import QtQuick
+import QtQuick.Controls
+import "../SettingsSearch.js" as Search
 import "../components"
 
 Column {
@@ -9,6 +11,29 @@ Column {
   required property var bridge
   required property var theme
   property var anchorController: null
+  readonly property bool searching: searchField.text.trim() !== ""
+  readonly property var searchResults: Search.search(searchField.text, bridge.canManageServer, !!anchorController)
+  property string revealedTarget: ""
+  signal revealSetting(var item)
+
+  function findSetting(item, name) {
+    if (item.objectName === name) return item
+    for (var child of item.children || []) {
+      var result = findSetting(child, name)
+      if (result) return result
+    }
+    return null
+  }
+  function openSearchResult(result) {
+    if (!result || result.section === "server" && !bridge.canManageServer) return
+    section = result.section
+    searchField.text = ""
+    // Wait for the section's layout before moving the outer settings scroll view.
+    Qt.callLater(function() {
+      var target = root.findSetting(root, result.target)
+      if (target) { root.revealedTarget = result.target; target.forceActiveFocus(Qt.TabFocusReason); root.revealSetting(target) }
+    })
+  }
 
   Connections {
     target: root.bridge
@@ -42,7 +67,52 @@ Column {
     }
   }
 
+  Row {
+    width: parent.width; spacing: root.theme.spacing.sm
+    TextField {
+      id: searchField; objectName: "settingsSearch"
+      width: parent.width - (clearSearch.visible ? clearSearch.width + parent.spacing : 0)
+      placeholderText: "Search settings…"
+      Accessible.name: "Search settings"
+      selectByMouse: true
+      color: root.theme.foreground; placeholderTextColor: root.theme.muted
+      font.family: root.theme.font.family; font.pixelSize: root.theme.font.body
+      background: Rectangle { color: root.theme.background; border.width: 1; border.color: searchField.activeFocus ? root.theme.accent : root.theme.separator; radius: root.theme.cornerRadius }
+      onAccepted: root.openSearchResult(root.searchResults[0])
+      Keys.onEscapePressed: text = ""
+    }
+    ChatButton {
+      id: clearSearch; objectName: "clearSettingsSearch"
+      theme: root.theme; text: "clear"; visible: searchField.text !== ""
+      onClicked: { searchField.text = ""; searchField.forceActiveFocus() }
+    }
+  }
+
+  Column {
+    width: parent.width; spacing: root.theme.spacing.xs
+    visible: root.searching
+    Text {
+      visible: root.searchResults.length === 0
+      width: parent.width; wrapMode: Text.Wrap
+      text: "No matching settings. Try another word."
+      color: root.theme.muted; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
+    }
+    Repeater {
+      model: root.searchResults
+      ChatButton {
+        required property var modelData
+        objectName: "settingsResult-" + modelData.target
+        width: parent.width; theme: root.theme; textAlignment: Text.AlignLeft
+        text: modelData.label + " · " + Search.sectionLabel(modelData.section)
+        Accessible.name: text
+        onClicked: root.openSearchResult(modelData)
+        ToolTip.visible: hovered; ToolTip.text: text
+      }
+    }
+  }
+
   Flow {
+    visible: !root.searching
     width: parent.width
     spacing: root.theme.spacing.sm
     Repeater {
@@ -62,7 +132,7 @@ Column {
   }
 
   Rectangle {
-    visible: root.section === "profile"
+    visible: !root.searching && root.section === "profile"
     width: parent.width
     height: visible ? profileSettings.implicitHeight + root.theme.spacing.xxl * 2 : 0
     radius: root.theme.cornerRadius
@@ -77,7 +147,7 @@ Column {
   }
 
   Rectangle {
-    visible: root.section === "server" && root.bridge.canManageServer
+    visible: !root.searching && root.section === "server" && root.bridge.canManageServer
     width: parent.width
     height: visible ? serverSettings.implicitHeight + root.theme.spacing.xxl * 2 : 0
     radius: root.theme.cornerRadius
@@ -93,7 +163,7 @@ Column {
 
   Rectangle {
     // Tab content stays instantiated so changing tabs never resets controls.
-    visible: root.section === "appearance"
+    visible: !root.searching && root.section === "appearance"
     width: parent.width
     height: appearanceSettings.implicitHeight + root.theme.spacing.xxl * 2
     radius: root.theme.cornerRadius
@@ -109,7 +179,7 @@ Column {
   }
 
   Rectangle {
-    visible: root.section === "privacy"
+    visible: !root.searching && root.section === "privacy"
     width: parent.width
     height: privacySettings.implicitHeight + root.theme.spacing.xxl * 2
     radius: root.theme.cornerRadius
@@ -124,7 +194,7 @@ Column {
   }
 
   Rectangle {
-    visible: root.section === "notifications"
+    visible: !root.searching && root.section === "notifications"
     width: parent.width
     height: notificationSettings.implicitHeight + root.theme.spacing.xxl * 2
     radius: root.theme.cornerRadius
@@ -143,7 +213,7 @@ Column {
   }
 
   Rectangle {
-    visible: root.section === "devices"
+    visible: !root.searching && root.section === "devices"
     width: parent.width
     height: deviceSettings.implicitHeight + root.theme.spacing.xxl * 2
     radius: root.theme.cornerRadius
@@ -163,7 +233,7 @@ Column {
   }
 
   Rectangle {
-    visible: root.section === "media"
+    visible: !root.searching && root.section === "media"
     width: parent.width
     height: videoSettings.implicitHeight + root.theme.spacing.xxl * 2
     radius: root.theme.cornerRadius
@@ -183,7 +253,7 @@ Column {
   }
 
   Rectangle {
-    visible: root.section === "media"
+    visible: !root.searching && root.section === "media"
     width: parent.width
     height: audioSettings.implicitHeight + root.theme.spacing.xxl * 2
     radius: root.theme.cornerRadius
@@ -203,7 +273,7 @@ Column {
   }
 
   Rectangle {
-    visible: root.section === "appearance" && !!root.anchorController
+    visible: !root.searching && root.section === "appearance" && !!root.anchorController
     width: parent.width
     height: visible ? desktopSettings.implicitHeight + root.theme.spacing.xxl * 2 : 0
     radius: root.theme.cornerRadius
@@ -220,7 +290,7 @@ Column {
       spacing: root.theme.spacing.lg
 
       Text {
-        text: "Desktop position"
+        objectName: "settingsDesktopPosition"; text: "Desktop position"
         color: root.theme.foreground
         font.family: root.theme.font.family
         font.pixelSize: root.theme.font.body

@@ -91,9 +91,10 @@ ShellRoot {
       test.check(bridge.rawSpeakers.indexOf("MemberA")<0,"closed voice gate overrides residual level")
       test.changeMedia(["Owner"],45)
       test.check(bridge.activeSpeakers.indexOf("Owner")>=0,"audio activity visible")
+      bridge.workspaceLayout.setStreamsAsTiles(true)
       test.tile.openVideo({participant:"Owner",source:"screen_share"})
       test.videoKey=Tiles.leaves(test.tile.tree).filter(function(n){return !!test.tile.videoFor(n.id)})[0].key
-      test.check(test.tile.detachedKeys.indexOf(test.videoKey)<0,"main-open watch docks by default")
+      test.check(test.tile.detachedKeys.indexOf(test.videoKey)<0,"tile preference docks a stream when the main window is open")
       test.check(bridge.workspaceLayout.chatTiles.indexOf("video:")<0,"stream subscriptions never persisted")
     }
   }
@@ -149,11 +150,13 @@ ShellRoot {
       test.tile.closePane(test.videoKey)
       test.check(bridge.sent.slice(beforeClose).some(function(command) { return command.name==="watch_video" && command.args.open===false && command.args.participant==="Owner" }),"closing stream tile stops watching locally")
       bridge.mainWindowOpen=false
+      bridge.workspaceLayout.setStreamsAsTiles(true)
       test.tile.openVideo({participant:"Owner",source:"screen_share"})
       test.videoKey=Tiles.leaves(test.tile.tree).filter(function(n){return !!test.tile.videoFor(n.id)})[0].key
       test.check(test.tile.detachedKeys.indexOf(test.videoKey)>=0,"main-closed watch opens popout")
       test.tile.closePane(test.videoKey)
       bridge.mainWindowOpen=true; bridge.workspaceLayout.streamsAsTiles=false
+      bridge.workspaceLayout.setStreamsAsTiles(true)
       test.tile.openVideo({participant:"Owner",source:"screen_share"})
       test.videoKey=Tiles.leaves(test.tile.tree).filter(function(n){return !!test.tile.videoFor(n.id)})[0].key
       test.check(test.tile.detachedKeys.indexOf(test.videoKey)>=0,"always-popout preference respected")

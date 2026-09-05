@@ -6,6 +6,8 @@ Wants=network-online.target
 [Service]
 Type=simple
 ExecStart="@WISP_LAUNCH_EXEC@"
+ExecStop="@WISP_UI_EXEC@" quit
+TimeoutStopSec=10
 KillMode=control-group
 Restart=on-failure
 RestartSec=3

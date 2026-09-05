@@ -527,6 +527,9 @@ struct Daemon {
     events: broadcast::Sender<DaemonEnvelope>,
     media: MediaManager,
     media_reconcile: Mutex<()>,
+    primary_connected: AtomicBool,
+    voice_recovery_blocked: AtomicBool,
+    local_voice_left: AtomicBool,
     failed_media_room: Mutex<Option<wisp_protocol::HangoutId>>,
     ptt_operation: Mutex<()>,
     ptt_lease_tx: watch::Sender<Option<Instant>>,
@@ -570,6 +573,9 @@ impl Daemon {
             events,
             media,
             media_reconcile: Mutex::new(()),
+            primary_connected: AtomicBool::new(true),
+            voice_recovery_blocked: AtomicBool::new(false),
+            local_voice_left: AtomicBool::new(false),
             failed_media_room: Mutex::new(None),
             ptt_operation: Mutex::new(()),
             ptt_lease_tx,
@@ -632,7 +638,8 @@ impl Daemon {
             }
         }
         for server in &mut servers {
-            server.connected = server.id == self.primary_server.id
+            server.connected = (server.id == self.primary_server.id
+                && self.primary_connected.load(Ordering::Acquire))
                 || linked.iter().any(|linked| {
                     linked.view.id == server.id && linked.connected.load(Ordering::Acquire)
                 });
@@ -653,6 +660,21 @@ impl Daemon {
         {
             let voice = server.state.read().await;
             snapshot.self_state.hangout_id = voice.self_state.hangout_id;
+        }
+        for state in &mut states {
+            if let Some(server) = snapshot
+                .servers
+                .iter()
+                .find(|server| server.id == state.server.id)
+            {
+                state.server.connected = server.connected;
+            }
+            if state.server.id == voice_server_id && self.local_voice_left.load(Ordering::Acquire) {
+                state.self_state.hangout_id = None;
+            }
+        }
+        if self.local_voice_left.load(Ordering::Acquire) {
+            snapshot.self_state.hangout_id = None;
         }
         snapshot.server_states = states;
     }
@@ -768,6 +790,13 @@ impl Daemon {
 
     async fn refresh(&self, event_name: &str) -> anyhow::Result<()> {
         let mut snapshot = self.api.snapshot().await?;
+        if *self.voice_server_id.read().await == self.primary_server.id
+            && self.local_voice_left.load(Ordering::Acquire)
+            && snapshot.self_state.hangout_id.is_some()
+        {
+            self.api.leave().await?;
+            snapshot = self.api.snapshot().await?;
+        }
         if self
             .privacy
             .reconcile_pending_admissions(&self.api, &snapshot)
@@ -785,6 +814,13 @@ impl Daemon {
         event_name: &str,
     ) -> anyhow::Result<()> {
         let mut snapshot = server.api.snapshot().await?;
+        if *self.voice_server_id.read().await == server.view.id
+            && self.local_voice_left.load(Ordering::Acquire)
+            && snapshot.self_state.hangout_id.is_some()
+        {
+            server.api.leave().await?;
+            snapshot = server.api.snapshot().await?;
+        }
         prepare_private_account(&server.api, &server.privacy, &mut snapshot).await;
         if server
             .privacy
@@ -873,12 +909,60 @@ impl Daemon {
         Ok(())
     }
 
+    async fn suspend_voice(&self, server_id: &str) {
+        if *self.voice_server_id.read().await != server_id {
+            return;
+        }
+        self.voice_recovery_blocked.store(true, Ordering::Release);
+        let _reconcile = self.media_reconcile.lock().await;
+        self.media.disconnect().await;
+        self.release_push_to_talk("push_to_talk_released").await;
+        self.set_local_media(
+            |state| {
+                state.self_state.sharing = false;
+                state.self_state.media.livekit_connected = false;
+                state.self_state.media.microphone_published = false;
+                state.self_state.media.screen_share = ScreenShareState::default();
+                state.self_state.media.camera =
+                    inactive_camera_state(&state.self_state.media.camera);
+                state.self_state.media.remote_videos.clear();
+                state.self_state.media.remote_audio_participants.clear();
+                state.self_state.media.active_speakers.clear();
+                state.self_state.connection = ConnectionState::Reconnecting;
+            },
+            if self.local_voice_left.load(Ordering::Acquire) {
+                "voice_left"
+            } else {
+                "voice_connection_lost"
+            },
+        )
+        .await;
+    }
+
+    async fn leave_voice_locally(&self) {
+        self.local_voice_left.store(true, Ordering::Release);
+        self.voice_recovery_blocked.store(true, Ordering::Release);
+        let server_id = self.voice_server_id.read().await.clone();
+        self.suspend_voice(&server_id).await;
+        self.set_local_media(
+            |state| {
+                state.self_state.hangout_id = None;
+                state.self_state.connection = ConnectionState::Available;
+            },
+            "voice_left",
+        )
+        .await;
+    }
+
     #[allow(clippy::too_many_lines)]
     async fn reconcile_media(&self) -> anyhow::Result<()> {
         let _reconcile = self.media_reconcile.lock().await;
         let (voice_api, hangout_id, encryption_required, privacy_active, media_key) =
             self.voice_context().await?;
         self.media.set_encryption_key(media_key);
+        if hangout_id.is_some() && self.voice_recovery_blocked.load(Ordering::Acquire) {
+            return Ok(());
+        }
         if !self.media_enabled {
             let connection = if hangout_id.is_some() {
                 ConnectionState::Connected
@@ -963,6 +1047,10 @@ impl Daemon {
                 .await
         }
         .await;
+        if self.voice_recovery_blocked.load(Ordering::Acquire) {
+            self.media.disconnect().await;
+            return Ok(());
+        }
         match result {
             Ok(connected) => {
                 let (camera, video) = {
@@ -1331,6 +1419,14 @@ impl Daemon {
 
     #[allow(clippy::too_many_lines)]
     async fn run_command(&self, command: &CommandEnvelope) -> anyhow::Result<Option<Value>> {
+        if matches!(
+            command.name.as_str(),
+            "join_spot" | "join_hangout" | "join_friend" | "respond_knock"
+        ) || (command.name == "respond_room_invitation" && command.args["accept"] == true)
+        {
+            self.local_voice_left.store(false, Ordering::Release);
+            self.voice_recovery_blocked.store(false, Ordering::Release);
+        }
         if let Some(server_id) = command.args.get("server_id").and_then(Value::as_str)
             && !server_id.is_empty()
             && server_id != self.primary_server.id
@@ -2074,7 +2170,11 @@ impl Daemon {
             "leave" => {
                 let server_id = self.voice_server_id.read().await.clone();
                 let (api, _, _, _, _) = self.voice_context().await?;
-                api.leave().await?;
+                self.leave_voice_locally().await;
+                if let Err(error) = api.leave().await {
+                    warn!(%error, "left voice locally while coordination server is unavailable");
+                    return Ok(None);
+                }
                 if server_id == self.primary_server.id {
                     self.refresh("hangout_changed").await?;
                 } else if let Some(server) =
@@ -3338,6 +3438,7 @@ async fn synchronize_server(daemon: Arc<Daemon>) {
             Ok((stream, _)) => {
                 attempt = 0;
                 info!("connected to wisp-server events");
+                daemon.primary_connected.store(true, Ordering::Release);
                 if let Err(error) = daemon.refresh("server_reconnected").await {
                     warn!(%error, "initial server refresh failed");
                 }
@@ -3380,12 +3481,17 @@ async fn synchronize_server(daemon: Arc<Daemon>) {
                 }
             }
         }
-        daemon
-            .set_connection(
-                ConnectionState::Reconnecting,
-                Some("coordination server unavailable"),
-            )
-            .await;
+        daemon.primary_connected.store(false, Ordering::Release);
+        daemon.suspend_voice(&daemon.primary_server.id).await;
+        let mut aggregate = daemon.state.read().await.clone();
+        aggregate.seq = daemon.next_seq(aggregate.seq);
+        daemon.decorate_snapshot(&mut aggregate).await;
+        *daemon.state.write().await = aggregate.clone();
+        daemon.emit(
+            "server_connection_changed",
+            json!({"snapshot": aggregate}),
+            aggregate.seq,
+        );
         attempt = attempt.saturating_add(1).min(6);
         let base = 250 * 2_u64.pow(attempt);
         let jitter = u64::from(daemon.profile.bytes().fold(0_u8, u8::wrapping_add)) * 3;
@@ -3439,6 +3545,7 @@ async fn synchronize_linked_server(daemon: Arc<Daemon>, server: Arc<LinkedServer
             }
         }
         server.connected.store(false, Ordering::Release);
+        daemon.suspend_voice(&server.view.id).await;
         let mut aggregate = daemon.state.read().await.clone();
         let seq = daemon.next_seq(aggregate.seq);
         aggregate.seq = seq;
@@ -3529,32 +3636,24 @@ async fn synchronize_media_events(
             }
 
             MediaEvent::Reconnecting { .. } => {
-                warn!("LiveKit media reconnecting");
-                daemon
-                    .update_media_state(
-                        Some(ConnectionState::Reconnecting),
-                        "media_reconnecting",
-                        |media| {
-                            media.livekit_connected = false;
-                            media.active_speakers.clear();
-                            media.audio.input_level = 0;
-                        },
-                    )
-                    .await;
+                let server_id = daemon.voice_server_id.read().await.clone();
+                daemon.suspend_voice(&server_id).await;
             }
             MediaEvent::Reconnected { .. } => {
-                info!("LiveKit media reconnected");
-                daemon
-                    .update_media_state(
-                        Some(ConnectionState::Connected),
-                        "media_reconnected",
-                        |media| {
-                            media.livekit_connected = true;
-                            media.error_code = None;
-                            media.error = None;
-                        },
-                    )
-                    .await;
+                // Full reconnects are owned by the bounded desktop recovery policy.
+                if !daemon.voice_recovery_blocked.load(Ordering::Acquire) {
+                    daemon
+                        .update_media_state(
+                            Some(ConnectionState::Connected),
+                            "media_reconnected",
+                            |media| {
+                                media.livekit_connected = true;
+                                media.error_code = None;
+                                media.error = None;
+                            },
+                        )
+                        .await;
+                }
             }
             track_event @ (MediaEvent::AudioSubscribed { .. }
             | MediaEvent::AudioUnsubscribed { .. }
@@ -3621,29 +3720,9 @@ async fn synchronize_media_events(
                 synchronize_surface_event(&daemon, surface_event).await;
             }
             MediaEvent::Disconnected { reason, .. } => {
-                warn!(%reason, "LiveKit media disconnected; reconnecting");
-                daemon
-                    .update_media_state(
-                        Some(ConnectionState::Reconnecting),
-                        "media_disconnected",
-                        |media| {
-                            media.livekit_connected = false;
-                            media.remote_audio_participants.clear();
-                            media.remote_audio_levels.clear();
-                            media.remote_muted_participants.clear();
-                            media.remote_video_participants.clear();
-                            media.remote_videos.clear();
-                            media.active_speakers.clear();
-                            media.audio.input_level = 0;
-                            media.error_code = Some("livekit_disconnected".into());
-                            media.error = Some(format!("LiveKit disconnected: {reason}"));
-                        },
-                    )
-                    .await;
-                tokio::time::sleep(Duration::from_millis(500)).await;
-                if let Err(error) = daemon.reconcile_media().await {
-                    warn!(%error, "LiveKit media reconnect failed");
-                }
+                warn!(%reason, "LiveKit media disconnected");
+                let server_id = daemon.voice_server_id.read().await.clone();
+                daemon.suspend_voice(&server_id).await;
             }
         }
     }
@@ -4207,6 +4286,15 @@ async fn quit_all_ui_instances() {
     if let Some(script) = installed_ui_script() {
         let _ = run_ui_script(&script, None, &arguments).await;
     }
+}
+
+async fn shutdown_signal() -> anyhow::Result<()> {
+    let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+    tokio::select! {
+        result = tokio::signal::ctrl_c() => { result?; }
+        _ = terminate.recv() => {}
+    }
+    Ok(())
 }
 
 async fn next_tray_action(
@@ -4822,7 +4910,7 @@ async fn main() -> anyhow::Result<()> {
     }
     info!(socket = %socket_path.display(), "wispd ready");
 
-    let shutdown = tokio::signal::ctrl_c();
+    let shutdown = shutdown_signal();
     tokio::pin!(shutdown);
     loop {
         tokio::select! {
@@ -4847,6 +4935,8 @@ async fn main() -> anyhow::Result<()> {
             }
         }
     }
+    daemon.leave_voice_locally().await;
+    quit_all_ui_instances().await;
     daemon.media.disconnect().await;
     daemon.media.shutdown_surface();
     drop(listener);

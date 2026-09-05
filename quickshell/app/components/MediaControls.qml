@@ -8,6 +8,7 @@ Column {
   signal leaveRequested()
   signal cameraRequested()
   property bool showLeave: true
+  property bool showInvite: true
   spacing: root.theme.spacing.sm
   RoomInvitePicker { id: invitePicker; bridge: root.bridge; theme: root.theme }
 
@@ -25,7 +26,7 @@ Column {
         { "label": root.bridge.cameraActive ? "Stop cam" : root.bridge.cameraStarting ? "Starting…" : "Camera", "action": "camera" },
         { "label": "Invite", "action": "invite" },
         { "label": "d/c", "action": "leave" }
-      ].filter(function(action) { return root.showLeave || action.action !== "leave" })
+      ].filter(function(action) { return (root.showLeave || action.action !== "leave") && (root.showInvite || action.action !== "invite") })
       delegate: Rectangle {
         required property var modelData
         objectName: "mediaAction-" + modelData.action
@@ -126,7 +127,7 @@ Column {
         Text {
           id: watchLabel
           anchors.centerIn: parent
-          text: parent.parent.watching ? "Close" : "Watch"
+          text: root.theme.tui ? (parent.parent.watching ? "[leave]" : "[watch]") : (parent.parent.watching ? "Leave" : "Watch")
           color: root.theme.accentText
           font.family: root.theme.font.family
           font.pixelSize: root.theme.font.caption
