@@ -26,8 +26,8 @@ pub(super) async fn directory(
     headers: HeaderMap,
 ) -> Result<Json<Value>, ApiError> {
     let user = authenticate_headers(&state, &headers).await?;
-    let identities=sqlx::query("SELECT user_id,public_identity FROM chat_identities WHERE user_id=? OR user_id IN (SELECT b.user_id FROM circle_members a JOIN circle_members b ON a.circle_id=b.circle_id WHERE a.user_id=?)")
-        .bind(user.to_string()).bind(user.to_string()).fetch_all(&state.pool).await.map_err(ApiError::internal)?;
+    let identities=sqlx::query("SELECT ci.user_id,ci.public_identity FROM chat_identities ci WHERE ci.user_id=? OR EXISTS(SELECT 1 FROM friendships f WHERE (f.first_user_id=? AND f.second_user_id=ci.user_id) OR (f.second_user_id=? AND f.first_user_id=ci.user_id))")
+        .bind(user.to_string()).bind(user.to_string()).bind(user.to_string()).fetch_all(&state.pool).await.map_err(ApiError::internal)?;
     let mut keys = BTreeMap::<String, Value>::new();
     for row in identities {
         keys.insert(
@@ -45,8 +45,16 @@ pub(super) async fn directory(
                 .map_err(ApiError::internal)?,
         );
     }
+    let pending = sqlx::query("SELECT p.conversation_id,p.user_id FROM pending_room_admissions p JOIN conversation_members cm ON cm.conversation_id=p.conversation_id AND cm.user_id=? WHERE cm.role IN ('host','admin') ORDER BY p.created_at")
+        .bind(user.to_string())
+        .fetch_all(&state.pool)
+        .await
+        .map_err(ApiError::internal)?
+        .into_iter()
+        .map(|row| json!({"conversation_id":row.get::<String,_>("conversation_id"),"user_id":row.get::<String,_>("user_id")}))
+        .collect::<Vec<_>>();
     Ok(Json(
-        json!({"network":network(&state).await?,"required":state.config.require_chat_e2ee,"identities":keys,"rosters":rosters}),
+        json!({"network":network(&state).await?,"required":state.config.require_chat_e2ee,"identities":keys,"rosters":rosters,"pending_admissions":pending}),
     ))
 }
 
@@ -198,9 +206,11 @@ pub(super) async fn apply_roster(
                 "Participant encryption identity does not match",
             ));
         }
-        let friend:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM circle_members a JOIN circle_members b ON a.circle_id=b.circle_id WHERE a.user_id=? AND b.user_id=?)").bind(user.to_string()).bind(id.to_string()).fetch_one(&mut *tx).await.map_err(ApiError::internal)?;
-        if !friend {
-            return Err(ApiError::forbidden("Only friends can be added to a room"));
+        if *id != user {
+            let friend:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM friendships WHERE (first_user_id=? AND second_user_id=?) OR (first_user_id=? AND second_user_id=?))").bind(user.to_string()).bind(id.to_string()).bind(id.to_string()).bind(user.to_string()).fetch_one(&mut *tx).await.map_err(ApiError::internal)?;
+            if !friend {
+                return Err(ApiError::forbidden("Only friends can be added to a room"));
+            }
         }
     }
     // Retain read markers/history state for existing members.
@@ -231,6 +241,14 @@ pub(super) async fn apply_roster(
         .execute(&mut *tx)
         .await
         .map_err(ApiError::internal)?;
+    for id in roster.members.keys() {
+        sqlx::query("DELETE FROM pending_room_admissions WHERE conversation_id=? AND user_id=?")
+            .bind(&roster.conversation)
+            .bind(id.to_string())
+            .execute(&mut *tx)
+            .await
+            .map_err(ApiError::internal)?;
+    }
     Ok(())
 }
 

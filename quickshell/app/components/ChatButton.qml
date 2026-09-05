@@ -9,6 +9,7 @@ Button {
   Binding { target: root; property: "padding"; value: 2; when: root.theme.tui; restoreMode: Binding.RestoreBindingOrValue }
   property bool primary: false
   property bool destructive: false
+  property int textAlignment: Text.AlignHCenter
   implicitHeight: theme.space(theme.tui ? 28 : 34)
   implicitWidth: label.implicitWidth + theme.space(theme.tui ? 12 : 24)
   background: Rectangle {
@@ -32,7 +33,7 @@ Button {
     font.family: root.theme.font.family
     font.pixelSize: root.theme.font.caption
     elide: Text.ElideRight
-    horizontalAlignment: Text.AlignHCenter
+    horizontalAlignment: root.textAlignment
     verticalAlignment: Text.AlignVCenter
   }
 }

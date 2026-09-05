@@ -21,10 +21,10 @@ ShellRoot {
       property string error: ""
       function volumeFor(person) { return 100 }
     }
-    property var selfState: ({id:"self",hangout_id:"porch",deafened:true,muted:true})
+    property var selfState: ({id:"self",hangout_id:"test_room",deafened:true,muted:true})
     property bool effectiveMuted: true
-    property var activeSpeakers: ["Charlie"]
-    property var remoteMutedParticipants: ["Jared"]
+    property var activeSpeakers: ["MemberC"]
+    property var remoteMutedParticipants: ["Owner"]
     property var remoteVideos: []
     property var pushToTalkState: ({enabled:false})
     property bool sharing: true
@@ -53,9 +53,9 @@ ShellRoot {
           Text { text: modelData; color: sampleTheme.foreground }
           Components.HangoutCard {
             width: parent.width; theme: sampleTheme; bridge: testBridge
-            hangout: ({id:"porch",label:"Porch",members:[
-              {id:"charlie",display_name:"Charlie"},{id:"self",display_name:"Tyler"},
-              {id:"jared",display_name:"Jared"},{id:"long",display_name:"AnUnusuallyLongFriendNameThatMustWrap"}]})
+            hangout: ({id:"test_room",label:"TestRoom",members:[
+              {id:"member_c",display_name:"MemberC"},{id:"self",display_name:"MemberA"},
+              {id:"owner",display_name:"Owner"},{id:"long",display_name:"AnUnusuallyLongFriendNameThatMustWrap"}]})
           }
           Components.MediaControls {
             width: parent.width; theme: sampleTheme; bridge: testBridge

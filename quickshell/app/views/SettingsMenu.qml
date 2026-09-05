@@ -10,6 +10,13 @@ Column {
   required property var theme
   property var anchorController: null
 
+  Connections {
+    target: root.bridge
+    function onCanManageServerChanged() {
+      if (!root.bridge.canManageServer && root.section === "server") root.section = "media"
+    }
+  }
+
   width: parent ? parent.width : 0
   spacing: root.theme.spacing.lg
 
@@ -39,7 +46,11 @@ Column {
     width: parent.width
     spacing: root.theme.spacing.sm
     Repeater {
-      model: [{id:"media",label:"Audio / Video"},{id:"appearance",label:"Appearance"},{id:"notifications",label:"Notifications & Chat"},{id:"privacy",label:"Privacy"},{id:"devices",label:"Devices"}]
+      model: {
+        var tabs = [{id:"media",label:"Audio / Video"},{id:"appearance",label:"Appearance"},{id:"notifications",label:"Notifications & Chat"},{id:"privacy",label:"Privacy"},{id:"devices",label:"Devices"}]
+        if (root.bridge.canManageServer) tabs.push({id:"server",label:"Server"})
+        return tabs
+      }
       SettingsTab {
         required property var modelData
         theme: root.theme; text: modelData.label
@@ -47,6 +58,21 @@ Column {
         primary: root.section === modelData.id
         onClicked: root.section = modelData.id
       }
+    }
+  }
+
+  Rectangle {
+    visible: root.section === "server" && root.bridge.canManageServer
+    width: parent.width
+    height: visible ? serverSettings.implicitHeight + root.theme.spacing.xxl * 2 : 0
+    radius: root.theme.cornerRadius
+    color: root.theme.tui ? root.theme.background : root.theme.alpha(root.theme.foreground, 0.035)
+    border.width: 1; border.color: root.theme.separator
+    ServerSettingsView {
+      id: serverSettings
+      anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
+      anchors.margins: root.theme.spacing.xxl
+      bridge: root.bridge; theme: root.theme
     }
   }
 

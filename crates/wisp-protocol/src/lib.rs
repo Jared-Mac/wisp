@@ -453,6 +453,12 @@ pub struct ConversationView {
     pub self_role: String,
     #[serde(default)]
     pub member_roles: std::collections::BTreeMap<UserId, String>,
+    #[serde(default)]
+    pub server_channel: bool,
+    #[serde(default)]
+    pub category_id: Option<String>,
+    #[serde(default)]
+    pub category_name: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -460,9 +466,52 @@ pub struct SpotView {
     pub id: String,
     pub name: String,
     #[serde(default)]
+    pub category_id: Option<String>,
+    #[serde(default)]
+    pub category_name: Option<String>,
+    #[serde(default)]
     pub active_hangout_id: Option<HangoutId>,
     #[serde(default)]
     pub members: Vec<UserSummary>,
+}
+
+/// One independently hosted Wisp community known to this client. The stable
+/// identifier is client-managed so changing a server's display name does not
+/// invalidate local drafts, notification preferences, or encryption state.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ServerView {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub url: String,
+    #[serde(default)]
+    pub connected: bool,
+}
+
+/// A server-scoped snapshot. Conversation and user identifiers only need to
+/// be unique inside this boundary; the desktop client uses `(server_id, id)`
+/// as the durable local identity.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ServerStateView {
+    pub server: ServerView,
+    #[serde(rename = "self")]
+    pub self_state: SelfState,
+    #[serde(default)]
+    pub friends: Vec<FriendState>,
+    #[serde(default)]
+    pub hangouts: Vec<HangoutView>,
+    #[serde(default)]
+    pub knocks: Vec<KnockRequestView>,
+    #[serde(default)]
+    pub room_invitations: Vec<RoomInvitation>,
+    #[serde(default)]
+    pub conversations: Vec<ConversationView>,
+    #[serde(default)]
+    pub messages: Vec<Message>,
+    #[serde(default)]
+    pub spots: Vec<SpotView>,
+    #[serde(default)]
+    pub devices: Vec<DeviceView>,
 }
 
 #[allow(clippy::struct_excessive_bools)]
@@ -521,9 +570,14 @@ pub struct MediaState {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct SelfState {
     #[serde(flatten)]
     pub user: UserSummary,
+    #[serde(default)]
+    pub server_owner: bool,
+    #[serde(default)]
+    pub server_admin: bool,
     pub presence: Presence,
     pub connection: ConnectionState,
     pub muted: bool,
@@ -540,6 +594,10 @@ pub struct SelfState {
 pub struct Snapshot {
     #[serde(default)]
     pub chat_encryption_required: bool,
+    /// Human-facing name chosen by the server's administrators. The desktop
+    /// daemon supplies a saved connection label when talking to older servers.
+    #[serde(default)]
+    pub server_name: String,
     pub seq: u64,
     #[serde(rename = "self")]
     pub self_state: SelfState,
@@ -559,6 +617,17 @@ pub struct Snapshot {
     pub devices: Vec<DeviceView>,
     #[serde(default)]
     pub last_invite: Option<DeviceInvite>,
+    /// Empty on a server response and populated by a multi-server desktop
+    /// daemon. Older clients ignore these fields and retain single-server
+    /// behavior.
+    #[serde(default)]
+    pub servers: Vec<ServerView>,
+    #[serde(default)]
+    pub selected_server_id: String,
+    #[serde(default)]
+    pub voice_server_id: String,
+    #[serde(default)]
+    pub server_states: Vec<ServerStateView>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -716,6 +785,11 @@ pub struct CreateGroupConversationRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GroupMemberRequest {
+    pub user_id: UserId,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MarkConversationReadRequest {
     pub conversation_id: String,
 }
@@ -756,9 +830,59 @@ pub struct RegisterDeviceRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BootstrapDeviceRequest {
     pub bootstrap_token: String,
-    pub profile: String,
+    pub username: String,
+    pub display_name: String,
+    pub password: String,
     pub device_name: String,
     pub protocol_version: u8,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AccountInviteKind {
+    Friend,
+    Room,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateAccountInviteRequest {
+    pub kind: AccountInviteKind,
+    #[serde(default)]
+    pub conversation_id: Option<String>,
+    #[serde(default)]
+    pub expires_in_minutes: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AccountInvite {
+    pub id: InviteId,
+    pub code: String,
+    pub kind: AccountInviteKind,
+    #[serde(default)]
+    pub conversation_id: Option<String>,
+    pub expires_at: DateTime<Utc>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub uri: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegisterAccountRequest {
+    pub invite_code: String,
+    pub username: String,
+    pub display_name: String,
+    pub password: String,
+    pub device_name: String,
+    pub protocol_version: u8,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LoginRequest {
+    pub username: String,
+    pub password: String,
+    pub device_name: String,
+    pub protocol_version: u8,
+    #[serde(default)]
+    pub invite_code: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -957,6 +1081,50 @@ pub struct ClearChatHistoryRequest {
 pub struct CreateRoomRequest {
     pub name: String,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SetServerAdminRequest {
+    pub user_id: UserId,
+    pub admin: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateServerProfileRequest {
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateServerCategoryRequest {
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RenameServerItemRequest {
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateServerChannelRequest {
+    pub name: String,
+    #[serde(default)]
+    pub category_id: Option<String>,
+    #[serde(default)]
+    pub member_ids: Vec<UserId>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateServerChannelRequest {
+    pub name: String,
+    #[serde(default)]
+    pub category_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateServerRoomRequest {
+    pub name: String,
+    #[serde(default)]
+    pub category_id: Option<String>,
+}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RoomMemberRequest {
     pub conversation_id: String,
@@ -1070,7 +1238,7 @@ mod tests {
     fn older_self_state_defaults_media_details() {
         let state: SelfState = serde_json::from_value(json!({
             "id": "00000000-0000-4000-8000-000000000001",
-            "display_name": "Jared",
+            "display_name": "Owner",
             "presence": "open",
             "connection": "available",
             "muted": false,

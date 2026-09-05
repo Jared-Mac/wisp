@@ -171,6 +171,10 @@ ShellRoot {
 
   // Compatibility endpoint: direct Wisp launches now mean the full app.
   IpcHandler {
+    target: "dev.wisp.chat"
+    function open(id: string): void { bridge.openChannel(id, true) }
+  }
+  IpcHandler {
     target: "dev.wisp.media"
     function open(participant: string, source: string): void {
       app.pendingMedia=app.pendingMedia.concat([{participant:participant,source:source}])

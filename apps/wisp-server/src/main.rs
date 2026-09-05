@@ -12,6 +12,8 @@ struct Args {
     addr: SocketAddr,
     #[arg(long, env = "WISP_DATABASE_URL")]
     database_url: Option<String>,
+    #[arg(long, env = "WISP_PUBLIC_URL")]
+    public_url: Option<String>,
     #[arg(long, env = "WISP_LIVEKIT_URL", default_value = "ws://127.0.0.1:7880")]
     livekit_url: String,
     #[arg(long, env = "WISP_LIVEKIT_API_KEY", default_value = "devkey")]
@@ -83,9 +85,18 @@ async fn main() -> anyhow::Result<()> {
             std::env::var_os("WISP_E2EE_KEY").is_none(),
             "Client media encryption keys must never be installed on the server"
         );
+        anyhow::ensure!(
+            args.public_url
+                .as_deref()
+                .is_some_and(|url| url.starts_with("https://")),
+            "Private hosting requires WISP_PUBLIC_URL=https://..."
+        );
     }
     let config = AppConfig {
         database_url: args.database_url.map_or_else(default_database_url, Ok)?,
+        public_url: args
+            .public_url
+            .map(|url| url.trim_end_matches('/').to_owned()),
         livekit_url: args.livekit_url,
         livekit_api_key: args.livekit_api_key,
         livekit_api_secret: args.livekit_api_secret,

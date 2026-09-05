@@ -16,8 +16,8 @@ FocusScope {
   property bool dismissOnNavigate: false
   property bool showAppButton: false
   property bool showCloseButton: false
-  // Top-level pages share the same way home; future settings-like screens can
-  // use this page state without adding navigation actions to the identity menu.
+  // Top-level pages share one route home. Non-home pages expose it in both the
+  // header and the identity menu without duplicating navigation state.
   property string currentPage: "chats"
   readonly property bool settingsOpen: currentPage === "settings"
   readonly property bool showingChats: currentPage === "chats"
@@ -63,6 +63,7 @@ FocusScope {
       bridge.refreshAudioDevices()
       bridge.refreshVideoDevices()
       bridge.refreshDevices()
+      bridge.refreshServerSettings()
     }
   }
 
@@ -156,6 +157,8 @@ FocusScope {
         maximumWidth: root.inlineHeader ? Math.min(root.theme.space(220), Math.max(0, headerActions.x - root.theme.space(520) - root.theme.spacing.lg * 2)) : Math.max(0, headerActions.x - root.theme.spacing.lg)
         bridge: root.bridge; theme: root.theme; logoSource: root.logoSource
         showWordmark: root.presentation === "app"
+        homeAvailable: !root.showingChats
+        onHomeRequested: root.goHome()
         onSettingsRequested: if (!root.settingsOpen) root.toggleSettings()
         onNewRoomRequested: identityRoomManager.createRoom()
       }
@@ -190,24 +193,14 @@ FocusScope {
           onClicked: layoutMenu.open()
         }
 
-        Button {
+        ChatButton {
           id: homeButton
           objectName: "headerHomeButton"
           visible: !root.showingChats
-          width: root.theme.space(30); height: width
-          Accessible.name: "Back to chats"
+          theme: root.theme
+          text: "[home]"
+          height: root.theme.space(30)
           onClicked: root.goHome()
-          background: Rectangle {
-            radius: root.theme.cornerRadius
-            color: root.theme.alpha(root.theme.foreground, homeButton.down ? 0.18 : homeButton.hovered ? 0.12 : 0.055)
-            border.width: homeButton.visualFocus ? 1 : 0
-            border.color: root.theme.focusBorder
-          }
-          contentItem: Image {
-            source: Qt.resolvedUrl("assets/home.svg")
-            sourceSize: Qt.size(root.theme.space(18), root.theme.space(18))
-            fillMode: Image.Pad
-          }
         }
 
         Rectangle {
@@ -351,7 +344,7 @@ FocusScope {
             theme: root.theme; primary: true
             text: "Voice invite · " + modelData.from.display_name
             width: Math.min(implicitWidth, parent.width)
-            onClicked: { root.currentPage = "chats"; root.bridge.selectConversation(modelData.conversation_id) }
+            onClicked: { root.currentPage = "chats"; root.bridge.selectConversation(root.bridge.scopedConversationId(modelData.server_id,modelData.conversation_id)) }
           }
         }
       }
@@ -413,6 +406,13 @@ FocusScope {
       id: compactDashboard
       spacing: root.theme.spacing.lg
 
+      ServerSelector {
+        width: parent.width
+        bridge: root.bridge
+        theme: root.theme
+        compact: true
+      }
+
       Repeater {
         model: root.bridge.knocks
         delegate: KnockCard {
@@ -432,6 +432,12 @@ FocusScope {
         onJoined: root.maybeDismiss()
         onRoomLeft: root.maybeDismiss()
         onCameraRequested: root.requestCamera()
+      }
+      ServerChannelsView {
+        width: parent.width
+        bridge: root.bridge
+        theme: root.theme
+        onSelected: root.maybeDismiss()
       }
       FriendsView {
         collapsible: true
@@ -459,7 +465,7 @@ FocusScope {
       theme: root.theme
       height: dashboardLoader.height
       onCameraRequested: root.requestCamera()
-      onRevealMainRequested: root.appRequested()
+      onRevealMainRequested: { root.goHome(); root.appRequested() }
     }
   }
 }

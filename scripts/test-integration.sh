@@ -5,6 +5,8 @@ repo_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$repo_dir"
 
 test_dir=$(mktemp -d)
+export XDG_CONFIG_HOME="$test_dir/config"
+export WISP_ACCOUNTS_FILE="$test_dir/accounts.json"
 server_pid=""
 daemon_pid=""
 sim_pid=""
@@ -42,9 +44,9 @@ for _ in $(seq 1 100); do
 done
 curl --silent --fail "$WISP_SERVER_URL/healthz" >/dev/null
 
-target/debug/wisp-sim --profile Tyler --silent >"$test_dir/sim.log" 2>&1 &
+target/debug/wisp-sim --profile MemberA --silent >"$test_dir/sim.log" 2>&1 &
 sim_pid=$!
-target/debug/wispd --profile Jared --disable-media >"$test_dir/daemon.log" 2>&1 &
+target/debug/wispd --profile Owner --disable-media >"$test_dir/daemon.log" 2>&1 &
 daemon_pid=$!
 
 for _ in $(seq 1 100); do
@@ -53,25 +55,35 @@ for _ in $(seq 1 100); do
 done
 [[ -S "$XDG_RUNTIME_DIR/wisp/wispd.sock" ]]
 
-target/debug/wispctl status | rg '"display_name": "Jared"' >/dev/null
-target/debug/wispctl dm Tyler "integration hello" >/dev/null
+# The IPC socket is available while authentication is still in progress.
+# Wait for the initial snapshot and peer presence before issuing chat commands.
+ready=false
+for _ in $(seq 1 100); do
+  if target/debug/wispctl status | jq -e '
+    .self.display_name == "Owner" and
+    any(.friends[]?; .display_name == "MemberA" and .online)
+  ' >/dev/null; then ready=true; break; fi
+  sleep 0.05
+done
+[[ "$ready" == true ]]
+target/debug/wispctl dm MemberA "integration hello" >/dev/null
 direct_id=$(target/debug/wispctl status | jq -er \
-  '.conversations[] | select(.kind == "direct" and .label == "Tyler") | .id')
+  '.conversations[] | select(.kind == "direct" and .label == "MemberA") | .id')
 target/debug/wispctl status | jq -e --arg id "$direct_id" '
   (.messages[] | select(.conversation_id == $id) | .payload == "integration hello") and
   (.conversations[] | select(.id == $id) | .last_message.payload == "integration hello")
 ' >/dev/null
 target/debug/wispctl read "$direct_id" >/dev/null
-target/debug/wispctl porch >/dev/null
+target/debug/wispctl join-room TestRoom >/dev/null
 target/debug/wispctl status | jq -e '
   . as $root |
   .self.connection == "connected" and
-  (.spots[] | select(.name == "Porch") | .active_hangout_id == $root.self.hangout_id)
+  (.spots[] | select(.name == "TestRoom") | .active_hangout_id == $root.self.hangout_id)
 ' >/dev/null
 target/debug/wispctl leave >/dev/null
 target/debug/wispctl status | jq -e '
   .self.connection == "available" and
-  (.spots[] | select(.name == "Porch") | .active_hangout_id == null)
+  (.spots[] | select(.name == "TestRoom") | .active_hangout_id == null)
 ' >/dev/null
 target/debug/wispctl ptt shortcut F8 | jq -e '.shortcut == "F8"' >/dev/null
 target/debug/wispctl status | jq -e '.self.push_to_talk.shortcut == "F8"' >/dev/null
@@ -82,7 +94,7 @@ target/debug/wispctl ptt clear-shortcut | jq -e '.shortcut == null' >/dev/null
 target/debug/wispctl status | jq -e '.self.push_to_talk.shortcut == null' >/dev/null
 rg -F 'No shortcut is currently set.' "$WISP_HYPR_CONFIG_DIR/wisp.lua" >/dev/null
 target/debug/wispctl presence knock | rg '"presence": "knock"' >/dev/null
-target/debug/wispctl join Tyler
+target/debug/wispctl join MemberA
 target/debug/wispctl status | rg '"connection": "connected"' >/dev/null
 target/debug/wispctl mute | rg '"muted": true' >/dev/null
 target/debug/wispctl leave

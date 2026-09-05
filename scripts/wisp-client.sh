@@ -3,7 +3,9 @@ set -euo pipefail
 
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 export PATH="$script_dir:$PATH"
-config_file=${XDG_CONFIG_HOME:-${HOME:?HOME is required}/.config}/wisp/friend.env
+config_root=${XDG_CONFIG_HOME:-${HOME:?HOME is required}/.config}/wisp
+config_file="$config_root/account.env"
+[[ -f "$config_file" ]] || config_file="$config_root/friend.env"
 socket_path=${XDG_RUNTIME_DIR:?XDG_RUNTIME_DIR is required}/wisp/wispd.sock
 
 if command -v wisp-ui >/dev/null 2>&1 \
@@ -26,25 +28,21 @@ profile=${explicit_profile:-${WISP_PROFILE:-$(saved_setting WISP_PROFILE)}}
 device_id=${WISP_DEVICE_ID:-$(saved_setting WISP_DEVICE_ID)}
 device_token=${WISP_DEVICE_TOKEN:-$(saved_setting WISP_DEVICE_TOKEN)}
 e2ee_key=${WISP_E2EE_KEY:-$(saved_setting WISP_E2EE_KEY)}
+server_url=${WISP_SERVER_URL:-$(saved_setting WISP_SERVER_URL)}
 
-if [[ -z "$host" || -z "$profile" ]]; then
-  echo "No saved Wisp friend identity." >&2
-  echo "Enroll with: just friend-register <tailscale-host-or-ip> <Tyler|Jack|Charlie>" >&2
+if [[ -z "$server_url" && -z "$host" ]] || [[ -z "$profile" ]]; then
+  echo "No saved Wisp account." >&2
   exit 2
 fi
-case "$profile" in
-  Jared|Tyler|Jack|Charlie) ;;
-  *)
-    echo "profile must be Tyler, Jack, or Charlie; each friend needs a unique profile" >&2
-    exit 2
-    ;;
-esac
+[[ "$profile" != *$'\n'* && "$profile" != *$'\r'* ]] || {
+  echo "saved profile contains an invalid line break" >&2
+  exit 2
+}
 export WISP_PROFILE="$profile"
 
 endpoint_helper="$script_dir/server-endpoint.sh"
 [[ -f "$endpoint_helper" ]] || endpoint_helper="$script_dir/wisp-server-endpoint"
 source "$endpoint_helper"
-server_url=${WISP_SERVER_URL:-$(saved_setting WISP_SERVER_URL)}
 if [[ -n "$explicit_host" || -z "$server_url" ]]; then server_url=$host; fi
 if [[ "$server_url" == "http://$host:8787" ]]; then server_url=$host; fi
 wisp_resolve_endpoint "$server_url"
@@ -55,18 +53,41 @@ if [[ "$server_url" == https://* ]]; then
 fi
 
 if [[ -z "$device_id" || -z "$device_token" ]] || [[ -z "$e2ee_key" && "$server_url" != https://* ]]; then
-  echo "This device has not been enrolled for private-alpha access." >&2
-  echo "Ask the host for a one-use invite and private media key, then run:" >&2
-  echo "  just friend-register $host $profile" >&2
+  echo "This device has not been signed in to Wisp." >&2
   exit 2
 fi
 export WISP_DEVICE_ID="$device_id"
 export WISP_DEVICE_TOKEN="$device_token"
 export WISP_E2EE_KEY="$e2ee_key"
 
+# One-server installs migrate in place to the multi-server registry. The
+# original account.env remains as a compatibility/rollback copy.
+accounts_file="$config_root/accounts.json"
+if [[ ! -f "$accounts_file" && -n "$server_url" && -n "$device_id" && -n "$device_token" ]]; then
+  for command_name in jq sha256sum; do
+    command -v "$command_name" >/dev/null 2>&1 || {
+      echo "$command_name is required to migrate the Wisp account registry" >&2
+      exit 1
+    }
+  done
+  server_id="server-$(printf '%s' "${server_url%/}" | sha256sum | cut -c1-16)"
+  server_name=$(printf '%s' "$server_url" | sed -E 's#^[a-zA-Z]+://##; s#[:/].*$##')
+  [[ -n "$server_name" ]] || server_name="Wisp server"
+  registry=$(jq -cn \
+    --arg id "$server_id" --arg name "$server_name" --arg url "${server_url%/}" \
+    --arg profile "$profile" --arg device_id "$device_id" \
+    --arg device_token "$device_token" --arg media_key "$e2ee_key" \
+    '{version:1,selected_server_id:$id,servers:[{id:$id,name:$name,server_url:$url,profile:$profile,device_id:$device_id,device_token:$device_token,media_key:(if $media_key=="" then null else $media_key end)}]}')
+  temporary=$(mktemp "$config_root/.accounts.json.XXXXXX")
+  chmod 0600 "$temporary"
+  printf '%s\n' "$registry" >"$temporary"
+  mv -f -- "$temporary" "$accounts_file"
+fi
+export WISP_ACCOUNTS_FILE="$accounts_file"
+
 for command_name in wispd wisp-ui; do
   if ! command -v "$command_name" >/dev/null 2>&1; then
-    echo "$command_name is missing; run ./scripts/friend-bootstrap-cachyos.sh" >&2
+    echo "$command_name is missing; reinstall Wisp with ./scripts/install-release.sh" >&2
     exit 1
   fi
 done
@@ -96,6 +117,6 @@ if [[ ! -S "$socket_path" ]]; then
 fi
 
 wisp-ui app open
-echo "Wisp is running as $profile and will connect through $host when available."
+echo "Wisp is running as $profile and will connect to $server_url when available."
 echo "Keep this terminal open; Ctrl+C exits."
 wait "$daemon_pid"

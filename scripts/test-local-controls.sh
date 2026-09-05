@@ -19,7 +19,7 @@ QML_IMPORT_PATH="$test_dir/app/native" XDG_CONFIG_HOME="$test_dir/config" WISP_S
 cat "$test_dir/log"
 if rg 'LOCAL_TEST_FAILED|TypeError|ReferenceError|Binding loop|Cannot assign|Cannot anchor|Failed to load' "$test_dir/log"; then exit 1; fi
 rg -q 'LOCAL_CONTROLS_OK' "$test_dir/log"
-jq -e '.accounts.self.charlie == 50 and .accounts.self.jared == 200' "$test_dir/config/wisp/participant-volumes.json" >/dev/null
+jq -e '.accounts.self.participant_a == 50 and .accounts.self.participant_b == 200' "$test_dir/config/wisp/participant-volumes.json" >/dev/null
 jq -e '.mutedChats == ["dm"] and (.eventSounds | length) == 4' "$test_dir/config/wisp/notifications.json" >/dev/null
 echo 'Unread navigation, local volumes, speaking activity and real native stream tiles passed'
 mkdir -p "$test_dir/bin" "$test_dir/sound-config"

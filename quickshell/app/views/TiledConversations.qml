@@ -101,6 +101,34 @@ Item {
     commit(next)
     syncConversations()
     if (bridge.activeConversationId) route(bridge.activeConversationId)
+    openPendingConversations()
+  }
+  function openPendingConversations() {
+    if (!loaded || !bridge.pendingConversationTiles.length) return
+    var pending = bridge.pendingConversationTiles
+    bridge.pendingConversationTiles = []
+    pending.forEach(function(id) {
+      var conversation = root.bridge.conversationById(id)
+      if (!conversation) { root.bridge.lastError = "This channel is no longer available."; return }
+      id = String(conversation.id)
+      var leaves = Tiles.leaves(root.tree)
+      var existing = leaves.filter(function(n) { return n.id === id })[0]
+      if (existing) {
+        root.activate(existing.key)
+        root.route(id)
+        if (root.detachedKeys.indexOf(existing.key) < 0) root.revealMainRequested()
+        return
+      }
+      var empty = leaves.filter(function(n) { return !n.id })[0]
+      if (empty) root.choose(empty.key, id)
+      else if (root.paneCount < 8) root.addConversation(root.activeKey, id)
+      else {
+        root.bridge.lastError = "All 8 tiles are in use. Close a tile before opening another."
+        root.revealMainRequested()
+        return
+      }
+      root.revealMainRequested()
+    })
   }
   function syncConversations() {
     if (!loaded) { initialize(); return }
@@ -109,7 +137,10 @@ Item {
     Tiles.leaves(next).forEach(function(n) {
       if (root.videoFor(n.id)) return
       var c=bridge.conversationById(n.id)
-      if (!c || c.tab_closed) {
+      if (c && !c.tab_closed && String(n.id)!==String(c.id)) {
+        n.id=String(c.id)
+        used.push(n.id)
+      } else if (!c || c.tab_closed) {
         var candidate=open.filter(function(c) { return used.indexOf(String(c.id))<0 })[0]
         n.id=candidate ? String(candidate.id) : ""
         used.push(n.id)
@@ -210,6 +241,7 @@ Item {
     target: root.bridge
     function onConversationsChanged() { root.syncConversations() }
     function onActiveConversationIdChanged() { root.route(root.bridge.activeConversationId) }
+    function onPendingConversationTilesChanged() { root.openPendingConversations() }
     function onMediaWatchReady(video) { root.openVideo(video) }
     function onRemoteVideosChanged() { root.syncVideos() }
     function onMainWindowOpenChanged() {

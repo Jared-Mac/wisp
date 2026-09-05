@@ -342,8 +342,8 @@ mod tests {
     use super::*;
     use crate::tests::{chat_headers, test_config};
     use crate::{
-        CHARLIE_ID, JARED_ID, TYLER_ID, clear_history_for, find_or_create_direct, get_chat_file,
-        load_recent_messages,
+        TEST_MEMBER_A_ID, TEST_MEMBER_C_ID, TEST_OWNER_ID, clear_history_for,
+        find_or_create_direct, get_chat_file, load_recent_messages,
     };
     use futures_util::StreamExt;
 
@@ -370,8 +370,8 @@ mod tests {
     #[allow(clippy::too_many_lines)]
     async fn chunks_resume_stream_and_complete_idempotently_above_old_limit() {
         let state = AppState::new(test_config()).await.unwrap();
-        let user = Uuid::parse_str(JARED_ID).unwrap();
-        let peer = Uuid::parse_str(TYLER_ID).unwrap();
+        let user = Uuid::parse_str(TEST_OWNER_ID).unwrap();
+        let peer = Uuid::parse_str(TEST_MEMBER_A_ID).unwrap();
         let conversation_id = find_or_create_direct(&state.pool, user, peer)
             .await
             .unwrap();
@@ -387,7 +387,7 @@ mod tests {
         assert_eq!(
             begin(
                 State(state.clone()),
-                chat_headers(JARED_ID),
+                chat_headers(TEST_OWNER_ID),
                 Json(request.clone())
             )
             .await
@@ -397,14 +397,14 @@ mod tests {
             0
         );
         assert!(
-            complete(State(state.clone()), chat_headers(JARED_ID), Path(id))
+            complete(State(state.clone()), chat_headers(TEST_OWNER_ID), Path(id))
                 .await
                 .is_err()
         );
         assert!(
             begin(
                 State(state.clone()),
-                chat_headers(TYLER_ID),
+                chat_headers(TEST_MEMBER_A_ID),
                 Json(request.clone())
             )
             .await
@@ -414,7 +414,7 @@ mod tests {
         assert!(
             chunk(
                 State(state.clone()),
-                chat_headers(TYLER_ID),
+                chat_headers(TEST_MEMBER_A_ID),
                 Path((id, 0)),
                 bytes.clone()
             )
@@ -424,7 +424,7 @@ mod tests {
         assert!(
             chunk(
                 State(state.clone()),
-                chat_headers(JARED_ID),
+                chat_headers(TEST_OWNER_ID),
                 Path((id, 1)),
                 bytes.clone()
             )
@@ -434,7 +434,7 @@ mod tests {
         for index in 0..8 {
             let result = chunk(
                 State(state.clone()),
-                chat_headers(JARED_ID),
+                chat_headers(TEST_OWNER_ID),
                 Path((id, index)),
                 bytes.clone(),
             )
@@ -447,7 +447,7 @@ mod tests {
         assert_eq!(
             chunk(
                 State(state.clone()),
-                chat_headers(JARED_ID),
+                chat_headers(TEST_OWNER_ID),
                 Path((id, 7)),
                 bytes
             )
@@ -460,7 +460,7 @@ mod tests {
         assert_eq!(
             begin(
                 State(state.clone()),
-                chat_headers(JARED_ID),
+                chat_headers(TEST_OWNER_ID),
                 Json(request.clone())
             )
             .await
@@ -469,12 +469,12 @@ mod tests {
             .received_bytes,
             request.size
         );
-        let message = complete(State(state.clone()), chat_headers(JARED_ID), Path(id))
+        let message = complete(State(state.clone()), chat_headers(TEST_OWNER_ID), Path(id))
             .await
             .unwrap()
             .0;
         assert_eq!(
-            complete(State(state.clone()), chat_headers(JARED_ID), Path(id))
+            complete(State(state.clone()), chat_headers(TEST_OWNER_ID), Path(id))
                 .await
                 .unwrap()
                 .0
@@ -482,11 +482,11 @@ mod tests {
             message.id
         );
         assert!(
-            download(&state, &chat_headers(CHARLIE_ID), message.id)
+            download(&state, &chat_headers(TEST_MEMBER_C_ID), message.id)
                 .await
                 .is_err()
         );
-        let response = download(&state, &chat_headers(TYLER_ID), message.id)
+        let response = download(&state, &chat_headers(TEST_MEMBER_A_ID), message.id)
             .await
             .unwrap()
             .unwrap();
@@ -502,7 +502,7 @@ mod tests {
         // Common DM clearing deletes both metadata and every chunk, including kept files.
         let _ = retention(
             State(state.clone()),
-            chat_headers(TYLER_ID),
+            chat_headers(TEST_MEMBER_A_ID),
             Path(message.id),
             Json(SetFileRetention { keep: true }),
         )
@@ -514,7 +514,7 @@ mod tests {
         assert!(
             get_chat_file(
                 State(state.clone()),
-                chat_headers(TYLER_ID),
+                chat_headers(TEST_MEMBER_A_ID),
                 Path(message.id)
             )
             .await
@@ -539,8 +539,8 @@ mod tests {
     #[tokio::test]
     async fn expiry_keep_override_and_abandoned_upload_cleanup() {
         let state = AppState::new(test_config()).await.unwrap();
-        let user = Uuid::parse_str(JARED_ID).unwrap();
-        let peer = Uuid::parse_str(TYLER_ID).unwrap();
+        let user = Uuid::parse_str(TEST_OWNER_ID).unwrap();
+        let peer = Uuid::parse_str(TEST_MEMBER_A_ID).unwrap();
         let conversation_id = find_or_create_direct(&state.pool, user, peer)
             .await
             .unwrap();
@@ -558,7 +558,7 @@ mod tests {
         assert!(
             retention(
                 State(state.clone()),
-                chat_headers(CHARLIE_ID),
+                chat_headers(TEST_MEMBER_C_ID),
                 Path(message.id),
                 Json(SetFileRetention { keep: false })
             )
@@ -567,7 +567,7 @@ mod tests {
         );
         let _ = retention(
             State(state.clone()),
-            chat_headers(TYLER_ID),
+            chat_headers(TEST_MEMBER_A_ID),
             Path(message.id),
             Json(SetFileRetention { keep: false }),
         )
@@ -576,7 +576,7 @@ mod tests {
         assert!(
             get_chat_file(
                 State(state.clone()),
-                chat_headers(JARED_ID),
+                chat_headers(TEST_OWNER_ID),
                 Path(message.id)
             )
             .await
@@ -589,7 +589,7 @@ mod tests {
         assert!(
             retention(
                 State(state.clone()),
-                chat_headers(JARED_ID),
+                chat_headers(TEST_OWNER_ID),
                 Path(message.id),
                 Json(SetFileRetention { keep: true })
             )
@@ -606,7 +606,7 @@ mod tests {
         };
         let _ = begin(
             State(state.clone()),
-            chat_headers(JARED_ID),
+            chat_headers(TEST_OWNER_ID),
             Json(pending.clone()),
         )
         .await

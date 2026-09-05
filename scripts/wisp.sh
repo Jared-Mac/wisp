@@ -2,12 +2,12 @@
 set -euo pipefail
 
 bin_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-config_file=${XDG_CONFIG_HOME:-${HOME:?HOME is required}/.config}/wisp/friend.env
+config_file=${XDG_CONFIG_HOME:-${HOME:?HOME is required}/.config}/wisp/account.env
 if [[ -f "$config_file" ]]; then
   configured_profile=$(sed -n 's/^WISP_PROFILE=//p' "$config_file" | tail -n 1)
-  case "$configured_profile" in
-    Tyler|Jack|Charlie) export WISP_PROFILE="$configured_profile" ;;
-  esac
+  if [[ -n "$configured_profile" && "$configured_profile" != *$'\n'* && "$configured_profile" != *$'\r'* ]]; then
+    export WISP_PROFILE="$configured_profile"
+  fi
 fi
 
 if command -v systemctl >/dev/null 2>&1 \

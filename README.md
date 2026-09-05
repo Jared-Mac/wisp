@@ -17,9 +17,9 @@ In another terminal:
 
 ```bash
 just app
-just sim Tyler
+just sim MemberA
 cargo run -p wispctl -- status
-cargo run -p wispctl -- join Tyler
+cargo run -p wispctl -- join MemberA
 ```
 
 `just app` syncs and opens the portable, resizable Quickshell application.
@@ -126,58 +126,57 @@ standalone configuration have independent pushed connections to `wispd`; call
 state remains daemon-owned. The adapter is not required on CachyOS or other
 desktops.
 
-## Trusted Tailscale friend test
+## Accounts and public servers
 
-For a short multi-PC test, the host can run a separate tailnet-only mode:
+Wisp connects directly to a self-hosted HTTPS server; clients do not need a VPN
+or provider account. A fresh server has no built-in users or rooms. Its one-time
+bootstrap creates the server owner account. Everyone else creates an account
+from an encoded friend or room invitation, or signs in to an existing account.
+Launching Wisp without saved account credentials opens the sign-in window.
+Choose **[create account]** there to enter an invitation and register, or
+**[new server]** to bootstrap a server you own. Closing the prompt exits Wisp;
+it does not reopen repeatedly. Saved credentials still sign in automatically.
 
-```bash
-just dev-tailscale
-just tailscale-info  # run in another terminal
-```
+Passwords are stored by the server only as Argon2id hashes. After a successful
+login, Wisp saves a revocable device credential in
+`~/.config/wisp/account.env` with user-only permissions and logs in automatically
+on future starts. The account password is not saved locally. Chat recovery keys
+and media keys remain client-side and are separate from account authentication.
 
-Friends on CachyOS clone this repository, run `just friend-bootstrap`, and then
-enroll each computer with its own one-use invite:
+The desktop daemon also maintains a private `~/.config/wisp/accounts.json`
+registry. Each accepted invite or login adds or updates one independently
+hosted server account; credentials are never shared between servers. The
+active-server selector above Rooms changes the Rooms, Channels, Friends, and
+administration context, while already-open chat tiles from other servers stay
+open. Joining voice on another server stops old camera/screen publication
+before switching the single active media context.
+Server owners and administrators can assign a human-facing server name in
+Server Settings. Selectors, chat pickers, and tile paths use that name instead
+of exposing the connection hostname.
 
-```bash
-just friend-register <host>.ts.net Tyler
-just friend
-```
+See [`docs/private-host-setup.md`](docs/private-host-setup.md) for Ubuntu server,
+TLS, firewall, LiveKit, privacy, backup, and validation guidance.
 
-The host creates the invite with `wispctl invite Tyler`, then sends its code and
-the private media key to that friend separately from GitHub. `friend-register`
-prompts without echoing either secret and stores the host, assigned identity,
-device credential, and media key in
-`~/.config/wisp/friend.env` with user-only permissions. The setting is local to
-that computer and is never committed to the repository. Every computer is a
-separately revocable device with a short-lived server session. The panel header
-shows
-the active profile name and live Open, Knock first, Closed, or Away presence so
-identity and availability are immediately visible. During an active voice
-connection the header shows Connected instead. Re-run `friend-register` with a
-new invite to change the saved host, profile, or device. `wispd` itself also
-requires a profile argument or `WISP_PROFILE`, so an unconfigured client can no
-longer silently become Jared.
-
-The Tailscale address and unique Tyler/Jack/Charlie assignments are private test
-information and must not be committed. See
-[`docs/tailscale-friend-test.md`](docs/tailscale-friend-test.md) for complete
-host setup, CachyOS instructions, ports, test steps, and security limitations.
-
-## Messages, Porch, and devices
+## Messages, rooms, and devices
 
 The app includes direct messages, the small-circle timeline, persistent Spot
 chats, and the current ad-hoc room timeline. Messages are committed to SQLite
 before acknowledgement, missed messages synchronize after reconnect, and
 unread cursors are per user. Ad-hoc room messages expire after 24 hours.
-**Porch** keeps one durable chat while its voice/video room exists only when
-occupied and is recreated for a later visit.
+Persistent rooms keep durable chat while their voice/video sessions exist only
+while occupied. Any account can create a room and becomes that room's owner.
+The server owner can grant persistent server-admin access from **Settings →
+Server**. Server admins can rename and remove inactive rooms and organize
+dedicated encrypted text channels into categories. Only the owner can grant or
+revoke server admins; ownership, host credentials, secrets, service shutdown,
+and VPS controls are deliberately not exposed through Wisp.
 
 Friends can open a direct conversation from a friend row. Equivalent CLI
 operations are useful for diagnostics:
 
 ```bash
-wispctl dm Tyler "Are you free?"
-wispctl porch
+wispctl dm MemberA "Are you free?"
+wispctl status
 wispctl devices
 wispctl revoke-device <device-id>
 ```
@@ -239,9 +238,10 @@ favorites and tray collapse state are saved per account on this device in
 `~/.config/wisp/friends.json` and are independent of the theme.
 
 Click the top-left waveform/Wisp/profile area to open the account menu in either
-window. **Settings** and **New Room** live here. A **Home** icon appears in the
-header while in Settings, immediately left of **Open app** in the tray. It returns
-to chats without closing the window or resetting drafts. Friend rows are compact, with the favorite star immediately after the
+window. **Settings** and **New Room** live here. A **[home]** action appears in the
+header while in Settings, immediately left of **Open app** in the tray, and is
+also the first account-menu item on non-home pages. It returns to chats without
+closing the window or resetting drafts. Friend rows are compact, with the favorite star immediately after the
 name. Stars appear only while hovering the friend row or focusing the star with
 the keyboard, without shifting the name. Add Friend is deferred until the
 friend-invitation workflow is agreed.
@@ -293,8 +293,8 @@ group, including when dragging over its own old area. Top and bottom targets use
 the nearest edge so tall panes remain easy to rearrange. Unchanged placements say
 **Already here** and preserve existing divider sizes. Every main-window chat pane
 and pop-out uses a current-conversation dropdown, with a searchable, scrollable
-list grouped into **Rooms** and **Friends List** (DMs and friend group chats).
-Use the All/Rooms/Friends List filters to jump between categories.
+list grouped by server, then room category, dedicated channel category, and
+friends/groups. Use the All/Rooms/Channels/Friends filters to jump between kinds.
 Unread counts and closed conversations remain visible. Type to filter names;
 Up/Down selects a result, Enter opens it, and Escape dismisses the picker.
 The picker's **New chat** action opens a friend selector: start/reopen a DM, or
@@ -309,6 +309,11 @@ endpoint. No database migration or new conversation wire enum is needed. Older
 servers return a clear update-required error and keep the form's selections;
 existing DM creation still works. Updating the local client does not deploy the
 remote server.
+
+Group owners can add or remove friends from **Chat options → Group members**.
+Encrypted membership changes publish a signed successor
+roster, so added members cannot decrypt old history and removed members receive
+no future message keys. A group remains hosted by exactly one server.
 This follows the local Tile Flow split-tree interaction without changing KWin settings.
 At very small window sizes, the workspace scrolls rather than crushing editors.
 **Close pane** removes only that tile, never its conversation, draft, or history.
@@ -336,7 +341,7 @@ immediate. Run `bash scripts/test-camera-confirmation.sh` for hardware-free chec
 
 Confirmed settings saves briefly show **Changes Saved** for 2.5 seconds. Activity
 collapse, divider resizing, docking, and chat tiling save silently. Failed
-saves retain their error feedback instead. The Home icon has no tooltip.
+saves retain their error feedback instead. The `[home]` action has no tooltip.
 
 Wisp-managed windows, menus, dialogs, and local video previews use a shared thin
 border for clear separation. Borders follow the selected color palette; Omarchy
@@ -344,8 +349,8 @@ continues using its host-provided frames.
 
 Use **Account menu → New Room** to create a private room you own. **Chat options → Room
 settings…** lets owners/admins invite friends, and lets owners grant or revoke
-admin access. Membership and permissions survive restarts. Jared owns Porch;
-owning Porch does not confer privileges in someone else's room. Creating or
+admin access. Membership and permissions survive restarts. Owner owns TestRoom;
+owning TestRoom does not confer privileges in someone else's room. Creating or
 being invited to a room never automatically joins a voice/video call.
 
 Both the full app and tray chat accept **Ctrl+V** screenshot pastes and local
@@ -443,19 +448,19 @@ wisp-restore ~/.local/share/wisp/server/backups/<backup>.sqlite3
 systemctl --user start wisp-server.service
 ```
 
-To test voice and remote video without microphone feedback, start Tyler with
+To test voice and remote video without microphone feedback, start MemberA with
 generated media:
 
 ```bash
-just sim Tyler --publish-tone --publish-video --publish-camera
-cargo run -p wispctl -- join Tyler
+just sim MemberA --publish-tone --publish-video --publish-camera
+cargo run -p wispctl -- join MemberA
 cargo run -p wispctl -- status
 ```
 
 The status output reports the selected microphone/speaker and a growing
 `received_audio_frames` counter. Synthetic screen and camera tracks appear as
 separate available media. The UI's per-track **Watch** button, or
-`wispctl watch Tyler screen_share` / `wispctl watch Tyler camera`, opens a
+`wispctl watch MemberA screen_share` / `wispctl watch MemberA camera`, opens a
 GPU-rendered native XWayland window with app ID `dev.wisp.surface`. Unwatching
 either track hides its window and unsubscribes without leaving the LiveKit
 room. `wispctl mute`, `unmute`, `deafen`, `undeafen`, and `leave` operate on the
@@ -507,13 +512,13 @@ gets Join/Later controls in the Wisp panel; the same flow is available from the
 CLI:
 
 ```bash
-cargo run -p wispctl -- join Tyler
+cargo run -p wispctl -- join MemberA
 cargo run -p wispctl -- knock <knock-id> join
 # or: cargo run -p wispctl -- knock <knock-id> later
 ```
 
 For unattended development, a simulator can respond automatically with
-`just sim Tyler --presence knock --auto-respond-knocks join`.
+`just sim MemberA --presence knock --auto-respond-knocks join`.
 
 To bind `Super+H`, copy the single reviewed line from
 `infra/local/wisp-bindings.lua` into `~/.config/hypr/bindings.lua`, then run
@@ -550,7 +555,7 @@ and memory allowance can be adjusted with `WISP_RELIABILITY_CYCLES` and
 `docs/architecture.md`. `just test-knock` covers request deduplication, Later,
 expiry, acceptance, both offline-user cases, and simulator auto-response.
 `just test-private-alpha` covers one-use enrollment, short sessions, scoped
-conversation access, offline delivery, unread cursors, Porch lifecycle,
+conversation access, offline delivery, unread cursors, TestRoom lifecycle,
 retention, restart, online backup/restore, revocation, protocol rejection, and
 the no-message-content logging rule.
 
@@ -583,17 +588,14 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-The archive contains `wispd`, `wispctl`, `wisp-server`, the standalone
+The archive contains `wispd`, `wisp-account`, `wispctl`, `wisp-server`, the standalone
 Quickshell app, the Omarchy adapter, and the runtime launch scripts. After
-installing the CachyOS runtime dependencies listed in
-[`docs/tailscale-friend-test.md`](docs/tailscale-friend-test.md), extract it and
-run:
+installing the desktop runtime dependencies, extract it and run:
 
 ```bash
 ./install.sh
-wisp-friend-register <host>.ts.net Tyler
 wisp
 ```
 
 The release job uses GitHub's short-lived repository token. It does not require
-or receive Tailscale credentials, LiveKit secrets, or a personal access token.
+or receive deployment credentials, LiveKit secrets, or a personal access token.

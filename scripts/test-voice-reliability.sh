@@ -7,12 +7,14 @@ repo_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$repo_dir"
 
 test_dir=$(mktemp -d)
+export XDG_CONFIG_HOME="$test_dir/config"
+export WISP_ACCOUNTS_FILE="$test_dir/accounts.json"
 livekit_pid=""
 server_pid=""
 daemon_pid=""
-tyler_pid=""
-jack_pid=""
-charlie_pid=""
+member_a_pid=""
+member_b_pid=""
+member_c_pid=""
 
 stop_process() {
   local signal=$1
@@ -23,14 +25,14 @@ stop_process() {
 cleanup() {
   local status=$?
   trap - EXIT INT TERM
-  for pid in "$daemon_pid" "$tyler_pid" "$jack_pid" "$charlie_pid"; do
+  for pid in "$daemon_pid" "$member_a_pid" "$member_b_pid" "$member_c_pid"; do
     stop_process INT "$pid"
   done
   sleep 0.1
-  for pid in "$daemon_pid" "$tyler_pid" "$jack_pid" "$charlie_pid" "$server_pid" "$livekit_pid"; do
+  for pid in "$daemon_pid" "$member_a_pid" "$member_b_pid" "$member_c_pid" "$server_pid" "$livekit_pid"; do
     stop_process TERM "$pid"
   done
-  for pid in "$daemon_pid" "$tyler_pid" "$jack_pid" "$charlie_pid" "$server_pid" "$livekit_pid"; do
+  for pid in "$daemon_pid" "$member_a_pid" "$member_b_pid" "$member_c_pid" "$server_pid" "$livekit_pid"; do
     [[ -z "$pid" ]] || wait "$pid" 2>/dev/null || true
   done
   if [[ $status -ne 0 ]]; then
@@ -115,10 +117,10 @@ done
 curl --silent --fail "http://127.0.0.1:$server_port/healthz" >/dev/null
 
 WISP_SERVER_URL="http://127.0.0.1:$server_port" RUST_LOG=info \
-  target/debug/wisp-sim --profile Tyler --publish-tone >"$test_dir/tyler.log" 2>&1 &
-tyler_pid=$!
+  target/debug/wisp-sim --profile MemberA --publish-tone >"$test_dir/member_a.log" 2>&1 &
+member_a_pid=$!
 WISP_SERVER_URL="http://127.0.0.1:$server_port" RUST_LOG=info \
-  target/debug/wispd --profile Jared --socket "$socket_path" \
+  target/debug/wispd --profile Owner --socket "$socket_path" \
   >"$test_dir/daemon.log" 2>&1 &
 daemon_pid=$!
 for _ in $(seq 1 200); do
@@ -127,12 +129,12 @@ for _ in $(seq 1 200); do
 done
 [[ -S "$socket_path" ]]
 
-target/debug/wispctl --socket "$socket_path" join Tyler
+target/debug/wispctl --socket "$socket_path" join MemberA
 wait_for_status '
   .self.connection == "connected" and
   .self.media.livekit_connected == true and
   .self.media.e2ee_enabled == true and
-  .self.media.remote_audio_participants == ["Tyler"] and
+  .self.media.remote_audio_participants == ["MemberA"] and
   .self.media.received_audio_frames > 0 and
   .self.media.audio.preset == "clear" and
   .self.media.audio.denoiser_active == true and
@@ -145,19 +147,19 @@ wait_for_status '
 '
 
 WISP_SERVER_URL="http://127.0.0.1:$server_port" RUST_LOG=info \
-  target/debug/wisp-sim --profile Jack --join Jared --publish-tone >"$test_dir/jack.log" 2>&1 &
-jack_pid=$!
+  target/debug/wisp-sim --profile MemberB --join Owner --publish-tone >"$test_dir/member_b.log" 2>&1 &
+member_b_pid=$!
 wait_for_status '
-  .self.media.remote_audio_participants == ["Jack", "Tyler"] and
+  .self.media.remote_audio_participants == ["MemberB", "MemberA"] and
   .self.media.received_audio_frames > 0
 '
 
 WISP_SERVER_URL="http://127.0.0.1:$server_port" RUST_LOG=info \
-  target/debug/wisp-sim --profile Charlie --join Jared --publish-tone >"$test_dir/charlie.log" 2>&1 &
-charlie_pid=$!
+  target/debug/wisp-sim --profile MemberC --join Owner --publish-tone >"$test_dir/member_c.log" 2>&1 &
+member_c_pid=$!
 wait_for_status '
   .self.connection == "connected" and
-  .self.media.remote_audio_participants == ["Charlie", "Jack", "Tyler"] and
+  .self.media.remote_audio_participants == ["MemberC", "MemberB", "MemberA"] and
   .self.media.received_audio_frames > 0
 '
 
@@ -172,11 +174,11 @@ for cycle in $(seq 1 "$cycles"); do
     .self.media.livekit_connected == false and
     .self.media.remote_audio_participants == []
   '
-  target/debug/wispctl --socket "$socket_path" join Tyler
+  target/debug/wispctl --socket "$socket_path" join MemberA
   wait_for_status '
     .self.connection == "connected" and
     .self.media.livekit_connected == true and
-    .self.media.remote_audio_participants == ["Charlie", "Jack", "Tyler"] and
+    .self.media.remote_audio_participants == ["MemberC", "MemberB", "MemberA"] and
     .self.media.received_audio_frames > 0 and
     .self.media.audio.denoiser == "deepfilternet"
   '
@@ -198,7 +200,7 @@ for _ in $(seq 1 100); do
 done
 jq -e --argjson before "$frames_before_ipc" '
   .self.connection == "connected" and
-  .self.media.remote_audio_participants == ["Charlie", "Jack", "Tyler"] and
+  .self.media.remote_audio_participants == ["MemberC", "MemberB", "MemberA"] and
   .self.media.received_audio_frames > $before
 ' <<<"$status_json" >/dev/null
 
@@ -213,7 +215,7 @@ for _ in $(seq 1 300); do
   if jq -e --argjson before "$frames_before_restart" '
     .self.connection == "connected" and
     .self.media.livekit_connected == true and
-    .self.media.remote_audio_participants == ["Charlie", "Jack", "Tyler"] and
+    .self.media.remote_audio_participants == ["MemberC", "MemberB", "MemberA"] and
     .self.media.received_audio_frames > $before
   ' <<<"$status_json" >/dev/null; then break; fi
   sleep 0.1
@@ -221,7 +223,7 @@ done
 jq -e --argjson before "$frames_before_restart" '
   .self.connection == "connected" and
   .self.media.livekit_connected == true and
-  .self.media.remote_audio_participants == ["Charlie", "Jack", "Tyler"] and
+  .self.media.remote_audio_participants == ["MemberC", "MemberB", "MemberA"] and
   .self.media.received_audio_frames > $before
 ' <<<"$status_json" >/dev/null
 rg -q 'LiveKit media reconnecting' "$test_dir/daemon.log"
@@ -232,7 +234,7 @@ kill -KILL "$livekit_pid"
 wait "$livekit_pid" 2>/dev/null || true
 livekit_pid=""
 sleep 0.2
-if target/debug/wispctl --socket "$socket_path" join Tyler \
+if target/debug/wispctl --socket "$socket_path" join MemberA \
   >"$test_dir/expected-connect-error.log" 2>&1; then
   echo "Joining unexpectedly succeeded while LiveKit was offline" >&2
   exit 1
@@ -244,13 +246,13 @@ wait_for_status '
   (.self.media.error | startswith("LiveKit connection failed:"))
 '
 start_livekit
-target/debug/wispctl --socket "$socket_path" join Tyler
+target/debug/wispctl --socket "$socket_path" join MemberA
 wait_for_status '
   .self.connection == "connected" and
   .self.media.livekit_connected == true and
   .self.media.error_code == null and
   .self.media.error == null and
-  .self.media.remote_audio_participants == ["Charlie", "Jack", "Tyler"] and
+  .self.media.remote_audio_participants == ["MemberC", "MemberB", "MemberA"] and
   .self.media.received_audio_frames > 0
 '
 

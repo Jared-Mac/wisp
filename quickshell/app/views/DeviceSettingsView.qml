@@ -109,56 +109,45 @@ Column {
   }
 
   Column {
-    visible: String(root.bridge.selfState.display_name || "") === "Jared"
     width: parent.width
     spacing: root.theme.spacing.sm
 
     Text {
-      text: "Invite a friend’s device"
+      text: "Invite a friend"
       color: root.theme.foreground
       font.family: root.theme.font.family
       font.pixelSize: root.theme.font.caption
       font.weight: Font.DemiBold
     }
 
-    Flow {
-      width: parent.width
-      height: childrenRect.height
-      spacing: root.theme.spacing.sm
+    Rectangle {
+      width: inviteLabel.implicitWidth + root.theme.spacing.lg * 2
+      height: root.theme.space(30)
+      radius: root.theme.cornerRadius
+      color: inviteMouse.containsMouse
+        ? root.theme.alpha(root.theme.accent, 0.28)
+        : root.theme.alpha(root.theme.foreground, 0.06)
 
-      Repeater {
-        model: root.bridge.friends
-        delegate: Rectangle {
-          required property var modelData
-          width: inviteLabel.implicitWidth + root.theme.spacing.lg * 2
-          height: root.theme.space(30)
-          radius: root.theme.cornerRadius
-          color: inviteMouse.containsMouse
-            ? root.theme.alpha(root.theme.accent, 0.28)
-            : root.theme.alpha(root.theme.foreground, 0.06)
+      Text {
+        id: inviteLabel
+        anchors.centerIn: parent
+        text: "invite a friend"
+        color: root.theme.foreground
+        font.family: root.theme.font.family
+        font.pixelSize: root.theme.font.caption
+      }
 
-          Text {
-            id: inviteLabel
-            anchors.centerIn: parent
-            text: String(modelData.display_name || "Friend")
-            color: root.theme.foreground
-            font.family: root.theme.font.family
-            font.pixelSize: root.theme.font.caption
-          }
-
-          MouseArea {
-            id: inviteMouse
-            anchors.fill: parent
-            hoverEnabled: true
-            cursorShape: Qt.PointingHandCursor
-            onClicked: root.bridge.createInvite(modelData.display_name, 30)
-          }
-        }
+      MouseArea {
+        id: inviteMouse
+        anchors.fill: parent
+        hoverEnabled: true
+        cursorShape: Qt.PointingHandCursor
+        onClicked: root.bridge.createAccountInvite("friend", "", 30)
       }
     }
 
     Rectangle {
-      visible: !!root.bridge.lastInvite
+      visible: !!root.bridge.lastAccountInvite
       width: parent.width
       height: visible ? root.theme.space(62) : 0
       radius: root.theme.cornerRadius
@@ -170,8 +159,7 @@ Column {
         spacing: root.theme.spacing.xs
 
         Text {
-          text: root.bridge.lastInvite
-            ? "One-use invite for " + String(root.bridge.lastInvite.profile) : ""
+          text: root.bridge.lastAccountInvite ? "One-use account invite" : ""
           color: root.theme.muted
           font.family: root.theme.font.family
           font.pixelSize: root.theme.font.caption
@@ -181,7 +169,8 @@ Column {
           width: parent.width
           readOnly: true
           selectByMouse: true
-          text: root.bridge.lastInvite ? String(root.bridge.lastInvite.code) : ""
+          text: root.bridge.lastAccountInvite
+            ? String(root.bridge.lastAccountInvite.uri || root.bridge.lastAccountInvite.code) : ""
           color: root.theme.foreground
           selectionColor: root.theme.accent
           font.family: "monospace"

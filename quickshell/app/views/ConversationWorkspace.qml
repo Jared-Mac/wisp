@@ -43,7 +43,9 @@ Rectangle {
   TerminalFrame {
     objectName: "conversationColorFrame"
     anchors.fill: parent; theme: root.theme
-    title: root.theme.cleanTui ? "03 /chat" : "03: /chat/" + root.label(root.current)
+    title: root.theme.cleanTui
+      ? "03 /" + (root.current ? root.current.server_name + "/chat" : "chat")
+      : "03: /" + (root.current ? root.current.server_name + "/chat/" + root.label(root.current) : "chat")
     ink: root.theme.chatBordersColored ? root.chatBorderColor : root.paneActive ? root.theme.accent : root.theme.surfaceBorder
     titleInk: root.chatHeadingColor
     emphasized: root.paneActive && root.tiled && root.canClosePane
@@ -218,6 +220,14 @@ Rectangle {
       onTriggered: root.bridge.toggleChatNotifications(root.currentId)
       ThemeControlStyle { theme: root.theme; control: muteChat }
     }
+    MenuItem {
+      id: manageGroup
+      text: "Group members…"
+      visible: !!(root.current && root.current.kind==="circle" && !root.current.server_channel)
+      height: visible ? implicitHeight : 0
+      onTriggered: groupManager.manage(root.currentId)
+      ThemeControlStyle { theme: root.theme; control: manageGroup }
+    }
     MenuSeparator {}
     MenuItem {
       id: trialControl3
@@ -273,4 +283,5 @@ Rectangle {
   }
   ClearHistoryDialog { id: confirmClear; bridge: root.bridge; theme: root.theme }
   RoomManager { id: roomManager; bridge: root.bridge; theme: root.theme }
+  GroupManager { id: groupManager; bridge: root.bridge; theme: root.theme }
 }

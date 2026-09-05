@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Source-only endpoint parser. HTTPS origins are used for hosted installations;
-# bare hostnames retain the private-alpha Tailscale transport for compatibility.
+# Source-only endpoint parser. Public servers require HTTPS; plain HTTP is
+# accepted only for development on the same machine.
 wisp_resolve_endpoint() {
   local endpoint=${1:-}
   if [[ "$endpoint" =~ ^https://([A-Za-z0-9][A-Za-z0-9.-]*)(:([0-9]{1,5}))?/?$ ]]; then
@@ -9,11 +9,11 @@ wisp_resolve_endpoint() {
     fi
     WISP_SELECTED_SERVER_HOST=${BASH_REMATCH[1]}
     WISP_SELECTED_SERVER_URL=${endpoint%/}
-  elif [[ "$endpoint" =~ ^[A-Za-z0-9][A-Za-z0-9.-]*$ ]]; then
-    WISP_SELECTED_SERVER_HOST=$endpoint
-    WISP_SELECTED_SERVER_URL="http://$endpoint:8787"
+  elif [[ "$endpoint" =~ ^http://(localhost|127\.0\.0\.1|\[::1\])(:([0-9]{1,5}))?/?$ ]]; then
+    WISP_SELECTED_SERVER_HOST=${BASH_REMATCH[1]}
+    WISP_SELECTED_SERVER_URL=${endpoint%/}
   else
-    echo "Use an HTTPS origin (https://wisp.example.com) or a private-alpha Tailscale host; no credentials, paths, or query strings" >&2
+    echo "Use an HTTPS origin such as https://wisp.example.com; plain HTTP is limited to localhost development" >&2
     return 2
   fi
 }

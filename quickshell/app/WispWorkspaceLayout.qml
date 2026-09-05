@@ -13,9 +13,14 @@ Item {
   property alias trayRoomsCollapsed: preferences.trayRoomsCollapsed
   property alias chatTiles: preferences.chatTiles
   property alias streamsAsTiles: preferences.streamsAsTiles
+  property alias channelsAsTiles: preferences.channelsAsTiles
+  property alias selectedServerId: preferences.selectedServerId
   signal settingsSaved()
   signal settingsSaveFailed()
   signal streamPreferenceSaved()
+  signal channelPreferenceSaved()
+  property bool savingChannelPreference: false
+  function setChannelsAsTiles(value) { savingChannelPreference = true; channelsAsTiles = value }
   property bool savingStreamPreference: false
   function setStreamsAsTiles(value) { savingStreamPreference = true; streamsAsTiles = value }
   signal resetRequested()
@@ -34,7 +39,11 @@ Item {
     onLoaded: Qt.callLater(function() { root.ready = true })
     onLoadFailed: Qt.callLater(function() { root.ready = true })
     onAdapterUpdated: { root.error = ""; if (root.ready) saveDelay.restart() }
-    onSaved: { root.settingsSaved(); if (root.savingStreamPreference) { root.savingStreamPreference = false; root.streamPreferenceSaved() } }
+    onSaved: {
+      root.settingsSaved()
+      if (root.savingStreamPreference) { root.savingStreamPreference = false; root.streamPreferenceSaved() }
+      if (root.savingChannelPreference) { root.savingChannelPreference = false; root.channelPreferenceSaved() }
+    }
     onSaveFailed: { root.error = "Couldn't save the main window layout."; root.settingsSaveFailed() }
     JsonAdapter {
       id: preferences
@@ -45,6 +54,8 @@ Item {
       property bool trayRoomsCollapsed: false
       property string chatTiles: "" // Main-window split tree; no message content.
       property bool streamsAsTiles: true
+      property bool channelsAsTiles: false
+      property string selectedServerId: ""
     }
   }
 }

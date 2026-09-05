@@ -19,7 +19,7 @@ case "$(uname -m)" in
     ;;
 esac
 
-for binary in wispd wispctl wisp-server; do
+for binary in wispd wisp-account wispctl wisp-server; do
   if [[ ! -x "$target_dir/release/$binary" ]]; then
     echo "missing release binary: $target_dir/release/$binary" >&2
     echo "run: cargo build --workspace --release --locked" >&2
@@ -31,6 +31,7 @@ package_name="wisp-$version-linux-$architecture"
 dist_dir="$repo_dir/dist"
 staging_dir=$(mktemp -d)
 package_dir="$staging_dir/$package_name"
+update_repository=${WISP_UPDATE_REPOSITORY:-${GITHUB_REPOSITORY:-}}
 
 cleanup() {
   rm -rf -- "$staging_dir"
@@ -42,7 +43,15 @@ mkdir -p \
   "$package_dir/infra/local" \
   "$package_dir/scripts"
 
-for binary in wispd wispctl wisp-server; do
+if [[ -n "$update_repository" ]]; then
+  if [[ ! "$update_repository" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
+    echo "invalid update repository: $update_repository" >&2
+    exit 1
+  fi
+  printf '%s\n' "$update_repository" >"$package_dir/update-repository"
+fi
+
+for binary in wispd wisp-account wispctl wisp-server; do
   install -m 0755 "$target_dir/release/$binary" "$package_dir/bin/$binary"
 done
 
@@ -54,15 +63,14 @@ install -m 0644 "$repo_dir/target/video-ui/qmldir" "$package_dir/quickshell/app/
 for script in \
   app-sync.sh \
   backup-database.sh \
-  configure-friend.sh \
-  friend-tailscale.sh \
   install-host-services.sh \
-  register-friend-device.sh \
   server-endpoint.sh \
   restore-database.sh \
   plugin-sync.sh \
   wisp-update.sh \
   wisp-launch.sh \
+  wisp-onboarding.sh \
+  wisp-client.sh \
   wisp-ui.sh \
   wisp.sh; do
   install -m 0755 "$repo_dir/scripts/$script" "$package_dir/scripts/$script"

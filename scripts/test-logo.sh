@@ -5,6 +5,10 @@ repo_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 test_dir=$(mktemp -d)
 trap 'rm -rf -- "$test_dir"' EXIT
 
+[[ -f "$repo_dir/quickshell/app/assets/wisp-icon.svg" ]]
+[[ -f "$repo_dir/quickshell/app/assets/wisp-icon-tray.png" ]]
+rg -q 'wisp-icon\.svg.*dev\.wisp\.svg' "$repo_dir/scripts/app-sync.sh"
+
 cp -a "$repo_dir/quickshell/app" "$test_dir/app"
 cp "$repo_dir/tests/quickshell/Logo.qml" "$test_dir/shell.qml"
 

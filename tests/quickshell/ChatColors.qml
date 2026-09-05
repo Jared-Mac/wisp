@@ -32,13 +32,13 @@ ShellRoot {
     color: theme.background
     Row {
       anchors.fill: parent; anchors.margins: 10; spacing: 10
-      Views.ConversationWorkspace { id: first; width: 480; height: parent.height; bridge: bridge; theme: theme; tiled: true; selectedId: "charlie"; canClosePane: true }
-      Views.ConversationWorkspace { id: second; width: 480; height: parent.height; bridge: bridge; theme: theme; tiled: true; selectedId: "jared"; paneActive: false }
+      Views.ConversationWorkspace { id: first; width: 480; height: parent.height; bridge: bridge; theme: theme; tiled: true; selectedId: "member_c"; canClosePane: true }
+      Views.ConversationWorkspace { id: second; width: 480; height: parent.height; bridge: bridge; theme: theme; tiled: true; selectedId: "owner"; paneActive: false }
     }
   }
   Component.onCompleted: {
     var data = JSON.parse(JSON.stringify(bridge.snapshot))
-    data.conversations = [{id:"charlie",label:"Charlie",kind:"direct"}, {id:"jared",label:"Jared",kind:"direct"}, {id:"room",label:"Room",kind:"hangout"}]
+    data.conversations = [{id:"member_c",label:"MemberC",kind:"direct"}, {id:"owner",label:"Owner",kind:"direct"}, {id:"room",label:"Room",kind:"hangout"}]
     bridge.applySnapshot(data)
   }
   Timer {
@@ -52,15 +52,15 @@ ShellRoot {
       test.original = first.chatBorderColor
       first.paneActive = false
       test.check(first.chatBorderColor === test.original, "focus retains hue")
-      first.selectedId = "jared"
+      first.selectedId = "owner"
       test.check(first.chatBorderColor === second.chatBorderColor, "same chat matches across panes")
-      first.selectedId = "charlie"
+      first.selectedId = "member_c"
       first.detached = true
       test.check(first.chatBorderColor === test.original, "pop-out retains hue")
       var data = JSON.parse(JSON.stringify(bridge.snapshot))
       data.conversations.reverse()
       data.conversations.push({id:"aaa-new",label:"New chat",kind:"direct"})
-      data.conversations.filter(function(c) { return c.id === "charlie" })[0].label = "Renamed chat with a very long label that should never fill the whole pane"
+      data.conversations.filter(function(c) { return c.id === "member_c" })[0].label = "Renamed chat with a very long label that should never fill the whole pane"
       bridge.applySnapshot(data)
       test.check(first.chatBorderColor === test.original, "rename/reorder/new chats retain hue")
     }

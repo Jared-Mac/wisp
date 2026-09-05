@@ -9,6 +9,11 @@
   explicitly starts them.
 - Preserve existing work and credentials. Do not print device tokens, invites,
   or media keys. Keep a recoverable copy of the previous installed client.
-- Updating the local client does not update Jared's host. Call out required
-  server migrations/API updates; do not restart or deploy that host implicitly.
+- Treat updates as coordinated client/server releases. When server code or
+  migrations changed, back up and deploy the matching server build to the
+  configured owner-managed production host, then verify schema, integrity,
+  service state, and public health. Before restarting server media/control
+  services, verify that no room is active. For client-only changes, verify the
+  deployed server has no required delta and remains healthy. Never deploy to a
+  friend's or otherwise unrelated host.
 - Only push changes when the user requests a push.

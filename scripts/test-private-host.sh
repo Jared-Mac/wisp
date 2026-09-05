@@ -12,7 +12,7 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 port=$(shuf -i 22000-45000 -n 1)
-common=(--require-chat-e2ee --database-url "sqlite://$test_dir/fresh.sqlite3" --addr "127.0.0.1:$port")
+common=(--require-chat-e2ee --public-url https://isolated.invalid --database-url "sqlite://$test_dir/fresh.sqlite3" --addr "127.0.0.1:$port")
 secure=(--allow-dev-sessions false --livekit-url wss://isolated.invalid --livekit-api-key isolated-test --livekit-api-secret isolated-test-service-secret-not-a-real-credential)
 if timeout 5 env -u WISP_E2EE_KEY -u WISP_BOOTSTRAP_TOKEN target/debug/wisp-server "${common[@]}" --allow-dev-sessions true >"$test_dir/refused.log" 2>&1; then
   echo 'Private server accepted development authentication' >&2; exit 1
@@ -31,10 +31,10 @@ server_pid=$!
 ready=false
 for _ in $(seq 1 100); do
   if curl --silent --fail "http://127.0.0.1:$port/healthz" | jq -e '.ok == true and .database == true' >/dev/null; then ready=true; break; fi
-  kill -0 "$server_pid" 2>/dev/null || { echo 'Isolated private host exited' >&2; exit 1; }
+  kill -0 "$server_pid" 2>/dev/null || { echo 'Isolated private host exited' >&2; cat "$test_dir/server.log" >&2; exit 1; }
   sleep 0.05
 done
 [[ "$ready" == true ]] || { echo 'Private host health check timed out' >&2; exit 1; }
-[[ $(curl --silent --output /dev/null --write-out '%{http_code}' -H 'content-type: application/json' --data '{"profile":"Jared"}' "http://127.0.0.1:$port/v1/dev/session") != 200 ]]
+[[ $(curl --silent --output /dev/null --write-out '%{http_code}' -H 'content-type: application/json' --data '{"profile":"Owner"}' "http://127.0.0.1:$port/v1/dev/session") != 200 ]]
 [[ $(sqlite3 "$test_dir/fresh.sqlite3" 'SELECT COUNT(*) FROM messages') == 0 ]]
 echo 'Fresh strict host starts; development login, default service credentials, and server-held media keys are rejected'

@@ -27,7 +27,7 @@ ShellRoot {
   }
   function changeMedia(speakers,level) {
     var next=JSON.parse(JSON.stringify(bridge.snapshot))
-    next.self.media.active_speakers=speakers; next.self.media.remote_audio_levels={Jared:level}
+    next.self.media.active_speakers=speakers; next.self.media.remote_audio_levels={Owner:level}
     bridge.snapshot=next
   }
   Wisp.WispAppearance { id: appearance; environment: "desktop"; Component.onCompleted: setPalette("performative") }
@@ -50,14 +50,14 @@ ShellRoot {
   Components.ParticipantVolumeMenu { id: roomVolumes; parent: window.contentItem; bridge: bridge; theme: theme; people: bridge.hangouts.length ? bridge.hangouts[0].members : [] }
   Component.onCompleted: {
     var data=JSON.parse(JSON.stringify(bridge.snapshot))
-    data.self.id="self"; data.self.display_name="Tyler"; data.self.hangout_id="porch"; data.self.muted=false
-    data.self.media.remote_audio_participants=["Jared"]
-    data.friends=[{id:"jared",display_name:"Jared",online:true,presence:"open"},{id:"charlie",display_name:"Charlie",online:false,presence:"away"}]
-    data.hangouts=[{id:"porch",label:"Porch",members:[{id:"self",display_name:"Tyler"},{id:"jared",display_name:"Jared"},{id:"charlie",display_name:"Charlie"}]}]
-    data.conversations=[{id:"porch",label:"Porch",kind:"spot",spot_id:"porch",unread_count:0},{id:"dm",label:"Jared",kind:"direct",unread_count:12}]
+    data.self.id="self"; data.self.display_name="MemberA"; data.self.hangout_id="test_room"; data.self.muted=false
+    data.self.media.remote_audio_participants=["Owner"]
+    data.friends=[{id:"owner",display_name:"Owner",online:true,presence:"open"},{id:"member_c",display_name:"MemberC",online:false,presence:"away"}]
+    data.hangouts=[{id:"test_room",label:"TestRoom",members:[{id:"self",display_name:"MemberA"},{id:"owner",display_name:"Owner"},{id:"member_c",display_name:"MemberC"}]}]
+    data.conversations=[{id:"test_room",label:"TestRoom",kind:"spot",spot_id:"test_room",unread_count:0},{id:"dm",label:"Owner",kind:"direct",unread_count:12}]
     data.messages=[]
-    data.self.media.remote_videos=[{participant:"Jared",source:"screen_share",subscribed:true}]
-    bridge.applySnapshot(data); bridge.selectConversation("porch")
+    data.self.media.remote_videos=[{participant:"Owner",source:"screen_share",subscribed:true}]
+    bridge.applySnapshot(data); bridge.selectConversation("test_room")
   }
   Timer {
     interval: 200; running: true
@@ -66,32 +66,32 @@ ShellRoot {
       test.tile=test.find(window.contentItem,"conversationPane")
       test.check(!!test.tile,"main tile host exists")
       test.check(!!test.find(tray,"unreadChat-dm"),"clickable unread chat shows its count and name")
-      test.check(test.find(tray,"trayChatHeading").text.indexOf("/Porch")>=0,"tray heading names current chat")
+      test.check(test.find(tray,"trayChatHeading").text.indexOf("/TestRoom")>=0,"tray heading names current chat")
       test.find(tray,"unreadChat-dm").clicked()
-      test.check(bridge.activeConversationId==="dm" && bridge.lastConversationId==="porch","unread shortcut remembers prior chat")
+      test.check(bridge.activeConversationId==="dm" && bridge.lastConversationId==="test_room","unread shortcut remembers prior chat")
       test.find(tray,"returnLastChat").clicked()
-      test.check(bridge.activeConversationId==="porch","return shortcut opens prior chat")
+      test.check(bridge.activeConversationId==="test_room","return shortcut opens prior chat")
       bridge.closeConversation()
       test.check(!!test.find(tray,"returnLastChat"),"return remains available from all chats")
-      bridge.selectConversation("porch")
-      bridge.participantVolumes.setVolume({id:"charlie"},50)
-      bridge.participantVolumes.setVolume({id:"jared"},200)
-      test.check(bridge.participantVolumes.volumeFor({id:"charlie"})===50,"per-person volume")
-      test.check(bridge.participantVolumes.volumeFor({id:"jared"})===200,"independent boost")
+      bridge.selectConversation("test_room")
+      bridge.participantVolumes.setVolume({id:"member_c"},50)
+      bridge.participantVolumes.setVolume({id:"owner"},200)
+      test.check(bridge.participantVolumes.volumeFor({id:"member_c"})===50,"per-person volume")
+      test.check(bridge.participantVolumes.volumeFor({id:"owner"})===200,"independent boost")
       var gateState=JSON.parse(JSON.stringify(bridge.snapshot))
       gateState.self.media.audio.voice_gate_active=true
       gateState.self.media.audio.voice_gate_open=true
       gateState.self.media.audio.input_level=0
       bridge.snapshot=gateState
-      test.check(bridge.rawSpeakers.indexOf("Tyler")>=0,"open voice gate marks local speech")
+      test.check(bridge.rawSpeakers.indexOf("MemberA")>=0,"open voice gate marks local speech")
       gateState=JSON.parse(JSON.stringify(gateState))
       gateState.self.media.audio.voice_gate_open=false
       gateState.self.media.audio.input_level=100
       bridge.snapshot=gateState
-      test.check(bridge.rawSpeakers.indexOf("Tyler")<0,"closed voice gate overrides residual level")
-      test.changeMedia(["Jared"],45)
-      test.check(bridge.activeSpeakers.indexOf("Jared")>=0,"audio activity visible")
-      test.tile.openVideo({participant:"Jared",source:"screen_share"})
+      test.check(bridge.rawSpeakers.indexOf("MemberA")<0,"closed voice gate overrides residual level")
+      test.changeMedia(["Owner"],45)
+      test.check(bridge.activeSpeakers.indexOf("Owner")>=0,"audio activity visible")
+      test.tile.openVideo({participant:"Owner",source:"screen_share"})
       test.videoKey=Tiles.leaves(test.tile.tree).filter(function(n){return !!test.tile.videoFor(n.id)})[0].key
       test.check(test.tile.detachedKeys.indexOf(test.videoKey)<0,"main-open watch docks by default")
       test.check(bridge.workspaceLayout.chatTiles.indexOf("video:")<0,"stream subscriptions never persisted")
@@ -104,9 +104,9 @@ ShellRoot {
       test.check(renderer && renderer.item && renderer.item.ready,"native RGBA stream renders")
       if(renderer && renderer.item) test.check(renderer.item.frameSize.width===640 && renderer.item.frameSize.height===240,"ultrawide source dimensions preserved")
       test.changeMedia([],45)
-      test.check(bridge.activeSpeakers.indexOf("Jared")>=0,"ongoing PCM level keeps highlight despite speaker-list omission")
+      test.check(bridge.activeSpeakers.indexOf("Owner")>=0,"ongoing PCM level keeps highlight despite speaker-list omission")
       test.changeMedia([],0)
-      test.check(bridge.activeSpeakers.indexOf("Jared")>=0,"brief silence has release hold")
+      test.check(bridge.activeSpeakers.indexOf("Owner")>=0,"brief silence has release hold")
       test.tile.detach(test.videoKey)
       test.check(test.tile.detachedKeys.indexOf(test.videoKey)>=0,"stream pops out")
     }
@@ -116,10 +116,10 @@ ShellRoot {
     onTriggered: {
       test.tile.attach(test.videoKey)
       test.check(test.tile.detachedKeys.indexOf(test.videoKey)<0,"anchor returns stream to tile")
-      var next=JSON.parse(JSON.stringify(bridge.snapshot)); next.self.media.remote_muted_participants=["Jared"]; bridge.snapshot=next
-      test.check(bridge.activeSpeakers.indexOf("Jared")<0,"mute overrides release immediately")
+      var next=JSON.parse(JSON.stringify(bridge.snapshot)); next.self.media.remote_muted_participants=["Owner"]; bridge.snapshot=next
+      test.check(bridge.activeSpeakers.indexOf("Owner")<0,"mute overrides release immediately")
       next.self.media.remote_muted_participants=[]; bridge.snapshot=JSON.parse(JSON.stringify(next))
-      var friend=test.find(window.contentItem,"favorite-jared").parent
+      var friend=test.find(window.contentItem,"favorite-owner").parent
       keys.mouseClick(friend,friend.width/2,friend.height/2,Qt.RightButton)
       test.volumePopup=test.findObject(friend,"participantVolumeMenu",[])
       test.check(test.volumePopup && test.volumePopup.visible,"right click friend opens local volume menu")
@@ -147,14 +147,14 @@ ShellRoot {
       test.check(renderer && renderer.item && renderer.item.ready,"stream survives reparenting")
       var beforeClose=bridge.sent.length
       test.tile.closePane(test.videoKey)
-      test.check(bridge.sent.slice(beforeClose).some(function(command) { return command.name==="watch_video" && command.args.open===false && command.args.participant==="Jared" }),"closing stream tile stops watching locally")
+      test.check(bridge.sent.slice(beforeClose).some(function(command) { return command.name==="watch_video" && command.args.open===false && command.args.participant==="Owner" }),"closing stream tile stops watching locally")
       bridge.mainWindowOpen=false
-      test.tile.openVideo({participant:"Jared",source:"screen_share"})
+      test.tile.openVideo({participant:"Owner",source:"screen_share"})
       test.videoKey=Tiles.leaves(test.tile.tree).filter(function(n){return !!test.tile.videoFor(n.id)})[0].key
       test.check(test.tile.detachedKeys.indexOf(test.videoKey)>=0,"main-closed watch opens popout")
       test.tile.closePane(test.videoKey)
       bridge.mainWindowOpen=true; bridge.workspaceLayout.streamsAsTiles=false
-      test.tile.openVideo({participant:"Jared",source:"screen_share"})
+      test.tile.openVideo({participant:"Owner",source:"screen_share"})
       test.videoKey=Tiles.leaves(test.tile.tree).filter(function(n){return !!test.tile.videoFor(n.id)})[0].key
       test.check(test.tile.detachedKeys.indexOf(test.videoKey)>=0,"always-popout preference respected")
       var path=Quickshell.env("WISP_CHAT_SCREENSHOT")
@@ -164,22 +164,22 @@ ShellRoot {
   Timer {
     interval: 2500; running: true
     onTriggered: {
-      test.check(bridge.activeSpeakers.indexOf("Jared")<0,"silence releases highlight")
+      test.check(bridge.activeSpeakers.indexOf("Owner")<0,"silence releases highlight")
       var next=JSON.parse(JSON.stringify(bridge.snapshot)); next.self.media.remote_videos=[]; bridge.snapshot=next
       test.check(Tiles.leaves(test.tile.tree).every(function(n){return !test.tile.videoFor(n.id)}),"ended stream closes ephemeral tiles")
       test.check(!bridge.sent.some(function(c){return ["join_hangout","camera","share","set_conversation_tab"].indexOf(c.name)>=0}),"no publish/join or server-side chat close")
-      bridge.focusedChats={fixture:"porch"}; bridge.appFocused=true
+      bridge.focusedChats={fixture:"test_room"}; bridge.appFocused=true
       bridge.receivedSnapshot=true // The mock deliberately has no daemon socket.
       var count=bridge.soundCount
       next=JSON.parse(JSON.stringify(next))
-      next.messages=[{id:"new1",conversation_id:"dm",sender:{id:"jared"},content_type:"text/plain",payload:"test"}]
+      next.messages=[{id:"new1",conversation_id:"dm",sender:{id:"owner"},content_type:"text/plain",payload:"test"}]
       bridge.applySnapshot(next,"message_created")
       test.check(bridge.soundCount===count+1,"other chat sounds while app focused")
-      next=JSON.parse(JSON.stringify(next)); next.messages.push({id:"new2",conversation_id:"porch",sender:{id:"jared"},content_type:"text/plain",payload:"test"})
+      next=JSON.parse(JSON.stringify(next)); next.messages.push({id:"new2",conversation_id:"test_room",sender:{id:"owner"},content_type:"text/plain",payload:"test"})
       bridge.applySnapshot(next,"message_created")
       test.check(bridge.soundCount===count+1,"focused chat does not sound")
       bridge.toggleChatNotifications("dm")
-      next=JSON.parse(JSON.stringify(next)); next.messages.push({id:"new3",conversation_id:"dm",sender:{id:"jared"},content_type:"text/plain",payload:"test"})
+      next=JSON.parse(JSON.stringify(next)); next.messages.push({id:"new3",conversation_id:"dm",sender:{id:"owner"},content_type:"text/plain",payload:"test"})
       bridge.applySnapshot(next,"message_created")
       test.check(bridge.soundCount===count+1,"muted chat does not sound")
       for(var kind of ["member_join","member_leave","self_join","self_leave"]) {

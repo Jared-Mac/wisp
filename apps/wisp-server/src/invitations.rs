@@ -23,8 +23,8 @@ async fn authorize(
     let room = sqlx::query("SELECT h.spot_id FROM hangouts h JOIN hangout_members m ON m.hangout_id = h.id WHERE h.id = ? AND h.ended_at IS NULL AND m.user_id = ? AND m.left_at IS NULL")
         .bind(hangout.to_string()).bind(actor.to_string()).fetch_optional(&mut *db).await.map_err(ApiError::internal)?
         .ok_or_else(|| ApiError::conflict("room_unavailable", "Your friend is no longer in this voice room"))?;
-    let friend: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM circle_members a JOIN circle_members b ON b.circle_id = a.circle_id WHERE a.user_id = ? AND b.user_id = ?)")
-        .bind(actor.to_string()).bind(recipient.to_string()).fetch_one(&mut *db).await.map_err(ApiError::internal)?;
+    let friend: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM friendships WHERE (first_user_id=? AND second_user_id=?) OR (first_user_id=? AND second_user_id=?))")
+        .bind(actor.to_string()).bind(recipient.to_string()).bind(recipient.to_string()).bind(actor.to_string()).fetch_one(&mut *db).await.map_err(ApiError::internal)?;
     if !friend {
         return Err(ApiError::forbidden("Only friends can be invited"));
     }
@@ -250,7 +250,7 @@ mod tests {
     use crate::tests::test_config;
     use crate::text_tests::{request, value};
     use crate::{
-        CHARLIE_ID, JARED_ID, Router, StatusCode, TYLER_ID, active_hangout_for,
+        Router, StatusCode, TEST_MEMBER_A_ID, TEST_MEMBER_C_ID, TEST_OWNER_ID, active_hangout_for,
         load_recent_messages, router,
     };
 
@@ -262,8 +262,8 @@ mod tests {
                 &app,
                 "POST",
                 "/v1/spots/join",
-                JARED_ID,
-                json!({"spot_id":"Porch"}),
+                TEST_OWNER_ID,
+                json!({"spot_id":"TestRoom"}),
             )
             .await,
         )
@@ -276,7 +276,7 @@ mod tests {
                 app,
                 "POST",
                 "/v1/room-invitations",
-                JARED_ID,
+                TEST_OWNER_ID,
                 json!({"hangout_id":room,"user_id":user}),
             )
             .await,
@@ -286,20 +286,23 @@ mod tests {
     #[tokio::test]
     async fn invitation_is_private_chat_card_and_acceptance_is_explicit_and_idempotent() {
         let (state, app, room) = setup().await;
-        let tyler = Uuid::parse_str(TYLER_ID).unwrap();
-        let first = invite(&app, &room, TYLER_ID).await;
-        let second = invite(&app, &room, TYLER_ID).await;
+        let member_a = Uuid::parse_str(TEST_MEMBER_A_ID).unwrap();
+        let first = invite(&app, &room, TEST_MEMBER_A_ID).await;
+        let second = invite(&app, &room, TEST_MEMBER_A_ID).await;
         assert_eq!(first["id"], second["id"]);
         assert_eq!(second["already_pending"], true);
-        assert_eq!(active_hangout_for(&state.pool, tyler).await.unwrap(), None);
-        assert_eq!(load(&state.pool, tyler).await.unwrap().len(), 1);
+        assert_eq!(
+            active_hangout_for(&state.pool, member_a).await.unwrap(),
+            None
+        );
+        assert_eq!(load(&state.pool, member_a).await.unwrap().len(), 1);
         assert!(
-            load(&state.pool, Uuid::parse_str(CHARLIE_ID).unwrap())
+            load(&state.pool, Uuid::parse_str(TEST_MEMBER_C_ID).unwrap())
                 .await
                 .unwrap()
                 .is_empty()
         );
-        let messages = load_recent_messages(&state.pool, tyler).await.unwrap();
+        let messages = load_recent_messages(&state.pool, member_a).await.unwrap();
         assert_eq!(messages.len(), 1);
         assert_eq!(
             messages[0].content_type,
@@ -314,42 +317,81 @@ mod tests {
             first["id"].as_str().unwrap()
         );
         assert_eq!(
-            request(&app, "POST", &path, CHARLIE_ID, json!({"accept":true}))
-                .await
-                .status(),
+            request(
+                &app,
+                "POST",
+                &path,
+                TEST_MEMBER_C_ID,
+                json!({"accept":true})
+            )
+            .await
+            .status(),
             StatusCode::NOT_FOUND
         );
-        value(request(&app, "POST", &path, TYLER_ID, json!({"accept":true})).await).await;
+        value(
+            request(
+                &app,
+                "POST",
+                &path,
+                TEST_MEMBER_A_ID,
+                json!({"accept":true}),
+            )
+            .await,
+        )
+        .await;
         assert_eq!(
-            active_hangout_for(&state.pool, tyler)
+            active_hangout_for(&state.pool, member_a)
                 .await
                 .unwrap()
                 .unwrap()
                 .to_string(),
             room.as_str().unwrap()
         );
-        assert!(load(&state.pool, tyler).await.unwrap().is_empty());
+        assert!(load(&state.pool, member_a).await.unwrap().is_empty());
         assert_eq!(
-            load_recent_messages(&state.pool, tyler).await.unwrap()[0].payload["status"],
+            load_recent_messages(&state.pool, member_a).await.unwrap()[0].payload["status"],
             "accepted"
         );
-        value(request(&app, "POST", "/v1/hangouts/leave", TYLER_ID, json!({})).await).await;
+        value(
+            request(
+                &app,
+                "POST",
+                "/v1/hangouts/leave",
+                TEST_MEMBER_A_ID,
+                json!({}),
+            )
+            .await,
+        )
+        .await;
         assert_eq!(
-            value(request(&app, "POST", &path, TYLER_ID, json!({"accept":true})).await).await["already_handled"],
+            value(
+                request(
+                    &app,
+                    "POST",
+                    &path,
+                    TEST_MEMBER_A_ID,
+                    json!({"accept":true})
+                )
+                .await
+            )
+            .await["already_handled"],
             true
         );
-        assert_eq!(active_hangout_for(&state.pool, tyler).await.unwrap(), None);
+        assert_eq!(
+            active_hangout_for(&state.pool, member_a).await.unwrap(),
+            None
+        );
     }
     #[tokio::test]
     async fn dismissal_expiry_departure_and_edit_are_safe() {
         let (state, app, room) = setup().await;
-        let tyler = Uuid::parse_str(TYLER_ID).unwrap();
-        let first = invite(&app, &room, TYLER_ID).await;
+        let member_a = Uuid::parse_str(TEST_MEMBER_A_ID).unwrap();
+        let first = invite(&app, &room, TEST_MEMBER_A_ID).await;
         let path = format!(
             "/v1/room-invitations/{}/respond",
             first["id"].as_str().unwrap()
         );
-        let message = load_recent_messages(&state.pool, tyler)
+        let message = load_recent_messages(&state.pool, member_a)
             .await
             .unwrap()
             .remove(0);
@@ -358,22 +400,41 @@ mod tests {
                 &app,
                 "PATCH",
                 &format!("/v1/messages/{}", message.id),
-                JARED_ID,
+                TEST_OWNER_ID,
                 json!({"text":"fake room"})
             )
             .await
             .status(),
             StatusCode::BAD_REQUEST
         );
-        value(request(&app, "POST", &path, TYLER_ID, json!({"accept":false})).await).await;
-        assert_eq!(active_hangout_for(&state.pool, tyler).await.unwrap(), None);
+        value(
+            request(
+                &app,
+                "POST",
+                &path,
+                TEST_MEMBER_A_ID,
+                json!({"accept":false}),
+            )
+            .await,
+        )
+        .await;
         assert_eq!(
-            request(&app, "POST", &path, TYLER_ID, json!({"accept":true}))
-                .await
-                .status(),
+            active_hangout_for(&state.pool, member_a).await.unwrap(),
+            None
+        );
+        assert_eq!(
+            request(
+                &app,
+                "POST",
+                &path,
+                TEST_MEMBER_A_ID,
+                json!({"accept":true})
+            )
+            .await
+            .status(),
             StatusCode::CONFLICT
         );
-        let second = invite(&app, &room, TYLER_ID).await;
+        let second = invite(&app, &room, TEST_MEMBER_A_ID).await;
         sqlx::query("UPDATE room_invitations SET expires_at = '2000-01-01T00:00:00Z' WHERE id = ?")
             .bind(second["id"].as_str().unwrap())
             .execute(&state.pool)
@@ -387,16 +448,16 @@ mod tests {
                     "/v1/room-invitations/{}/respond",
                     second["id"].as_str().unwrap()
                 ),
-                TYLER_ID,
+                TEST_MEMBER_A_ID,
                 json!({"accept":true})
             )
             .await
             .status(),
             StatusCode::NOT_FOUND
         );
-        let third = invite(&app, &room, TYLER_ID).await;
-        value(request(&app, "POST", "/v1/hangouts/leave", JARED_ID, json!({})).await).await;
-        assert!(load(&state.pool, tyler).await.unwrap().is_empty());
+        let third = invite(&app, &room, TEST_MEMBER_A_ID).await;
+        value(request(&app, "POST", "/v1/hangouts/leave", TEST_OWNER_ID, json!({})).await).await;
+        assert!(load(&state.pool, member_a).await.unwrap().is_empty());
         assert_eq!(
             request(
                 &app,
@@ -405,14 +466,17 @@ mod tests {
                     "/v1/room-invitations/{}/respond",
                     third["id"].as_str().unwrap()
                 ),
-                TYLER_ID,
+                TEST_MEMBER_A_ID,
                 json!({"accept":true})
             )
             .await
             .status(),
             StatusCode::CONFLICT
         );
-        assert_eq!(active_hangout_for(&state.pool, tyler).await.unwrap(), None);
+        assert_eq!(
+            active_hangout_for(&state.pool, member_a).await.unwrap(),
+            None
+        );
     }
     #[tokio::test]
     async fn nonmembers_require_admin_and_revoked_authority_is_rechecked() {
@@ -420,7 +484,7 @@ mod tests {
         sqlx::query(
             "DELETE FROM conversation_members WHERE user_id = ? AND conversation_id LIKE 'spot:%'",
         )
-        .bind(TYLER_ID)
+        .bind(TEST_MEMBER_A_ID)
         .execute(&state.pool)
         .await
         .unwrap();
@@ -429,7 +493,7 @@ mod tests {
                 &app,
                 "POST",
                 "/v1/hangouts/join",
-                CHARLIE_ID,
+                TEST_MEMBER_C_ID,
                 json!({"hangout_id":room}),
             )
             .await,
@@ -440,15 +504,15 @@ mod tests {
                 &app,
                 "POST",
                 "/v1/room-invitations",
-                CHARLIE_ID,
-                json!({"hangout_id":room,"user_id":TYLER_ID})
+                TEST_MEMBER_C_ID,
+                json!({"hangout_id":room,"user_id":TEST_MEMBER_A_ID})
             )
             .await
             .status(),
             StatusCode::FORBIDDEN
         );
-        let invitation = invite(&app, &room, TYLER_ID).await;
-        sqlx::query("UPDATE conversation_members SET role='member' WHERE user_id=? AND conversation_id LIKE 'spot:%'").bind(JARED_ID).execute(&state.pool).await.unwrap();
+        let invitation = invite(&app, &room, TEST_MEMBER_A_ID).await;
+        sqlx::query("UPDATE conversation_members SET role='member' WHERE user_id=? AND conversation_id LIKE 'spot:%'").bind(TEST_OWNER_ID).execute(&state.pool).await.unwrap();
         assert_eq!(
             request(
                 &app,
@@ -457,7 +521,7 @@ mod tests {
                     "/v1/room-invitations/{}/respond",
                     invitation["id"].as_str().unwrap()
                 ),
-                TYLER_ID,
+                TEST_MEMBER_A_ID,
                 json!({"accept":true})
             )
             .await
@@ -465,7 +529,7 @@ mod tests {
             StatusCode::FORBIDDEN
         );
         assert_eq!(
-            active_hangout_for(&state.pool, Uuid::parse_str(TYLER_ID).unwrap())
+            active_hangout_for(&state.pool, Uuid::parse_str(TEST_MEMBER_A_ID).unwrap())
                 .await
                 .unwrap(),
             None

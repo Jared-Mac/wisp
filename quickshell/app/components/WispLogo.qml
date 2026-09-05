@@ -33,9 +33,11 @@ Canvas {
 
   // One amplitude per horizontal cell, including a little breathing room at
   // both ends. Each value expands equally above and below the center line.
+  // Center the I's peak on its stem. A tall peak along its left edge fills
+  // the counterspace and makes the combined silhouette read as an E.
   property var waveformLevels: [
     0, 1, 0, 2, 1, 0, 1, 2, 1, 0,
-    1, 2, 3, 1, 0, 1, 2, 1, 0, 1,
+    1, 0, 0, 0, 2, 3, 2, 0, 0, 0,
     2, 1, 3, 2, 1, 0, 0, 0, 0, 0,
     2, 3, 1, 0, 1, 2, 1, 0, 1, 0
   ]

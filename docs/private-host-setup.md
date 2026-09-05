@@ -1,14 +1,14 @@
-# Fresh private host — preparation, not an executed deployment
+# Fresh private host setup
 
 The user chose fresh encrypted history. Leave the old installation and its test
 history untouched. Never copy its database, WAL, backups, host environment,
 client `friend.env`, media key, or recovery files onto OVH.
 
-## Purchase checkpoint
+## Capacity planning
 
-Do not place an order until the privacy rollout checks in `privacy-hardening.md`
-are complete and a deployable Linux build is available. For four people, choose
-Hillsboro/Oregon if offered at checkout. Compare the actual CPU/RAM/disk/bandwidth
+Complete the privacy rollout checks in `privacy-hardening.md` before enrolling
+real accounts. For a small west-coast group, choose a nearby region when offered.
+Compare the actual CPU/RAM/disk/bandwidth
 specifications rather than assuming an old VPS model number means the same thing.
 Use monthly billing initially; confirm renewal price, currency, tax and region.
 Use Ubuntu 24.04 x86_64 to match the project's GitHub Actions build environment.
@@ -22,10 +22,10 @@ monitor storage and expand it instead of silently deleting kept files.
    Patch the OS, enable automatic security updates, and use a non-root sudo
    account with key-only SSH. Verify a second SSH session and OVH console access
    before disabling password/root login or restricting the firewall.
-2. Join the existing private Tailscale network. Restrict the service node's
-   policy to the intended friends, and SSH to administrators only. Do not enable
-   Tailscale Funnel or an exit node. Use a neutral hostname: certificate issuance
-   can expose the hostname in certificate-transparency records.
+2. Point a hostname at the server's public IPv4/IPv6 addresses. Wisp has no VPN,
+   overlay-network, or hosted coordination dependency. Keep SSH public-key only;
+   a private administration network is optional and is never required by clients.
+   Certificate issuance exposes the hostname in certificate-transparency records.
 3. Install a reviewed Ubuntu-compatible Wisp build and a pinned, verified
    LiveKit release. Do not copy CachyOS-built binaries to Ubuntu without checking
    ABI compatibility. Create separate non-login `wisp` and `wisp-media` users.
@@ -38,37 +38,47 @@ monitor storage and expand it instead of silently deleting kept files.
    Install the provided system services; inspect `systemd-analyze security`
    and runtime logs after startup. No release/client installation is automatic.
 
-Serve only the two loopback HTTP backends over the private tailnet:
+Terminate HTTPS locally with Caddy (or an equivalent reviewed reverse proxy).
+The supplied Caddy template exposes Wisp on 443 and LiveKit signaling on 8443,
+while their HTTP listeners remain inaccessible through the firewall:
 
 ```sh
-sudo tailscale serve --bg --https=443 http://127.0.0.1:8787
-sudo tailscale serve --bg --https=8443 http://127.0.0.1:7880
+sudo install -m 0644 infra/private-host/Caddyfile.example /etc/caddy/Caddyfile
+sudoedit /etc/caddy/Caddyfile
+sudo caddy validate --config /etc/caddy/Caddyfile
+sudo systemctl reload caddy
 ```
 
-The app URL is `https://NODE.TAILNET.ts.net`; signaling is
-`wss://NODE.TAILNET.ts.net:8443`. Serve provisions HTTPS certificates and limits
-access to the tailnet; it is distinct from public Funnel.
-[Tailscale Serve reference](https://tailscale.com/docs/reference/tailscale-cli/serve).
+The app URL is `https://wisp.example.com`; signaling is
+`wss://wisp.example.com:8443`. Clients need only that hostname or an encoded
+Wisp invitation. They do not need SSH, provider credentials, or a VPN account.
 
-Permit client access on `tailscale0` to TCP 443/8443/7881 and UDP 50000–50100,
-with matching tailnet rules. Keep 8787/7880 and RTC ports closed on the public
-interface. Allow the Tailscale UDP transport as required for direct connections;
-test `tailscale ping` from each friend to avoid a slow relayed path. Do not flush
+Permit public TCP 80/443/8443/7881 and UDP 7882–7885. LiveKit 1.13.6 uses
+`rtc.udp_port: 7882-7885` to multiplex connections across four shared UDP sockets,
+matching the four-vCPU host. Omit `rtc.port_range_start` and `rtc.port_range_end`
+when using multiplexing. For larger hosts, size the mux range to at least the
+vCPU count and update the firewall to match. TCP 7881 remains the fallback.
+Keep 8787/7880 blocked publicly; Caddy reaches them through loopback. Port 80
+exists only for certificate validation and HTTPS redirection. Do not flush
 existing firewall rules or close the only working SSH path. LiveKit's configured
-RTC range, interface filter and advertised node IP must match the actual node.
+RTC ports and advertised public node IP must match the actual server. When
+migrating an existing host, back up the config and firewall rules, open the new
+ports first, restart LiveKit only with no active media participants, verify its
+listeners and health, then remove the old UDP range. Clients discover these
+ports through signaling; no client configuration or database migration is needed.
 [LiveKit network configuration](https://github.com/livekit/livekit/blob/master/config-sample.yaml),
 [ports reference](https://docs.livekit.io/transport/self-hosting/ports-firewall/).
 
 ## Enrollment and keys
 
-- Bootstrap the existing circle administrator (currently Jared) over HTTPS from
-  his client, not by leaving an administrator client/session on the VPS. Remove
-  the bootstrap token from the server config after first enrollment and restart
-  only when it is safe to do so. Preserve existing room ownership semantics.
-- Issue one-use invites; enroll each client with the HTTPS origin. The launcher
-  now saves that origin rather than forcing HTTP/8787. Initial HTTPS enrollment
-  may omit the media key so encrypted chat can be set up first; voice/video stays
-  blocked without a valid client-held media key.
+- Bootstrap the first account over HTTPS from the Wisp onboarding window. The
+  first account becomes server owner. Remove the bootstrap token from the server
+  config after enrollment and restart only when it is safe to do so.
+- A fresh server contains no default users or rooms. Create rooms normally after
+  sign-in. Friend and room invitation URIs encode the public server address and a
+  one-use token, so invitees can paste one value into onboarding. Passwords are
+  stored only as Argon2id hashes. Successful login installs a revocable local
+  device credential for automatic login; the password is not saved locally.
 - Each user selects Settings → Privacy → Set up encryption and saves their own
   recovery file somewhere private and separate from the VPS. Never share recovery
   files between friends. Configure every participant before sending to that chat.

@@ -50,7 +50,7 @@ QtObject {
     // Black terminal canvas, restrained olive accents, and ash inverse selections.
     case "performative":
     case "ash_olive": return {background:"#000000", surface:"#000000", accent:"#a2b586", muted:"#92988f"}
-    // Herdr's Terminal theme over Jared's current Solarized Japan palette.
+    // Herdr's Terminal theme over Owner's current Solarized Japan palette.
     case "herdr": return {background:"#001419", surface:"#001419", accent:"#29a298", muted:"#637981"}
     case "graphite": return {background:"#191b20", surface:"#23262d", accent:"#9bb9df", muted:"#a1a8b4"}
     case "violet": return {background:"#191722", surface:"#24202f", accent:"#b79aff", muted:"#a49bb6"}

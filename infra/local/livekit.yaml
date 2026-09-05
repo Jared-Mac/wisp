@@ -1,6 +1,6 @@
 port: 7880
-# Public, loopback-only development configuration. The Tailscale mode generates
-# a random keypair at runtime and does not use this known test value.
+# Loopback-only development configuration. Public hosts use independent random
+# credentials and the hardened template under infra/private-host.
 bind_addresses:
   - "127.0.0.1"
 rtc:

@@ -108,6 +108,7 @@ jobs:
           ./scripts/test-private-alpha.sh
           bash scripts/test-server-endpoint.sh
           bash scripts/test-private-host.sh
+          bash scripts/test-onboarding.sh
 
       - name: Scan tracked source for secrets
         run: ./scripts/scan-secrets.sh

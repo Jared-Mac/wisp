@@ -1,0 +1,272 @@
+//@ pragma AppId dev.wisp.onboarding
+
+import QtQuick
+import QtQuick.Controls
+import QtQuick.Layouts
+import Quickshell
+import Quickshell.Io
+
+ShellRoot {
+  id: app
+  property alias accountWindow: window
+
+  FloatingWindow {
+    id: window
+    objectName: "accountWindow"
+    visible: true
+    title: mode === "login" ? "Sign in to Wisp" : mode === "register" ? "Create a Wisp account" : "Set up a Wisp server"
+    implicitWidth: 560
+    implicitHeight: 650
+    minimumSize: Qt.size(440, 540)
+    color: "#151821"
+    onClosed: Qt.exit(2)
+
+    property string mode: {
+      var requested = Quickshell.env("WISP_ONBOARDING_MODE") || "login"
+      return ["register", "login", "bootstrap"].indexOf(requested) >= 0 ? requested : "login"
+    }
+    property bool busy: false
+    property string feedback: ""
+
+    function selectMode(value) {
+      if (busy) return
+      mode = value
+      feedback = ""
+      password.text = ""
+      confirmPassword.text = ""
+      bootstrapToken.text = ""
+    }
+
+    function submit() {
+      if (busy) return
+      feedback = ""
+      var embeddedServer = mode !== "bootstrap" && invite.text.trim().indexOf("wisp-invite:") === 0
+      if ((!server.text.trim() && !embeddedServer) || !username.text.trim() || !password.text) {
+        feedback = "Server, username, and password are required."
+        return
+      }
+      if (mode !== "login" && !displayName.text.trim()) {
+        feedback = "Choose a display name."
+        return
+      }
+      if (mode !== "login" && password.text !== confirmPassword.text) {
+        feedback = "Passwords do not match."
+        return
+      }
+      if (mode === "register" && !invite.text.trim()) {
+        feedback = "Paste the invitation code you received."
+        return
+      }
+      if (mode === "bootstrap" && !bootstrapToken.text.trim()) {
+        feedback = "Paste the one-time server setup token."
+        return
+      }
+      busy = true
+      accountProcess.running = true
+    }
+
+    Rectangle {
+      anchors.fill: parent
+      color: "#151821"
+      border.color: "#3b4353"
+      border.width: 1
+
+      ScrollView {
+        anchors.fill: parent
+        anchors.margins: 28
+        contentWidth: availableWidth
+
+        ColumnLayout {
+          width: parent.width
+          spacing: 14
+
+          Text {
+            text: window.mode === "login" ? "Sign in to Wisp" : window.mode === "register" ? "Create your account" : "Set up your server"
+            color: "#e8ecf3"
+            font.family: "Hack"
+            font.pixelSize: 22
+            font.weight: Font.DemiBold
+          }
+          Text {
+            text: "Connect directly to a Wisp server. Your password authenticates the account; encrypted chat keys remain on your devices."
+            color: "#8d96a8"
+            font.family: "Hack"
+            font.pixelSize: 12
+            wrapMode: Text.Wrap
+            Layout.fillWidth: true
+          }
+
+          RowLayout {
+            Layout.fillWidth: true
+            spacing: 7
+            Repeater {
+              model: [
+                {key:"login", label:"[sign in]"},
+                {key:"register", label:"[create account]"},
+                {key:"bootstrap", label:"[new server]"}
+              ]
+              delegate: Button {
+                required property var modelData
+                objectName: "accountMode-" + modelData.key
+                text: modelData.label
+                enabled: !window.busy
+                font.family: "Hack"
+                font.pixelSize: 12
+                onClicked: window.selectMode(modelData.key)
+                background: Rectangle {
+                  radius: 3
+                  color: window.mode === modelData.key ? "#2f8cff" : "#1c202b"
+                  border.color: window.mode === modelData.key ? "#72afff" : "#3b4353"
+                }
+                contentItem: Text {
+                  text: parent.text
+                  color: "#e8ecf3"
+                  font: parent.font
+                  horizontalAlignment: Text.AlignHCenter
+                  verticalAlignment: Text.AlignVCenter
+                }
+              }
+            }
+          }
+
+          Text { text: "server"; color: "#8d96a8"; font.family: "Hack"; font.pixelSize: 12 }
+          TextField {
+            id: server
+            objectName: "accountServer"
+            Layout.fillWidth: true
+            text: Quickshell.env("WISP_ONBOARDING_SERVER") || ""
+            placeholderText: window.mode === "register" ? "optional when encoded in invite" : "https://wisp.example.com"
+            color: "#e8ecf3"
+            placeholderTextColor: "#667085"
+            font.family: "Hack"
+            font.pixelSize: 13
+            background: Rectangle { color: "#1c202b"; border.color: server.activeFocus ? "#2f8cff" : "#3b4353"; radius: 3 }
+          }
+
+          Text { visible: window.mode !== "bootstrap"; text: window.mode === "login" ? "invite (optional)" : "invite"; color: "#8d96a8"; font.family: "Hack"; font.pixelSize: 12 }
+          TextField {
+            id: invite
+            objectName: "accountInvite"
+            visible: window.mode !== "bootstrap"
+            Layout.fillWidth: true
+            placeholderText: "paste friend or room invitation"
+            color: "#e8ecf3"; placeholderTextColor: "#667085"; font.family: "Hack"; font.pixelSize: 13
+            background: Rectangle { color: "#1c202b"; border.color: invite.activeFocus ? "#2f8cff" : "#3b4353"; radius: 3 }
+          }
+
+          Text { visible: window.mode === "bootstrap"; text: "one-time setup token"; color: "#8d96a8"; font.family: "Hack"; font.pixelSize: 12 }
+          TextField {
+            id: bootstrapToken
+            visible: window.mode === "bootstrap"
+            Layout.fillWidth: true
+            echoMode: TextInput.Password
+            placeholderText: "server bootstrap token"
+            color: "#e8ecf3"; placeholderTextColor: "#667085"; font.family: "Hack"; font.pixelSize: 13
+            background: Rectangle { color: "#1c202b"; border.color: bootstrapToken.activeFocus ? "#2f8cff" : "#3b4353"; radius: 3 }
+          }
+
+          Text { text: "username"; color: "#8d96a8"; font.family: "Hack"; font.pixelSize: 12 }
+          TextField {
+            id: username
+            objectName: "accountUsername"
+            Layout.fillWidth: true
+            placeholderText: "username"
+            color: "#e8ecf3"; placeholderTextColor: "#667085"; font.family: "Hack"; font.pixelSize: 13
+            background: Rectangle { color: "#1c202b"; border.color: username.activeFocus ? "#2f8cff" : "#3b4353"; radius: 3 }
+          }
+
+          Text { visible: window.mode !== "login"; text: "display name"; color: "#8d96a8"; font.family: "Hack"; font.pixelSize: 12 }
+          TextField {
+            id: displayName
+            objectName: "accountDisplayName"
+            visible: window.mode !== "login"
+            Layout.fillWidth: true
+            placeholderText: "name shown to friends"
+            color: "#e8ecf3"; placeholderTextColor: "#667085"; font.family: "Hack"; font.pixelSize: 13
+            background: Rectangle { color: "#1c202b"; border.color: displayName.activeFocus ? "#2f8cff" : "#3b4353"; radius: 3 }
+          }
+
+          Text { text: "password"; color: "#8d96a8"; font.family: "Hack"; font.pixelSize: 12 }
+          TextField {
+            id: password
+            objectName: "accountPassword"
+            Layout.fillWidth: true
+            echoMode: TextInput.Password
+            placeholderText: window.mode === "login" ? "password" : "at least 12 characters"
+            color: "#e8ecf3"; placeholderTextColor: "#667085"; font.family: "Hack"; font.pixelSize: 13
+            onAccepted: if (window.mode === "login") window.submit()
+            background: Rectangle { color: "#1c202b"; border.color: password.activeFocus ? "#2f8cff" : "#3b4353"; radius: 3 }
+          }
+
+          Text { visible: window.mode !== "login"; text: "confirm password"; color: "#8d96a8"; font.family: "Hack"; font.pixelSize: 12 }
+          TextField {
+            id: confirmPassword
+            visible: window.mode !== "login"
+            Layout.fillWidth: true
+            echoMode: TextInput.Password
+            placeholderText: "repeat password"
+            color: "#e8ecf3"; placeholderTextColor: "#667085"; font.family: "Hack"; font.pixelSize: 13
+            onAccepted: window.submit()
+            background: Rectangle { color: "#1c202b"; border.color: confirmPassword.activeFocus ? "#2f8cff" : "#3b4353"; radius: 3 }
+          }
+
+          Text {
+            visible: window.feedback !== ""
+            text: window.feedback
+            color: "#ff7777"
+            font.family: "Hack"
+            font.pixelSize: 12
+            wrapMode: Text.Wrap
+            Layout.fillWidth: true
+          }
+
+          Button {
+            objectName: "accountSubmit"
+            Layout.fillWidth: true
+            Layout.preferredHeight: 38
+            enabled: !window.busy
+            text: window.busy ? "working…" : window.mode === "login" ? "sign in" : window.mode === "bootstrap" ? "create owner account" : "create account"
+            font.family: "Hack"
+            font.pixelSize: 13
+            onClicked: window.submit()
+            background: Rectangle { radius: 3; color: parent.enabled ? "#2f8cff" : "#273140"; border.color: parent.enabled ? "#72afff" : "#3b4353" }
+            contentItem: Text { text: parent.text; color: "#e8ecf3"; font: parent.font; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+          }
+        }
+      }
+
+      Process {
+        id: accountProcess
+        command: ["wisp-account"]
+        stdinEnabled: true
+        onStarted: write(JSON.stringify({
+          action: window.mode,
+          server_url: server.text.trim(),
+          username: username.text.trim(),
+          display_name: displayName.text.trim(),
+          password: password.text,
+          invite_code: invite.text.trim(),
+          bootstrap_token: bootstrapToken.text.trim(),
+          device_name: Quickshell.env("HOSTNAME") || "Desktop"
+        }) + "\n")
+        stdout: StdioCollector { id: output }
+        stderr: StdioCollector { id: errors }
+        onExited: function(exitCode) {
+          window.busy = false
+          password.text = ""
+          confirmPassword.text = ""
+          bootstrapToken.text = ""
+          if (exitCode === 0) {
+            window.feedback = "Account saved. Starting Wisp…"
+            finishTimer.start()
+          } else {
+            var lines = String(errors.text || "Account setup failed").trim().split("\n")
+            window.feedback = lines.length ? lines[lines.length - 1].replace(/^Error: /, "") : "Account setup failed"
+          }
+        }
+      }
+
+      Timer { id: finishTimer; interval: 500; onTriggered: Qt.quit() }
+    }
+  }
+}

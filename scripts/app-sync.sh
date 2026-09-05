@@ -5,6 +5,7 @@ repo_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 source_dir="$repo_dir/quickshell/app/"
 config_root="${XDG_CONFIG_HOME:-$HOME/.config}/quickshell"
 destination="$config_root/wisp"
+onboarding_destination="$config_root/wisp-onboarding"
 bin_root="${XDG_BIN_HOME:-$HOME/.local/bin}"
 data_root="${XDG_DATA_HOME:-$HOME/.local/share}"
 desktop_root="$data_root/applications"
@@ -18,10 +19,16 @@ if [[ ! -f "$source_dir/shell.qml" ]]; then
   exit 1
 fi
 
-mkdir -p "$destination" "$bin_root" "$desktop_root" "$icon_root" "$service_root"
+mkdir -p "$destination" "$onboarding_destination" "$bin_root" "$desktop_root" "$icon_root" "$service_root"
 
 if [[ -d "$repo_dir/native/video" ]]; then
   bash "$repo_dir/scripts/build-video-ui.sh"
+fi
+
+if command -v rsync >/dev/null 2>&1; then
+  rsync --archive --delete "$repo_dir/quickshell/onboarding/" "$onboarding_destination/"
+else
+  cp -a "$repo_dir/quickshell/onboarding"/. "$onboarding_destination/"
 fi
 
 if command -v rsync >/dev/null 2>&1; then
@@ -38,11 +45,10 @@ fi
 
 install -m 0755 "$repo_dir/scripts/wisp-ui.sh" "$bin_root/wisp-ui"
 install -m 0644 "$repo_dir/scripts/server-endpoint.sh" "$bin_root/wisp-server-endpoint"
-install -m 0755 "$repo_dir/scripts/configure-friend.sh" "$bin_root/wisp-friend-config"
-install -m 0755 "$repo_dir/scripts/register-friend-device.sh" "$bin_root/wisp-friend-register"
-install -m 0755 "$repo_dir/scripts/friend-tailscale.sh" "$bin_root/wisp-friend"
+install -m 0755 "$repo_dir/scripts/wisp-client.sh" "$bin_root/wisp-client"
 install -m 0755 "$repo_dir/scripts/wisp-update.sh" "$bin_root/wisp-update"
 install -m 0755 "$repo_dir/scripts/wisp-launch.sh" "$bin_root/wisp-launch"
+install -m 0755 "$repo_dir/scripts/wisp-onboarding.sh" "$bin_root/wisp-onboarding"
 install -m 0755 "$repo_dir/scripts/wisp.sh" "$bin_root/wisp"
 desktop_contents=$(<"$desktop_template")
 app_exec="$bin_root/wisp"
@@ -62,7 +68,7 @@ printf '%s\n' "$service_contents" >"$service_file"
 install -m 0644 "$service_file" "$service_root/wisp.service"
 rm -f -- "$service_file"
 trap - EXIT
-install -m 0644 "$source_dir/assets/waveform.svg" "$icon_root/dev.wisp.svg"
+install -m 0644 "$source_dir/assets/wisp-icon.svg" "$icon_root/dev.wisp.svg"
 
 if command -v systemctl >/dev/null 2>&1; then
   systemctl --user daemon-reload

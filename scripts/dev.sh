@@ -51,7 +51,7 @@ done
 if [[ -n ${WISP_BOOTSTRAP_TOKEN:-} && -z ${WISP_DEVICE_ID:-} ]]; then
   bootstrap_response=$(jq -n \
     --arg token "$WISP_BOOTSTRAP_TOKEN" \
-    --arg profile "${WISP_PROFILE:-Jared}" \
+    --arg profile "${WISP_PROFILE:-Owner}" \
     --arg device "${HOSTNAME:-Wisp host}" \
     '{bootstrap_token:$token, profile:$profile, device_name:$device, protocol_version:1}' \
     | curl --silent --show-error --fail-with-body \
@@ -74,8 +74,8 @@ if [[ -n ${WISP_BOOTSTRAP_TOKEN:-} && -z ${WISP_DEVICE_ID:-} ]]; then
   echo "Registered this host as the administrator device."
 fi
 
-cargo run -p wispd -- --profile "${WISP_PROFILE:-Jared}" &
+cargo run -p wispd -- --profile "${WISP_PROFILE:-Owner}" &
 child_pids+=("$!")
 
-echo "Wisp is running. Use 'just sim Tyler' or 'cargo run -p wispctl -- status'."
+echo "Wisp is running. Use 'just sim MemberA' or 'cargo run -p wispctl -- status'."
 wait -n "${child_pids[@]}"

@@ -116,6 +116,12 @@ call_or_start() {
 
 surface=${1:-app}
 case "$surface" in
+  chat)
+    case "${2:-}" in
+      tile) call_or_start dev.wisp.chat open "${3:?conversation required}" ;;
+      *) echo "usage: wisp-ui chat tile CONVERSATION" >&2; exit 2 ;;
+    esac
+    ;;
   media)
     case "${2:-}" in
       watch) call_or_start dev.wisp.media open "${3:?participant required}" "${4:?source required}" ;;

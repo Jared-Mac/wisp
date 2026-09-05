@@ -11,13 +11,17 @@ Dialog {
   property string requestId: ""
   property string groupRequestId: ""
   property string submittedSignature: ""
+  property string selectedServerId: ""
   property string error: ""
   readonly property bool busy: requestId!==""
-  readonly property var availableFriends: bridge.friends.filter(function(f) {
+  readonly property var selectedServerState: bridge.serverStates.filter(function(state) {
+    return String(state.server.id)===String(root.selectedServerId)
+  })[0] || ({friends:[]})
+  readonly property var availableFriends: (selectedServerState.friends || []).filter(function(f) {
     return String(f.id)!==String(root.bridge.selfState.id) && String(f.display_name).toLocaleLowerCase().indexOf(search.text.trim().toLocaleLowerCase())>=0
   }).sort(function(a,b) { return String(a.display_name).localeCompare(String(b.display_name)) })
   readonly property bool canSubmit: selectedIds.length >= (group?2:1) && selectedIds.length <= (group?31:1) && (!group || !!nameField.text.trim())
-  function begin() { group=false; selectedIds=[]; requestId=""; groupRequestId=""; submittedSignature=""; error=""; nameField.text=""; search.text=""; open() }
+  function begin() { group=false; selectedIds=[]; requestId=""; groupRequestId=""; submittedSignature=""; error=""; selectedServerId=String(bridge.activeServer.id || ""); nameField.text=""; search.text=""; open() }
   function toggleFriend(id) {
     if (busy) return
     selectedIds=selectedIds.indexOf(id)>=0 ? selectedIds.filter(function(v) { return v!==id }) : group ? selectedIds.concat([id]) : [id]
@@ -33,11 +37,11 @@ Dialog {
         groupRequestId="xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g,function(c) { var r=Math.floor(Math.random()*16); return (c==="x"?r:(r&3)|8).toString(16) })
         submittedSignature=signature
       }
-      args={name:nameField.text.trim(),members:selectedIds,request_id:groupRequestId}
+      args={server_id:selectedServerId,name:nameField.text.trim(),members:selectedIds,request_id:groupRequestId}
     } else {
       var friend=bridge.friends.filter(function(f) { return String(f.id)===selectedIds[0] })[0]
       if (!friend) { error="This friend is no longer available."; return }
-      args={friend:String(friend.display_name)}
+      args={server_id:selectedServerId,friend:String(friend.display_name)}
     }
     requestId=bridge.createChat(group,args)
     if (!requestId) error="Wisp is disconnected. Try again after reconnecting."
@@ -66,9 +70,22 @@ Dialog {
       ChatButton { theme: root.theme; text:"Direct message"; width:(parent.width-parent.spacing)/2; primary:!root.group; enabled:!root.busy; onClicked:{root.group=false;root.selectedIds=[]} }
       ChatButton { theme: root.theme; text:"Group chat"; width:(parent.width-parent.spacing)/2; primary:root.group; enabled:!root.busy; onClicked:{root.group=true;root.selectedIds=[]} }
     }
+    ComboBox {
+      id:serverPicker
+      anchors.top:modes.bottom; anchors.topMargin:root.theme.spacing.sm; width:parent.width
+      height:root.theme.space(34); enabled:!root.busy
+      model:root.bridge.servers; textRole:"name"; valueRole:"id"
+      currentIndex:{ for(var i=0;i<root.bridge.servers.length;i++) if(String(root.bridge.servers[i].id)===root.selectedServerId)return i; return 0 }
+      onActivated:function(index){var server=root.bridge.servers[index];if(server){root.selectedServerId=String(server.id);root.selectedIds=[]}}
+      Accessible.name:"Server for new chat"
+      font.family:root.theme.font.family; font.pixelSize:root.theme.font.caption
+      background:Rectangle { color:root.theme.background; border.width:1; border.color:serverPicker.activeFocus?root.theme.accent:root.theme.separator }
+      delegate:ItemDelegate { required property var modelData; width:serverPicker.width; text:String(modelData.name); font.family:root.theme.font.family; font.pixelSize:root.theme.font.caption; ThemeControlStyle { theme:root.theme; control:parent } }
+      popup.background:Rectangle { color:root.theme.surface; border.width:1; border.color:root.theme.muted; radius:root.theme.cornerRadius }
+    }
     TextField {
       id: nameField; objectName:"newChatName"; property bool wispTextEditor:true
-      anchors.top:modes.bottom; anchors.topMargin:root.theme.spacing.sm; width:parent.width
+      anchors.top:serverPicker.bottom; anchors.topMargin:root.theme.spacing.sm; width:parent.width
       visible:root.group; height:visible?root.theme.space(34):0; enabled:!root.busy
       maximumLength:60; placeholderText:"Group name"; color:root.theme.foreground; placeholderTextColor:root.theme.muted
       font.family:root.theme.font.family; font.pixelSize:root.theme.font.body

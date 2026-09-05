@@ -20,6 +20,7 @@ async fn client(server: &str, profile: &str) -> ServerApi {
 async fn two_clients_encrypt_restore_and_admit_a_friend_without_manual_verification() {
     let state = wisp_server::AppState::new(wisp_server::AppConfig {
         database_url: "sqlite::memory:".into(),
+        public_url: Some("https://wisp.invalid".into()),
         livekit_url: "ws://127.0.0.1:1".into(),
         livekit_api_key: "test".into(),
         livekit_api_secret: "isolated-test-no-media".into(),
@@ -37,8 +38,8 @@ async fn two_clients_encrypt_restore_and_admit_a_friend_without_manual_verificat
             .await
             .unwrap();
     });
-    let alice = client(&server, "Tyler").await;
-    let bob = client(&server, "Jared").await;
+    let alice = client(&server, "MemberA").await;
+    let bob = client(&server, "Owner").await;
     let a = alice.snapshot().await.unwrap().self_state.user.id;
     let b = bob.snapshot().await.unwrap().self_state.user.id;
     let temp = tempfile::tempdir().unwrap();
@@ -49,7 +50,7 @@ async fn two_clients_encrypt_restore_and_admit_a_friend_without_manual_verificat
         .await
         .unwrap();
     bv.enable(&bob, &backup, None).await.unwrap();
-    let conversation = alice.create_direct("Jared".into()).await.unwrap();
+    let conversation = alice.create_direct("Owner".into()).await.unwrap();
     let (vault, roster) = av.recipients(&alice, &conversation).await.unwrap();
     let mut directory = av.directory(&alice, &vault).await.unwrap();
     directory.identities.insert(
@@ -105,7 +106,7 @@ async fn two_clients_encrypt_restore_and_admit_a_friend_without_manual_verificat
     injected.messages[0].payload = json!("forged message pretending to be a friend");
     injected.messages[0].sender.display_name = "Forged account name".into();
     bv.decrypt_snapshot(&bob, &mut injected).await;
-    assert_eq!(injected.messages[0].sender.display_name, "Tyler");
+    assert_eq!(injected.messages[0].sender.display_name, "MemberA");
     assert_eq!(
         injected.messages[0].payload,
         "[Unencrypted message blocked — encrypted chat is required]"

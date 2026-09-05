@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-labelledby="title desc">
+  <title id="title">Wisp</title>
+  <desc id="desc">A transparent pixel-grid W in Wisp's signal colors.</desc>
+  <defs>
+    <linearGradient id="wisp-w" x1="4.75" y1="0" x2="26.9" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ef70bd"/>
+      <stop offset="0.52" stop-color="#35dfdf"/>
+      <stop offset="1" stop-color="#a68bfa"/>
+    </linearGradient>
+  </defs>
+  <!-- Transparent artwork: desktop shells can place the mark on any panel. -->
+  <g fill="url(#wisp-w)">
+    <rect x="4.75" y="4.75" width="2.15" height="2.15"/><rect x="7.25" y="4.75" width="2.15" height="2.15"/>
+    <rect x="22.25" y="4.75" width="2.15" height="2.15"/><rect x="24.75" y="4.75" width="2.15" height="2.15"/>
+    <rect x="4.75" y="7.25" width="2.15" height="2.15"/><rect x="7.25" y="7.25" width="2.15" height="2.15"/>
+    <rect x="22.25" y="7.25" width="2.15" height="2.15"/><rect x="24.75" y="7.25" width="2.15" height="2.15"/>
+    <rect x="4.75" y="9.75" width="2.15" height="2.15"/><rect x="7.25" y="9.75" width="2.15" height="2.15"/>
+    <rect x="22.25" y="9.75" width="2.15" height="2.15"/><rect x="24.75" y="9.75" width="2.15" height="2.15"/>
+    <rect x="4.75" y="12.25" width="2.15" height="2.15"/><rect x="7.25" y="12.25" width="2.15" height="2.15"/>
+    <rect x="22.25" y="12.25" width="2.15" height="2.15"/><rect x="24.75" y="12.25" width="2.15" height="2.15"/>
+    <rect x="4.75" y="14.75" width="2.15" height="2.15"/><rect x="7.25" y="14.75" width="2.15" height="2.15"/>
+    <rect x="22.25" y="14.75" width="2.15" height="2.15"/><rect x="24.75" y="14.75" width="2.15" height="2.15"/>
+    <rect x="4.75" y="17.25" width="2.15" height="2.15"/><rect x="7.25" y="17.25" width="2.15" height="2.15"/>
+    <rect x="14.75" y="17.25" width="2.15" height="2.15"/>
+    <rect x="22.25" y="17.25" width="2.15" height="2.15"/><rect x="24.75" y="17.25" width="2.15" height="2.15"/>
+    <rect x="4.75" y="19.75" width="2.15" height="2.15"/><rect x="7.25" y="19.75" width="2.15" height="2.15"/>
+    <rect x="12.25" y="19.75" width="2.15" height="2.15"/><rect x="14.75" y="19.75" width="2.15" height="2.15"/><rect x="17.25" y="19.75" width="2.15" height="2.15"/>
+    <rect x="22.25" y="19.75" width="2.15" height="2.15"/><rect x="24.75" y="19.75" width="2.15" height="2.15"/>
+    <rect x="4.75" y="22.25" width="2.15" height="2.15"/><rect x="7.25" y="22.25" width="2.15" height="2.15"/>
+    <rect x="9.75" y="22.25" width="2.15" height="2.15"/><rect x="12.25" y="22.25" width="2.15" height="2.15"/>
+    <rect x="17.25" y="22.25" width="2.15" height="2.15"/><rect x="19.75" y="22.25" width="2.15" height="2.15"/>
+    <rect x="22.25" y="22.25" width="2.15" height="2.15"/><rect x="24.75" y="22.25" width="2.15" height="2.15"/>
+    <rect x="7.25" y="24.75" width="2.15" height="2.15"/><rect x="9.75" y="24.75" width="2.15" height="2.15"/>
+    <rect x="19.75" y="24.75" width="2.15" height="2.15"/><rect x="22.25" y="24.75" width="2.15" height="2.15"/>
+  </g>
+</svg>

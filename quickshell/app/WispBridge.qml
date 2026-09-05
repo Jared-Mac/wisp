@@ -9,26 +9,30 @@ Item {
 
   property string clientName: "quickshell"
   readonly property alias workspaceLayout: workspaceLayout
-  WispWorkspaceLayout { id: workspaceLayout; onStreamPreferenceSaved: root.settingsSaved() }
+  WispWorkspaceLayout {
+    id: workspaceLayout
+    onStreamPreferenceSaved: root.settingsSaved()
+    onChannelPreferenceSaved: root.settingsSaved()
+  }
   readonly property alias chatColors: chatColors
   WispChatColors { id: chatColors; conversations: root.conversations }
   readonly property alias friendPreferences: friendPreferences
   readonly property alias participantVolumes: participantVolumes
   WispParticipantVolumes {
     id: participantVolumes
-    account: String(root.selfState.id || root.configuredProfile || "")
+    account: String((root.voiceServerState.self || {}).id || root.configuredProfile || "")
     onVolumesChanged: root.applyParticipantVolumes()
     onReadyChanged: root.applyParticipantVolumes()
     onSaved: root.settingsSaved()
   }
   property string lastAppliedVolumes: ""
   onDaemonConnectedChanged: { lastAppliedVolumes = ""; if (daemonConnected) { applyParticipantVolumes(); refreshPrivacy() } }
-  onFriendsChanged: applyParticipantVolumes()
-  onHangoutsChanged: applyParticipantVolumes()
+  onVoiceFriendsChanged: applyParticipantVolumes()
+  onVoiceHangoutsChanged: applyParticipantVolumes()
   function applyParticipantVolumes() {
     if (!daemonConnected || !participantVolumes.ready) return
-    var people = friends.slice(), values = ({})
-    hangouts.forEach(function(room) { people = people.concat(room.members || []) })
+    var people = voiceFriends.slice(), values = ({})
+    voiceHangouts.forEach(function(room) { people = people.concat(room.members || []) })
     people.forEach(function(person) {
       if (person.id !== root.selfState.id) values[String(person.display_name)] = participantVolumes.volumeFor(person) / 100
     })
@@ -47,6 +51,14 @@ Item {
   property var mediaTileHost: null
   property bool delegateMediaToDesktop: false
   signal desktopWatchRequested(string participant, string source, bool open)
+  property bool delegateConversationsToDesktop: false
+  signal desktopConversationTileRequested(string id)
+  property var pendingConversationTiles: []
+  function openChannel(id, forceNewTile) {
+    if (!forceNewTile && !workspaceLayout.channelsAsTiles) { selectConversation(id); return }
+    if (delegateConversationsToDesktop) { desktopConversationTileRequested(String(id)); return }
+    pendingConversationTiles = pendingConversationTiles.concat([String(id)])
+  }
   property var watchedMedia: ({})
   signal mediaWatchReady(var video)
   readonly property string videoSocketPath: socketPath.replace(/\.[^/.]+$/, "") + ".video"
@@ -97,20 +109,48 @@ Item {
   property var imageErrors: ({})
   property var imageRequests: ({})
   property var requests: ({})
+  property var pendingCreatedConversations: []
   property var privacyStatus: ({configured:false})
   property bool privacyBusy: false
   property string privacyFeedback: ""
+  property var serverSettings: ({name:"",role:"",members:[],categories:[],channels:[],rooms:[]})
+  property bool serverSettingsBusy: false
+  property string serverSettingsFeedback: ""
+  readonly property bool canManageServer: !!selfState.server_owner || !!selfState.server_admin
+  onCanManageServerChanged: {
+    if (canManageServer) refreshServerSettings()
+    else {
+      serverSettings = ({name:"",role:"",members:[],categories:[],channels:[],rooms:[]})
+      serverSettingsFeedback = ""
+    }
+  }
   function refreshPrivacy() {
-    var id = send("privacy_status", {})
+    var id = send("privacy_status", {server_id:String(activeServer.id || "")})
     if (id) requests[id] = {kind:"privacyStatus"}
   }
   function configurePrivacy(backup, recovery) {
-    var id = send("privacy_enable", {backup_file:String(backup),recovery_file:String(recovery || "")})
+    var id = send("privacy_enable", {server_id:String(activeServer.id || ""),backup_file:String(backup),recovery_file:String(recovery || "")})
     if (id) { requests[id] = {kind:"privacySetup"}; privacyBusy = true; privacyFeedback = "" }
   }
   function exportPrivacy(backup) {
-    var id = send("privacy_export", {backup_file:String(backup)})
+    var id = send("privacy_export", {server_id:String(activeServer.id || ""),backup_file:String(backup)})
     if (id) { requests[id] = {kind:"privacyExport"}; privacyBusy = true; privacyFeedback = "" }
+  }
+  function refreshServerSettings() {
+    if (!daemonConnected || !canManageServer || serverSettingsBusy) return
+    var id = send("server_settings", {server_id:String(activeServer.id || "")})
+    if (id) { requests[id] = {kind:"serverSettings"}; serverSettingsBusy = true }
+  }
+  function serverMutation(action, args) {
+    if (!canManageServer || serverSettingsBusy) return false
+    var values = Object.assign({}, args || {}, {server_id:String(activeServer.id || "")})
+    var id = send(action, values)
+    if (id) {
+      requests[id] = {kind:"serverMutation",action:action}
+      serverSettingsBusy = true
+      serverSettingsFeedback = ""
+    }
+    return !!id
   }
   signal clipboardTextReady(string conversationId, string value)
   signal messageMutationFinished(string messageId, string action, bool success, string error)
@@ -226,37 +266,144 @@ Item {
     "last_invite": null
   })
 
-  readonly property var selfState: snapshot["self"] || ({})
-  readonly property var friends: snapshot.friends || []
+  function scopedConversationId(serverId, conversationId) {
+    return String(serverId) + "::" + String(conversationId)
+  }
+  function scopedConversation(server, conversation) {
+    var value = Object.assign({}, conversation)
+    value.raw_id = String(conversation.id)
+    value.server_id = String(server.id)
+    value.server_name = String(server.name)
+    value.id = scopedConversationId(server.id, conversation.id)
+    return value
+  }
+  function scopedMessage(server, message) {
+    var value = Object.assign({}, message)
+    value.server_id = String(server.id)
+    value.server_name = String(server.name)
+    value.raw_conversation_id = String(message.conversation_id)
+    value.conversation_id = scopedConversationId(server.id, message.conversation_id)
+    return value
+  }
+  function flattenedSnapshot(value) {
+    if (!value) return {conversations:[],messages:[],room_invitations:[]}
+    var states=(value.server_states || []).length ? value.server_states : [{
+      server:(value.servers || [])[0] || ({id:"local",name:"Wisp server"}),
+      hangouts:value.hangouts || [], conversations:value.conversations || [],
+      messages:value.messages || [], room_invitations:value.room_invitations || []
+    }]
+    var conversations=[],messages=[],invitations=[]
+    states.forEach(function(state) {
+      ChatLogic.visibleConversations(state.conversations || [],state.hangouts || []).forEach(function(c) { conversations.push(root.scopedConversation(state.server,c)) })
+      var stateMessages=state.messages || [],stateInvitations=state.room_invitations || []
+      stateMessages.forEach(function(m) { messages.push(root.scopedMessage(state.server,m)) })
+      stateInvitations.forEach(function(i) { invitations.push(Object.assign({},i,{server_id:String(state.server.id)})) })
+    })
+    return {conversations:conversations,messages:messages,room_invitations:invitations}
+  }
+  function roomEventsForSnapshots(previous,next,eventName) {
+    if (!(next.server_states || []).length) return ChatLogic.roomSoundEvents(previous,next,eventName)
+    var result=[],previousStates=previous ? previous.server_states || [] : [],nextStates=next.server_states || []
+    nextStates.forEach(function(state) {
+      var old=previousStates.filter(function(candidate) { return String(candidate.server.id)===String(state.server.id) })[0] || null
+      result=result.concat(ChatLogic.roomSoundEvents(old,state,eventName))
+    })
+    return result
+  }
+  function scopeForConversation(id) {
+    var conversation = conversationById(id)
+    if (conversation) return {server_id:String(conversation.server_id),conversation_id:String(conversation.raw_id)}
+    var text = String(id || ""), split = text.indexOf("::")
+    if (split > 0) return {server_id:text.slice(0, split),conversation_id:text.slice(split + 2)}
+    return {server_id:String(activeServer.id || ""),conversation_id:text}
+  }
+  function messageById(id) {
+    for (var i=0;i<messages.length;i++) if (String(messages[i].id)===String(id)) return messages[i]
+    return null
+  }
+  function scopeForMessage(id) {
+    var message=messageById(id)
+    return {server_id:String(message ? message.server_id : activeServer.id || ""),message_id:String(id)}
+  }
+  function withConversationScope(id, values) {
+    return Object.assign({}, values || {}, scopeForConversation(id))
+  }
+  readonly property var serverStates: {
+    if ((snapshot.server_states || []).length) return snapshot.server_states
+    var fallback = (snapshot.servers || [])[0] || ({id:"local",name:"Wisp server",connected:daemonConnected})
+    return [{server:fallback,self:snapshot.self,friends:snapshot.friends || [],hangouts:snapshot.hangouts || [],knocks:snapshot.knocks || [],room_invitations:snapshot.room_invitations || [],conversations:snapshot.conversations || [],messages:snapshot.messages || [],spots:snapshot.spots || [],devices:snapshot.devices || []}]
+  }
+  readonly property var servers: {
+    var values = (snapshot.servers || []).slice()
+    if (!values.length) values = serverStates.map(function(state) { return state.server })
+    return values
+  }
+  property string activeServerId: ""
+  function selectServer(id) {
+    id = String(id || "")
+    if (!servers.some(function(server) { return String(server.id) === id })) return
+    activeServerId = id
+    workspaceLayout.selectedServerId = id
+    serverSettings = ({name:"",role:"",members:[],categories:[],channels:[],rooms:[]})
+    serverSettingsFeedback = ""
+    if (canManageServer) refreshServerSettings()
+  }
+  onServersChanged: {
+    if (!servers.length) return
+    var preferred = String(workspaceLayout.selectedServerId || snapshot.selected_server_id || activeServerId || "")
+    if (!servers.some(function(server) { return String(server.id) === preferred })) preferred = String(servers[0].id)
+    if (activeServerId !== preferred) activeServerId = preferred
+  }
+  readonly property var activeServer: servers.filter(function(server) { return String(server.id) === root.activeServerId })[0] || servers[0] || ({id:"",name:"Wisp server",connected:false})
+  readonly property var activeServerState: serverStates.filter(function(state) { return String(state.server.id) === String(root.activeServer.id) })[0]
+    || ({server:activeServer,self:{display_name:configuredProfile,presence:"away",connection:"connecting_to_server",server_owner:false,server_admin:false},friends:[],hangouts:[],knocks:[],room_invitations:[],conversations:[],messages:[],spots:[],devices:[]})
+  readonly property string voiceServerId: String(snapshot.voice_server_id || snapshot.selected_server_id || (servers[0] || {}).id || "")
+  readonly property var voiceServerState: serverStates.filter(function(state) { return String(state.server.id)===root.voiceServerId })[0] || serverStates[0] || ({})
+  readonly property var voiceHangouts: (voiceServerState.hangouts || []).map(function(room) { return Object.assign({},room,{server_id:root.voiceServerId,server_name:String((voiceServerState.server || {}).name || "")}) })
+  readonly property var voiceFriends: voiceServerState.friends || []
+  readonly property var voiceSpots: voiceServerState.spots || []
+  readonly property var selfState: {
+    var selected = activeServerState.self || snapshot.self || ({})
+    var mediaOwner = snapshot.self || selected
+    return Object.assign({}, selected, {
+      muted:!!mediaOwner.muted,
+      deafened:!!mediaOwner.deafened,
+      sharing:!!mediaOwner.sharing,
+      hangout_id:mediaOwner.hangout_id,
+      push_to_talk:mediaOwner.push_to_talk,
+      media:mediaOwner.media
+    })
+  }
+  readonly property var friends: (activeServerState.friends || []).map(function(friend) { return Object.assign({},friend,{server_id:String(root.activeServer.id),server_name:String(root.activeServer.name)}) })
   readonly property var sortedFriends: FriendLogic.sorted(friends, friendPreferences.favorites)
-  readonly property var hangouts: snapshot.hangouts || []
-  readonly property var knocks: snapshot.knocks || []
+  readonly property var hangouts: (activeServerState.hangouts || []).map(function(room) { return Object.assign({},room,{server_id:String(root.activeServer.id),server_name:String(root.activeServer.name)}) })
+  readonly property var knocks: (activeServerState.knocks || []).map(function(knock) { return Object.assign({},knock,{server_id:String(root.activeServer.id)}) })
   property double invitationClock: Date.now()
   property var invitationRequests: ({})
   property string invitationFeedback: ""
-  readonly property var roomInvitations: (snapshot.room_invitations || []).filter(function(i) { return Date.parse(i.expires_at) > root.invitationClock })
-  readonly property var currentVoiceRoom: hangouts.filter(function(h) { return h.id === root.selfState.hangout_id })[0] || null
+  readonly property var roomInvitations: (activeServerState.room_invitations || []).filter(function(i) { return Date.parse(i.expires_at) > root.invitationClock }).map(function(invite) { return Object.assign({},invite,{server_id:String(root.activeServer.id)}) })
+  readonly property var currentVoiceRoom: voiceHangouts.filter(function(h) { return h.id === root.selfState.hangout_id })[0] || null
   Timer { interval: 1000; repeat: true; running: true; onTriggered: root.invitationClock = Date.now() }
   Timer { id: invitationFeedbackTimer; interval: 3000; onTriggered: root.invitationFeedback = "" }
 
   function inviteToRoom(friend) {
     if (!currentVoiceRoom || invitationRequests[friend.id]) return
-    var id = send("send_voice_invite", {hangout_id:currentVoiceRoom.id, user_id:friend.id})
+    var id = send("send_voice_invite", {server_id:String(currentVoiceRoom.server_id || activeServer.id),hangout_id:currentVoiceRoom.id, user_id:friend.id})
     if (id) {
       invitationRequests = replaceEntry(invitationRequests, friend.id, true)
-      requests[id] = {kind:"roomInvite", key:friend.id, name:friend.display_name}
+      requests[id] = {kind:"roomInvite", key:friend.id, name:friend.display_name, serverId:String(currentVoiceRoom.server_id || activeServer.id)}
     }
   }
   function needsEncryptedRoomAccess(friend) {
     if (!currentVoiceRoom || !(privacyStatus.configured || snapshot.chat_encryption_required)) return false
-    var spot = spots.filter(function(s) { return s.active_hangout_id === root.currentVoiceRoom.id })[0]
+    var spot = voiceSpots.filter(function(s) { return s.active_hangout_id === root.currentVoiceRoom.id })[0]
     var conversation = conversationById(spot ? "spot:" + spot.id : "hangout:" + currentVoiceRoom.id)
     return !conversation || !(conversation.members || []).some(function(p) { return p.id === friend.id })
   }
   function respondRoomInvitation(invitation, accept) {
     var key = String(invitation.invitation_id || invitation.id)
     if (invitationRequests[key]) return
-    var id = send("respond_room_invitation", {id:key, accept:accept})
+    var id = send("respond_room_invitation", {server_id:String(invitation.server_id || activeServer.id),id:key, accept:accept})
     if (id) {
       invitationRequests = replaceEntry(invitationRequests, key, true)
       requests[id] = {kind:"roomInviteResponse", key:key}
@@ -264,16 +411,39 @@ Item {
   }
   function openRoomChat(room, persistent) {
     var spot = persistent ? room : spots.filter(function(s) { return s.active_hangout_id === room.id })[0]
-    var id = spot ? "spot:" + spot.id : "hangout:" + room.id
+    var id = scopedConversationId(String(room.server_id || activeServer.id),spot ? "spot:" + spot.id : "hangout:" + room.id)
     if (conversationById(id)) selectConversation(id)
     else lastError = "Join this room or ask an administrator for access to its chat."
   }
-  readonly property var conversations: ChatLogic.visibleConversations(
-    snapshot.conversations || [], snapshot.hangouts || [])
-  readonly property var messages: snapshot.messages || []
-  readonly property var spots: snapshot.spots || []
-  readonly property var devices: snapshot.devices || []
+  readonly property var conversations: {
+    var result=[]
+    serverStates.forEach(function(state) {
+      var visible=ChatLogic.visibleConversations(state.conversations || [],state.hangouts || [])
+      visible.forEach(function(conversation) { result.push(root.scopedConversation(state.server,conversation)) })
+    })
+    pendingCreatedConversations.forEach(function(conversation) {
+      if (!result.some(function(current) { return String(current.id)===String(conversation.id) })) result.push(conversation)
+    })
+    return result
+  }
+  readonly property var messages: {
+    var result=[]
+    serverStates.forEach(function(state) { (state.messages || []).forEach(function(message) { result.push(root.scopedMessage(state.server,message)) }) })
+    return result
+  }
+  readonly property var spots: (activeServerState.spots || []).map(function(spot) { return Object.assign({},spot,{server_id:String(root.activeServer.id),server_name:String(root.activeServer.name),conversation_id:root.scopedConversationId(root.activeServer.id,"spot:"+spot.id)}) })
+  readonly property int roomCount: {
+    var activeFromSpots = ({})
+    spots.forEach(function(spot) {
+      if (spot.active_hangout_id) activeFromSpots[String(spot.active_hangout_id)] = true
+    })
+    return spots.length + hangouts.filter(function(room) {
+      return !activeFromSpots[String(room.id)]
+    }).length
+  }
+  readonly property var devices: activeServerState.devices || []
   readonly property var lastInvite: snapshot.last_invite || null
+  property var lastAccountInvite: null
   property string activeConversationId: ""
   property string lastConversationId: ""
   property string previousActiveId: ""
@@ -286,6 +456,7 @@ Item {
     return Number(c.unread_count || 0) > 0 && String(c.id) !== activeConversationId
   })
   property string pendingDirectName: ""
+  property string pendingDirectServerId: ""
   readonly property var activeConversation: conversationById(activeConversationId)
   readonly property var activeMessages: messagesFor(activeConversationId)
   readonly property int unreadMessages: totalUnread()
@@ -416,7 +587,7 @@ Item {
   signal commandFailed(string message)
 
   function readConfiguredProfile() {
-    var match = localConfig.text().match(/(?:^|\n)WISP_PROFILE=(Tyler|Jack|Charlie)(?:\n|$)/)
+    var match = localConfig.text().match(/(?:^|\n)WISP_PROFILE=([^\r\n]+)(?:\n|$)/)
     return match ? String(match[1]) : ""
   }
 
@@ -428,7 +599,7 @@ Item {
 
   FileView {
     id: localConfig
-    path: root.configHome + "/wisp/friend.env"
+    path: root.configHome + "/wisp/account.env"
     blockLoading: true
     printErrors: false
     watchChanges: true
@@ -522,9 +693,9 @@ Item {
     if (unreadMessages > 0 && !inHangout) return "󰍩  " + String(unreadMessages) + " unread"
     var names = []
     if (inHangout) {
-      for (var h = 0; h < hangouts.length; h++) {
-        if (hangouts[h].id !== selfState.hangout_id) continue
-        var members = hangouts[h].members || []
+      for (var h = 0; h < voiceHangouts.length; h++) {
+        if (voiceHangouts[h].id !== selfState.hangout_id) continue
+        var members = voiceHangouts[h].members || []
         for (var m = 0; m < members.length; m++)
           if (members[m].id !== selfState.id) names.push(members[m].display_name)
       }
@@ -557,9 +728,9 @@ Item {
     if (cameraActive) return "camera"
     var names = []
     if (inHangout) {
-      for (var h = 0; h < hangouts.length; h++) {
-        if (hangouts[h].id !== selfState.hangout_id) continue
-        var members = hangouts[h].members || []
+      for (var h = 0; h < voiceHangouts.length; h++) {
+        if (voiceHangouts[h].id !== selfState.hangout_id) continue
+        var members = voiceHangouts[h].members || []
         for (var m = 0; m < members.length; m++)
           if (members[m].id !== selfState.id) names.push(members[m].display_name)
       }
@@ -594,16 +765,20 @@ Item {
 
   function applySnapshot(next, eventName) {
     if (!next) return
-    var incoming = ChatLogic.incomingConversationIds(receivedSnapshot ? snapshot : null, next, eventName)
-    var roomEvents = ChatLogic.roomSoundEvents(receivedSnapshot ? snapshot : null, next, eventName)
-    var knownInvites = (snapshot.room_invitations || []).map(function(i) { return i.id })
-    var newInvite = receivedSnapshot && (next.room_invitations || []).some(function(i) {
-      return Date.parse(i.expires_at) > Date.now() && knownInvites.indexOf(i.id) < 0
+    var previousFlat=receivedSnapshot ? flattenedSnapshot(snapshot) : null
+    var nextFlat=flattenedSnapshot(next)
+    var incoming = ChatLogic.incomingConversationIds(previousFlat, nextFlat, eventName)
+    var roomEvents = roomEventsForSnapshots(receivedSnapshot ? snapshot : null,next,eventName)
+    var knownInvites = (previousFlat ? previousFlat.room_invitations : []).map(function(i) { return String(i.server_id)+":"+String(i.id) })
+    var newInvite = receivedSnapshot && nextFlat.room_invitations.some(function(i) {
+      return Date.parse(i.expires_at) > Date.now() && knownInvites.indexOf(String(i.server_id)+":"+String(i.id)) < 0
     })
     snapshot = next
+    pendingCreatedConversations = pendingCreatedConversations.filter(function(pending) {
+      return !nextFlat.conversations.some(function(current) { return String(current.id)===String(pending.id) })
+    })
     if (activeConversationId) {
-      var nextVisibleConversations = ChatLogic.visibleConversations(
-        next.conversations || [], next.hangouts || [])
+      var nextVisibleConversations = conversations
       var activeStillVisible = nextVisibleConversations.some(function(conversation) {
         return String(conversation.id) === String(activeConversationId)
       })
@@ -624,13 +799,16 @@ Item {
       || nextShare.error || nextCamera.error || "")
     if (pendingDirectName !== "") {
       var wanted = pendingDirectName
-      var nextConversations = next.conversations || []
+      var wantedServer = pendingDirectServerId
+      var nextConversations = conversations
       for (var i = 0; i < nextConversations.length; i++) {
         if (String(nextConversations[i].kind) === "direct"
-            && String(nextConversations[i].label) === wanted) {
+            && String(nextConversations[i].label) === wanted
+            && (!wantedServer || String(nextConversations[i].server_id) === wantedServer)) {
           activeConversationId = String(nextConversations[i].id)
           pendingDirectName = ""
-          send("mark_conversation_read", { "conversation_id": activeConversationId })
+          pendingDirectServerId = ""
+          send("mark_conversation_read", withConversationScope(activeConversationId))
           break
         }
       }
@@ -644,20 +822,27 @@ Item {
     var id = String(c.last_message.id)
     if (lastReadMessageId === id) return
     lastReadMessageId = id
-    send("mark_conversation_read", { "conversation_id": String(c.id) })
+    send("mark_conversation_read", withConversationScope(c.id))
   }
 
   function conversationById(id) {
     for (var i = 0; i < conversations.length; i++)
       if (String(conversations[i].id) === String(id)) return conversations[i]
+    // Older local layouts stored unscoped IDs. Resolve them against the active
+    // server first so upgrading does not discard a user's open workspace.
+    for (var j = 0; j < conversations.length; j++)
+      if (String(conversations[j].server_id) === String(activeServer.id)
+          && String(conversations[j].raw_id) === String(id)) return conversations[j]
     return null
   }
 
   function messagesFor(id) {
     var result = []
     if (!id) return result
+    var conversation=conversationById(id)
+    var canonical=conversation ? String(conversation.id) : String(id)
     for (var i = 0; i < messages.length; i++)
-      if (String(messages[i].conversation_id) === String(id)) result.push(messages[i])
+      if (String(messages[i].conversation_id) === canonical) result.push(messages[i])
     return result
   }
 
@@ -725,21 +910,37 @@ Item {
     else next[key] = value
     return next
   }
-  function draftFor(id) { return String(drafts[id] || "") }
+  function conversationKeys(id) {
+    var value=String(id || ""), conversation=conversationById(value)
+    var canonical=conversation ? String(conversation.id) : value
+    var raw=conversation ? String(conversation.raw_id) : value
+    return canonical===raw ? [canonical] : [canonical,raw]
+  }
+  function conversationValue(map,id,fallback) {
+    var keys=conversationKeys(id)
+    for(var i=0;i<keys.length;i++) if(map[keys[i]]!==undefined)return map[keys[i]]
+    return fallback
+  }
+  function replaceConversationEntry(map,id,value) {
+    var next=Object.assign({},map),keys=conversationKeys(id)
+    keys.forEach(function(key){if(value===undefined)delete next[key];else next[key]=value})
+    return next
+  }
+  function draftFor(id) { return String(conversationValue(drafts,id,"") || "") }
   function setDraft(id, value) {
-    if (id && draftFor(id) !== value) drafts = replaceEntry(drafts, id, value)
+    if (id && draftFor(id) !== value) drafts = replaceConversationEntry(drafts, id, value)
   }
   function pasteClipboard(conversationId) {
-    if (!conversationId || sendingConversations[conversationId]) return
+    if (!conversationId || conversationValue(sendingConversations,conversationId,false)) return
     var id = send("paste_clipboard", {})
     if (id) {
       requests[id] = { kind: "paste", conversationId: conversationId }
-      importingConversations = replaceEntry(importingConversations, conversationId, (importingConversations[conversationId] || 0) + 1)
+      importingConversations = replaceConversationEntry(importingConversations, conversationId, Number(conversationValue(importingConversations,conversationId,0)) + 1)
     }
   }
-  function attachmentsFor(id) { return pendingAttachments[id] || [] }
+  function attachmentsFor(id) { return conversationValue(pendingAttachments,id,[]) || [] }
   function setAttachmentKeep(conversationId, token, keep) {
-    pendingAttachments = replaceEntry(pendingAttachments, conversationId, attachmentsFor(conversationId).map(function(a) {
+    pendingAttachments = replaceConversationEntry(pendingAttachments, conversationId, attachmentsFor(conversationId).map(function(a) {
       return a.token === token ? Object.assign({}, a, {keep:keep}) : a
     }))
   }
@@ -748,30 +949,30 @@ Item {
     return value && value.total > 0 ? " " + Math.min(100, Math.floor(value.bytes * 100 / value.total)) + "%" : "…"
   }
   function importChatFiles(conversationId, urls) {
-    if (!conversationId || sendingConversations[conversationId]) return
+    if (!conversationId || conversationValue(sendingConversations,conversationId,false)) return
     var values = []
     for (var i = 0; i < urls.length; i++) values.push(String(urls[i]))
     var id = send("import_chat_files", {urls: values})
     if (id) {
       requests[id] = {kind: "import", conversationId: conversationId}
-      importingConversations = replaceEntry(importingConversations, conversationId, (importingConversations[conversationId] || 0) + 1)
+      importingConversations = replaceConversationEntry(importingConversations, conversationId, Number(conversationValue(importingConversations,conversationId,0)) + 1)
     }
   }
   function removeAttachment(conversationId, token, alreadySent) {
     if (!alreadySent) send("discard_attachment_draft", {token: token})
-    pendingAttachments = replaceEntry(pendingAttachments, conversationId,
+    pendingAttachments = replaceConversationEntry(pendingAttachments, conversationId,
       attachmentsFor(conversationId).filter(function(a) { return a.token !== token }))
   }
   function sendAttachmentQueue(conversationId, tokens, caption, originalText) {
     var attachment = attachmentsFor(conversationId).filter(function(a) { return a.token === tokens[0] })[0]
-    sendingConversations = replaceEntry(sendingConversations, conversationId, true)
-    var id = send("send_attachment_message", {conversation_id: conversationId, token: tokens[0], caption: caption, keep:!!(attachment && attachment.keep)})
+    sendingConversations = replaceConversationEntry(sendingConversations, conversationId, true)
+    var id = send("send_attachment_message", withConversationScope(conversationId, {token: tokens[0], caption: caption, keep:!!(attachment && attachment.keep)}))
     if (id) {
       requests[id] = {kind: "send", conversationId: conversationId, text: originalText, token: tokens[0], remaining: tokens.slice(1)}
-    } else sendingConversations = replaceEntry(sendingConversations, conversationId, undefined)
+    } else sendingConversations = replaceConversationEntry(sendingConversations, conversationId, undefined)
   }
   function sendComposedMessage(conversationId) {
-    if (!conversationId || sendingConversations[conversationId] || importingConversations[conversationId]) return
+    if (!conversationId || conversationValue(sendingConversations,conversationId,false) || conversationValue(importingConversations,conversationId,0)) return
     var text = draftFor(conversationId).trim()
     var attachments = attachmentsFor(conversationId)
     if (attachments.length > 0) {
@@ -779,15 +980,15 @@ Item {
       return
     }
     if (!text) return
-    sendingConversations = replaceEntry(sendingConversations, conversationId, true)
-    var id = send("send_message", {conversation_id: conversationId, text: text})
+    sendingConversations = replaceConversationEntry(sendingConversations, conversationId, true)
+    var id = send("send_message", withConversationScope(conversationId, {text: text}))
     if (id) {
       requests[id] = {kind: "send", conversationId: conversationId, text: draftFor(conversationId), token: ""}
-    } else sendingConversations = replaceEntry(sendingConversations, conversationId, undefined)
+    } else sendingConversations = replaceConversationEntry(sendingConversations, conversationId, undefined)
   }
   function saveChatFile(messageId) {
     if (savingFiles[messageId]) return
-    var id = send("save_chat_file", {message_id: messageId})
+    var id = send("save_chat_file", scopeForMessage(messageId))
     if (id) {
       requests[id] = {kind: "saveFile", messageId: messageId}
       savingFiles = replaceEntry(savingFiles, messageId, true)
@@ -800,14 +1001,14 @@ Item {
   }
   function loadChatImage(messageId, retry) {
     if (chatImageUrls[messageId] || (imageRequests[messageId] && !retry)) return
-    var id = send("load_chat_image", {message_id: messageId})
+    var id = send("load_chat_image", scopeForMessage(messageId))
     if (id) {
       imageRequests[messageId] = true
       requests[id] = {kind: "image", messageId: messageId}
     }
   }
   function copyChatImage(messageId) {
-    var id=send("copy_chat_image",{message_id:messageId})
+    var id=send("copy_chat_image",scopeForMessage(messageId))
     if(id)requests[id]={kind:"copyImage"}
     return id || ""
   }
@@ -825,12 +1026,28 @@ Item {
         if (action.kind === "privacyExport") privacyFeedback = "Recovery file saved locally. Keep it private."
       } else privacyFeedback = message.error ? String(message.error.message) : "Privacy operation failed"
       privacyBusy = false
+    } else if (action.kind === "serverSettings") {
+      if (message.ok) serverSettings = value
+      else serverSettingsFeedback = message.error ? String(message.error.message || "Could not load server settings") : "Could not load server settings"
+      serverSettingsBusy = false
+    } else if (action.kind === "serverMutation") {
+      serverSettingsBusy = false
+      if (message.ok) {
+        serverSettingsFeedback = "Changes saved"
+        settingsSaved()
+        refreshServerSettings()
+      } else {
+        serverSettingsFeedback = message.error ? String(message.error.message || "Could not update server") : "Could not update server"
+      }
+    } else if (action.kind === "accountInvite") {
+      if (message.ok) lastAccountInvite = value
+      else lastError = message.error ? String(message.error.message || "Could not create invite") : "Could not create invite"
     } else if (action.kind === "roomInvite" || action.kind === "roomInviteResponse") {
       invitationRequests = replaceEntry(invitationRequests, action.key, undefined)
       if (message.ok && action.kind === "roomInvite") {
         invitationFeedback = value.already_pending ? "Invitation already pending" : "Voice invite sent to " + action.name
         invitationFeedbackTimer.restart()
-        if (value.conversation_id) selectConversation(String(value.conversation_id))
+        if (value.conversation_id) selectConversation(scopedConversationId(action.serverId,value.conversation_id))
       }
     } else if (action.kind === "copyImage") {
       imageCopyFinished(String(message.id),!!message.ok,message.error ? String(message.error.message || "Could not copy image") : "")
@@ -849,15 +1066,15 @@ Item {
       historyClearFinished(action.conversationId, !!message.ok, message.error ? String(message.error.message || "Could not clear history") : "")
     } else if (action.kind === "newChat") {
       var created = !!message.ok && !!value.id
+      var createdId = created ? scopedConversationId(action.serverId, value.id) : ""
       if (created) {
-        var next = Object.assign({}, snapshot)
-        next.conversations = conversations.filter(function(c) { return String(c.id) !== String(value.id) }).concat([value])
-        snapshot = next
+        var server=servers.filter(function(candidate) { return String(candidate.id)===String(action.serverId) })[0] || ({id:action.serverId,name:"Wisp server"})
+        pendingCreatedConversations = pendingCreatedConversations.concat([scopedConversation(server,value)])
       }
-      chatCreationFinished(String(message.id), created, created ? String(value.id) : "",
+      chatCreationFinished(String(message.id), created, createdId,
         created ? "" : message.error ? String(message.error.message || "Could not create chat") : "Could not create chat")
     } else if (action.kind === "room") {
-      if (message.ok && action.action === "create_room" && value.id) activeConversationId = String(value.id)
+      if (message.ok && action.action === "create_room" && value.id) activeConversationId = scopedConversationId(action.serverId,value.id)
       roomActionFinished(action.action, !!message.ok, message.error ? String(message.error.message || "Could not update room") : "")
     } else if (action.kind === "send") {
       if (message.ok) {
@@ -869,13 +1086,13 @@ Item {
         }
       }
       // Clear acknowledged content before re-enabling Enter and Send.
-      sendingConversations = replaceEntry(sendingConversations, conversationId, undefined)
+      sendingConversations = replaceConversationEntry(sendingConversations, conversationId, undefined)
     } else if (action.kind === "paste" || action.kind === "import") {
-      importingConversations = replaceEntry(importingConversations, conversationId,
-        Math.max(0, (importingConversations[conversationId] || 1) - 1))
+      importingConversations = replaceConversationEntry(importingConversations, conversationId,
+        Math.max(0, Number(conversationValue(importingConversations,conversationId,1)) - 1))
       if (message.ok) {
         var added = value.attachments || (value.token ? [value] : [])
-        if (added.length > 0) pendingAttachments = replaceEntry(pendingAttachments, conversationId, attachmentsFor(conversationId).concat(added))
+        if (added.length > 0) pendingAttachments = replaceConversationEntry(pendingAttachments, conversationId, attachmentsFor(conversationId).concat(added))
         else if (value.text !== undefined) clipboardTextReady(conversationId, String(value.text))
       }
     } else if (action.kind === "saveFile") {
@@ -887,7 +1104,7 @@ Item {
     }
   }
 
-  function setPresence(value) { send("set_presence", { "presence": value }) }
+  function setPresence(value) { send("set_presence", {server_id:String(activeServer.id || ""), "presence": value }) }
   function saveSetting(name, args) {
     var id = send(name, args)
     if (id) requests[id] = {kind: "setting"}
@@ -895,56 +1112,59 @@ Item {
     return id
   }
   function editChatMessage(messageId, text) {
-    var id = send("edit_message", {message_id: messageId, text: text})
+    var id = send("edit_message", Object.assign(scopeForMessage(messageId), {text: text}))
     if (id) requests[id] = {kind: "edit", messageId: messageId}
     return !!id
   }
   function deleteChatMessage(messageId) {
-    var id = send("delete_message", {message_id: messageId})
+    var id = send("delete_message", scopeForMessage(messageId))
     if (id) requests[id] = {kind: "delete", messageId: messageId}
   }
-  function joinFriend(name) { send("join_friend", { "friend": name }) }
-  function joinHangout(id) { send("join_hangout", { "hangout_id": id }) }
-  function joinSpot(id) { send("join_spot", { "spot_id": id }) }
+  function joinFriend(name) { send("join_friend", {server_id:String(activeServer.id || ""), "friend": name }) }
+  function joinHangout(id) { send("join_hangout", {server_id:String(activeServer.id || ""), "hangout_id": id }) }
+  function joinSpot(id) { send("join_spot", {server_id:String(activeServer.id || ""), "spot_id": id }) }
   function openDirect(friendName) {
     pendingDirectName = String(friendName)
-    send("open_direct", { "friend": String(friendName) })
+    pendingDirectServerId = String(activeServer.id || "")
+    send("open_direct", {server_id:pendingDirectServerId, "friend": String(friendName) })
   }
   function createChat(group, args) {
-    var request = send(group ? "create_group" : "open_direct", args)
-    if (request) requests[request] = {kind:"newChat"}
+    var serverId=String(args.server_id || activeServer.id || "")
+    var values=Object.assign({},args,{server_id:serverId})
+    var request = send(group ? "create_group" : "open_direct", values)
+    if (request) requests[request] = {kind:"newChat",serverId:serverId}
     return request || ""
   }
   function selectConversation(id) {
-    activeConversationId = String(id)
     var c = conversationById(id)
-    if (c && c.tab_closed) send("set_conversation_tab", { "conversation_id": String(id), "closed": false })
-    send("mark_conversation_read", { "conversation_id": activeConversationId })
+    activeConversationId = c ? String(c.id) : String(id)
+    if (c && c.tab_closed) send("set_conversation_tab", withConversationScope(id, {closed:false}))
+    send("mark_conversation_read", withConversationScope(activeConversationId))
   }
   function exitConversation(id) {
-    send("set_conversation_tab", { "conversation_id": String(id), "closed": true })
+    send("set_conversation_tab", withConversationScope(id, {closed:true}))
   }
   function clearChatHistory(id, forEveryone) {
-    var request = send("clear_chat_history", {conversation_id:String(id), for_everyone:!!forEveryone})
+    var request = send("clear_chat_history", withConversationScope(id, {for_everyone:!!forEveryone}))
     if (request) requests[request] = {kind:"clear",conversationId:String(id)}
     return !!request
   }
   function setFileRetention(id, keep) {
-    send("set_file_retention", {message_id:String(id),keep:keep})
+    send("set_file_retention", Object.assign(scopeForMessage(id),{keep:keep}))
   }
   function roomAction(action, args) {
-    var request = send(action, args)
-    if (request) requests[request] = {kind:"room",action:action}
+    var values=Object.assign({},args || {})
+    if (values.conversation_id) values=withConversationScope(values.conversation_id,values)
+    else values.server_id=String(activeServer.id || "")
+    var request = send(action, values)
+    if (request) requests[request] = {kind:"room",action:action,serverId:String(values.server_id || activeServer.id || "")}
     return !!request
   }
   function closeConversation() { activeConversationId = "" }
   function sendMessage(text) {
     var trimmed = String(text || "").trim()
     if (!activeConversationId || !trimmed) return false
-    send("send_message", {
-      "conversation_id": activeConversationId,
-      "text": trimmed
-    })
+    send("send_message", withConversationScope(activeConversationId,{text:trimmed}))
     return true
   }
   function createInvite(profile, expiresMinutes) {
@@ -953,9 +1173,20 @@ Item {
       "expires_in_minutes": Number(expiresMinutes || 30)
     })
   }
-  function refreshDevices() { send("list_devices", {}) }
-  function revokeDevice(id) { send("revoke_device", { "device_id": String(id) }) }
-  function respondKnock(id, response) { send("respond_knock", { "knock_id": id, "response": response }) }
+  function createAccountInvite(kind, conversationId, expiresMinutes) {
+    var scope = conversationId ? scopeForConversation(conversationId) : {server_id:String(activeServer.id || ""),conversation_id:null}
+    var id = send("create_account_invite", {
+      "server_id": scope.server_id,
+      "kind": String(kind || "friend"),
+      "conversation_id": scope.conversation_id,
+      "expires_in_minutes": Number(expiresMinutes || 30)
+    })
+    if (id) requests[id] = {kind:"accountInvite"}
+    return id || ""
+  }
+  function refreshDevices() { send("list_devices", {server_id:String(activeServer.id || "")}) }
+  function revokeDevice(id) { send("revoke_device", {server_id:String(activeServer.id || ""), "device_id": String(id) }) }
+  function respondKnock(id, response) { send("respond_knock", {server_id:String(activeServer.id || ""), "knock_id": id, "response": response }) }
   function toggleMuted() { send("toggle_muted", {}) }
   function toggleDeafened() { send("toggle_deafened", {}) }
   function setPushToTalk(enabled) { saveSetting("set_push_to_talk", { "enabled": enabled }) }

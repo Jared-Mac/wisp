@@ -12,20 +12,41 @@ Popup {
   signal newChatRequested()
   readonly property var rows: {
     var term=query.trim().toLocaleLowerCase()
-    var groups=[{label:"Rooms",items:[]},{label:"Friends List",items:[]}]
+    var serverGroups=({})
     bridge.conversations.forEach(function(c) {
       var label=String(c.label === "Hangout" ? "Room" : c.label || "Messages")
-      if (term && label.toLocaleLowerCase().indexOf(term)<0) return
-      var group=c.kind === "direct" || c.kind === "circle" ? 1 : 0
-      if (category && category!==groups[group].label) return
-      groups[group].items.push({section:false,id:String(c.id),label:label,closed:!!c.tab_closed,unread:Number(c.unread_count || 0)})
+      var serverName=String(c.server_name || "Wisp server")
+      if (term && (label+" "+serverName+" "+String(c.category_name || "")).toLocaleLowerCase().indexOf(term)<0) return
+      var serverId=String(c.server_id || "")
+      if (!serverGroups[serverId]) serverGroups[serverId]={label:serverName,groups:{}}
+      var groupKey,groupLabel,groupKind,order
+      if (c.server_channel) {
+        var categoryName=String(c.category_name || "Uncategorized")
+        groupKey="channel:"+categoryName; groupLabel="Channels · "+categoryName; groupKind="Channels"; order=1
+      } else if (c.kind === "direct" || c.kind === "circle") {
+        groupKey="friends"; groupLabel="Friends & groups"; groupKind="Friends List"; order=2
+      } else {
+        var roomCategory=String(c.category_name || "")
+        groupKey="rooms:"+roomCategory
+        groupLabel=roomCategory ? "Room chats · "+roomCategory : "Room chats"
+        groupKind="Rooms"; order=0
+      }
+      if (category && category!==groupKind) return
+      var groups=serverGroups[serverId].groups
+      if (!groups[groupKey]) groups[groupKey]={label:groupLabel,kind:groupKind,order:order,items:[]}
+      groups[groupKey].items.push({section:false,id:String(c.id),label:label,server:serverName,closed:!!c.tab_closed,unread:Number(c.unread_count || 0)})
     })
     var result=[]
-    groups.forEach(function(g) {
-      if (!g.items.length) return
-      g.items.sort(function(a,b) { return a.label.localeCompare(b.label) || a.id.localeCompare(b.id) })
-      result.push({section:true,label:g.label})
-      result=result.concat(g.items)
+    Object.keys(serverGroups).sort(function(a,b) { return serverGroups[a].label.localeCompare(serverGroups[b].label) }).forEach(function(serverId) {
+      var server=serverGroups[serverId]
+      result.push({section:true,serverSection:true,label:"@ "+server.label})
+      var groups=Object.keys(server.groups).map(function(key) { return server.groups[key] })
+      groups.sort(function(a,b) { return a.order-b.order || a.label.localeCompare(b.label) })
+      groups.forEach(function(g) {
+        g.items.sort(function(a,b) { return a.label.localeCompare(b.label) || a.id.localeCompare(b.id) })
+        result.push({section:true,serverSection:false,label:g.label})
+        result=result.concat(g.items)
+      })
     })
     return result
   }
@@ -83,11 +104,11 @@ Popup {
       anchors.topMargin: root.theme.spacing.sm
       spacing: root.theme.spacing.xs
       Repeater {
-        model: [{label:"All",key:"",weight:0.24},{label:"Rooms",key:"Rooms",weight:0.3},{label:"Friends List",key:"Friends List",weight:0.46}]
+        model: [{label:"All",key:"",weight:0.16},{label:"Rooms",key:"Rooms",weight:0.23},{label:"Channels",key:"Channels",weight:0.27},{label:"Friends",key:"Friends List",weight:0.34}]
         ChatButton {
           required property var modelData
           theme: root.theme; text: modelData.label; primary: root.category===modelData.key
-          width: (categories.width-categories.spacing*2)*modelData.weight
+          width: (categories.width-categories.spacing*3)*modelData.weight
           height: root.theme.space(28)
           leftPadding: root.theme.space(4); rightPadding: root.theme.space(4)
           Accessible.name: "Show " + (modelData.key || "all chats")
@@ -110,7 +131,7 @@ Popup {
         required property var modelData
         required property int index
         width: results.width
-        height: root.theme.space(modelData.section ? 28 : 36)
+        height: root.theme.space(modelData.section ? (modelData.serverSection ? 32 : 26) : 36)
         enabled: !modelData.section
         highlighted: !modelData.section && results.currentIndex===index
         Accessible.name: modelData.label + (modelData.unread ? ", " + modelData.unread + " unread" : "")
@@ -121,8 +142,8 @@ Popup {
             anchors.left: parent.left; anchors.right: unread.left; anchors.rightMargin: root.theme.spacing.sm; anchors.verticalCenter: parent.verticalCenter
             text: entry.modelData.label + (entry.modelData.closed ? " · closed" : "")
             elide: Text.ElideRight; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
-            font.bold: !!entry.modelData.section || entry.modelData.id===root.selectedId
-            color: entry.modelData.section ? root.theme.muted : root.theme.foreground
+            font.bold: !!entry.modelData.serverSection || entry.modelData.id===root.selectedId
+            color: entry.modelData.serverSection ? root.theme.accent : entry.modelData.section ? root.theme.muted : root.theme.foreground
           }
           Text {
             id: unread; anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter

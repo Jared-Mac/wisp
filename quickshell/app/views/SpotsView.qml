@@ -46,7 +46,9 @@ Column {
         Text {
           Binding on width { when: root.theme.terminal; value: spotInfo.width; restoreMode: Binding.RestoreBindingOrValue }
           elide: root.theme.terminal ? Text.ElideRight : Text.ElideNone
-          text: (root.theme.tui ? "# " : "") + String(modelData.name || "Spot")
+          text: (root.theme.tui ? "# " : "")
+            + (modelData.category_name ? String(modelData.category_name) + " / " : "")
+            + String(modelData.name || "Room")
           color: root.theme.foreground
           font.family: root.theme.font.family
           font.pixelSize: root.theme.font.body

@@ -11,6 +11,36 @@ Column {
   spacing: theme.spacing.lg
 
   Text {
+    text: "Channel navigation · this device"; color: root.theme.foreground
+    font.family: root.theme.font.family; font.pixelSize: root.theme.font.body; font.bold: true
+  }
+  CheckBox {
+    id: channelTilePreference
+    objectName: "channelsAsTilesSetting"
+    width: parent.width
+    text: "Open channels in new tiles"
+    checked: root.bridge.workspaceLayout.channelsAsTiles
+    onClicked: root.bridge.workspaceLayout.setChannelsAsTiles(checked)
+    ThemeControlStyle { theme: root.theme; control: channelTilePreference }
+    contentItem: Text {
+      text: channelTilePreference.text; wrapMode: Text.Wrap
+      leftPadding: channelTilePreference.indicator.width + channelTilePreference.spacing
+      color: root.theme.foreground; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
+    }
+  }
+  Text {
+    width: parent.width; wrapMode: Text.Wrap
+    text: "Keep your current chats when opening a channel or room chat from the channel list. The + button always opens a tile. Chats already in a tile are brought into focus."
+    color: root.theme.muted; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
+  }
+  Text {
+    width: parent.width; wrapMode: Text.Wrap
+    visible: !!root.bridge.workspaceLayout.error
+    text: root.bridge.workspaceLayout.error
+    color: root.theme.danger; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
+  }
+
+  Text {
     Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
     Binding on font.pixelSize { when: root.theme.terminal; value: root.theme.font.body; restoreMode: Binding.RestoreBindingOrValue }
      text: "Notifications · this device"; color: root.theme.foreground; font.bold: true }

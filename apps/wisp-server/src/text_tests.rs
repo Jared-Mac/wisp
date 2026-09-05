@@ -7,8 +7,8 @@ async fn setup() -> (AppState, Router, String) {
     let state = AppState::new(test_config()).await.unwrap();
     let conversation = find_or_create_direct(
         &state.pool,
-        Uuid::parse_str(JARED_ID).unwrap(),
-        Uuid::parse_str(TYLER_ID).unwrap(),
+        Uuid::parse_str(TEST_OWNER_ID).unwrap(),
+        Uuid::parse_str(TEST_MEMBER_A_ID).unwrap(),
     )
     .await
     .unwrap();
@@ -50,32 +50,38 @@ fn large_text() -> String {
 async fn long_text_round_trips_and_edits_through_http_without_truncation() {
     let (state, app, conversation) = setup().await;
     let text = large_text();
-    let sent = value(request(&app, "POST", "/v1/messages", JARED_ID, json!({
+    let sent = value(request(&app, "POST", "/v1/messages", TEST_OWNER_ID, json!({
         "conversation_id":conversation,"content_type":"text/plain","payload":text,"encryption_version":0
     })).await).await;
     assert_eq!(sent["payload"], text);
     let path = format!("/v1/messages/{}", sent["id"].as_str().unwrap());
     let edited = format!("{text}edited");
-    let response = request(&app, "PATCH", &path, JARED_ID, json!({"text":edited})).await;
+    let response = request(&app, "PATCH", &path, TEST_OWNER_ID, json!({"text":edited})).await;
     assert_eq!(response.status(), StatusCode::OK);
-    let messages = load_recent_messages(&state.pool, Uuid::parse_str(TYLER_ID).unwrap())
+    let messages = load_recent_messages(&state.pool, Uuid::parse_str(TEST_MEMBER_A_ID).unwrap())
         .await
         .unwrap();
     assert_eq!(messages[0].payload, edited);
     assert!(messages[0].edited_at.is_some());
     assert_eq!(
-        request(&app, "PATCH", &path, TYLER_ID, json!({"text":edited}))
-            .await
-            .status(),
+        request(
+            &app,
+            "PATCH",
+            &path,
+            TEST_MEMBER_A_ID,
+            json!({"text":edited})
+        )
+        .await
+        .status(),
         StatusCode::FORBIDDEN
     );
     assert_eq!(
-        request(&app, "PATCH", &path, JARED_ID, json!({"text":" \n "}))
+        request(&app, "PATCH", &path, TEST_OWNER_ID, json!({"text":" \n "}))
             .await
             .status(),
         StatusCode::BAD_REQUEST
     );
-    assert_eq!(request(&app, "POST", "/v1/messages", CHARLIE_ID, json!({
+    assert_eq!(request(&app, "POST", "/v1/messages", TEST_MEMBER_C_ID, json!({
         "conversation_id":conversation,"content_type":"text/plain","payload":text,"encryption_version":0
     })).await.status(), StatusCode::FORBIDDEN);
 }
@@ -100,7 +106,7 @@ async fn long_captions_work_for_images_legacy_files_and_chunked_uploads() {
     ] {
         body["conversation_id"] = json!(conversation);
         body["caption"] = json!(caption);
-        let sent = value(request(&app, "POST", path, JARED_ID, body).await).await;
+        let sent = value(request(&app, "POST", path, TEST_OWNER_ID, body).await).await;
         assert_eq!(sent["payload"]["caption"], caption);
         let path = format!("/v1/messages/{}", sent["id"].as_str().unwrap());
         assert_eq!(
@@ -108,7 +114,7 @@ async fn long_captions_work_for_images_legacy_files_and_chunked_uploads() {
                 &app,
                 "PATCH",
                 &path,
-                JARED_ID,
+                TEST_OWNER_ID,
                 json!({"text":format!("{caption}edited")})
             )
             .await
@@ -116,7 +122,7 @@ async fn long_captions_work_for_images_legacy_files_and_chunked_uploads() {
             StatusCode::OK
         );
         assert_eq!(
-            request(&app, "PATCH", &path, JARED_ID, json!({"text":""}))
+            request(&app, "PATCH", &path, TEST_OWNER_ID, json!({"text":""}))
                 .await
                 .status(),
             StatusCode::OK
@@ -125,13 +131,19 @@ async fn long_captions_work_for_images_legacy_files_and_chunked_uploads() {
     let id = Uuid::new_v4();
     let body = json!({"id":id,"conversation_id":conversation,"file_name":"empty.txt","size":0,"caption":caption});
     assert_eq!(
-        request(&app, "POST", "/v1/file-uploads", JARED_ID, body.clone())
-            .await
-            .status(),
+        request(
+            &app,
+            "POST",
+            "/v1/file-uploads",
+            TEST_OWNER_ID,
+            body.clone()
+        )
+        .await
+        .status(),
         StatusCode::OK
     );
     assert_eq!(
-        request(&app, "POST", "/v1/file-uploads", JARED_ID, body)
+        request(&app, "POST", "/v1/file-uploads", TEST_OWNER_ID, body)
             .await
             .status(),
         StatusCode::OK
@@ -141,7 +153,7 @@ async fn long_captions_work_for_images_legacy_files_and_chunked_uploads() {
             &app,
             "POST",
             &format!("/v1/file-uploads/{id}/complete"),
-            JARED_ID,
+            TEST_OWNER_ID,
             json!({}),
         )
         .await,
@@ -189,7 +201,7 @@ async fn uncapped_text_routes_authenticate_before_reading_the_body() {
         &app,
         "POST",
         "/v1/presence",
-        JARED_ID,
+        TEST_OWNER_ID,
         json!({"presence":large_text()}),
     )
     .await;
@@ -198,7 +210,7 @@ async fn uncapped_text_routes_authenticate_before_reading_the_body() {
         &app,
         "PUT",
         "/v1/file-uploads/00000000-0000-0000-0000-000000000001/chunks/0",
-        JARED_ID,
+        TEST_OWNER_ID,
         json!("x".repeat(wisp_protocol::CHAT_FILE_CHUNK_BYTES + 1)),
     )
     .await;

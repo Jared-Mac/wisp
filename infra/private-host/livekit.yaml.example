@@ -1,17 +1,16 @@
-# Tailnet-only signaling and RTC; do not enable recording/egress or debug endpoints.
+# Public RTC with signaling kept behind the local TLS proxy. Do not enable
+# recording, egress, or debug endpoints.
 port: 7880
 bind_addresses:
-  - "127.0.0.1"
-  - "REPLACE_WITH_TAILSCALE_IPV4"
+  - "0.0.0.0"
 rtc:
   tcp_port: 7881
-  port_range_start: 50000
-  port_range_end: 50100
+  # Shared UDP sockets avoid allocating a separate port pair per participant.
+  # LiveKit 1.13.6 recommends at least one mux port per vCPU (four here).
+  # Do not set port_range_start/end alongside udp_port.
+  udp_port: 7882-7885
   use_external_ip: false
-  node_ip: "REPLACE_WITH_TAILSCALE_IPV4"
-  interfaces:
-    includes:
-      - tailscale0
+  node_ip: "REPLACE_WITH_PUBLIC_IPV4"
 keys:
   REPLACE_WITH_FRESH_SERVICE_KEY_ID: replace-with-the-same-livekit-service-secret-as-server-env
 logging:

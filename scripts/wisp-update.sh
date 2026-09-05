@@ -1,7 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-repository=${WISP_UPDATE_REPOSITORY:-Jared-Mac/wisp}
+config_root=${XDG_CONFIG_HOME:-${HOME:?HOME is required}/.config}
+repository=${WISP_UPDATE_REPOSITORY:-}
+if [[ -z "$repository" && -f "$config_root/wisp/update-repository" ]]; then
+  IFS= read -r repository <"$config_root/wisp/update-repository"
+fi
+if [[ ! "$repository" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
+  echo "Wisp update source is not configured. Set WISP_UPDATE_REPOSITORY=owner/repository." >&2
+  exit 2
+fi
 release_tag=${WISP_UPDATE_TAG:-main}
 bin_root=${XDG_BIN_HOME:-${HOME:?HOME is required}/.local/bin}
 release_base=${WISP_UPDATE_BASE_URL:-https://github.com/$repository/releases/download/$release_tag}

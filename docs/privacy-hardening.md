@@ -1,8 +1,9 @@
-# Privacy hardening — in progress, not deployed
+# Privacy hardening
 
-Starting point: `009eeb4`, branch `codex/privacy-hardening`. The live client and
-server still send/store chat and attachments in plaintext. This document is a
-rollout gate, not a claim that E2EE is already enabled.
+The fresh public host and this local owner client now require encrypted chat.
+The old test database remains separate and was not migrated. This document
+records the security boundary and remaining operational work; it is not an
+independent cryptographic audit.
 
 ## Threat model and decisions
 
@@ -29,8 +30,8 @@ rollout gate, not a claim that E2EE is already enabled.
   does not authorize encrypted chat membership; an owner/admin must invite the
   participant. Stale offers fail closed and must be sent again.
   Initial friend account IDs and names are also remembered locally; arbitrary
-  new server-supplied accounts are rejected. A future Add Friend workflow will
-  need an explicit trust decision rather than silently expanding that set.
+  new server-supplied accounts are rejected. Explicit one-use friend invitations
+  expand the local trusted-contact set under the selected TOFU model.
 - Joining a room must not automatically re-encrypt or disclose prior history.
   Default to messages sent after admission; history sharing needs a separate
   explicit policy/action. Removing a member excludes them from future messages,
@@ -52,7 +53,7 @@ rollout gate, not a claim that E2EE is already enabled.
   and uptime. Room labels/voice invites currently contain readable coordination
   metadata; review these explicitly rather than calling all metadata encrypted.
 
-## Required gates before purchase / migration
+## Rollout and operational gates
 
 1. Client encryption primitives and recovery tests.
 2. TOFU key exchange/pinning, local key storage/export/import and key-change UI;
@@ -70,12 +71,9 @@ rollout gate, not a claim that E2EE is already enabled.
    security updates, private administration, minimal logs, encrypted backups to
    a client-held recovery recipient. Disable development sessions and remove
    bootstrap credentials after enrollment. Test backup restoration.
-7. Coordinate the server/client cutover with Jared; no remote deployment is
-   authorized merely by preparing this branch. Preserve the working local build.
+7. Coordinate each additional client enrollment and preserve a working local
+   rollback. A code change alone never authorizes a remote deployment.
 
-Hold purchasing until gates 1–4 establish compatibility and resource needs.
-Then select the smallest suitable OVH VPS in Hillsboro/Oregon if available;
-verify the actual checkout location, price, bandwidth and storage before paying.
 Large unlimited-size attachments require a capacity/quota strategy even though
 messages have no product-level character cap.
 
@@ -91,21 +89,22 @@ messages have no product-level character cap.
   disclosure, tampering, wrong keys, private files, legacy rejection and chunk uploads.
 - Privacy is a separate Settings tab. Tabs have explicit borders and selected
   markers across presentations. Opening Settings never creates or exports a key.
-- Local UI labels the rollout unfinished. No real accounts have been enrolled in
-  chat encryption; no remote deployment or migration has been performed.
+- The fresh server, owner account, local recovery identity, public TLS endpoint,
+  and strict ciphertext-only history are active. Bootstrap enrollment is disabled.
 
 Additional implemented checks cover encrypted image/file upload and HTTP download,
 signed voice-invite acceptance (including replay and forged offers), edits after
 admission without redistributing old history, plaintext downgrade rejection and
 unknown-account substitution. File retention uses original plaintext size. The
 HTTPS launcher requires chat encryption locally and blocks media without a
-client-held key. Private-host service templates and a fresh-host smoke test are
-included; no host configuration has been installed remotely.
+client-held key. The private-host service templates are installed on the fresh
+host; key-only SSH, the firewall, TLS, strict encryption mode, and bootstrap
+removal have been runtime-checked.
 
-Remaining rollout gates: a matching Ubuntu-compatible CI artifact, coordinated
-server/client enrollment, fresh client-only media keys, and runtime validation
-of the new host's firewall, TLS, media paths and backup restoration. The existing
-host remains unchanged and chat encryption is not enabled on real accounts.
+Remaining operational gates include enrolling additional clients, exercising
+cross-device recovery, testing encrypted backup restoration, and completing a
+multi-user media call on the public host. The legacy test host/database remains
+unchanged.
 This code has not received an independent cryptographic review; passing isolated
 tests is not a production security audit.
 

@@ -1,0 +1,14 @@
+# Replace the hostname before installing this as /etc/caddy/Caddyfile.
+# Caddy terminates trusted TLS; Wisp and LiveKit signaling remain on loopback.
+REPLACE_WITH_PUBLIC_HOSTNAME {
+    encode zstd gzip
+    reverse_proxy 127.0.0.1:8787 {
+        # Wisp's login throttle combines this trusted client address with the
+        # username. The Wisp service itself remains bound to loopback.
+        header_up X-Forwarded-For {remote_host}
+    }
+}
+
+REPLACE_WITH_PUBLIC_HOSTNAME:8443 {
+    reverse_proxy 127.0.0.1:7880
+}

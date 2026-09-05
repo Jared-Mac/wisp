@@ -55,12 +55,25 @@ Item {
       ScrollBar.vertical: ScrollBar {}
       Column {
         id: roomColumn; width: parent.width; spacing: root.theme.spacing.xs
+        ServerSelector { width: parent.width; bridge: root.bridge; theme: root.theme; compact: true }
         Repeater {
           model: root.bridge.knocks
           KnockCard { required property var modelData; width: roomColumn.width; knock: modelData; bridge: root.bridge; theme: root.theme }
         }
+        Text {
+          objectName: "roomsSectionHeader"
+          width: parent.width
+          height: root.theme.space(22)
+          verticalAlignment: Text.AlignVCenter
+          text: root.theme.tui ? "┌─ /rooms · " + root.bridge.roomCount : "ROOMS"
+          color: root.theme.roomSectionColor
+          font.family: root.theme.font.family
+          font.pixelSize: root.theme.font.caption
+          font.bold: true
+        }
         NowView { width: parent.width; showHeader: !root.theme.tui; bridge: root.bridge; theme: root.theme; onCameraRequested: root.cameraRequested() }
         SpotsView { width: parent.width; bridge: root.bridge; theme: root.theme }
+        ServerChannelsView { width: parent.width; bridge: root.bridge; theme: root.theme; showHeader: true }
         Text {
           visible: root.theme.tui && !root.bridge.hangouts.length && !root.bridge.spots.length
           width: parent.width; wrapMode: Text.Wrap
@@ -88,7 +101,7 @@ Item {
     }
     TerminalFrame {
       width: parent.width; height: activity.roomsSize
-      theme: root.theme; title: root.theme.cleanTui ? "01 /rooms" : "01: /rooms"; ink: root.theme.roomSectionColor
+      theme: root.theme; title: root.theme.cleanTui ? "01 /server" : "01: /server"; ink: root.theme.roomSectionColor
     }
     TerminalFrame {
       y: activity.roomsSize + root.handleSize

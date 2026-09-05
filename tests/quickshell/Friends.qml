@@ -13,7 +13,7 @@ ShellRoot {
     onTriggered: {
       var friends = [
         {id:"b",display_name:"beta",online:true}, {id:"a",display_name:"Alpha",online:true},
-        {id:"d",display_name:"Delta",online:false}, {id:"c",display_name:"charlie",online:false},
+        {id:"d",display_name:"Delta",online:false}, {id:"c",display_name:"member_c",online:false},
         {id:"f",display_name:"Foxtrot",online:true}, {id:"e",display_name:"Echo",online:true},
         {id:"h",display_name:"Hotel",online:false}, {id:"g",display_name:"golf",online:false}
       ]

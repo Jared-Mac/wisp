@@ -13,6 +13,6 @@ for pass in save reload; do
   if ! rg -q CHAT_COLORS_OK "$test_dir/log" || rg -q 'CHAT_COLORS_FAILED|TypeError|ReferenceError|Binding loop|Cannot assign|Failed to load' "$test_dir/log"; then
     cat "$test_dir/log"; exit 1
   fi
-  jq -e '.assignments | fromjson | .charlie == "#7fa9cf" and .jared == "#cb8897"' "$test_dir/config/wisp/chat-colors.json" >/dev/null
+  jq -e '.assignments | fromjson | .participant_a == "#7fa9cf" and .participant_b == "#cb8897"' "$test_dir/config/wisp/chat-colors.json" >/dev/null
 done
 echo 'Chat border colors persist across restart and follow conversation identity across views'

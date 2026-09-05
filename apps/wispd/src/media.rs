@@ -502,13 +502,24 @@ pub(crate) struct MediaManager {
     denoiser: Arc<DenoiserService>,
     surface: Option<SurfaceController>,
     event_tx: mpsc::UnboundedSender<MediaEvent>,
-    e2ee_key: Option<Vec<u8>>,
+    e2ee_key: Mutex<Option<Vec<u8>>>,
     local_name: String,
 }
 
 impl MediaManager {
     pub(crate) fn encryption_configured(&self) -> bool {
-        self.e2ee_key.as_ref().is_some_and(|key| key.len() >= 16)
+        self.e2ee_key
+            .lock()
+            .expect("media encryption key lock poisoned")
+            .as_ref()
+            .is_some_and(|key| key.len() >= 16)
+    }
+
+    pub(crate) fn set_encryption_key(&self, key: Option<String>) {
+        *self
+            .e2ee_key
+            .lock()
+            .expect("media encryption key lock poisoned") = key.map(String::into_bytes);
     }
 
     pub(crate) fn new(
@@ -561,7 +572,7 @@ impl MediaManager {
                 denoiser,
                 surface,
                 event_tx,
-                e2ee_key: e2ee_key.map(String::into_bytes),
+                e2ee_key: Mutex::new(e2ee_key.map(String::into_bytes)),
                 local_name,
             },
             event_rx,
@@ -982,7 +993,12 @@ impl MediaManager {
         let mut room_options = RoomOptions::default();
         room_options.auto_subscribe = true;
         room_options.dynacast = true;
-        if let Some(key) = &self.e2ee_key {
+        let e2ee_key = self
+            .e2ee_key
+            .lock()
+            .expect("media encryption key lock poisoned")
+            .clone();
+        if let Some(key) = &e2ee_key {
             if key.len() < 16 {
                 bail!("WISP_E2EE_KEY must contain at least 16 bytes");
             }
@@ -997,7 +1013,7 @@ impl MediaManager {
         let (room, events) = Room::connect(&credentials.url, &credentials.token, room_options)
             .await
             .with_context(|| format!("connect to LiveKit room {}", credentials.room))?;
-        if self.e2ee_key.is_some() {
+        if e2ee_key.is_some() {
             room.e2ee_manager().set_enabled(true);
         }
         let room = Arc::new(room);
@@ -1162,7 +1178,7 @@ impl MediaManager {
             remote_audio_participants,
             remote_muted_participants,
             remote_videos: initial_remote_videos,
-            e2ee_enabled: self.e2ee_key.is_some(),
+            e2ee_enabled: e2ee_key.is_some(),
         })
     }
 
@@ -3468,8 +3484,8 @@ mod tests {
         use super::validate_camera_start_target;
         assert!(
             validate_camera_start_target(
-                Some("porch"),
-                "porch",
+                Some("test_room"),
+                "test_room",
                 Some("camera-a"),
                 Some("camera-a")
             )
@@ -3477,7 +3493,7 @@ mod tests {
         );
         assert!(
             validate_camera_start_target(
-                Some("porch"),
+                Some("test_room"),
                 "other",
                 Some("camera-a"),
                 Some("camera-a")
@@ -3486,15 +3502,16 @@ mod tests {
         );
         assert!(
             validate_camera_start_target(
-                Some("porch"),
-                "porch",
+                Some("test_room"),
+                "test_room",
                 Some("camera-a"),
                 Some("camera-b")
             )
             .is_err()
         );
         assert!(
-            validate_camera_start_target(Some("porch"), "porch", Some("camera-a"), None).is_err()
+            validate_camera_start_target(Some("test_room"), "test_room", Some("camera-a"), None)
+                .is_err()
         );
     }
 
@@ -3521,38 +3538,38 @@ mod tests {
     fn video_viewer_updates_use_identity_with_legacy_name_fallback() {
         let identity_signal = VideoWatchSignal {
             participant: "stale display name".into(),
-            participant_identity: Some("user-tyler".into()),
+            participant_identity: Some("user-member_a".into()),
             source: VideoSource::Camera,
             watching: true,
         };
         assert!(video_watch_targets_local(
             &identity_signal,
-            "Tyler",
-            "user-tyler"
+            "MemberA",
+            "user-member_a"
         ));
 
         let wrong_identity_signal = VideoWatchSignal {
-            participant: "Tyler".into(),
-            participant_identity: Some("user-jared".into()),
+            participant: "MemberA".into(),
+            participant_identity: Some("user-owner".into()),
             source: VideoSource::ScreenShare,
             watching: true,
         };
         assert!(!video_watch_targets_local(
             &wrong_identity_signal,
-            "Tyler",
-            "user-tyler"
+            "MemberA",
+            "user-member_a"
         ));
 
         let legacy_signal = VideoWatchSignal {
-            participant: "Tyler".into(),
+            participant: "MemberA".into(),
             participant_identity: None,
             source: VideoSource::Camera,
             watching: true,
         };
         assert!(video_watch_targets_local(
             &legacy_signal,
-            "Tyler",
-            "user-tyler"
+            "MemberA",
+            "user-member_a"
         ));
     }
 

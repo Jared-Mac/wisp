@@ -41,7 +41,7 @@ The ordinary user-facing concepts are:
   - `Closed`
   - `Away`
 - **Hangout** — an ephemeral live session containing people.
-- **Spot** — an optional saved hangout preset such as `Porch`.
+- **Spot** — an optional saved hangout preset such as `TestRoom`.
 - **Circle** — a durable trust/membership group; keep this mostly invisible when only one exists.
 - **Media track** — voice, camera, or screen-share media associated with a participant.
 
@@ -58,13 +58,13 @@ Most of the time, Wisp should have **no visible application window**. A standalo
 The optional Omarchy bar adapter may show compact state such as:
 
 ```text
-󰍬 Tyler Jack
+󰍬 MemberA MemberB
 ```
 
 When connected:
 
 ```text
-🎙 Tyler Jack      🖥 Jack
+🎙 MemberA MemberB      🖥 MemberB
 ```
 
 A hotkey such as `Super+H` should summon the standalone Wisp window on any supported desktop. On Omarchy, the same content may also appear as an anchored bar panel:
@@ -73,11 +73,11 @@ A hotkey such as `Super+H` should summon the standalone Wisp window on any suppo
 ╭─ Wisp ───────────────────────────╮
 │ NOW                              │
 │                                  │
-│ Tyler + Jack                     │
+│ MemberA + MemberB                     │
 │ Factorio                  JOIN   │
 │                                  │
 │ FRIENDS                          │
-│ Charlie                  ● open  │
+│ MemberC                  ● open  │
 ├──────────────────────────────────┤
 │ Mute       Share       Leave     │
 ╰──────────────────────────────────╯
@@ -268,7 +268,7 @@ Examples:
 ```bash
 wispctl status
 wispctl presence open
-wispctl join Tyler
+wispctl join MemberA
 wispctl mute
 wispctl deafen
 wispctl leave
@@ -284,10 +284,10 @@ This is not a TUI.
 Seed four development users:
 
 ```text
-Jared
-Tyler
-Jack
-Charlie
+Owner
+MemberA
+MemberB
+MemberC
 ```
 
 Use stable UUIDs internally. Display names must never be primary keys.
@@ -295,10 +295,10 @@ Use stable UUIDs internally. Display names must never be primary keys.
 Provide:
 
 ```bash
-wispd --profile Jared
-wisp-sim --profile Tyler
-wisp-sim --profile Jack
-wisp-sim --profile Charlie
+wispd --profile Owner
+wisp-sim --profile MemberA
+wisp-sim --profile MemberB
+wisp-sim --profile MemberC
 ```
 
 `wisp-sim` should be capable of simulating presence, room membership, messages, synthetic audio, and eventually synthetic video so multi-user behavior can be tested from one PC.
@@ -437,9 +437,9 @@ just bootstrap
 just dev
 just dev-server
 just dev-daemon
-just sim Tyler
-just sim Jack
-just sim Charlie
+just sim MemberA
+just sim MemberB
+just sim MemberC
 just plugin-sync
 just plugin-watch
 just app
@@ -532,13 +532,13 @@ Bar:
 Friends around:
 
 ```text
-󰍬 Tyler Jack
+󰍬 MemberA MemberB
 ```
 
 Connected:
 
 ```text
-🎙 Tyler Jack      🖥 Jack
+🎙 MemberA MemberB      🖥 MemberB
 ```
 
 Disconnected/error states must be visually distinct.
@@ -647,7 +647,7 @@ Do not expose LiveKit room naming as a user-facing concept.
 
 ### Phase 3 Exit Gate
 
-Using Jared's Quickshell UI plus simulators:
+Using Owner's Quickshell UI plus simulators:
 
 - all users show correct online/offline state;
 - presence propagates;
@@ -706,9 +706,9 @@ Avoid microphone feedback during local multi-client testing.
 `wisp-sim` should support:
 
 ```bash
-wisp-sim --profile Tyler --publish-tone
-wisp-sim --profile Jack --publish-file test-voice.wav
-wisp-sim --profile Charlie --silent
+wisp-sim --profile MemberA --publish-tone
+wisp-sim --profile MemberB --publish-file test-voice.wav
+wisp-sim --profile MemberC --silent
 ```
 
 ### Phase 4 Exit Gate
@@ -752,7 +752,7 @@ Semantics:
 The ordinary action is:
 
 ```text
-Join Tyler
+Join MemberA
 ```
 
 not:
@@ -764,7 +764,7 @@ Join room XYZ
 Behavior:
 
 ```text
-Tyler already has a hangout
+MemberA already has a hangout
         ↓
 join it
 ```
@@ -772,7 +772,7 @@ join it
 Otherwise:
 
 ```text
-Tyler is available and alone
+MemberA is available and alone
         ↓
 create ephemeral hangout
 ```
@@ -784,7 +784,7 @@ A knock is an expiring control event, not a persistent text message.
 Example:
 
 ```text
-Tyler wants to hang out
+MemberA wants to hang out
 
 [ Join ]    [ Later ]
 ```
@@ -796,11 +796,11 @@ Aggregate active people by hangout:
 ```text
 NOW
 
-Tyler + Jack        Factorio       JOIN
-Charlie             ● open
+MemberA + MemberB        Factorio       JOIN
+MemberC             ● open
 ```
 
-Do not show Tyler and Jack as unrelated active entries.
+Do not show MemberA and MemberB as unrelated active entries.
 
 ### Phase 5 Exit Gate
 
@@ -903,9 +903,9 @@ Do not build a Discord-style call grid.
 Quickshell sends commands such as:
 
 ```text
-OpenShare(Jack)
-CloseShare(Jack)
-FullscreenShare(Jack)
+OpenShare(MemberB)
+CloseShare(MemberB)
+FullscreenShare(MemberB)
 ```
 
 `wispd` owns:
@@ -952,7 +952,7 @@ Make codec capability negotiation explicit.
 Starting a share should only show:
 
 ```text
-Jack  🖥 sharing
+MemberB  🖥 sharing
 ```
 
 Do not automatically open or decode it.
@@ -1041,16 +1041,16 @@ Offline clients should retrieve missed messages after reconnecting.
 Introduce one initial persistent Spot:
 
 ```text
-Porch
+TestRoom
 ```
 
 A Spot is a saved hangout configuration, not an always-running room.
 
 ```text
-Porch empty
+TestRoom empty
     → not shown in NOW
 
-Porch occupied
+TestRoom occupied
     → shown in NOW
 ```
 
@@ -1059,7 +1059,7 @@ Porch occupied
 - messages survive restart;
 - offline message delivery works;
 - hangout chat can use short retention;
-- Porch behaves as a preset rather than a permanent voice channel;
+- TestRoom behaves as a preset rather than a permanent voice channel;
 - no channel hierarchy has appeared.
 
 ---
@@ -1206,8 +1206,8 @@ Programmatically launch a temporary stack using random ports and a temporary dat
 ```text
 LiveKit
 wisp-server
-Jared wispd
-Tyler simulator
+Owner wispd
+MemberA simulator
 ```
 
 Test:
@@ -1260,7 +1260,7 @@ High-quality audio, screen sharing, camera, detachable native surfaces.
 
 ## M4 — Private Alpha
 
-Messages, Porch, device invites, E2EE, reconnect hardening, backups.
+Messages, TestRoom, device invites, E2EE, reconnect hardening, backups.
 
 ---
 
@@ -1311,17 +1311,17 @@ see friends in the bar
       ↓
 press Super+H
       ↓
-see Tyler + Jack hanging out
+see MemberA + MemberB hanging out
       ↓
 join them
       ↓
 talk with excellent audio
       ↓
-Jack starts sharing
+MemberB starts sharing
       ↓
-Wisp shows "Jack 🖥 sharing"
+Wisp shows "MemberB 🖥 sharing"
       ↓
-open Jack's stream as a native Hyprland surface
+open MemberB's stream as a native Hyprland surface
       ↓
 close the Wisp panel
       ↓

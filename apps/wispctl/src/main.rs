@@ -36,7 +36,9 @@ enum Command {
     JoinHangout {
         id: String,
     },
-    Porch,
+    JoinRoom {
+        room: String,
+    },
     Dm {
         friend: String,
         text: String,
@@ -187,7 +189,7 @@ impl Command {
             Self::Presence { state } => ("set_presence", json!({"presence": state})),
             Self::Join { friend } => ("join_friend", json!({"friend": friend})),
             Self::JoinHangout { id } => ("join_hangout", json!({"hangout_id": id})),
-            Self::Porch => ("join_spot", json!({"spot_id": "Porch"})),
+            Self::JoinRoom { room } => ("join_spot", json!({"spot_id": room})),
             Self::Dm { friend, text } => ("send_direct", json!({"friend": friend, "text": text})),
             Self::Message {
                 conversation_id,

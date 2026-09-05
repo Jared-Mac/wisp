@@ -68,11 +68,7 @@ pub(super) async fn invite(
             "Only room owners and admins can invite friends",
         ));
     }
-    let friend: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM circle_members a JOIN circle_members b ON b.circle_id = a.circle_id WHERE a.user_id = ? AND b.user_id = ?)")
-        .bind(user.to_string()).bind(request.user_id.to_string()).fetch_one(&state.pool).await.map_err(ApiError::internal)?;
-    if !friend {
-        return Err(ApiError::forbidden("Invite a friend from your circle"));
-    }
+    super::ensure_friendship(&state.pool, user, request.user_id).await?;
     sqlx::query("INSERT OR IGNORE INTO conversation_members(conversation_id, user_id, joined_at, role) VALUES (?, ?, ?, 'member')")
         .bind(&request.conversation_id).bind(request.user_id.to_string()).bind(Utc::now().to_rfc3339())
         .execute(&state.pool).await.map_err(ApiError::internal)?;
@@ -109,29 +105,29 @@ mod tests {
     use super::*;
     use crate::tests::{chat_headers, test_config};
     use crate::{
-        CHARLIE_ID, JACK_ID, JARED_ID, JoinHangoutRequest, JoinSpotRequest, PORCH_ID,
-        SendMessageRequest, TYLER_ID, active_hangout_for, can_clear_room, clear_room_history,
-        join_hangout, join_spot, join_users, load_hangouts, load_recent_messages, load_spots,
-        seed_development_users, send_message,
+        JoinHangoutRequest, JoinSpotRequest, SendMessageRequest, TEST_MEMBER_A_ID,
+        TEST_MEMBER_B_ID, TEST_MEMBER_C_ID, TEST_OWNER_ID, TEST_ROOM_ID, active_hangout_for,
+        can_clear_room, clear_room_history, join_hangout, join_spot, join_users, load_hangouts,
+        load_recent_messages, load_spots, seed_development_users, send_message,
     };
 
     #[tokio::test]
     #[allow(clippy::too_many_lines)]
     async fn ownership_invites_admin_permissions_and_private_room_access() {
         let state = AppState::new(test_config()).await.unwrap();
-        let tyler = Uuid::parse_str(TYLER_ID).unwrap();
-        let charlie = Uuid::parse_str(CHARLIE_ID).unwrap();
-        let jack = Uuid::parse_str(JACK_ID).unwrap();
-        let jared = Uuid::parse_str(JARED_ID).unwrap();
+        let member_a = Uuid::parse_str(TEST_MEMBER_A_ID).unwrap();
+        let member_c = Uuid::parse_str(TEST_MEMBER_C_ID).unwrap();
+        let member_b = Uuid::parse_str(TEST_MEMBER_B_ID).unwrap();
+        let owner = Uuid::parse_str(TEST_OWNER_ID).unwrap();
         assert_eq!(
-            role(&state.pool, jared, &format!("spot:{PORCH_ID}"))
+            role(&state.pool, owner, &format!("spot:{TEST_ROOM_ID}"))
                 .await
                 .unwrap(),
             "host"
         );
         let room = create(
             State(state.clone()),
-            chat_headers(TYLER_ID),
+            chat_headers(TEST_MEMBER_A_ID),
             Json(CreateRoomRequest {
                 name: "Test room".into(),
             }),
@@ -143,16 +139,16 @@ mod tests {
         assert_eq!(room.members.len(), 1);
         assert!(room.can_clear_for_everyone);
         assert!(
-            active_hangout_for(&state.pool, tyler)
+            active_hangout_for(&state.pool, member_a)
                 .await
                 .unwrap()
                 .is_none()
         );
-        assert_eq!(load_spots(&state.pool, jared).await.unwrap().len(), 1);
+        assert_eq!(load_spots(&state.pool, owner).await.unwrap().len(), 1);
         assert!(
             join_spot(
                 State(state.clone()),
-                chat_headers(JARED_ID),
+                chat_headers(TEST_OWNER_ID),
                 Json(JoinSpotRequest {
                     spot_id: room.spot_id.clone().unwrap()
                 })
@@ -162,16 +158,16 @@ mod tests {
         );
         let _ = invite(
             State(state.clone()),
-            chat_headers(TYLER_ID),
+            chat_headers(TEST_MEMBER_A_ID),
             Json(RoomMemberRequest {
                 conversation_id: room.id.clone(),
-                user_id: charlie,
+                user_id: member_c,
             }),
         )
         .await
         .unwrap();
         assert!(
-            active_hangout_for(&state.pool, charlie)
+            active_hangout_for(&state.pool, member_c)
                 .await
                 .unwrap()
                 .is_none()
@@ -179,10 +175,10 @@ mod tests {
         assert!(
             invite(
                 State(state.clone()),
-                chat_headers(CHARLIE_ID),
+                chat_headers(TEST_MEMBER_C_ID),
                 Json(RoomMemberRequest {
                     conversation_id: room.id.clone(),
-                    user_id: jack
+                    user_id: member_b
                 })
             )
             .await
@@ -191,10 +187,10 @@ mod tests {
         assert!(
             set_admin(
                 State(state.clone()),
-                chat_headers(CHARLIE_ID),
+                chat_headers(TEST_MEMBER_C_ID),
                 Json(SetRoomAdminRequest {
                     conversation_id: room.id.clone(),
-                    user_id: charlie,
+                    user_id: member_c,
                     admin: true
                 })
             )
@@ -203,10 +199,10 @@ mod tests {
         );
         let _ = set_admin(
             State(state.clone()),
-            chat_headers(TYLER_ID),
+            chat_headers(TEST_MEMBER_A_ID),
             Json(SetRoomAdminRequest {
                 conversation_id: room.id.clone(),
-                user_id: charlie,
+                user_id: member_c,
                 admin: true,
             }),
         )
@@ -214,39 +210,43 @@ mod tests {
         .unwrap();
         let _ = invite(
             State(state.clone()),
-            chat_headers(CHARLIE_ID),
+            chat_headers(TEST_MEMBER_C_ID),
             Json(RoomMemberRequest {
                 conversation_id: room.id.clone(),
-                user_id: jack,
+                user_id: member_b,
             }),
         )
         .await
         .unwrap();
         assert!(
-            can_clear_room(&state.pool, charlie, &room.id)
+            can_clear_room(&state.pool, member_c, &room.id)
                 .await
                 .unwrap()
         );
-        assert!(!can_clear_room(&state.pool, jack, &room.id).await.unwrap());
-        assert!(!can_clear_room(&state.pool, jared, &room.id).await.unwrap());
+        assert!(
+            !can_clear_room(&state.pool, member_b, &room.id)
+                .await
+                .unwrap()
+        );
+        assert!(!can_clear_room(&state.pool, owner, &room.id).await.unwrap());
         let _ = join_spot(
             State(state.clone()),
-            chat_headers(TYLER_ID),
+            chat_headers(TEST_MEMBER_A_ID),
             Json(JoinSpotRequest {
                 spot_id: room.spot_id.clone().unwrap(),
             }),
         )
         .await
         .unwrap();
-        let hangout = active_hangout_for(&state.pool, tyler)
+        let hangout = active_hangout_for(&state.pool, member_a)
             .await
             .unwrap()
             .unwrap();
-        assert!(load_hangouts(&state.pool, jared).await.unwrap().is_empty());
+        assert!(load_hangouts(&state.pool, owner).await.unwrap().is_empty());
         assert!(
             join_hangout(
                 State(state.clone()),
-                chat_headers(JARED_ID),
+                chat_headers(TEST_OWNER_ID),
                 Json(JoinHangoutRequest {
                     hangout_id: hangout
                 })
@@ -254,16 +254,16 @@ mod tests {
             .await
             .is_err()
         );
-        assert!(join_users(&state, jared, tyler).await.is_err());
+        assert!(join_users(&state, owner, member_a).await.is_err());
         assert!(
-            active_hangout_for(&state.pool, jared)
+            active_hangout_for(&state.pool, owner)
                 .await
                 .unwrap()
                 .is_none()
         );
         let _ = send_message(
             State(state.clone()),
-            chat_headers(TYLER_ID),
+            chat_headers(TEST_MEMBER_A_ID),
             Json(SendMessageRequest {
                 conversation_id: room.id.clone(),
                 content_type: "text/plain".into(),
@@ -274,52 +274,55 @@ mod tests {
         .await
         .unwrap();
         assert!(
-            clear_room_history(&state.pool, jack, &room.id)
+            clear_room_history(&state.pool, member_b, &room.id)
                 .await
                 .is_err()
         );
-        clear_room_history(&state.pool, charlie, &room.id)
+        clear_room_history(&state.pool, member_c, &room.id)
             .await
             .unwrap();
         assert!(
-            load_recent_messages(&state.pool, tyler)
+            load_recent_messages(&state.pool, member_a)
                 .await
                 .unwrap()
                 .is_empty()
         );
         assert!(
-            load_conversation(&state.pool, jack, &room.id)
+            load_conversation(&state.pool, member_b, &room.id)
                 .await
                 .unwrap()
                 .history_cleared_at
                 .is_some()
         );
         seed_development_users(&state.pool).await.unwrap();
-        assert_eq!(role(&state.pool, charlie, &room.id).await.unwrap(), "admin");
-        assert!(role(&state.pool, jared, &room.id).await.is_err());
+        assert_eq!(
+            role(&state.pool, member_c, &room.id).await.unwrap(),
+            "admin"
+        );
+        assert!(role(&state.pool, owner, &room.id).await.is_err());
         let _ = set_admin(
             State(state.clone()),
-            chat_headers(TYLER_ID),
+            chat_headers(TEST_MEMBER_A_ID),
             Json(SetRoomAdminRequest {
                 conversation_id: room.id.clone(),
-                user_id: charlie,
+                user_id: member_c,
                 admin: false,
             }),
         )
         .await
         .unwrap();
         assert!(
-            !can_clear_room(&state.pool, charlie, &room.id)
+            !can_clear_room(&state.pool, member_c, &room.id)
                 .await
                 .unwrap()
         );
         assert!(
             set_admin(
                 State(state.clone()),
-                chat_headers(TYLER_ID),
+                chat_headers(TEST_MEMBER_A_ID),
                 Json(SetRoomAdminRequest {
                     conversation_id: room.id,
-                    user_id: tyler,
+                    user_id: member_a,
                     admin: false
                 })
             )

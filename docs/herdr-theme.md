@@ -5,7 +5,7 @@ Classic, Terminal Grid, Clean TUI, Wisp blue, Graphite, Violet, Ember, or Perfor
 under **Settings → Appearance → Herdr**. Its original colors are available
 separately as **Color palette → Solarized Japan**. Neither choice changes the other.
 
-The option mirrors Jared's current Herdr `terminal` theme over the Solarized
+The option mirrors Owner's current Herdr `terminal` theme over the Solarized
 Japan terminal palette:
 
 - canvas and panels: `#001419`

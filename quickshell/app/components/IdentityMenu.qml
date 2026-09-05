@@ -9,9 +9,11 @@ Button {
   required property url logoSource
   property bool showWordmark: false
   property real maximumWidth: 300
+  property bool homeAvailable: false
   readonly property bool useWordmark: showWordmark
   signal settingsRequested()
   signal newRoomRequested()
+  signal homeRequested()
   function closeMenu() { menu.close() }
   implicitHeight: theme.space(42)
   implicitWidth: Math.min(maximumWidth,
@@ -101,6 +103,13 @@ Button {
     ThemeControlStyle { theme: root.theme; control: menu; outline: true; menuOutline: true }
     font.family: root.theme.font.family; font.pixelSize: root.theme.font.body
     palette.window: root.theme.surface; palette.windowText: root.theme.foreground; palette.text: root.theme.foreground
+    MenuItem {
+      objectName: "identityHome"
+      visible: root.homeAvailable
+      height: visible ? implicitHeight : 0
+      text: "[home]"
+      onTriggered: root.homeRequested()
+    }
     MenuItem {
       objectName: "identitySettings"
       text: "Settings"; onTriggered: root.settingsRequested()

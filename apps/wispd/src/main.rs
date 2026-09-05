@@ -1,3 +1,4 @@
+mod accounts;
 mod chat_images;
 mod chat_transfers;
 mod media;
@@ -8,18 +9,19 @@ mod surface;
 mod tray;
 mod video_bridge;
 
-use anyhow::{Context, anyhow, bail};
+use anyhow::{Context, anyhow, bail, ensure};
 use base64::Engine as _;
 use clap::Parser;
 use futures_util::StreamExt;
 use reqwest::StatusCode;
 use serde_json::{Value, json};
 use std::{
+    collections::BTreeMap,
     path::{Path, PathBuf},
     process::Stdio,
     sync::{
         Arc, RwLock as StdRwLock,
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
     time::{Duration, Instant},
 };
@@ -32,14 +34,19 @@ use tokio_tungstenite::{connect_async, tungstenite::client::IntoClientRequest};
 use tracing::{debug, error, info, warn};
 use tracing_subscriber::EnvFilter;
 use url::Url;
+use wisp_crypto::{
+    message::Content,
+    roster::{Member, Role},
+};
 use wisp_protocol::{
-    AudioPreset, CameraState, CommandEnvelope, ConnectionState, CreateDirectConversationRequest,
-    CreateInviteRequest, DaemonEnvelope, DevSession, DevSessionRequest, DeviceInvite,
-    DeviceSession, DeviceSessionRequest, DeviceView, JoinFriendRequest, JoinFriendResult,
-    JoinHangoutRequest, JoinSpotRequest, KnockResponse, LiveKitTokenResponse,
-    MarkConversationReadRequest, MediaState, PROTOCOL_VERSION, Presence, PushToTalkState,
-    RemoteVideoState, RemoteVideoTarget, RespondKnockRequest, RespondKnockResult, ScreenShareState,
-    SendMessageRequest, ServerEvent, SetPresenceRequest, Snapshot, VideoCodecPreference,
+    AccountInvite, AccountInviteKind, AudioPreset, CameraState, CommandEnvelope, ConnectionState,
+    CreateAccountInviteRequest, CreateDirectConversationRequest, CreateInviteRequest,
+    DaemonEnvelope, DevSession, DevSessionRequest, DeviceInvite, DeviceSession,
+    DeviceSessionRequest, DeviceView, JoinFriendRequest, JoinFriendResult, JoinHangoutRequest,
+    JoinSpotRequest, KnockResponse, LiveKitTokenResponse, MarkConversationReadRequest, MediaState,
+    PROTOCOL_VERSION, Presence, PushToTalkState, RemoteVideoState, RemoteVideoTarget,
+    RespondKnockRequest, RespondKnockResult, ScreenShareState, SendMessageRequest, ServerEvent,
+    ServerStateView, ServerView, SetPresenceRequest, Snapshot, VideoCodecPreference,
     VideoQualityPreset, VideoSource,
 };
 
@@ -54,6 +61,8 @@ struct Args {
     profile: String,
     #[arg(long, env = "WISP_SERVER_URL", default_value = "http://127.0.0.1:8787")]
     server_url: String,
+    #[arg(long, env = "WISP_ACCOUNTS_FILE")]
+    accounts_file: Option<PathBuf>,
     #[arg(long, env = "WISP_SOCKET")]
     socket: Option<PathBuf>,
     #[arg(long, env = "WISP_DISABLE_MEDIA")]
@@ -85,9 +94,6 @@ enum AuthMethod {
 
 impl ServerApi {
     async fn connect(base_url: String, profile: &str) -> anyhow::Result<(Self, Snapshot)> {
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(5))
-            .build()?;
         let device_id = std::env::var("WISP_DEVICE_ID").ok();
         let device_token = std::env::var("WISP_DEVICE_TOKEN").ok();
         let auth = match (device_id, device_token) {
@@ -100,6 +106,29 @@ impl ServerApi {
             },
             _ => bail!("WISP_DEVICE_ID and WISP_DEVICE_TOKEN must be configured together"),
         };
+        Self::connect_with_auth(base_url, auth).await
+    }
+
+    async fn connect_account(
+        account: &accounts::ServerAccount,
+    ) -> anyhow::Result<(Self, Snapshot)> {
+        Self::connect_with_auth(
+            account.server_url.clone(),
+            AuthMethod::Device {
+                device_id: account.device_id,
+                device_token: account.device_token.clone(),
+            },
+        )
+        .await
+    }
+
+    async fn connect_with_auth(
+        base_url: String,
+        auth: AuthMethod,
+    ) -> anyhow::Result<(Self, Snapshot)> {
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()?;
         let token = obtain_session(&client, &base_url, &auth).await?;
         let api = Self {
             client,
@@ -278,6 +307,47 @@ impl ServerApi {
         .await
     }
 
+    async fn create_account_invite(
+        &self,
+        kind: AccountInviteKind,
+        conversation_id: Option<String>,
+        expires_in_minutes: Option<u32>,
+        media_key: Option<String>,
+    ) -> anyhow::Result<AccountInvite> {
+        let mut invite: AccountInvite = decode(
+            self.request(reqwest::Method::POST, "/v1/account-invites")
+                .json(&CreateAccountInviteRequest {
+                    kind,
+                    conversation_id,
+                    expires_in_minutes,
+                })
+                .send()
+                .await?,
+        )
+        .await?;
+        let media_key = media_key.filter(|key| !key.is_empty());
+        if self.base_url.starts_with("https://") {
+            ensure!(
+                media_key.as_ref().is_some_and(|key| key.len() >= 16),
+                "Set up this device's media encryption key before creating invitations"
+            );
+        }
+        if let Some(media_key) = media_key {
+            let payload = json!({
+                "v": 1,
+                "server": self.base_url,
+                "token": invite.code,
+                "kind": invite.kind,
+                "media_key": media_key,
+            });
+            invite.uri = Some(format!(
+                "wisp-invite:{}",
+                base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(payload.to_string())
+            ));
+        }
+        Ok(invite)
+    }
+
     async fn devices(&self) -> anyhow::Result<Vec<DeviceView>> {
         decode(
             self.request(reqwest::Method::GET, "/v1/devices")
@@ -293,6 +363,20 @@ impl ServerApi {
                 .send()
                 .await?,
         )
+        .await
+    }
+
+    async fn server_request(
+        &self,
+        method: reqwest::Method,
+        path: &str,
+        body: Option<&Value>,
+    ) -> anyhow::Result<Value> {
+        let request = self.request(method, path);
+        decode(match body {
+            Some(body) => request.json(body).send().await?,
+            None => request.send().await?,
+        })
         .await
     }
 
@@ -393,10 +477,25 @@ async fn ensure_ok(response: reqwest::Response) -> anyhow::Result<()> {
     bail!("server returned {status}: {body}")
 }
 
+struct LinkedServer {
+    view: ServerView,
+    api: ServerApi,
+    privacy: privacy::Privacy,
+    state: RwLock<Snapshot>,
+    connected: AtomicBool,
+    media_key: Option<String>,
+}
+
 struct Daemon {
     privacy: privacy::Privacy,
     chat_images: chat_images::ImageStore,
     profile: String,
+    primary_server: ServerView,
+    configured_servers: Vec<ServerView>,
+    selected_server_id: RwLock<String>,
+    voice_server_id: RwLock<String>,
+    primary_media_key: Option<String>,
+    linked_servers: RwLock<BTreeMap<String, Arc<LinkedServer>>>,
     api: ServerApi,
     state: RwLock<Snapshot>,
     seq: AtomicU64,
@@ -412,10 +511,15 @@ struct Daemon {
 }
 
 impl Daemon {
+    // The constructor assembles the already-initialized desktop services.
+    #[allow(clippy::too_many_arguments)]
     fn new(
         profile: String,
+        primary_server: ServerView,
+        configured_servers: Vec<ServerView>,
         api: ServerApi,
         snapshot: Snapshot,
+        primary_media_key: Option<String>,
         media: MediaManager,
         media_enabled: bool,
         ptt_lease_duration: Duration,
@@ -428,6 +532,12 @@ impl Daemon {
             privacy: privacy::Privacy::new(&api.base_url, snapshot.self_state.user.id),
             chat_images: chat_images::ImageStore::default(),
             profile,
+            selected_server_id: RwLock::new(primary_server.id.clone()),
+            voice_server_id: RwLock::new(primary_server.id.clone()),
+            primary_media_key,
+            primary_server,
+            configured_servers,
+            linked_servers: RwLock::new(BTreeMap::new()),
             api,
             state: RwLock::new(snapshot),
             seq: AtomicU64::new(seq),
@@ -443,10 +553,83 @@ impl Daemon {
         }
     }
 
+    fn server_view_for_snapshot(mut server: ServerView, snapshot: &Snapshot) -> ServerView {
+        if !snapshot.server_name.trim().is_empty() {
+            server.name.clone_from(&snapshot.server_name);
+        }
+        server
+    }
+
+    fn scoped_state(server: ServerView, snapshot: &Snapshot) -> ServerStateView {
+        ServerStateView {
+            server: Self::server_view_for_snapshot(server, snapshot),
+            self_state: snapshot.self_state.clone(),
+            friends: snapshot.friends.clone(),
+            hangouts: snapshot.hangouts.clone(),
+            knocks: snapshot.knocks.clone(),
+            room_invitations: snapshot.room_invitations.clone(),
+            conversations: snapshot.conversations.clone(),
+            messages: snapshot.messages.clone(),
+            spots: snapshot.spots.clone(),
+            devices: snapshot.devices.clone(),
+        }
+    }
+
+    async fn decorate_snapshot(&self, snapshot: &mut Snapshot) {
+        let linked = self
+            .linked_servers
+            .read()
+            .await
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
+        let mut states = vec![Self::scoped_state(self.primary_server.clone(), snapshot)];
+        for server in &linked {
+            states.push(Self::scoped_state(
+                server.view.clone(),
+                &*server.state.read().await,
+            ));
+        }
+        states.sort_by(|left, right| {
+            left.server
+                .name
+                .to_lowercase()
+                .cmp(&right.server.name.to_lowercase())
+                .then_with(|| left.server.id.cmp(&right.server.id))
+        });
+        let mut servers = self.configured_servers.clone();
+        for server in &mut servers {
+            server.connected = server.id == self.primary_server.id
+                || linked.iter().any(|linked| {
+                    linked.view.id == server.id && linked.connected.load(Ordering::Acquire)
+                });
+            if let Some(current) = states.iter().find(|state| state.server.id == server.id) {
+                server.name.clone_from(&current.server.name);
+            }
+        }
+        snapshot.servers = servers;
+        snapshot
+            .selected_server_id
+            .clone_from(&*self.selected_server_id.read().await);
+        let voice_server_id = self.voice_server_id.read().await.clone();
+        snapshot.voice_server_id.clone_from(&voice_server_id);
+        if voice_server_id != self.primary_server.id
+            && let Some(server) = linked
+                .iter()
+                .find(|server| server.view.id == voice_server_id)
+        {
+            let voice = server.state.read().await;
+            snapshot.self_state.hangout_id = voice.self_state.hangout_id;
+        }
+        snapshot.server_states = states;
+    }
+
     async fn envelope_snapshot(&self) -> DaemonEnvelope {
+        let mut snapshot = self.state.read().await.clone();
+        self.decorate_snapshot(&mut snapshot).await;
         DaemonEnvelope::Snapshot {
             v: PROTOCOL_VERSION,
-            snapshot: Box::new(self.state.read().await.clone()),
+            snapshot: Box::new(snapshot),
         }
     }
 
@@ -499,6 +682,7 @@ impl Daemon {
         }
         let seq = self.next_seq(incoming.seq);
         incoming.seq = seq;
+        self.decorate_snapshot(&mut incoming).await;
         *self.state.write().await = incoming.clone();
         self.emit(event_name, json!({"snapshot": incoming}), seq);
     }
@@ -544,15 +728,117 @@ impl Daemon {
     }
 
     async fn refresh(&self, event_name: &str) -> anyhow::Result<()> {
-        let snapshot = self.api.snapshot().await?;
+        let mut snapshot = self.api.snapshot().await?;
+        if self
+            .privacy
+            .reconcile_pending_admissions(&self.api, &snapshot)
+            .await?
+        {
+            snapshot = self.api.snapshot().await?;
+        }
         self.merge_server_snapshot(snapshot, event_name).await;
+        Ok(())
+    }
+
+    async fn refresh_linked(
+        &self,
+        server: &Arc<LinkedServer>,
+        event_name: &str,
+    ) -> anyhow::Result<()> {
+        let mut snapshot = server.api.snapshot().await?;
+        if server
+            .privacy
+            .reconcile_pending_admissions(&server.api, &snapshot)
+            .await?
+        {
+            snapshot = server.api.snapshot().await?;
+        }
+        if std::env::var("WISP_REQUIRE_CHAT_E2EE").as_deref() == Ok("true") {
+            snapshot.chat_encryption_required = true;
+        }
+        server
+            .privacy
+            .decrypt_snapshot(&server.api, &mut snapshot)
+            .await;
+        server.connected.store(true, Ordering::Release);
+        *server.state.write().await = snapshot;
+        let mut aggregate = self.state.read().await.clone();
+        let seq = self.next_seq(aggregate.seq);
+        aggregate.seq = seq;
+        self.decorate_snapshot(&mut aggregate).await;
+        *self.state.write().await = aggregate.clone();
+        self.emit(event_name, json!({"snapshot": aggregate}), seq);
+        Ok(())
+    }
+
+    async fn voice_context(
+        &self,
+    ) -> anyhow::Result<(ServerApi, Option<uuid::Uuid>, bool, bool, Option<String>)> {
+        let server_id = self.voice_server_id.read().await.clone();
+        if server_id == self.primary_server.id {
+            let state = self.state.read().await;
+            return Ok((
+                self.api.clone(),
+                state.self_state.hangout_id,
+                state.chat_encryption_required,
+                self.privacy.active()?.is_some(),
+                self.primary_media_key.clone(),
+            ));
+        }
+        let server = self
+            .linked_servers
+            .read()
+            .await
+            .get(&server_id)
+            .cloned()
+            .context("Voice server is disconnected")?;
+        let state = server.state.read().await;
+        Ok((
+            server.api.clone(),
+            state.self_state.hangout_id,
+            state.chat_encryption_required,
+            server.privacy.active()?.is_some(),
+            server.media_key.clone(),
+        ))
+    }
+
+    async fn switch_voice_server(&self, server_id: &str) -> anyhow::Result<()> {
+        let current = self.voice_server_id.read().await.clone();
+        if current == server_id {
+            return Ok(());
+        }
+        let target_exists = server_id == self.primary_server.id
+            || self.linked_servers.read().await.contains_key(server_id);
+        ensure!(target_exists, "Selected server is disconnected");
+        // A deliberate join on another server is the only operation that may
+        // switch the voice context. Stop all publication before leaving the
+        // old room, preserving the user's manual mute/deafen preferences.
+        if self.media_enabled {
+            self.screen_share_command(&json!({"enabled":false})).await?;
+            self.camera_command(&json!({"enabled":false})).await?;
+        }
+        let (api, hangout, _, _, _) = self.voice_context().await?;
+        if hangout.is_some() {
+            api.leave().await?;
+        }
+        self.media.disconnect().await;
+        *self.voice_server_id.write().await = server_id.to_owned();
+        let (_, _, _, _, key) = self.voice_context().await?;
+        self.media.set_encryption_key(key);
+        if current == self.primary_server.id {
+            self.refresh("hangout_changed").await?;
+        } else if let Some(server) = self.linked_servers.read().await.get(&current).cloned() {
+            self.refresh_linked(&server, "hangout_changed").await?;
+        }
         Ok(())
     }
 
     #[allow(clippy::too_many_lines)]
     async fn reconcile_media(&self) -> anyhow::Result<()> {
         let _reconcile = self.media_reconcile.lock().await;
-        let hangout_id = self.state.read().await.self_state.hangout_id;
+        let (voice_api, hangout_id, encryption_required, privacy_active, media_key) =
+            self.voice_context().await?;
+        self.media.set_encryption_key(media_key);
         if !self.media_enabled {
             let connection = if hangout_id.is_some() {
                 ConnectionState::Connected
@@ -601,8 +887,8 @@ impl Daemon {
             return Ok(());
         }
 
-        if (self.state.read().await.chat_encryption_required
-            || self.privacy.active()?.is_some()
+        if (encryption_required
+            || privacy_active
             || std::env::var("WISP_REQUIRE_MEDIA_E2EE").as_deref() == Ok("true"))
             && !self.media.encryption_configured()
         {
@@ -626,7 +912,7 @@ impl Daemon {
         };
         self.set_connection(ConnectionState::Joining, None).await;
         let result = async {
-            let credentials = self.api.livekit_token().await?;
+            let credentials = voice_api.livekit_token().await?;
             self.media
                 .connect(hangout_id, credentials, muted, deafened)
                 .await
@@ -999,6 +1285,19 @@ impl Daemon {
 
     #[allow(clippy::too_many_lines)]
     async fn run_command(&self, command: &CommandEnvelope) -> anyhow::Result<Option<Value>> {
+        if let Some(server_id) = command.args.get("server_id").and_then(Value::as_str)
+            && !server_id.is_empty()
+            && server_id != self.primary_server.id
+        {
+            let server = self
+                .linked_servers
+                .read()
+                .await
+                .get(server_id)
+                .cloned()
+                .with_context(|| format!("Server {server_id} is not connected"))?;
+            return self.run_linked_command(command, &server).await;
+        }
         if matches!(
             command.name.as_str(),
             "send_message"
@@ -1101,7 +1400,10 @@ impl Daemon {
                 self.refresh("presence_changed").await?;
                 Ok(Some(json!({"presence": presence})))
             }
-            "join_friend" => self.join_friend_command(&command.args).await,
+            "join_friend" => {
+                self.switch_voice_server(&self.primary_server.id).await?;
+                self.join_friend_command(&command.args).await
+            }
             "open_direct" => {
                 let friend = string_arg(&command.args, "friend")?;
                 let conversation = self.api.create_direct(friend).await?;
@@ -1140,6 +1442,62 @@ impl Daemon {
                     warn!(%error, "group created but snapshot refresh failed");
                 }
                 Ok(Some(serde_json::to_value(conversation)?))
+            }
+            "group_add_member" | "group_remove_member" => {
+                let conversation_id = string_arg(&command.args, "conversation_id")?;
+                let user_id: uuid::Uuid = string_arg(&command.args, "user_id")?.parse()?;
+                let add = command.name == "group_add_member";
+                if self.privacy.active()?.is_some() {
+                    Self::change_group_membership(
+                        &self.api,
+                        &self.privacy,
+                        &conversation_id,
+                        user_id,
+                        add,
+                    )
+                    .await?;
+                } else {
+                    let path = if add {
+                        format!("/v1/conversations/groups/{conversation_id}/members")
+                    } else {
+                        format!("/v1/conversations/groups/{conversation_id}/members/{user_id}")
+                    };
+                    let request = self.api.request(
+                        if add {
+                            reqwest::Method::POST
+                        } else {
+                            reqwest::Method::DELETE
+                        },
+                        &path,
+                    );
+                    ensure_ok(if add {
+                        request.json(&command.args).send().await?
+                    } else {
+                        request.send().await?
+                    })
+                    .await?;
+                }
+                self.refresh("group_members_changed").await?;
+                Ok(None)
+            }
+            "group_leave" => {
+                ensure!(
+                    self.privacy.active()?.is_none(),
+                    "Ask the group owner to remove you from an encrypted group"
+                );
+                let conversation_id = string_arg(&command.args, "conversation_id")?;
+                ensure_ok(
+                    self.api
+                        .request(
+                            reqwest::Method::POST,
+                            &format!("/v1/conversations/groups/{conversation_id}/leave"),
+                        )
+                        .send()
+                        .await?,
+                )
+                .await?;
+                self.refresh("group_members_changed").await?;
+                Ok(None)
             }
             "create_room" | "invite_to_room" | "set_room_admin" => {
                 if command.name != "create_room" && self.privacy.active()?.is_some() {
@@ -1231,6 +1589,7 @@ impl Daemon {
                 // Explicit acceptance may switch rooms. Stop video before the
                 // server can announce the new membership to our event loop.
                 if accept && self.media_enabled {
+                    self.switch_voice_server(&self.primary_server.id).await?;
                     self.screen_share_command(&json!({"enabled":false})).await?;
                     self.camera_command(&json!({"enabled":false})).await?;
                 }
@@ -1453,6 +1812,7 @@ impl Daemon {
             }
             "join_spot" => {
                 let spot_id = string_arg(&command.args, "spot_id")?;
+                self.switch_voice_server(&self.primary_server.id).await?;
                 self.set_connection(ConnectionState::Joining, None).await;
                 self.api.join_spot(spot_id).await?;
                 self.refresh("hangout_changed").await?;
@@ -1476,6 +1836,148 @@ impl Daemon {
                 self.publish_current("invite_created").await;
                 Ok(Some(serde_json::to_value(invite)?))
             }
+            "create_account_invite" => {
+                let kind = match string_arg(&command.args, "kind")?.as_str() {
+                    "friend" => AccountInviteKind::Friend,
+                    "room" => AccountInviteKind::Room,
+                    _ => bail!("kind must be friend or room"),
+                };
+                let conversation_id = command
+                    .args
+                    .get("conversation_id")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned);
+                let expires = command
+                    .args
+                    .get("expires_in_minutes")
+                    .and_then(Value::as_u64)
+                    .map(u32::try_from)
+                    .transpose()
+                    .context("expires_in_minutes is too large")?;
+                let invite = self
+                    .api
+                    .create_account_invite(
+                        kind,
+                        conversation_id,
+                        expires,
+                        std::env::var("WISP_E2EE_KEY").ok(),
+                    )
+                    .await?;
+                Ok(Some(serde_json::to_value(invite)?))
+            }
+            "server_settings" => Ok(Some(
+                self.api
+                    .server_request(reqwest::Method::GET, "/v1/server/settings", None)
+                    .await?,
+            )),
+            "rename_server" => {
+                let value = self
+                    .api
+                    .server_request(
+                        reqwest::Method::PATCH,
+                        "/v1/server/settings",
+                        Some(&command.args),
+                    )
+                    .await
+                    .map_err(describe_server_name_error)?;
+                self.refresh("server_settings_changed").await?;
+                Ok(Some(value))
+            }
+            "set_server_admin" => {
+                let value = self
+                    .api
+                    .server_request(
+                        reqwest::Method::POST,
+                        "/v1/server/admins",
+                        Some(&command.args),
+                    )
+                    .await?;
+                self.refresh("server_settings_changed").await?;
+                Ok(Some(value))
+            }
+            "create_server_category" => {
+                let value = self
+                    .api
+                    .server_request(
+                        reqwest::Method::POST,
+                        "/v1/server/categories",
+                        Some(&command.args),
+                    )
+                    .await?;
+                self.refresh("server_settings_changed").await?;
+                Ok(Some(value))
+            }
+            "rename_server_category" | "delete_server_category" => {
+                let id = string_arg(&command.args, "id")?;
+                let rename = command.name == "rename_server_category";
+                let value = self
+                    .api
+                    .server_request(
+                        if rename {
+                            reqwest::Method::PATCH
+                        } else {
+                            reqwest::Method::DELETE
+                        },
+                        &format!("/v1/server/categories/{id}"),
+                        rename.then_some(&command.args),
+                    )
+                    .await?;
+                self.refresh("server_settings_changed").await?;
+                Ok(Some(value))
+            }
+            "create_server_channel" => {
+                let value = self
+                    .api
+                    .server_request(
+                        reqwest::Method::POST,
+                        "/v1/server/channels",
+                        Some(&command.args),
+                    )
+                    .await?;
+                let conversation: wisp_protocol::ConversationView =
+                    serde_json::from_value(value.clone())?;
+                if self.privacy.active()?.is_some() {
+                    self.privacy.recipients(&self.api, &conversation).await?;
+                }
+                self.refresh("server_settings_changed").await?;
+                Ok(Some(value))
+            }
+            "update_server_channel" | "delete_server_channel" => {
+                let id = string_arg(&command.args, "id")?;
+                let update = command.name == "update_server_channel";
+                let value = self
+                    .api
+                    .server_request(
+                        if update {
+                            reqwest::Method::PATCH
+                        } else {
+                            reqwest::Method::DELETE
+                        },
+                        &format!("/v1/server/channels/{id}"),
+                        update.then_some(&command.args),
+                    )
+                    .await?;
+                self.refresh("server_settings_changed").await?;
+                Ok(Some(value))
+            }
+            "rename_server_room" | "delete_server_room" => {
+                let id = string_arg(&command.args, "id")?;
+                let rename = command.name == "rename_server_room";
+                let value = self
+                    .api
+                    .server_request(
+                        if rename {
+                            reqwest::Method::PATCH
+                        } else {
+                            reqwest::Method::DELETE
+                        },
+                        &format!("/v1/server/rooms/{id}"),
+                        rename.then_some(&command.args),
+                    )
+                    .await?;
+                self.refresh("server_settings_changed").await?;
+                Ok(Some(value))
+            }
             "list_devices" => {
                 let devices = self.api.devices().await?;
                 self.refresh("devices_changed").await?;
@@ -1487,9 +1989,13 @@ impl Daemon {
                 self.refresh("devices_changed").await?;
                 Ok(None)
             }
-            "respond_knock" => self.respond_knock_command(&command.args).await,
+            "respond_knock" => {
+                self.switch_voice_server(&self.primary_server.id).await?;
+                self.respond_knock_command(&command.args).await
+            }
             "join_hangout" => {
                 let id = string_arg(&command.args, "hangout_id")?.parse()?;
+                self.switch_voice_server(&self.primary_server.id).await?;
                 self.set_connection(ConnectionState::Joining, None).await;
                 self.api.join_hangout(id).await?;
                 self.refresh("hangout_changed").await?;
@@ -1497,8 +2003,16 @@ impl Daemon {
                 Ok(None)
             }
             "leave" => {
-                self.api.leave().await?;
-                self.refresh("hangout_changed").await?;
+                let server_id = self.voice_server_id.read().await.clone();
+                let (api, _, _, _, _) = self.voice_context().await?;
+                api.leave().await?;
+                if server_id == self.primary_server.id {
+                    self.refresh("hangout_changed").await?;
+                } else if let Some(server) =
+                    self.linked_servers.read().await.get(&server_id).cloned()
+                {
+                    self.refresh_linked(&server, "hangout_changed").await?;
+                }
                 self.reconcile_media().await?;
                 Ok(None)
             }
@@ -1509,6 +2023,731 @@ impl Daemon {
             "camera" => self.camera_command(&command.args).await,
             _ => bail!("unknown command: {}", command.name),
         }
+    }
+
+    async fn send_linked_chat_text(
+        server: &LinkedServer,
+        conversation_id: String,
+        text: String,
+    ) -> anyhow::Result<()> {
+        let Some(vault) = server.privacy.active()? else {
+            return server.api.send_message(conversation_id, text).await;
+        };
+        let snapshot = server.api.snapshot().await?;
+        let conversation = snapshot
+            .conversations
+            .iter()
+            .find(|conversation| conversation.id == conversation_id)
+            .context("Conversation is not available on this server")?;
+        let (_, roster) = server.privacy.recipients(&server.api, conversation).await?;
+        let request = privacy::Privacy::seal(
+            &vault,
+            &roster,
+            uuid::Uuid::new_v4(),
+            Content {
+                content_type: "text/plain".into(),
+                payload: json!(text),
+                attachment: None,
+            },
+        )?;
+        let _: wisp_protocol::Message = decode(
+            server
+                .api
+                .request(reqwest::Method::POST, "/v1/e2ee/messages")
+                .json(&request)
+                .send()
+                .await?,
+        )
+        .await?;
+        Ok(())
+    }
+
+    async fn change_group_membership(
+        api: &ServerApi,
+        privacy: &privacy::Privacy,
+        conversation_id: &str,
+        target: uuid::Uuid,
+        add: bool,
+    ) -> anyhow::Result<()> {
+        let vault = privacy
+            .active()?
+            .context("Encrypted chat is not configured for this server")?;
+        let snapshot = api.snapshot().await?;
+        let conversation = snapshot
+            .conversations
+            .iter()
+            .find(|conversation| conversation.id == conversation_id)
+            .context("Group is not available")?;
+        ensure!(
+            conversation.kind == wisp_protocol::ConversationKind::Circle
+                && !conversation.server_channel
+                && conversation.spot_id.is_none(),
+            "Only private group chats can change members"
+        );
+        let (_, previous) = privacy.recipients(api, conversation).await?;
+        let mut roster = previous.roster.clone();
+        roster.actor = vault.account;
+        roster.revision = roster
+            .revision
+            .checked_add(1)
+            .context("Group version overflow")?;
+        roster.previous = Some(previous.hash()?);
+        if add {
+            if roster.members.contains_key(&target) {
+                return Ok(());
+            }
+            let directory = privacy.directory(api, &vault).await?;
+            let identity = directory
+                .identities
+                .get(&target)
+                .context("This friend needs to enable encrypted chat first")?
+                .clone();
+            roster.members.insert(
+                target,
+                Member {
+                    identity,
+                    role: Role::Member,
+                },
+            );
+        } else {
+            ensure!(
+                target != vault.account,
+                "The group owner cannot leave without transferring ownership"
+            );
+            let removed = roster.members.remove(&target);
+            ensure!(removed.is_some(), "This person is not in the group");
+        }
+        let signed = roster.sign(vault.ring.identity())?;
+        signed.verify_successor(&previous)?;
+        ensure_ok(
+            api.request(reqwest::Method::POST, "/v1/e2ee/roster")
+                .json(&signed)
+                .send()
+                .await?,
+        )
+        .await
+    }
+
+    async fn change_linked_room(
+        server: &LinkedServer,
+        command: &str,
+        args: &Value,
+    ) -> anyhow::Result<()> {
+        let conversation_id = string_arg(args, "conversation_id")?;
+        let target: uuid::Uuid = string_arg(args, "user_id")?.parse()?;
+        let vault = server
+            .privacy
+            .active()?
+            .context("Encrypted chat is not configured for this server")?;
+        let snapshot = server.api.snapshot().await?;
+        let conversation = snapshot
+            .conversations
+            .iter()
+            .find(|conversation| conversation.id == conversation_id)
+            .context("Room is not available")?;
+        let (_, previous) = server.privacy.recipients(&server.api, conversation).await?;
+        let mut roster = previous.roster.clone();
+        roster.actor = vault.account;
+        roster.revision = roster
+            .revision
+            .checked_add(1)
+            .context("Room version overflow")?;
+        roster.previous = Some(previous.hash()?);
+        if command == "invite_to_room" {
+            if roster.members.contains_key(&target) {
+                return Ok(());
+            }
+            let directory = server.privacy.directory(&server.api, &vault).await?;
+            let identity = directory
+                .identities
+                .get(&target)
+                .context("This friend needs to enable encrypted chat first")?
+                .clone();
+            roster.members.insert(
+                target,
+                Member {
+                    identity,
+                    role: Role::Member,
+                },
+            );
+        } else {
+            let admin = args
+                .get("admin")
+                .and_then(Value::as_bool)
+                .context("Admin choice required")?;
+            roster
+                .members
+                .get_mut(&target)
+                .context("Friend is not in this room")?
+                .role = if admin { Role::Admin } else { Role::Member };
+        }
+        let signed = roster.sign(vault.ring.identity())?;
+        signed.verify_successor(&previous)?;
+        ensure_ok(
+            server
+                .api
+                .request(reqwest::Method::POST, "/v1/e2ee/roster")
+                .json(&signed)
+                .send()
+                .await?,
+        )
+        .await
+    }
+
+    async fn edit_linked_message(
+        server: &LinkedServer,
+        id: uuid::Uuid,
+        text: String,
+    ) -> anyhow::Result<()> {
+        let message = server
+            .state
+            .read()
+            .await
+            .messages
+            .iter()
+            .find(|message| message.id == id)
+            .cloned()
+            .context("Message is not visible")?;
+        let vault = server
+            .privacy
+            .active()?
+            .context("Encrypted chat is not configured for this server")?;
+        ensure!(
+            message.sender.id == vault.account,
+            "Only your messages can be edited"
+        );
+        let snapshot = server.api.snapshot().await?;
+        let conversation = snapshot
+            .conversations
+            .iter()
+            .find(|conversation| conversation.id == message.conversation_id)
+            .context("Conversation is not available")?;
+        let (_, roster) = server.privacy.recipients(&server.api, conversation).await?;
+        let mut content = server.privacy.content(id)?;
+        if content.content_type == "text/plain" {
+            content.payload = json!(text);
+        } else {
+            content.payload["caption"] = json!(text);
+        }
+        let raw = snapshot
+            .messages
+            .into_iter()
+            .find(|raw| raw.id == id)
+            .context("Message was removed")?;
+        let binding = wisp_crypto::message::MessageContext {
+            network: vault.network,
+            conversation: raw.conversation_id,
+            sender: vault.account,
+            message: id,
+            roster: raw.payload["roster_hash"]
+                .as_str()
+                .context("Missing original signed roster")?
+                .into(),
+        };
+        let (_, mut recipients) = binding.open_with_recipients(
+            vault.ring.identity(),
+            vault.account,
+            &vault.ring.identity().public(),
+            &base64::engine::general_purpose::STANDARD.decode(
+                raw.payload["ciphertext"]
+                    .as_str()
+                    .context("Missing original ciphertext")?,
+            )?,
+        )?;
+        recipients.retain(|member, key| {
+            roster
+                .roster
+                .members
+                .get(member)
+                .is_some_and(|current| &current.identity == key)
+        });
+        let request = privacy::Privacy::seal_to(&vault, &roster, id, content, &recipients)?;
+        ensure_ok(
+            server
+                .api
+                .request(reqwest::Method::PUT, &format!("/v1/e2ee/messages/{id}"))
+                .json(&request)
+                .send()
+                .await?,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_lines)]
+    async fn run_linked_command(
+        &self,
+        command: &CommandEnvelope,
+        server: &Arc<LinkedServer>,
+    ) -> anyhow::Result<Option<Value>> {
+        let mut args = command.args.clone();
+        args.as_object_mut()
+            .map(|values| values.remove("server_id"));
+        let encrypted_write = matches!(
+            command.name.as_str(),
+            "send_message" | "send_direct" | "edit_message" | "send_attachment_message"
+        );
+        if encrypted_write
+            && server.privacy.active()?.is_none()
+            && server.state.read().await.chat_encryption_required
+        {
+            bail!("This server requires encrypted chat. Configure Privacy for this server first.");
+        }
+        let value = match command.name.as_str() {
+            "privacy_status" => Some(server.privacy.status()),
+            "privacy_enable" => {
+                let backup = privacy::local_path(&string_arg(&args, "backup_file")?)?;
+                let recovery = args
+                    .get("recovery_file")
+                    .and_then(Value::as_str)
+                    .filter(|value| !value.is_empty())
+                    .map(privacy::local_path)
+                    .transpose()?;
+                Some(
+                    server
+                        .privacy
+                        .enable(&server.api, &backup, recovery.as_deref())
+                        .await?,
+                )
+            }
+            "privacy_export" => {
+                let backup = privacy::local_path(&string_arg(&args, "backup_file")?)?;
+                server
+                    .privacy
+                    .active()?
+                    .context("Chat encryption is not configured for this server")?
+                    .ring
+                    .export_recovery(&backup)?;
+                Some(json!({"saved":true}))
+            }
+            "set_presence" => {
+                let presence = string_arg(&args, "presence")?
+                    .parse()
+                    .map_err(anyhow::Error::msg)?;
+                server.api.set_presence(presence).await?;
+                Some(json!({"presence":presence}))
+            }
+            "open_direct" => Some(serde_json::to_value(
+                server
+                    .api
+                    .create_direct(string_arg(&args, "friend")?)
+                    .await?,
+            )?),
+            "create_group" => {
+                if let Some(vault) = server.privacy.active()? {
+                    let directory = server.privacy.directory(&server.api, &vault).await?;
+                    let members: Vec<uuid::Uuid> = serde_json::from_value(args["members"].clone())?;
+                    ensure!(
+                        members
+                            .iter()
+                            .all(|member| directory.identities.contains_key(member)),
+                        "Every selected friend needs encrypted chat on this server"
+                    );
+                }
+                let response = server
+                    .api
+                    .request(reqwest::Method::POST, "/v1/conversations/group")
+                    .json(&args)
+                    .send()
+                    .await?;
+                let conversation: wisp_protocol::ConversationView = decode(response).await?;
+                if server.privacy.active()?.is_some() {
+                    server
+                        .privacy
+                        .recipients(&server.api, &conversation)
+                        .await?;
+                }
+                Some(serde_json::to_value(conversation)?)
+            }
+            "group_add_member" | "group_remove_member" => {
+                let conversation_id = string_arg(&args, "conversation_id")?;
+                let user_id: uuid::Uuid = string_arg(&args, "user_id")?.parse()?;
+                let add = command.name == "group_add_member";
+                if server.privacy.active()?.is_some() {
+                    Self::change_group_membership(
+                        &server.api,
+                        &server.privacy,
+                        &conversation_id,
+                        user_id,
+                        add,
+                    )
+                    .await?;
+                } else {
+                    let path = if add {
+                        format!("/v1/conversations/groups/{conversation_id}/members")
+                    } else {
+                        format!("/v1/conversations/groups/{conversation_id}/members/{user_id}")
+                    };
+                    let request = server.api.request(
+                        if add {
+                            reqwest::Method::POST
+                        } else {
+                            reqwest::Method::DELETE
+                        },
+                        &path,
+                    );
+                    ensure_ok(if add {
+                        request.json(&args).send().await?
+                    } else {
+                        request.send().await?
+                    })
+                    .await?;
+                }
+                None
+            }
+            "create_room" | "invite_to_room" | "set_room_admin" => {
+                if command.name != "create_room" && server.privacy.active()?.is_some() {
+                    Self::change_linked_room(server, &command.name, &args).await?;
+                    None
+                } else {
+                    let endpoint = match command.name.as_str() {
+                        "create_room" => "/v1/rooms",
+                        "invite_to_room" => "/v1/rooms/invite",
+                        _ => "/v1/rooms/admin",
+                    };
+                    let value: Value = decode(
+                        server
+                            .api
+                            .request(reqwest::Method::POST, endpoint)
+                            .json(&args)
+                            .send()
+                            .await?,
+                    )
+                    .await?;
+                    if command.name == "create_room" && server.privacy.active()?.is_some() {
+                        let conversation = serde_json::from_value(value.clone())?;
+                        server
+                            .privacy
+                            .recipients(&server.api, &conversation)
+                            .await?;
+                    }
+                    Some(value)
+                }
+            }
+            "group_leave" => {
+                ensure!(
+                    server.privacy.active()?.is_none(),
+                    "Ask the group owner to remove you from an encrypted group"
+                );
+                let conversation_id = string_arg(&args, "conversation_id")?;
+                ensure_ok(
+                    server
+                        .api
+                        .request(
+                            reqwest::Method::POST,
+                            &format!("/v1/conversations/groups/{conversation_id}/leave"),
+                        )
+                        .send()
+                        .await?,
+                )
+                .await?;
+                None
+            }
+            "send_message" => {
+                Self::send_linked_chat_text(
+                    server,
+                    string_arg(&args, "conversation_id")?,
+                    opaque_string_arg(&args, "text")?,
+                )
+                .await?;
+                None
+            }
+            "mark_conversation_read" => {
+                server
+                    .api
+                    .mark_conversation_read(string_arg(&args, "conversation_id")?)
+                    .await?;
+                None
+            }
+            "set_conversation_tab" | "clear_chat_history" => {
+                let action = if command.name == "set_conversation_tab" {
+                    "tab"
+                } else {
+                    "clear"
+                };
+                server.api.conversation_action(action, &args).await?;
+                None
+            }
+            "server_settings" => Some(
+                server
+                    .api
+                    .server_request(reqwest::Method::GET, "/v1/server/settings", None)
+                    .await?,
+            ),
+            "rename_server" => Some(
+                server
+                    .api
+                    .server_request(reqwest::Method::PATCH, "/v1/server/settings", Some(&args))
+                    .await
+                    .map_err(describe_server_name_error)?,
+            ),
+            "set_server_admin" => Some(
+                server
+                    .api
+                    .server_request(reqwest::Method::POST, "/v1/server/admins", Some(&args))
+                    .await?,
+            ),
+            "create_server_category" => Some(
+                server
+                    .api
+                    .server_request(reqwest::Method::POST, "/v1/server/categories", Some(&args))
+                    .await?,
+            ),
+            "rename_server_category" | "delete_server_category" => {
+                let id = string_arg(&args, "id")?;
+                let rename = command.name == "rename_server_category";
+                Some(
+                    server
+                        .api
+                        .server_request(
+                            if rename {
+                                reqwest::Method::PATCH
+                            } else {
+                                reqwest::Method::DELETE
+                            },
+                            &format!("/v1/server/categories/{id}"),
+                            rename.then_some(&args),
+                        )
+                        .await?,
+                )
+            }
+            "create_server_channel" => Some(
+                server
+                    .api
+                    .server_request(reqwest::Method::POST, "/v1/server/channels", Some(&args))
+                    .await?,
+            ),
+            "update_server_channel" | "delete_server_channel" => {
+                let id = string_arg(&args, "id")?;
+                let update = command.name == "update_server_channel";
+                Some(
+                    server
+                        .api
+                        .server_request(
+                            if update {
+                                reqwest::Method::PATCH
+                            } else {
+                                reqwest::Method::DELETE
+                            },
+                            &format!("/v1/server/channels/{id}"),
+                            update.then_some(&args),
+                        )
+                        .await?,
+                )
+            }
+            "rename_server_room" | "delete_server_room" => {
+                let id = string_arg(&args, "id")?;
+                let rename = command.name == "rename_server_room";
+                Some(
+                    server
+                        .api
+                        .server_request(
+                            if rename {
+                                reqwest::Method::PATCH
+                            } else {
+                                reqwest::Method::DELETE
+                            },
+                            &format!("/v1/server/rooms/{id}"),
+                            rename.then_some(&args),
+                        )
+                        .await?,
+                )
+            }
+            "list_devices" => Some(serde_json::to_value(server.api.devices().await?)?),
+            "revoke_device" => {
+                server
+                    .api
+                    .revoke_device(string_arg(&args, "device_id")?.parse()?)
+                    .await?;
+                None
+            }
+            "create_account_invite" => {
+                let kind = match string_arg(&args, "kind")?.as_str() {
+                    "friend" => AccountInviteKind::Friend,
+                    "room" => AccountInviteKind::Room,
+                    _ => bail!("kind must be friend or room"),
+                };
+                Some(serde_json::to_value(
+                    server
+                        .api
+                        .create_account_invite(
+                            kind,
+                            args.get("conversation_id")
+                                .and_then(Value::as_str)
+                                .map(str::to_owned),
+                            args.get("expires_in_minutes")
+                                .and_then(Value::as_u64)
+                                .map(u32::try_from)
+                                .transpose()?,
+                            server.media_key.clone(),
+                        )
+                        .await?,
+                )?)
+            }
+            "edit_message" | "delete_message" => {
+                let id: uuid::Uuid = string_arg(&args, "message_id")?.parse()?;
+                if command.name == "edit_message" && server.privacy.active()?.is_some() {
+                    Self::edit_linked_message(server, id, opaque_string_arg(&args, "text")?)
+                        .await?;
+                } else {
+                    let mut request = server.api.request(
+                        if command.name == "edit_message" {
+                            reqwest::Method::PATCH
+                        } else {
+                            reqwest::Method::DELETE
+                        },
+                        &format!("/v1/messages/{id}"),
+                    );
+                    if command.name == "edit_message" {
+                        request = request.json(&wisp_protocol::EditMessageRequest {
+                            text: opaque_string_arg(&args, "text")?,
+                        });
+                    }
+                    ensure_ok(request.send().await?).await?;
+                }
+                None
+            }
+            "set_file_retention" => {
+                let id: uuid::Uuid = string_arg(&args, "message_id")?.parse()?;
+                ensure_ok(
+                    server
+                        .api
+                        .request(
+                            reqwest::Method::PATCH,
+                            &format!("/v1/messages/{id}/retention"),
+                        )
+                        .json(&wisp_protocol::SetFileRetention {
+                            keep: boolean_arg(&args, "keep")?,
+                        })
+                        .send()
+                        .await?,
+                )
+                .await?;
+                None
+            }
+            "send_attachment_message"
+            | "save_chat_file"
+            | "load_chat_image"
+            | "copy_chat_image" => {
+                bail!(
+                    "This operation on a secondary server will be enabled after its encrypted transfer session is initialized"
+                )
+            }
+            "join_friend" => {
+                self.switch_voice_server(&server.view.id).await?;
+                self.set_connection(ConnectionState::Joining, None).await;
+                let result = server.api.join_friend(string_arg(&args, "friend")?).await?;
+                if matches!(result, JoinFriendResult::Joined { .. }) {
+                    self.refresh_linked(server, "hangout_changed").await?;
+                    self.reconcile_media().await?;
+                    None
+                } else {
+                    self.set_connection(ConnectionState::Available, None).await;
+                    Some(serde_json::to_value(result)?)
+                }
+            }
+            "join_spot" => {
+                self.switch_voice_server(&server.view.id).await?;
+                self.set_connection(ConnectionState::Joining, None).await;
+                server.api.join_spot(string_arg(&args, "spot_id")?).await?;
+                self.refresh_linked(server, "hangout_changed").await?;
+                self.reconcile_media().await?;
+                None
+            }
+            "join_hangout" => {
+                self.switch_voice_server(&server.view.id).await?;
+                self.set_connection(ConnectionState::Joining, None).await;
+                server
+                    .api
+                    .join_hangout(string_arg(&args, "hangout_id")?.parse()?)
+                    .await?;
+                self.refresh_linked(server, "hangout_changed").await?;
+                self.reconcile_media().await?;
+                None
+            }
+            "respond_knock" => {
+                self.switch_voice_server(&server.view.id).await?;
+                let knock_id = string_arg(&args, "knock_id")?.parse()?;
+                let response = serde_json::from_value(
+                    args.get("response")
+                        .cloned()
+                        .context("response is required")?,
+                )?;
+                let result = server.api.respond_knock(knock_id, response).await?;
+                self.refresh_linked(server, "knock_responded").await?;
+                if matches!(result, RespondKnockResult::Accepted { .. }) {
+                    self.reconcile_media().await?;
+                }
+                Some(serde_json::to_value(result)?)
+            }
+            "send_voice_invite" => {
+                let mut request: wisp_protocol::InviteToRoom = serde_json::from_value(args)?;
+                request.encrypted_membership = None;
+                if server.privacy.active()?.is_some() {
+                    let snapshot = server.api.snapshot().await?;
+                    let id = snapshot
+                        .spots
+                        .iter()
+                        .find(|spot| spot.active_hangout_id == Some(request.hangout_id))
+                        .map_or_else(
+                            || format!("hangout:{}", request.hangout_id),
+                            |spot| format!("spot:{}", spot.id),
+                        );
+                    let conversation = snapshot
+                        .conversations
+                        .iter()
+                        .find(|conversation| conversation.id == id)
+                        .context("Room chat is unavailable")?;
+                    request.encrypted_membership = server
+                        .privacy
+                        .invite_member(&server.api, conversation, request.user_id)
+                        .await?;
+                }
+                Some(
+                    decode::<Value>(
+                        server
+                            .api
+                            .request(reqwest::Method::POST, "/v1/room-invitations")
+                            .json(&request)
+                            .send()
+                            .await?,
+                    )
+                    .await?,
+                )
+            }
+            "respond_room_invitation" => {
+                let id: uuid::Uuid = string_arg(&args, "id")?.parse()?;
+                let accept = args
+                    .get("accept")
+                    .and_then(Value::as_bool)
+                    .context("accept is required")?;
+                if accept {
+                    self.switch_voice_server(&server.view.id).await?;
+                }
+                let result: Value = decode(
+                    server
+                        .api
+                        .request(
+                            reqwest::Method::POST,
+                            &format!("/v1/room-invitations/{id}/respond"),
+                        )
+                        .json(&wisp_protocol::RespondRoomInvitation { accept })
+                        .send()
+                        .await?,
+                )
+                .await?;
+                self.refresh_linked(server, "room_invitation_responded")
+                    .await?;
+                if accept {
+                    self.reconcile_media().await?;
+                }
+                Some(result)
+            }
+            _ => bail!("{} is not a server-scoped command", command.name),
+        };
+        if command.name != "privacy_export" {
+            self.refresh_linked(server, "server_changed").await?;
+        }
+        Ok(value)
     }
 
     async fn audio_command(&self, command: &CommandEnvelope) -> anyhow::Result<Option<Value>> {
@@ -2133,6 +3372,71 @@ async fn synchronize_server(daemon: Arc<Daemon>) {
         let base = 250 * 2_u64.pow(attempt);
         let jitter = u64::from(daemon.profile.bytes().fold(0_u8, u8::wrapping_add)) * 3;
         tokio::time::sleep(Duration::from_millis((base + jitter).min(20_000))).await;
+    }
+}
+
+async fn synchronize_linked_server(daemon: Arc<Daemon>, server: Arc<LinkedServer>) {
+    let mut attempt = 0_u32;
+    loop {
+        let request = match server.api.events_request() {
+            Ok(request) => request,
+            Err(error) => {
+                warn!(%error, server = %server.view.name, "invalid linked-server events request");
+                return;
+            }
+        };
+        match connect_async(request).await {
+            Ok((stream, _)) => {
+                attempt = 0;
+                if let Err(error) = daemon.refresh_linked(&server, "server_reconnected").await {
+                    warn!(%error, server = %server.view.name, "linked-server refresh failed");
+                }
+                let (_, mut incoming) = stream.split();
+                while let Some(message) = incoming.next().await {
+                    match message {
+                        Ok(message) if message.is_text() => {
+                            let event_name = serde_json::from_str::<ServerEvent>(
+                                message.to_text().unwrap_or_default(),
+                            )
+                            .map_or_else(|_| "server_state_changed".to_owned(), |event| event.name);
+                            if let Err(error) = daemon.refresh_linked(&server, &event_name).await {
+                                warn!(%error, server = %server.view.name, "linked-server snapshot refresh failed");
+                                break;
+                            }
+                        }
+                        Ok(message) if message.is_close() => break,
+                        Ok(_) => {}
+                        Err(error) => {
+                            warn!(%error, server = %server.view.name, "linked-server event stream failed");
+                            break;
+                        }
+                    }
+                }
+            }
+            Err(error) => {
+                warn!(%error, server = %server.view.name, "cannot connect to linked-server events");
+                if let Err(renew_error) = server.api.renew_session().await {
+                    warn!(%renew_error, server = %server.view.name, "cannot renew linked-server session");
+                }
+            }
+        }
+        server.connected.store(false, Ordering::Release);
+        let mut aggregate = daemon.state.read().await.clone();
+        let seq = daemon.next_seq(aggregate.seq);
+        aggregate.seq = seq;
+        daemon.decorate_snapshot(&mut aggregate).await;
+        *daemon.state.write().await = aggregate.clone();
+        daemon.emit(
+            "server_connection_changed",
+            json!({"snapshot": aggregate}),
+            seq,
+        );
+        attempt = attempt.saturating_add(1).min(6);
+        let jitter = u64::from(server.view.id.bytes().fold(0_u8, u8::wrapping_add)) * 3;
+        tokio::time::sleep(Duration::from_millis(
+            (250 * 2_u64.pow(attempt) + jitter).min(20_000),
+        ))
+        .await;
     }
 }
 
@@ -3034,6 +4338,7 @@ async fn handle_connecting_tray_action(
 async fn connect_with_tray(
     server_url: String,
     profile: &str,
+    account: Option<&accounts::ServerAccount>,
     tray_actions: &mut Option<tokio::sync::mpsc::UnboundedReceiver<TrayAction>>,
     tray_handle: Option<&ksni::Handle<tray::WispTray>>,
     audio_state: &mut (bool, bool),
@@ -3041,7 +4346,13 @@ async fn connect_with_tray(
 ) -> anyhow::Result<Option<(ServerApi, Snapshot)>> {
     let mut attempt = 0_u32;
     loop {
-        let connection = ServerApi::connect(server_url.clone(), profile);
+        let connection = async {
+            if let Some(account) = account {
+                ServerApi::connect_account(account).await
+            } else {
+                ServerApi::connect(server_url.clone(), profile).await
+            }
+        };
         tokio::pin!(connection);
         let result = loop {
             tokio::select! {
@@ -3104,9 +4415,12 @@ async fn connect_with_tray(
 
 async fn start_connected_daemon(
     args: Args,
+    primary_server: ServerView,
+    configured_servers: Vec<ServerView>,
     api: ServerApi,
     mut snapshot: Snapshot,
     connecting_audio: Option<(bool, bool)>,
+    media_key: Option<String>,
 ) -> Arc<Daemon> {
     if let Some((muted, deafened)) = connecting_audio {
         snapshot.self_state.muted = muted;
@@ -3125,19 +4439,24 @@ async fn start_connected_daemon(
     let shortcut = ShortcutManager::from_environment();
     snapshot.self_state.push_to_talk.shortcut = shortcut.load_shortcut().await;
     snapshot.self_state.push_to_talk.shortcut_backend = shortcut.backend().map(str::to_owned);
-    let e2ee_key = std::env::var("WISP_E2EE_KEY")
-        .ok()
-        .filter(|key| !key.is_empty());
+    let e2ee_key = media_key.or_else(|| {
+        std::env::var("WISP_E2EE_KEY")
+            .ok()
+            .filter(|key| !key.is_empty())
+    });
     let (media, media_events) = MediaManager::new(
         !args.disable_media && !args.disable_surfaces,
-        e2ee_key,
+        e2ee_key.clone(),
         snapshot.self_state.user.display_name.clone(),
     );
     snapshot.self_state.media.video = media.video_settings();
     let daemon = Arc::new(Daemon::new(
         args.profile,
+        primary_server,
+        configured_servers,
         api,
         snapshot,
+        e2ee_key,
         media,
         !args.disable_media,
         Duration::from_millis(args.ptt_lease_ms.max(100)),
@@ -3180,15 +4499,123 @@ fn describe_media_failure(error: &anyhow::Error) -> (String, String) {
     (code.into(), format!("{label}: {detail}"))
 }
 
+fn describe_server_name_error(error: anyhow::Error) -> anyhow::Error {
+    if error.to_string().contains("405 Method Not Allowed") {
+        anyhow!("Server update required before its shared name can be changed")
+    } else {
+        error
+    }
+}
+
+fn account_view(account: &accounts::ServerAccount, connected: bool) -> ServerView {
+    ServerView {
+        id: account.id.clone(),
+        name: account.name.clone(),
+        url: account.server_url.clone(),
+        connected,
+    }
+}
+
+fn start_linked_accounts(
+    daemon: &Arc<Daemon>,
+    accounts: impl IntoIterator<Item = accounts::ServerAccount>,
+) {
+    for account in accounts {
+        let daemon = daemon.clone();
+        tokio::spawn(async move {
+            let mut attempt = 0_u32;
+            loop {
+                match ServerApi::connect_account(&account).await {
+                    Ok((api, snapshot)) => {
+                        let server = Arc::new(LinkedServer {
+                            view: account_view(&account, true),
+                            privacy: privacy::Privacy::new(
+                                &api.base_url,
+                                snapshot.self_state.user.id,
+                            ),
+                            api,
+                            state: RwLock::new(snapshot),
+                            connected: AtomicBool::new(true),
+                            media_key: account.media_key.clone(),
+                        });
+                        daemon
+                            .linked_servers
+                            .write()
+                            .await
+                            .insert(account.id.clone(), server.clone());
+                        if let Err(error) = daemon.refresh_linked(&server, "server_connected").await
+                        {
+                            warn!(%error, server = %account.name, "initial linked-server refresh failed");
+                        }
+                        synchronize_linked_server(daemon, server).await;
+                        return;
+                    }
+                    Err(error) => {
+                        warn!(%error, server = %account.name, "cannot connect linked Wisp server");
+                    }
+                }
+                attempt = attempt.saturating_add(1).min(6);
+                tokio::time::sleep(Duration::from_millis(
+                    (250 * 2_u64.pow(attempt)).min(20_000),
+                ))
+                .await;
+            }
+        });
+    }
+}
+
 #[tokio::main]
 #[allow(clippy::too_many_lines)]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| "wispd=info".into()))
         .init();
-    let args = Args::parse();
+    let mut args = Args::parse();
+    let registry_path = args.accounts_file.clone().or_else(accounts::default_path);
+    let registry = registry_path
+        .as_deref()
+        .filter(|path| path.exists())
+        .map(accounts::AccountRegistry::load)
+        .transpose()?;
+    let primary_account = registry.as_ref().and_then(|registry| {
+        registry
+            .servers
+            .iter()
+            .find(|account| account.id == registry.selected_server_id)
+            .cloned()
+    });
+    if let Some(account) = &primary_account {
+        args.profile.clone_from(&account.profile);
+        args.server_url.clone_from(&account.server_url);
+    }
+    let primary_server = primary_account.as_ref().map_or_else(
+        || ServerView {
+            id: accounts::stable_id(&args.server_url),
+            name: Url::parse(&args.server_url)
+                .ok()
+                .and_then(|url| url.host_str().map(str::to_owned))
+                .unwrap_or_else(|| "Wisp server".into()),
+            url: args.server_url.clone(),
+            connected: true,
+        },
+        |account| account_view(account, true),
+    );
+    let configured_servers = registry.as_ref().map_or_else(
+        || vec![primary_server.clone()],
+        |registry| {
+            registry
+                .servers
+                .iter()
+                .map(|account| account_view(account, account.id == primary_server.id))
+                .collect()
+        },
+    );
     if !args.disable_media
-        && std::env::var_os("WISP_DEVICE_ID").is_some()
+        && (primary_account.is_some() || std::env::var_os("WISP_DEVICE_ID").is_some())
+        && primary_account
+            .as_ref()
+            .and_then(|account| account.media_key.as_ref())
+            .is_none()
         && std::env::var_os("WISP_E2EE_KEY").is_none()
     {
         bail!("WISP_E2EE_KEY is required for device-authenticated media");
@@ -3212,6 +4639,7 @@ async fn main() -> anyhow::Result<()> {
     let Some((api, snapshot)) = connect_with_tray(
         args.server_url.clone(),
         &args.profile,
+        primary_account.as_ref(),
         &mut tray_actions,
         tray_handle.as_ref(),
         &mut connecting_audio_state,
@@ -3228,11 +4656,25 @@ async fn main() -> anyhow::Result<()> {
     };
     let daemon = start_connected_daemon(
         args,
+        primary_server.clone(),
+        configured_servers,
         api,
         snapshot,
         connecting_audio_changed.then_some(connecting_audio_state),
+        primary_account
+            .as_ref()
+            .and_then(|account| account.media_key.clone()),
     )
     .await;
+    if let Some(registry) = registry {
+        start_linked_accounts(
+            &daemon,
+            registry
+                .servers
+                .into_iter()
+                .filter(|account| account.id != primary_server.id),
+        );
+    }
     let video_listener = bind_socket(&socket_path.with_extension("video")).await?;
     let video_daemon = daemon.clone();
     tokio::spawn(async move {
@@ -3317,8 +4759,9 @@ async fn main() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        clear_audio_telemetry, deafen_transition, describe_media_failure, effective_muted,
-        inactive_camera_state, mute_transition, update_remote_mute_state,
+        clear_audio_telemetry, deafen_transition, describe_media_failure,
+        describe_server_name_error, effective_muted, inactive_camera_state, mute_transition,
+        update_remote_mute_state,
     };
     use wisp_protocol::{AudioState, CameraState, MediaState, PushToTalkState};
 
@@ -3351,7 +4794,7 @@ mod tests {
             fps: Some(30),
             published_frames: 42,
             encoder_backend: Some("software".into()),
-            viewers: vec!["Jared".into()],
+            viewers: vec!["Owner".into()],
             error: Some("old error".into()),
             ..CameraState::default()
         };
@@ -3368,17 +4811,17 @@ mod tests {
     #[test]
     fn remote_mute_state_is_sorted_deduplicated_and_not_speaking() {
         let mut media = MediaState {
-            active_speakers: vec!["Tyler".into(), "Jared".into()],
+            active_speakers: vec!["MemberA".into(), "Owner".into()],
             ..MediaState::default()
         };
 
-        update_remote_mute_state(&mut media, "Tyler", true);
+        update_remote_mute_state(&mut media, "MemberA", true);
         update_remote_mute_state(&mut media, "Aaron", true);
-        update_remote_mute_state(&mut media, "Tyler", true);
-        assert_eq!(media.remote_muted_participants, ["Aaron", "Tyler"]);
-        assert_eq!(media.active_speakers, ["Jared"]);
+        update_remote_mute_state(&mut media, "MemberA", true);
+        assert_eq!(media.remote_muted_participants, ["Aaron", "MemberA"]);
+        assert_eq!(media.active_speakers, ["Owner"]);
 
-        update_remote_mute_state(&mut media, "Tyler", false);
+        update_remote_mute_state(&mut media, "MemberA", false);
         assert_eq!(media.remote_muted_participants, ["Aaron"]);
     }
 
@@ -3393,6 +4836,18 @@ mod tests {
             describe_media_failure(&anyhow::anyhow!("connect to LiveKit room wisp-test"));
         assert_eq!(code, "livekit_connection");
         assert!(message.starts_with("LiveKit connection failed:"));
+    }
+
+    #[test]
+    fn old_server_name_route_has_an_actionable_error() {
+        let error =
+            describe_server_name_error(anyhow::anyhow!("server returned 405 Method Not Allowed:"));
+        assert_eq!(
+            error.to_string(),
+            "Server update required before its shared name can be changed"
+        );
+        let other = describe_server_name_error(anyhow::anyhow!("network offline"));
+        assert_eq!(other.to_string(), "network offline");
     }
 
     #[test]

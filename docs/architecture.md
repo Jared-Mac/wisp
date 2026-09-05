@@ -47,40 +47,52 @@ The Quickshell settings view only captures a chord. On Omarchy/Hyprland,
 adds one managed import to the user's bindings file, reloads Hyprland, and
 rolls both files back if config validation fails.
 
-`wisp-server` owns stable users, circle membership, ephemeral hangouts, messages,
-saved spots, device identities, presence events, and short-lived LiveKit grants.
-It binds to loopback by default. The four development users have stable UUIDs
-and are seeded by the first migration.
+`wisp-server` owns accounts, friendships, server and room roles, channel
+categories, encrypted-conversation routing, ephemeral hangouts, messages,
+saved rooms, device identities, presence events, and short-lived LiveKit grants.
+It binds to loopback by default. A production database has no compiled users or
+rooms: one explicit bootstrap creates the immutable server owner, and all other
+accounts arrive through expiring friend or room invitations. Stable fixture
+accounts exist only when development sessions are explicitly enabled.
 
-Private-alpha authentication is device based. An administrator creates a
-single-use, expiring invite for one seeded profile; registration returns one
-opaque credential for that physical installation. Only credential hashes are
+`wispd` may hold several independent server sessions. It keeps each server's
+snapshot, encryption vault, device credential, and event stream separate, then
+exposes a scoped aggregate to QML. The active server controls navigation while
+open chat tiles may span servers. Voice has one explicit server context at a
+time; switching it disables outgoing video before leaving the prior server.
+This is client aggregation, not server federation.
+
+Passwords are Argon2id hashes. Login or invited registration returns one opaque,
+revocable credential for that physical installation. Only credential hashes are
 stored in SQLite. A device exchanges that credential for a 12-hour session,
 and `wispd` renews it when needed. Revoking one device invalidates both its
 credential and outstanding sessions without affecting another device owned by
-the same person. Name-only development sessions are available only when
-explicitly enabled and default to loopback-only development.
+the same person. Login failures are throttled per trusted peer/account and
+password verification runs behind a bounded work semaphore.
 
 All authenticated requests require protocol version 1. WebSocket events carry
 only change notifications, never message bodies; clients respond by fetching a
 fresh authorized snapshot. `wispd` reconnects with bounded exponential delay
 and deterministic jitter, then restores its desired hangout/media state.
 
-Conversations are deliberately flat: direct, circle, and current hangout. The
+Conversation transport remains deliberately small: direct, circle, and
+hangout. Dedicated server text channels reuse encrypted circle transport and
+carry separate category metadata; they never create or join voice. The
 server verifies membership on every read/write, inserts a message and advances
 the sender's read cursor in one transaction, and acknowledges only after that
 transaction commits. Per-user cursors produce unread counts, while a full
-snapshot supplies missed messages after reconnect. Direct, circle, and Spot
-history is durable; ad-hoc hangout history is deleted after 24 hours. Porch is
-a durable Spot record with one persistent conversation, while each media room
-exists only for the duration of an occupied visit.
+snapshot supplies missed messages after reconnect. Direct, circle,
+dedicated-channel, and persistent-room history is durable; ad-hoc hangout
+history is deleted after 24 hours. TestRoom is a development-only fixture;
+production rooms are account-created records with one persistent conversation,
+while each media room exists only while occupied.
 
-Device-authenticated LiveKit connections require a shared private-alpha media
-key. The key configures LiveKit's built-in AES-GCM E2EE manager in each client
-and never crosses the coordination API. This protects voice and video from the
-SFU, but coordination metadata and stored text are server-readable. The static
-shared key is intentionally a replaceable boundary for future per-device key
-distribution rather than a custom cipher.
+Device-authenticated LiveKit connections require a client-held media key. The
+key configures LiveKit's built-in AES-GCM E2EE manager in each client and never
+crosses the coordination API. Chat content uses separate client-held age and
+Ed25519 keys with signed membership chains; the server stores ciphertext but can
+still observe coordination metadata. The current shared room media key remains
+a replaceable boundary for future per-device distribution.
 
 The media path publishes a DeepFilterNet-processed platform microphone, plays
 remote audio through the selected platform speaker, and independently publishes
@@ -138,7 +150,7 @@ font, scale, corners, and geometry. Each active
 frontend has its own pushed IPC connection; none owns call state.
 
 The Voice MVP reliability gate is intentionally short and deterministic rather
-than a one-hour soak. It connects Jared plus Tyler, Jack, and Charlie; cycles the
+than a one-hour soak. It connects Owner plus MemberA, MemberB, and MemberC; cycles the
 real media session through leave/rejoin; starts two independent Quickshell IPC
 probe processes; restarts LiveKit; verifies an offline-LiveKit join produces a
 clear error and then recovers; and enforces a configurable RSS-growth ceiling.
@@ -153,7 +165,7 @@ The M4 private-alpha gate starts the server with development authentication
 disabled. It validates bootstrap of the first administrator device, one-use
 friend invites, replay rejection, short sessions, device revocation, strict
 protocol compatibility, conversation authorization, durable/offline direct
-messages, read cursors, Porch lifecycle, transient hangout retention, restart,
+messages, read cursors, TestRoom lifecycle, transient hangout retention, restart,
 SQLite online backup/restore, and absence of message content in normal logs.
 Host and client systemd user services use restart-on-failure and journald; the
 daily timer retains 14 integrity-checked backups.

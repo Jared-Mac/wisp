@@ -7,6 +7,8 @@ repo_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$repo_dir"
 
 test_dir=$(mktemp -d)
+export XDG_CONFIG_HOME="$test_dir/config"
+export WISP_ACCOUNTS_FILE="$test_dir/accounts.json"
 livekit_pid=""
 server_pid=""
 daemon_pid=""
@@ -102,11 +104,11 @@ done
 curl --silent --fail "http://127.0.0.1:$server_port/healthz" >/dev/null
 
 WISP_SERVER_URL="http://127.0.0.1:$server_port" RUST_LOG=info \
-  target/debug/wisp-sim --profile Tyler --publish-tone --publish-video --publish-camera >"$test_dir/sim.log" 2>&1 &
+  target/debug/wisp-sim --profile MemberA --publish-tone --publish-video --publish-camera >"$test_dir/sim.log" 2>&1 &
 sim_pid=$!
 WISP_SERVER_URL="http://127.0.0.1:$server_port" WISP_PTT_LEASE_MS=400 \
-  WISP_TEST_MICROPHONE_TONE=1 WISP_PREVIEW_DIR="$test_dir/preview-jared" RUST_LOG=info \
-  target/debug/wispd --profile Jared --socket "$test_dir/wispd.sock" \
+  WISP_TEST_MICROPHONE_TONE=1 WISP_PREVIEW_DIR="$test_dir/preview-owner" RUST_LOG=info \
+  target/debug/wispd --profile Owner --socket "$test_dir/wispd.sock" \
   "${surface_args[@]}" \
   >"$test_dir/daemon.log" 2>&1 &
 daemon_pid=$!
@@ -117,23 +119,23 @@ for _ in $(seq 1 200); do
 done
 [[ -S "$test_dir/wispd.sock" ]]
 
-tyler_ready_json=""
+member_ready_json=""
 for _ in $(seq 1 200); do
-  tyler_ready_json=$(target/debug/wispctl --socket "$test_dir/wispd.sock" status)
-  if jq -e 'any(.friends[]; .display_name == "Tyler" and .online == true)' \
-    <<<"$tyler_ready_json" >/dev/null; then
+  member_ready_json=$(target/debug/wispctl --socket "$test_dir/wispd.sock" status)
+  if jq -e 'any(.friends[]; .display_name == "MemberA" and .online == true)' \
+    <<<"$member_ready_json" >/dev/null; then
     break
   fi
   sleep 0.1
 done
-jq -e 'any(.friends[]; .display_name == "Tyler" and .online == true)' \
-  <<<"$tyler_ready_json" >/dev/null || {
-  echo "Tyler simulator did not become ready" >&2
-  jq '.friends' <<<"$tyler_ready_json" >&2
+jq -e 'any(.friends[]; .display_name == "MemberA" and .online == true)' \
+  <<<"$member_ready_json" >/dev/null || {
+  echo "MemberA simulator did not become ready" >&2
+  jq '.friends' <<<"$member_ready_json" >&2
   exit 1
 }
 
-target/debug/wispctl --socket "$test_dir/wispd.sock" join Tyler
+target/debug/wispctl --socket "$test_dir/wispd.sock" join MemberA
 status_json=""
 for _ in $(seq 1 200); do
   status_json=$(target/debug/wispctl --socket "$test_dir/wispd.sock" status)
@@ -141,11 +143,11 @@ for _ in $(seq 1 200); do
     .self.connection == "connected" and
     .self.media.livekit_connected == true and
     .self.media.microphone_published == true and
-    .self.media.remote_audio_participants == ["Tyler"] and
+    .self.media.remote_audio_participants == ["MemberA"] and
     .self.media.received_video_frames == 0 and
     .self.media.rendered_video_frames == 0 and
     .self.media.surface_open == false and
-    .self.media.remote_video_participants == ["Tyler"] and
+    .self.media.remote_video_participants == ["MemberA"] and
     (.self.media.remote_videos | length) == 2 and
     ([.self.media.remote_videos[].source] | sort) == ["camera", "screen_share"] and
     ([.self.media.remote_videos[].subscribed] | all(. == false)) and
@@ -181,11 +183,11 @@ jq -e --argjson expect_input_level "$expect_input_level" '
   .self.media.livekit_connected == true and
   .self.media.microphone_published == true and
   .self.media.e2ee_enabled == true and
-  .self.media.remote_audio_participants == ["Tyler"] and
+  .self.media.remote_audio_participants == ["MemberA"] and
   .self.media.received_video_frames == 0 and
   .self.media.rendered_video_frames == 0 and
   .self.media.surface_open == false and
-  .self.media.remote_video_participants == ["Tyler"] and
+  .self.media.remote_video_participants == ["MemberA"] and
   (.self.media.remote_videos | length) == 2 and
   ([.self.media.remote_videos[].source] | sort) == ["camera", "screen_share"] and
   ([.self.media.remote_videos[].subscribed] | all(. == false)) and
@@ -245,8 +247,8 @@ target/debug/wispctl --socket "$test_dir/wispd.sock" video codec h264 \
 
 WISP_SERVER_URL="http://127.0.0.1:$server_port" WISP_DISABLE_SURFACES=true \
   WISP_TEST_MICROPHONE_TONE=1 WISP_DISABLE_TRAY=1 \
-  WISP_PREVIEW_DIR="$test_dir/preview-jack" RUST_LOG=info \
-  target/debug/wispd --profile Jack --socket "$test_dir/viewer.sock" \
+  WISP_PREVIEW_DIR="$test_dir/preview-member_b" RUST_LOG=info \
+  target/debug/wispd --profile MemberB --socket "$test_dir/viewer.sock" \
   >"$test_dir/viewer.log" 2>&1 &
 viewer_pid=$!
 for _ in $(seq 1 200); do
@@ -254,7 +256,7 @@ for _ in $(seq 1 200); do
   sleep 0.05
 done
 [[ -S "$test_dir/viewer.sock" ]]
-target/debug/wispctl --socket "$test_dir/viewer.sock" join Tyler
+target/debug/wispctl --socket "$test_dir/viewer.sock" join MemberA
 viewer_hidden_json=""
 for _ in $(seq 1 "$media_attempts"); do
   viewer_hidden_json=$(target/debug/wispctl --socket "$test_dir/viewer.sock" status)
@@ -279,9 +281,9 @@ jq -e '
   exit 1
 }
 
-target/debug/wispctl --socket "$test_dir/wispd.sock" watch Tyler screen_share \
+target/debug/wispctl --socket "$test_dir/wispd.sock" watch MemberA screen_share \
   | jq -e '.watched == true and .source == "screen_share"' >/dev/null
-target/debug/wispctl --socket "$test_dir/viewer.sock" watch Tyler screen_share \
+target/debug/wispctl --socket "$test_dir/viewer.sock" watch MemberA screen_share \
   | jq -e '.watched == true and .source == "screen_share"' >/dev/null
 watched_json=""
 for _ in $(seq 1 "$media_attempts"); do
@@ -291,7 +293,7 @@ for _ in $(seq 1 "$media_attempts"); do
     .self.media.surface_open == $expect_surface and
     (if $expect_surface then .self.media.rendered_video_frames > 0
      else .self.media.rendered_video_frames == 0 end) and
-    .self.media.remote_video_participants == ["Tyler"] and
+    .self.media.remote_video_participants == ["MemberA"] and
     any(.self.media.remote_videos[];
       .source == "screen_share" and .subscribed and .received_frames > 0) and
     any(.self.media.remote_videos[];
@@ -306,7 +308,7 @@ jq -e --argjson expect_surface "$expect_surface" '
   .self.media.surface_open == $expect_surface and
   (if $expect_surface then .self.media.rendered_video_frames > 0
    else .self.media.rendered_video_frames == 0 end) and
-  .self.media.remote_video_participants == ["Tyler"] and
+  .self.media.remote_video_participants == ["MemberA"] and
   any(.self.media.remote_videos[];
     .source == "screen_share" and .subscribed and .received_frames > 0) and
   any(.self.media.remote_videos[];
@@ -317,9 +319,9 @@ jq -e --argjson expect_surface "$expect_surface" '
   exit 1
 }
 
-target/debug/wispctl --socket "$test_dir/wispd.sock" watch Tyler camera \
+target/debug/wispctl --socket "$test_dir/wispd.sock" watch MemberA camera \
   | jq -e '.watched == true and .source == "camera"' >/dev/null
-target/debug/wispctl --socket "$test_dir/viewer.sock" watch Tyler camera \
+target/debug/wispctl --socket "$test_dir/viewer.sock" watch MemberA camera \
   | jq -e '.watched == true and .source == "camera"' >/dev/null
 for _ in $(seq 1 "$media_attempts"); do
   watched_json=$(target/debug/wispctl --socket "$test_dir/wispd.sock" status)
@@ -488,9 +490,9 @@ if command -v hyprctl >/dev/null && [[ -n "${WAYLAND_DISPLAY:-}" ]]; then
 fi
 
 audio_markers_before_close=$(rg -c 'simulator audio still flowing' "$test_dir/sim.log" || true)
-target/debug/wispctl --socket "$test_dir/wispd.sock" unwatch Tyler screen_share \
+target/debug/wispctl --socket "$test_dir/wispd.sock" unwatch MemberA screen_share \
   | jq -e '.watched == false' >/dev/null
-target/debug/wispctl --socket "$test_dir/wispd.sock" unwatch Tyler camera \
+target/debug/wispctl --socket "$test_dir/wispd.sock" unwatch MemberA camera \
   | jq -e '.watched == false' >/dev/null
 closed_json=""
 for _ in $(seq 1 100); do
@@ -546,7 +548,7 @@ jq -e '([.self.media.remote_videos[].subscribed] | all(. == false))' \
   <<<"$hidden_settled_json" >/dev/null
 (( hidden_stable_checks >= 3 ))
 
-target/debug/wispctl --socket "$test_dir/wispd.sock" watch Tyler screen_share \
+target/debug/wispctl --socket "$test_dir/wispd.sock" watch MemberA screen_share \
   | jq -e '.watched == true' >/dev/null
 reopened_json=""
 for _ in $(seq 1 100); do
@@ -589,7 +591,7 @@ if [[ "${WISP_TEST_REAL_CAMERA:-0}" == "1" ]] \
     camera_json=$(target/debug/wispctl --socket "$test_dir/wispd.sock" status)
     if jq -e '.self.media.camera.active and .self.media.camera.published_frames > 0' \
       <<<"$camera_json" >/dev/null \
-      && find "$test_dir/preview-jared" -maxdepth 1 -name 'camera-preview-*.bmp' \
+      && find "$test_dir/preview-owner" -maxdepth 1 -name 'camera-preview-*.bmp' \
         -type f -size +0c | rg -q .; then
       break
     fi
@@ -600,7 +602,7 @@ if [[ "${WISP_TEST_REAL_CAMERA:-0}" == "1" ]] \
     .self.media.camera.encoder_backend == "software" and
     .self.media.camera.published_frames > 0
   ' <<<"$camera_json" >/dev/null
-  file "$test_dir"/preview-jared/camera-preview-*.bmp | rg -q 'PC bitmap'
+  file "$test_dir"/preview-owner/camera-preview-*.bmp | rg -q 'PC bitmap'
 
   for _ in $(seq 1 200); do
     kill -0 "$daemon_pid"
@@ -612,23 +614,23 @@ if [[ "${WISP_TEST_REAL_CAMERA:-0}" == "1" ]] \
   for _ in $(seq 1 100); do
     viewer_camera_json=$(target/debug/wispctl --socket "$test_dir/viewer.sock" status)
     if jq -e 'any(.self.media.remote_videos[];
-      .participant == "Jared" and .source == "camera")' \
+      .participant == "Owner" and .source == "camera")' \
       <<<"$viewer_camera_json" >/dev/null; then
       break
     fi
     sleep 0.1
   done
-  target/debug/wispctl --socket "$test_dir/viewer.sock" watch Jared camera \
+  target/debug/wispctl --socket "$test_dir/viewer.sock" watch Owner camera \
     | jq -e '.watched == true and .source == "camera"' >/dev/null
   for _ in $(seq 1 100); do
     camera_json=$(target/debug/wispctl --socket "$test_dir/wispd.sock" status)
-    if jq -e '.self.media.camera.viewers == ["Jack"]' <<<"$camera_json" >/dev/null; then
+    if jq -e '.self.media.camera.viewers == ["MemberB"]' <<<"$camera_json" >/dev/null; then
       break
     fi
     sleep 0.1
   done
-  jq -e '.self.media.camera.viewers == ["Jack"]' <<<"$camera_json" >/dev/null
-  target/debug/wispctl --socket "$test_dir/viewer.sock" unwatch Jared camera >/dev/null
+  jq -e '.self.media.camera.viewers == ["MemberB"]' <<<"$camera_json" >/dev/null
+  target/debug/wispctl --socket "$test_dir/viewer.sock" unwatch Owner camera >/dev/null
   for _ in $(seq 1 100); do
     camera_json=$(target/debug/wispctl --socket "$test_dir/wispd.sock" status)
     if jq -e '.self.media.camera.viewers == []' <<<"$camera_json" >/dev/null; then
@@ -638,7 +640,7 @@ if [[ "${WISP_TEST_REAL_CAMERA:-0}" == "1" ]] \
   done
   jq -e '.self.media.camera.viewers == []' <<<"$camera_json" >/dev/null
   target/debug/wispctl --socket "$test_dir/wispd.sock" camera off >/dev/null
-  ! find "$test_dir/preview-jared" -maxdepth 1 -name 'camera-preview*.bmp' -type f | rg -q .
+  ! find "$test_dir/preview-owner" -maxdepth 1 -name 'camera-preview*.bmp' -type f | rg -q .
 fi
 
 target/debug/wispctl --socket "$test_dir/wispd.sock" mute \
@@ -675,7 +677,7 @@ for _ in $(seq 1 200); do
     .self.connection == "connected" and
     .self.media.livekit_connected == true and
     .self.media.received_video_frames > $video_before and
-    .self.media.remote_video_participants == ["Tyler"] and
+    .self.media.remote_video_participants == ["MemberA"] and
     any(.self.media.remote_videos[];
       .source == "screen_share" and .subscribed and .received_frames > 0) and
     any(.self.media.remote_videos[];
@@ -689,7 +691,7 @@ jq -e --argjson video_before "$video_frames_before_restart" '
   .self.connection == "connected" and
   .self.media.livekit_connected == true and
   .self.media.received_video_frames > $video_before and
-  .self.media.remote_video_participants == ["Tyler"] and
+  .self.media.remote_video_participants == ["MemberA"] and
   any(.self.media.remote_videos[];
     .source == "screen_share" and .subscribed and .received_frames > 0) and
   any(.self.media.remote_videos[];

@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     fs,
     io::{Read, Write},
     os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt},
@@ -39,6 +39,14 @@ pub(super) struct Directory {
     pub network: Uuid,
     pub identities: BTreeMap<Uuid, PublicIdentity>,
     pub rosters: BTreeMap<String, Vec<SignedRoster>>,
+    #[serde(default)]
+    pub pending_admissions: Vec<PendingAdmission>,
+}
+
+#[derive(Deserialize)]
+pub(super) struct PendingAdmission {
+    pub conversation_id: String,
+    pub user_id: Uuid,
 }
 
 pub(super) struct Vault {
@@ -105,6 +113,22 @@ fn read_setup(path: &Path) -> anyhow::Result<Option<Setup>> {
     Read::by_ref(&mut file).take(4097).read_to_end(&mut bytes)?;
     ensure!(bytes.len() <= 4096, "Invalid privacy configuration");
     Ok(Some(serde_json::from_slice(&bytes)?))
+}
+
+fn write_setup(path: &Path, setup: &Setup, replace: bool) -> anyhow::Result<()> {
+    let parent = path
+        .parent()
+        .context("Missing privacy configuration parent")?;
+    private_dir(parent)?;
+    let mut file = tempfile::NamedTempFile::new_in(parent)?;
+    file.write_all(&serde_json::to_vec(setup)?)?;
+    file.as_file().sync_all()?;
+    if replace {
+        file.persist(path)?;
+    } else {
+        file.persist_noclobber(path)?;
+    }
+    Ok(())
 }
 
 impl Privacy {
@@ -275,14 +299,100 @@ impl Privacy {
             }
         };
         if read_setup(&self.binding)?.is_none() {
-            let mut file = tempfile::NamedTempFile::new_in(&self.root)?;
-            file.write_all(&serde_json::to_vec(&setup)?)?;
-            file.as_file().sync_all()?;
-            file.persist_noclobber(&self.binding)?;
+            write_setup(&self.binding, &setup, false)?;
         }
         *self.active.write().expect("privacy state lock") =
             Ok(Some(Arc::new(Self::load(&self.root, &setup)?)));
         Ok(self.status())
+    }
+
+    /// Trust-on-first-use applies when the authenticated account intentionally
+    /// gains a new friend. Existing contacts are never removed or replaced,
+    /// and the keyring separately refuses changes to an already pinned key.
+    fn sync_contacts(&self, snapshot: &Snapshot) -> anyhow::Result<bool> {
+        let Some(vault) = self.active()? else {
+            return Ok(false);
+        };
+        let mut setup = read_setup(&self.binding)?.context("Missing privacy binding")?;
+        ensure!(
+            setup.network == vault.network && setup.account == vault.account,
+            "Privacy binding changed"
+        );
+        let mut changed = false;
+        for friend in &snapshot.friends {
+            if let std::collections::btree_map::Entry::Vacant(entry) =
+                setup.contacts.entry(friend.user.id)
+            {
+                entry.insert(friend.user.display_name.clone());
+                changed = true;
+            }
+        }
+        if changed {
+            write_setup(&self.binding, &setup, true)?;
+            *self.active.write().expect("privacy state lock") =
+                Ok(Some(Arc::new(Self::load(&self.root, &setup)?)));
+        }
+        Ok(changed)
+    }
+
+    /// Complete accepted encrypted-room account invitations with an
+    /// owner/admin signature. At most one admission per room is published per
+    /// pass so every signature is based on the latest roster and snapshot.
+    pub async fn reconcile_pending_admissions(
+        &self,
+        api: &ServerApi,
+        snapshot: &Snapshot,
+    ) -> anyhow::Result<bool> {
+        self.sync_contacts(snapshot)?;
+        let Some(vault) = self.active()? else {
+            return Ok(false);
+        };
+        let directory = self.directory(api, &vault).await?;
+        let friend_ids = snapshot
+            .friends
+            .iter()
+            .map(|friend| friend.user.id)
+            .collect::<BTreeSet<_>>();
+        let mut attempted = BTreeSet::new();
+        for pending in directory.pending_admissions {
+            if !attempted.insert(pending.conversation_id.clone())
+                || !friend_ids.contains(&pending.user_id)
+                || !directory.identities.contains_key(&pending.user_id)
+            {
+                continue;
+            }
+            let Some(conversation) = snapshot
+                .conversations
+                .iter()
+                .find(|conversation| conversation.id == pending.conversation_id)
+            else {
+                continue;
+            };
+            if !matches!(
+                conversation
+                    .member_roles
+                    .get(&vault.account)
+                    .map(String::as_str),
+                Some("host" | "admin")
+            ) {
+                continue;
+            }
+            let Some(signed) = self
+                .invite_member(api, conversation, pending.user_id)
+                .await?
+            else {
+                continue;
+            };
+            super::ensure_ok(
+                api.request(reqwest::Method::POST, "/v1/e2ee/roster")
+                    .json(&signed)
+                    .send()
+                    .await?,
+            )
+            .await?;
+            return Ok(true);
+        }
+        Ok(false)
     }
 
     pub async fn directory(&self, api: &ServerApi, vault: &Vault) -> anyhow::Result<Directory> {

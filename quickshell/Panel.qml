@@ -46,9 +46,23 @@ Panel {
     id: bridge
     clientName: "omarchy-plugin"
     delegateMediaToDesktop: true
+    delegateConversationsToDesktop: true
+    onDesktopConversationTileRequested: function(id) {
+      var launcher = chatLauncher.createObject(root, {command:["env","WISP_INTEGRATION=omarchy","wisp-ui","chat","tile",id]})
+      launcher.running = true
+    }
     onDesktopWatchRequested: function(participant, source, open) {
       var launcher = mediaLauncher.createObject(root, {command:["env","WISP_INTEGRATION=omarchy","wisp-ui","media",open ? "watch" : "stop",participant,source]})
       launcher.running = true
+    }
+  }
+  Component {
+    id: chatLauncher
+    Process {
+      onExited: function(code, status) {
+        if (code !== 0) bridge.lastError = "Couldn't open the chat in the desktop workspace."
+        destroy()
+      }
     }
   }
   Component {

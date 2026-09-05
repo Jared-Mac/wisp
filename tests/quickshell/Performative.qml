@@ -42,7 +42,7 @@ ShellRoot {
       }
       Components.HangoutCard {
         id: room; width: parent.width; theme: theme; bridge: bridge
-        hangout: ({id:"fixture",label:"Room",members:[{id:"jared",display_name:"Jared"},{id:"self",display_name:"Tyler"}]})
+        hangout: ({id:"fixture",label:"Room",members:[{id:"owner",display_name:"Owner"},{id:"self",display_name:"MemberA"}]})
       }
       Components.MediaControls { id: media; width: parent.width; theme: theme; bridge: bridge }
     }

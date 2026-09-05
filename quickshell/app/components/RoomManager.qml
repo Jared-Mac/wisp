@@ -15,9 +15,12 @@ Dialog {
   readonly property var conversation: bridge.conversationById(conversationId)
   readonly property bool owner: conversation && conversation.self_role === "host"
   readonly property bool admin: owner || (conversation && conversation.self_role === "admin")
+  readonly property var conversationServerState: bridge.serverStates.filter(function(state) {
+    return conversation && String(state.server.id)===String(conversation.server_id)
+  })[0] || ({friends:[]})
   readonly property var invitees: {
     var members = conversation ? conversation.members || [] : []
-    return bridge.friends.filter(function(friend) { return !members.some(function(member) { return member.id === friend.id }) })
+    return (conversationServerState.friends || []).filter(function(friend) { return !members.some(function(member) { return member.id === friend.id }) })
   }
   function createRoom() { creating = true; conversationId = ""; nameField.text = ""; error = ""; busy = false; open() }
   function manage(id) { creating = false; conversationId = String(id); error = ""; busy = false; open() }

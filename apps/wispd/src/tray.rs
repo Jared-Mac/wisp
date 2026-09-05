@@ -143,7 +143,7 @@ impl ksni::Tray for WispTray {
     }
 
     fn icon_pixmap(&self) -> Vec<ksni::Icon> {
-        let mut icon = waveform_icon(
+        let mut icon = wisp_icon(
             32,
             self.audio_state(),
             self.state.sharing,
@@ -264,24 +264,29 @@ pub(super) async fn spawn(
     Ok((receiver, handle))
 }
 
-fn waveform_icon(size: i32, state: AudioState, sharing: bool, camera: bool) -> ksni::Icon {
+fn wisp_icon(size: i32, state: AudioState, sharing: bool, camera: bool) -> ksni::Icon {
+    // Rendered from the transparent standalone W used by the desktop shell.
+    // Status badges stay live without adding a permanent icon background.
+    static BRAND_ICON: std::sync::LazyLock<image::RgbaImage> = std::sync::LazyLock::new(|| {
+        image::load_from_memory(include_bytes!(
+            "../../../quickshell/app/assets/wisp-icon-tray.png"
+        ))
+        .expect("bundled Wisp tray icon is a valid PNG")
+        .into_rgba8()
+    });
     let dimension = usize::try_from(size).expect("positive tray icon size");
-    let mut data = vec![0_u8; dimension * dimension * 4];
-    let center = size / 2;
-    let heights = [8, 16, 24, 14, 26, 18, 10];
-    for (index, height) in heights.into_iter().enumerate() {
-        let x = 4 + i32::try_from(index).expect("small icon index") * 4;
-        let top = center - height / 2;
-        let bottom = center + height / 2;
-        for px in x..=(x + 2) {
-            for py in top..=bottom {
-                if px < 0 || py < 0 || px >= size || py >= size {
-                    continue;
-                }
-                set_pixel(&mut data, dimension, px, py, [255, 47, 140, 255]);
-            }
-        }
-    }
+    let extent = u32::try_from(size).expect("positive tray icon size");
+    let pixels = image::imageops::resize(
+        &*BRAND_ICON,
+        extent,
+        extent,
+        image::imageops::FilterType::Lanczos3,
+    );
+    // StatusNotifierItem pixels use network-order ARGB, not PNG's RGBA.
+    let mut data: Vec<u8> = pixels
+        .pixels()
+        .flat_map(|pixel| [pixel[3], pixel[0], pixel[1], pixel[2]])
+        .collect();
     if sharing && camera {
         draw_share_badge(&mut data, dimension, (7, 7));
     } else if sharing {
@@ -444,7 +449,7 @@ fn draw_state_badge(data: &mut [u8], dimension: usize, size: i32, state: AudioSt
 
 #[cfg(test)]
 mod tests {
-    use super::{AudioState, TrayState, WispTray, waveform_icon};
+    use super::{AudioState, TrayState, WispTray, wisp_icon};
 
     #[test]
     fn open_app_is_first_in_tray_context_menu() {
@@ -468,10 +473,15 @@ mod tests {
 
     #[test]
     fn tray_icon_is_argb32() {
-        let icon = waveform_icon(32, AudioState::Ready, false, false);
+        let icon = wisp_icon(32, AudioState::Ready, false, false);
         assert_eq!(icon.width, 32);
         assert_eq!(icon.height, 32);
         assert_eq!(icon.data.len(), 32 * 32 * 4);
+        assert_eq!(
+            icon.data[0], 0,
+            "the icon background must remain transparent"
+        );
+        assert!(icon.data.chunks_exact(4).any(|pixel| pixel[0] == 0));
         assert!(icon.data.chunks_exact(4).any(|pixel| pixel[0] == 255));
     }
 
@@ -517,7 +527,7 @@ mod tests {
             AudioState::Muted,
             AudioState::MutedAndDeafened,
         ];
-        let icons = states.map(|state| waveform_icon(32, state, false, false).data);
+        let icons = states.map(|state| wisp_icon(32, state, false, false).data);
         for left in 0..icons.len() {
             for right in (left + 1)..icons.len() {
                 assert_ne!(icons[left], icons[right]);
@@ -528,17 +538,17 @@ mod tests {
     #[test]
     fn screen_sharing_adds_a_distinct_badge() {
         assert_ne!(
-            waveform_icon(32, AudioState::Ready, false, false).data,
-            waveform_icon(32, AudioState::Ready, true, false).data
+            wisp_icon(32, AudioState::Ready, false, false).data,
+            wisp_icon(32, AudioState::Ready, true, false).data
         );
     }
 
     #[test]
     fn camera_adds_a_distinct_badge() {
-        let idle = waveform_icon(32, AudioState::Ready, false, false).data;
-        let sharing = waveform_icon(32, AudioState::Ready, true, false).data;
-        let camera = waveform_icon(32, AudioState::Ready, false, true).data;
-        let both = waveform_icon(32, AudioState::Ready, true, true).data;
+        let idle = wisp_icon(32, AudioState::Ready, false, false).data;
+        let sharing = wisp_icon(32, AudioState::Ready, true, false).data;
+        let camera = wisp_icon(32, AudioState::Ready, false, true).data;
+        let both = wisp_icon(32, AudioState::Ready, true, true).data;
         assert_ne!(camera, idle);
         assert_ne!(camera, sharing);
         assert_ne!(both, camera);

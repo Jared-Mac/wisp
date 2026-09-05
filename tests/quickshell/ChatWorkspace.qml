@@ -11,17 +11,17 @@ ShellRoot {
   readonly property string mode: Quickshell.env("WISP_CHAT_FIXTURE_MODE")
   readonly property real testWidth: Number(Quickshell.env("WISP_TEST_WIDTH")) || (Quickshell.env("WISP_TEST_CONSTRAINED") === "1" ? 840 : 1180)
   readonly property real testHeight: Number(Quickshell.env("WISP_TEST_HEIGHT")) || (Quickshell.env("WISP_TEST_CONSTRAINED") === "1" ? 700 : 900)
-  readonly property bool compactMode: mode === "panelinteractions" || mode === "panelprivacy" || mode === "panelinvites" || mode === "returnchat" || mode === "panelimagegeometry" || mode === "panellatest" || mode === "panelaudiotooltips" || mode === "panelpresence" || mode === "traycollapse" || mode === "panel" || mode === "panelmedia" || mode === "panelsettings" || mode === "friends" || mode === "panelidentity" || mode === "panelidentityactions"
+  readonly property bool compactMode: mode === "panelchanneltiles" || mode === "panelinteractions" || mode === "panelprivacy" || mode === "panelinvites" || mode === "returnchat" || mode === "panelimagegeometry" || mode === "panellatest" || mode === "panelaudiotooltips" || mode === "panelpresence" || mode === "traycollapse" || mode === "panel" || mode === "panelmedia" || mode === "panelsettings" || mode === "panelserversettings" || mode === "friends" || mode === "panelidentity" || mode === "panelidentityactions"
   function setImageFixture(w,h) {
     var data=JSON.parse(JSON.stringify(bridge.snapshot))
     bridge.chatImageUrls={"geometry":"data:image/svg+xml,"+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="'+w+'" height="'+h+'"><rect width="'+w+'" height="'+h+'" fill="#254261"/><circle cx="40" cy="40" r="25" fill="#e6b75b"/><path d="M0 0L'+w+' '+h+'" stroke="#74c9d6" stroke-width="5"/></svg>')}
-    data.messages=[{id:"geometry",conversation_id:"porch",sender:{id:"jared",display_name:"Jared"},created_at:"2026-09-03T17:04:00Z",content_type:"image/png",payload:{width:w,height:h,caption:"Original "+w+" × "+h}}]
+    data.messages=[{id:"geometry",conversation_id:"test_room",sender:{id:"owner",display_name:"Owner"},created_at:"2026-09-03T17:04:00Z",content_type:"image/png",payload:{width:w,height:h,caption:"Original "+w+" × "+h}}]
     bridge.snapshot=data
   }
   property real readingPosition: 0
   function appendScrollFixture() {
     var data=JSON.parse(JSON.stringify(bridge.snapshot))
-    data.messages.push({id:"scroll-"+data.messages.length,conversation_id:"porch",sender:{id:"jared",display_name:"Jared"},created_at:"2026-09-03T17:04:00Z",content_type:"text/plain",payload:"Another message in the conversation"})
+    data.messages.push({id:"scroll-"+data.messages.length,conversation_id:"test_room",sender:{id:"owner",display_name:"Owner"},created_at:"2026-09-03T17:04:00Z",content_type:"text/plain",payload:"Another message in the conversation"})
     bridge.snapshot=data
   }
   property real trayInitialFeed: 0
@@ -73,7 +73,7 @@ ShellRoot {
       if ("profile" in theme) theme.profile = Quickshell.env("WISP_TEST_ADAPTER") === "omarchy" ? "legacy" : Quickshell.env("WISP_TEST_THEME") || "legacy"
       if (test.mode === "cleantui" && "profile" in theme) theme.profile = "clean_tui"
       if (Quickshell.env("WISP_TEST_ADAPTER") === "omarchy") {
-        // Representative host overrides, not Jared's settings or machine.
+        // Representative host overrides, not Owner's settings or machine.
         tuiTreatment = true
         foreground = "#d8dee9"; background = "#242933"; surface = "#242933"
         accent = "#81a1c1"; muted = "#a0a8b7"; danger = "#bf616a"
@@ -124,46 +124,58 @@ ShellRoot {
     bridge.workspaceLayout.activityCollapsed = Quickshell.env("WISP_TEST_COLLAPSED") === "1"
     var data = JSON.parse(JSON.stringify(bridge.snapshot))
     data.self.id = "self"
-    data.self.display_name = "Tyler"
+    data.self.display_name = "MemberA"
     data.self.connection = "available"
     data.self.presence = "open"
     data.conversations = [
-      {id:"porch",kind:"hangout",label:"Porch",spot_id:"porch",unread_count:0, self_role:"host", can_clear_for_everyone:true,
-        members:[{id:"self",display_name:"Tyler"},{id:"jared",display_name:"Jared"}],member_roles:{self:"host",jared:"member"}},
-      {id:"dm",kind:"direct",label:"Jared",unread_count:2},
+      {id:"test_room",kind:"hangout",label:"TestRoom",spot_id:"test_room",unread_count:0, self_role:"host", can_clear_for_everyone:true,
+        members:[{id:"self",display_name:"MemberA"},{id:"owner",display_name:"Owner"}],member_roles:{self:"host",owner:"member"}},
+      {id:"dm",kind:"direct",label:"Owner",unread_count:2},
       {id:"friends",kind:"circle",label:"Friends",unread_count:0}
     ]
+    if (test.mode === "picker") data.conversations.push({id:"channel:builds",kind:"circle",label:"Builds",server_channel:true,category_id:"projects",category_name:"Projects",unread_count:1})
+    if (test.mode === "serversettings" || test.mode === "panelserversettings") data.self.server_owner = true
     if (test.mode === "roomcleanup") {
       data.conversations.push(
         {id:"hangout:ended-empty",kind:"hangout",label:"Room",unread_count:0,last_message:null},
         {id:"hangout:ended-history",kind:"hangout",label:"Room",unread_count:0,
-          last_message:{id:"history",conversation_id:"hangout:ended-history",sender:{id:"jared",display_name:"Jared"},created_at:"2026-09-03T17:03:00Z",content_type:"text/plain",payload:"Saved history"}},
+          last_message:{id:"history",conversation_id:"hangout:ended-history",sender:{id:"owner",display_name:"Owner"},created_at:"2026-09-03T17:03:00Z",content_type:"text/plain",payload:"Saved history"}},
         {id:"hangout:active-empty",kind:"hangout",label:"Room",unread_count:0,last_message:null}
       )
       data.hangouts = [{id:"active-empty",label:null,members:[],sharing:[]}]
     }
-    data.friends = [{id:"jared",display_name:"Jared",online:true,presence:"open"}, {id:"charlie",display_name:"Charlie",online:false,presence:"away"}]
+    data.friends = [{id:"owner",display_name:"Owner",online:true,presence:"open"}, {id:"member_c",display_name:"MemberC",online:false,presence:"away"}]
     if (test.mode === "presence" || test.mode === "panelpresence") {
       data.friends = [
-        {id:"jared",display_name:"Jared",online:true,presence:"open"},
-        {id:"charlie",display_name:"Charlie",online:true,presence:"knock"},
-        {id:"tyler",display_name:"Tyler",online:true,presence:"closed"},
+        {id:"owner",display_name:"Owner",online:true,presence:"open"},
+        {id:"member_c",display_name:"MemberC",online:true,presence:"knock"},
+        {id:"member_a",display_name:"MemberA",online:true,presence:"closed"},
         {id:"morgan",display_name:"Morgan",online:true,presence:"away"},
-        {id:"jack",display_name:"Jack",online:false,presence:"closed"}
+        {id:"member_b",display_name:"MemberB",online:false,presence:"closed"}
       ]
       bridge.workspaceLayout.activityRatio = 0.2
     }
-    if (test.mode === "traycollapse") data.spots = [{id:"porch",name:"Porch",members:[]}, {id:"games",name:"Games",members:[]}]
+    if (test.mode === "traycollapse") data.spots = [{id:"test_room",name:"TestRoom",members:[]}, {id:"games",name:"Games",members:[]}]
     if (Quickshell.env("WISP_TEST_STRESS")) {
       data.self.display_name = "A very long display name"
       data.friends[0].display_name = "A friend with a long name"
-      data.spots = [{id:"porch",name:"Porch with a long room name",members:[]}]
+      data.spots = [{id:"test_room",name:"TestRoom with a long room name",members:[]}]
     }
     data.messages = [
-      {id:"1",conversation_id:"porch",sender:{id:"jared",display_name:"Jared"},created_at:"2026-09-03T17:00:00Z",content_type:"text/plain",payload:"The new chat has a lot more space. Can you send that screenshot here?"},
-      {id:"2",conversation_id:"porch",sender:{id:"self",display_name:"Tyler"},created_at:"2026-09-03T17:01:00Z",edited_at:"2026-09-03T17:01:30Z",content_type:"text/plain",payload:"Yep — I can paste it without leaving Wisp. The conversation stays open while I switch tabs."},
-      {id:"3",conversation_id:"porch",sender:{id:"jared",display_name:"Jared"},created_at:"2026-09-03T17:02:00Z",content_type:"text/plain",payload:"Perfect. We can keep Porch and our DMs side by side."}
+      {id:"1",conversation_id:"test_room",sender:{id:"owner",display_name:"Owner"},created_at:"2026-09-03T17:00:00Z",content_type:"text/plain",payload:"The new chat has a lot more space. Can you send that screenshot here?"},
+      {id:"2",conversation_id:"test_room",sender:{id:"self",display_name:"MemberA"},created_at:"2026-09-03T17:01:00Z",edited_at:"2026-09-03T17:01:30Z",content_type:"text/plain",payload:"Yep — I can paste it without leaving Wisp. The conversation stays open while I switch tabs."},
+      {id:"3",conversation_id:"test_room",sender:{id:"owner",display_name:"Owner"},created_at:"2026-09-03T17:02:00Z",content_type:"text/plain",payload:"Perfect. We can keep TestRoom and our DMs side by side."}
     ]
+    if (["multiserver", "channeltiles", "panelchanneltiles"].indexOf(test.mode) >= 0) {
+      var primaryServer={id:"local",name:"Home server",url:"https://home.example",connected:true}
+      var secondServer={id:"server-b",name:"Project server",url:"https://project.example",connected:true}
+      data.servers=[primaryServer,secondServer]
+      data.selected_server_id="local"; data.voice_server_id="local"
+      data.server_states=[
+        {server:primaryServer,self:data.self,friends:data.friends,hangouts:data.hangouts,knocks:data.knocks,room_invitations:[],conversations:data.conversations,messages:data.messages,spots:data.spots,devices:[]},
+        {server:secondServer,self:Object.assign({},data.self,{id:"remote-self",display_name:"Remote Me"}),friends:[{id:"remote-friend",display_name:"Remote Friend",online:true,presence:"open"}],hangouts:[],knocks:[],room_invitations:[],conversations:[{id:"channel:ops",kind:"circle",label:"Operations",server_channel:true,category_id:"work",category_name:"Work",unread_count:4},{id:"remote-dm",kind:"direct",label:"Remote Friend",unread_count:0}],messages:[{id:"remote-message",conversation_id:"channel:ops",sender:{id:"remote-friend",display_name:"Remote Friend"},created_at:"2026-09-03T18:00:00Z",content_type:"text/plain",payload:"Remote update"}],spots:[{id:"remote-room",name:"Planning",category_id:"work",category_name:"Work",members:[]}],devices:[]}
+      ]
+    }
     bridge.applySnapshot(data)
     if (test.mode === "roomcleanup") {
       test.check(!bridge.conversationById("hangout:ended-empty"), "ended empty temporary rooms are hidden")
@@ -176,10 +188,10 @@ ShellRoot {
       bridge.applySnapshot(ended)
       test.check(bridge.activeConversationId === "", "an open empty room closes when its call ends")
     }
-    bridge.selectConversation("porch")
-    bridge.setDraft("porch", "Here's the latest version…")
+    bridge.selectConversation("test_room")
+    bridge.setDraft("test_room", "Here's the latest version…")
     bridge.setDraft("dm", "A separate DM draft")
-    test.check(bridge.draftFor("porch") !== bridge.draftFor("dm"), "drafts are independent")
+    test.check(bridge.draftFor("test_room") !== bridge.draftFor("dm"), "drafts are independent")
     bridge.sendComposedMessage("dm")
     var id = "test-" + bridge.requestId
     bridge.finishRequest({id:id,ok:false,error:{message:"offline"}})
@@ -218,44 +230,56 @@ ShellRoot {
     test.check(bridge.attachmentsFor("dm").length === 0, "successful queue clears attachments")
     if (test.mode === "image" || test.mode === "panel") {
       data = JSON.parse(JSON.stringify(data))
-      data.messages.push({id:"image",conversation_id:"porch",sender:{id:"self",display_name:"Tyler"},created_at:"2026-09-03T17:03:00Z",content_type:"image/png",payload:{width:480,height:160,caption:"Pasted screenshot preview"}})
+      data.messages.push({id:"image",conversation_id:"test_room",sender:{id:"self",display_name:"MemberA"},created_at:"2026-09-03T17:03:00Z",content_type:"image/png",payload:{width:480,height:160,caption:"Pasted screenshot preview"}})
       bridge.chatImageUrls = {image:String(Qt.resolvedUrl("app/assets/waveform.svg"))}
       bridge.applySnapshot(data)
     }
     if (test.mode === "files" || test.mode === "panel" || test.mode === "transfer") {
       data = JSON.parse(JSON.stringify(data))
-      data.messages.push({id:"file",conversation_id:"porch",sender:{id:"jared",display_name:"Jared"},created_at:"2026-09-03T17:04:00Z",content_type:"application/octet-stream",payload:{file_name:"project-footage.mp4",size:6000000000,expires_at:"2026-09-04T17:04:00Z",keep:false,caption:"Here is the footage."}})
+      data.messages.push({id:"file",conversation_id:"test_room",sender:{id:"owner",display_name:"Owner"},created_at:"2026-09-03T17:04:00Z",content_type:"application/octet-stream",payload:{file_name:"project-footage.mp4",size:6000000000,expires_at:"2026-09-04T17:04:00Z",keep:false,caption:"Here is the footage."}})
       bridge.applySnapshot(data)
-      bridge.pendingAttachments = {porch:[{token:"pending-file",file_name:"notes.txt",size:3000,is_image:false},{token:"pending-image",file_name:"Screenshot.png",size:8000,is_image:true,url:String(Qt.resolvedUrl("app/assets/waveform.svg"))}]}
+      bridge.pendingAttachments = {test_room:[{token:"pending-file",file_name:"notes.txt",size:3000,is_image:false},{token:"pending-image",file_name:"Screenshot.png",size:8000,is_image:true,url:String(Qt.resolvedUrl("app/assets/waveform.svg"))}]}
       bridge.saveChatFile("file")
       test.check(bridge.savingFiles.file, "save disables duplicate download")
       bridge.finishRequest({id:"test-" + bridge.requestId,ok:true,value:{directory_url:"file:///tmp/test-saved",url:"file:///tmp/test-saved/notes.txt"}})
       test.check(!bridge.savingFiles.file && !!bridge.savedFiles.file, "successful save offers its directory without opening the file")
       if (test.mode === "transfer") {
-        bridge.sendingConversations = {porch:true}
+        bridge.sendingConversations = {test_room:true}
         bridge.transferProgress = {"upload:pending-file":{bytes:3000000000,total:6000000000}}
       }
     }
     if (["media", "panelmedia", "preview"].indexOf(test.mode) >= 0) {
       data = JSON.parse(JSON.stringify(data))
       data.self.hangout_id = "call"; data.self.muted = true
-      data.hangouts = [{id:"call",label:"Porch",members:[{id:"self",display_name:"Tyler"},{id:"jared",display_name:"A very long friend name"}]}]
-      data.self.media.camera.active = true; data.self.media.camera.viewers = ["Jared"]
+      data.hangouts = [{id:"call",label:"TestRoom",members:[{id:"self",display_name:"MemberA"},{id:"owner",display_name:"A very long friend name"}]}]
+      data.self.media.camera.active = true; data.self.media.camera.viewers = ["Owner"]
       data.self.media.camera.devices = [{id:"fixture",label:"Fixture camera"}]
       data.self.media.screen_share.active = true
       data.self.media.remote_videos = [{participant:"A friend with a long name",source:"screen",requested_quality:"high"}]
-      data.knocks = [{id:"knock",from:{id:"charlie",display_name:"Charlie with a long name"}}]
+      data.knocks = [{id:"knock",from:{id:"member_c",display_name:"MemberC with a long name"}}]
       bridge.applySnapshot(data)
     }
     if (test.mode === "empty") { data = JSON.parse(JSON.stringify(data)); data.conversations = []; data.messages = []; bridge.applySnapshot(data); bridge.closeConversation() }
     bridge.notificationMuted = true
     bridge.notificationVolume = 35
     bridge.notificationSoundPath = "file:///tmp/test-custom-sound.wav"
-    if (test.mode === "privacy" || test.mode === "settings" || test.mode === "themes" || test.mode === "saved") test.findItem(window.contentItem, "wispContent").toggleSettings()
+    if (test.mode === "privacy" || test.mode === "settings" || test.mode === "themes" || test.mode === "saved" || test.mode === "serversettings") test.findItem(window.contentItem, "wispContent").toggleSettings()
     if (test.mode === "themes") test.findItem(window.contentItem, "settingsTab-appearance").clicked()
-    if (test.mode === "panelsettings" || test.mode === "panelprivacy") compactContent.toggleSettings()
+    if (test.mode === "panelsettings" || test.mode === "panelprivacy" || test.mode === "panelserversettings") compactContent.toggleSettings()
     if (test.mode === "privacy" || test.mode === "panelprivacy") {
       test.findItem(test.compactMode ? compactSurface : window.contentItem, "settingsTab-privacy").clicked()
+    }
+    if (test.mode === "serversettings" || test.mode === "panelserversettings") {
+      bridge.serverSettings = {name:"Northstar",role:"owner",members:[
+        {id:"self",display_name:"MemberA",role:"owner"},
+        {id:"owner",display_name:"Owner",role:"member"}
+      ],categories:[{id:"projects",name:"Projects",position:0}],channels:[
+        {id:"channel:builds",name:"Builds",category_id:"projects",position:0}
+      ],rooms:[{id:"test_room",name:"TestRoom",active:false}]}
+      bridge.serverSettingsBusy = false
+      var serverTab = test.findItem(test.compactMode ? compactSurface : window.contentItem, "settingsTab-server")
+      test.check(!!serverTab, "server owners receive a Server settings tab")
+      if (serverTab) serverTab.clicked()
     }
     if (Quickshell.env("WISP_TEST_APPEARANCE_SETTINGS") === "1") {
       test.findItem(test.compactMode ? compactSurface : window.contentItem, "settingsTab-appearance").clicked()
@@ -288,9 +312,81 @@ ShellRoot {
     interval: 300; running: test.mode === "returnchat"
     onTriggered: {
       var data=JSON.parse(JSON.stringify(bridge.snapshot))
-      data.conversations.forEach(function(c) { c.unread_count=0; if(c.id==="dm") c.label="Jared with a very long display name" })
+      data.conversations.forEach(function(c) { c.unread_count=0; if(c.id==="dm") c.label="Owner with a very long display name" })
       bridge.applySnapshot(data)
-      bridge.selectConversation("dm"); bridge.selectConversation("porch")
+      bridge.selectConversation("dm"); bridge.selectConversation("test_room")
+    }
+  }
+  Timer {
+    interval: 700; running: test.mode === "channeltiles" || test.mode === "panelchanneltiles"
+    onTriggered: {
+      var surface = test.compactMode ? compactSurface : window.contentItem
+      var chat = test.findObject(window.contentItem, "conversationPane", [])
+      var label = test.findObject(surface, "serverChannel-test_room", [])
+      var tile = test.findObject(surface, "serverChannelTile-test_room", [])
+      test.check(label && label.contentItem.horizontalAlignment === Text.AlignLeft, "channel labels remain left aligned")
+      test.check(tile && tile.width >= theme.space(28), "channel has a separate tile button")
+      if (!chat || !label || !tile) { test.check(false, "channel navigation controls exist"); return }
+      bridge.workspaceLayout.channelsAsTiles = false
+      chat.commit({key:"base", id:"local::dm"}); chat.activate("base")
+      var before = bridge.sent.length
+      tile.clicked()
+      test.check(chat.paneCount === 2 && Tiles.find(chat.tree,"base").id === "local::dm", "explicit tile action preserves the current chat")
+      test.check(bridge.activeConversationId === "local::test_room", "tile opens the selected room chat")
+      var channelKey = chat.activeKey
+      chat.activate("base"); tile.clicked(); tile.clicked()
+      test.check(chat.paneCount === 2 && chat.activeKey === channelKey, "existing and already active tiles are focused without duplicates")
+      chat.commit({key:"base",id:"local::dm"}); chat.activate("base")
+      label.clicked()
+      test.check(chat.paneCount === 1 && Tiles.find(chat.tree,"base").id === "local::test_room", "default off opens in current tile")
+      chat.commit({key:"base",id:"local::dm"}); chat.activate("base")
+      bridge.workspaceLayout.setChannelsAsTiles(true)
+      label.clicked()
+      test.check(chat.paneCount === 2 && Tiles.find(chat.tree,"base").id === "local::dm", "default on opens in another tile")
+      bridge.openChannel("server-b::channel:ops", true)
+      test.check(chat.paneCount === 3 && bridge.activeConversationId === "server-b::channel:ops", "new tiles preserve server scope")
+      test.check(bridge.sent.slice(before).every(function(command) { return ["mark_conversation_read","set_conversation_tab"].indexOf(command.name) >= 0 }), "opening channel tiles never joins voice or starts media")
+      chat.commit({key:"base",id:""})
+      bridge.openChannel("local::test_room",true)
+      test.check(chat.paneCount === 1 && Tiles.find(chat.tree,"base").id === "local::test_room", "empty tile is reused")
+      var full = {key:"base",id:"local::dm"}
+      for (var i=1; i<8; i++) full=Tiles.insert(full,"base",{key:"full-"+i,id:"local::dm"},"right","split-"+i)
+      chat.commit(full); chat.activate("base")
+      var saved = JSON.stringify(chat.tree), active = bridge.activeConversationId
+      bridge.openChannel("local::test_room",true)
+      test.check(chat.paneCount === 8 && JSON.stringify(chat.tree) === saved && bridge.activeConversationId === active && bridge.lastError.indexOf("8 tiles") >= 0, "full workspace explains limit without replacing a chat")
+      bridge.lastError = ""
+      chat.commit({key:"base",id:"local::test_room"}); chat.activate("base")
+      var content = test.compactMode ? compactContent : test.findObject(window.contentItem,"wispContent",[])
+      content.toggleSettings()
+      test.findItem(surface,"settingsTab-notifications").clicked()
+      var preference = test.findItem(surface,"channelsAsTilesSetting")
+      test.check(preference && preference.checked, "saved tile preference is exposed in Notifications & Chat")
+      if (preference) { preference.checked = false; preference.clicked() }
+      test.check(!bridge.workspaceLayout.channelsAsTiles, "settings control changes default behavior")
+      content.goHome()
+    }
+  }
+  Timer {
+    interval:700; running:test.mode==="multiserver"
+    onTriggered:{
+      var selector=test.findObject(window.contentItem,"activeServerSelector",[])
+      test.check(!!selector,"active server selector is part of server activity")
+      var roomsHeader=test.findObject(window.contentItem,"roomsSectionHeader",[])
+      var channelsHeader=test.findObject(window.contentItem,"serverChannelsHeader",[])
+      test.check(!!roomsHeader && !!channelsHeader && roomsHeader.font.pixelSize===channelsHeader.font.pixelSize,"Rooms and Channels use matching section headers")
+      test.check(!!test.findObject(window.contentItem,"serverChannel-test_room",[]),"room text chat is also listed with server channels")
+      test.check(bridge.conversationById("server-b::channel:ops") && bridge.messagesFor("server-b::channel:ops").length===1,"secondary server chat and history are independently scoped")
+      bridge.selectServer("server-b")
+      test.check(bridge.activeServer.name==="Project server" && bridge.friends[0].display_name==="Remote Friend","server selection changes rooms, channels, and friends context")
+      bridge.selectConversation("server-b::channel:ops")
+      bridge.sendMessage("Scoped message")
+      var command=bridge.sent[bridge.sent.length-1]
+      test.check(command.name==="send_message" && command.args.server_id==="server-b" && command.args.conversation_id==="channel:ops","chat commands carry server scope but send raw conversation IDs")
+      var picker=test.findObject(window.contentItem,"headerAddChatPicker",[])
+      test.check(picker.rows.filter(function(row){return row.serverSection}).length===2,"chat picker groups open conversations by server")
+      bridge.selectServer("local")
+      test.check(bridge.activeConversationId==="server-b::channel:ops","changing navigation server leaves cross-server chat open")
     }
   }
   Timer {
@@ -305,8 +401,8 @@ ShellRoot {
       var title=test.findItem(compactSurface,"trayChatHeading")
       test.check(title.x+title.width<=back.x,"heading does not overlap return button")
       back.clicked()
-      test.check(bridge.activeConversationId==="dm","header return action opens the previous chat")
-      bridge.selectConversation("porch")
+      test.check(bridge.activeConversationId==="local::dm","header return action opens the previous chat")
+      bridge.selectConversation("test_room")
     }
   }
   Timer {
@@ -327,17 +423,17 @@ ShellRoot {
       var classic = test.findItem(window.contentItem, "theme-legacy")
       test.check(!!classic && classic.enabled, "Classic theme is available in Settings")
       var before = bridge.sent.length
-      var draft = bridge.draftFor("porch")
+      var draft = bridge.draftFor("test_room")
       if (classic) classic.clicked()
       test.check(theme.profile === "legacy", "Settings selects Classic live")
-      test.check(bridge.sent.length === before && bridge.draftFor("porch") === draft, "theme switching does not send commands or alter drafts")
+      test.check(bridge.sent.length === before && bridge.draftFor("test_room") === draft, "theme switching does not send commands or alter drafts")
     }
   }
   Timer {
     interval: 900; running: test.mode === "themes"
     onTriggered: {
       var before = bridge.sent.length
-      var draft = bridge.draftFor("porch")
+      var draft = bridge.draftFor("test_room")
       var terminal = test.findItem(window.contentItem, "theme-terminal")
       test.check(!!terminal && terminal.enabled, "Terminal remains available in Classic")
       if (terminal) terminal.clicked()
@@ -348,19 +444,19 @@ ShellRoot {
       if (clean) clean.clicked()
       test.check(theme.profile === "clean_tui" && theme.cleanTui && theme.tui,
         "Settings selects the independent Clean TUI interface live")
-      test.check(bridge.sent.length === before && bridge.draftFor("porch") === draft,
+      test.check(bridge.sent.length === before && bridge.draftFor("test_room") === draft,
         "Clean TUI switching preserves drafts and sends no commands")
       var performative = test.findItem(window.contentItem, "palette-ash_olive")
       test.check(!!performative && performative.enabled, "Ash & Olive palette is available in Settings")
       if (performative) performative.clicked()
       test.check(theme.paletteName === "ash_olive" && theme.background == "#000000" && theme.cleanTui, "Ash & Olive preserves Clean TUI")
-      test.check(bridge.sent.length === before && bridge.draftFor("porch") === draft, "palette switching preserves drafts and sends no commands")
+      test.check(bridge.sent.length === before && bridge.draftFor("test_room") === draft, "palette switching preserves drafts and sends no commands")
       var herdr = test.findItem(window.contentItem, "palette-herdr")
       test.check(!!herdr && herdr.enabled, "Herdr palette is available in Settings")
       if (herdr) herdr.clicked()
       test.check(theme.paletteName === "herdr" && theme.background == "#001419"
         && theme.accent == "#29a298" && theme.tui, "Settings selects Herdr live")
-      test.check(bridge.sent.length === before && bridge.draftFor("porch") === draft, "Herdr switching preserves drafts and sends no commands")
+      test.check(bridge.sent.length === before && bridge.draftFor("test_room") === draft, "Herdr switching preserves drafts and sends no commands")
       test.findItem(window.contentItem, "theme-performative").clicked()
       test.check(theme.performative && theme.paletteName === "herdr", "Performative appearance supports Solarized Japan")
       test.findItem(window.contentItem, "theme-herdr").clicked()
@@ -384,21 +480,21 @@ ShellRoot {
     interval: 650; running: ["clearroom","cleardm","roomsettings","newroom"].indexOf(test.mode) >= 0
     onTriggered: {
       if (test.mode === "clearroom" || test.mode === "cleardm") {
-        clearDialog.confirm(test.mode === "clearroom" ? "porch" : "dm")
+        clearDialog.confirm(test.mode === "clearroom" ? "test_room" : "dm")
         test.check(clearDialog.forEveryone === (test.mode === "clearroom"), "global clearing requires room permission")
         clearDialog.clearing = bridge.clearChatHistory(clearDialog.conversationId, clearDialog.forEveryone)
         test.check(bridge.sent[bridge.sent.length-1].args.for_everyone === clearDialog.forEveryone, "clear request explicitly scopes deletion")
         bridge.finishRequest({id:"test-" + bridge.requestId,ok:false,error:{message:"Test failure — history was not cleared."}})
         test.check(!clearDialog.clearing && clearDialog.error !== "", "failed clearing remains retryable")
       } else if (test.mode === "roomsettings") {
-        roomDialog.manage("porch")
+        roomDialog.manage("test_room")
         test.check(roomDialog.owner && roomDialog.admin, "owner has administration controls")
-        test.check(roomDialog.invitees.length === 1 && roomDialog.invitees[0].id === "charlie", "only non-members offered invitations")
+        test.check(roomDialog.invitees.length === 1 && roomDialog.invitees[0].id === "member_c", "only non-members offered invitations")
       } else roomDialog.createRoom()
     }
   }
   Timer {
-    interval: 400; running: ["privacy","panelprivacy","settings","themes","panelsettings","preview","empty","transfer","saved"].indexOf(test.mode) < 0
+    interval: 400; running: ["privacy","panelprivacy","settings","themes","panelsettings","preview","empty","transfer","saved","serversettings","panelserversettings"].indexOf(test.mode) < 0
     onTriggered: {
       var target = test.compactMode ? compactSurface : window.contentItem
       var area = test.findItem(target, "chatDropArea")
@@ -410,7 +506,7 @@ ShellRoot {
       test.check(drop.accepted && drop.action === Qt.CopyAction, "drop copies and never moves source files")
       test.check(bridge.sent[bridge.sent.length-1].name === "import_chat_files", "drop stages files without sending")
       bridge.finishRequest({id:"test-" + bridge.requestId,ok:false})
-      test.check(!bridge.importingConversations.porch, "failed drop releases staging state")
+      test.check(!bridge.importingConversations.test_room, "failed drop releases staging state")
     }
   }
   Timer {
@@ -450,14 +546,17 @@ ShellRoot {
       if (button) button.clicked()
       var menu = test.findObject(target, "identityMenu", [])
       test.check(!!menu && menu.opened, "identity click opens menu")
-      test.check(!!menu && menu.itemAt(0).objectName === "identitySettings", "Settings is in identity menu")
-      test.check(!!menu && menu.itemAt(1).objectName === "identityNewRoom", "New Room is in identity menu")
-      test.check(!!menu && menu.count === 2, "identity menu contains only Settings and New Room")
+      var homeEntry = menu ? menu.itemAt(0) : null
+      var settingsEntry = menu ? menu.itemAt(1) : null
+      var roomEntry = menu ? menu.itemAt(2) : null
+      test.check(!!homeEntry && !homeEntry.visible, "Home is absent from the identity menu on the home page")
+      test.check(!!settingsEntry && settingsEntry.visible, "Settings is in identity menu")
+      test.check(!!roomEntry && roomEntry.visible, "New Room is in identity menu")
       if (menu) {
         var frame = test.findItem(menu.background, "wispSurfaceOutline")
         test.check(!!frame === !theme.hostManaged, "Wisp popup outline preserves host-managed frames")
         if (frame) test.check(frame.border.width === 1 && frame.width === menu.background.width, "popup outline follows full background")
-        menu.currentIndex = 0
+        menu.currentIndex = 1
       }
       test.check(bridge.sent.length === before, "opening menu does not activate media or join")
     }
@@ -467,26 +566,31 @@ ShellRoot {
     onTriggered: {
       var target = test.compactMode ? compactSurface : window.contentItem
       var menu = test.findObject(target, "identityMenu", [])
-      var settings = menu ? menu.itemAt(0) : null
+      var settings = menu ? menu.itemAt(1) : null
       if (settings) settings.triggered()
       if (menu) menu.close()
       var content = test.findItem(target, "wispContent")
       test.check(!!content && content.settingsOpen, "Settings action opens settings")
       var home = test.findItem(target, "headerHomeButton")
-      test.check(!!home && home.width === theme.space(30), "Settings exposes a compact Home icon")
+      test.check(!!home && home.text === "[home]", "Settings exposes the [home] header action")
+      var identityButton = test.findItem(target, "identityMenuButton")
+      if (identityButton) identityButton.clicked()
+      var menuHome = menu ? menu.itemAt(0) : null
+      test.check(!!menuHome && menuHome.visible && menuHome.text === "[home]", "Settings adds [home] at the top of the identity menu")
+      if (menu) menu.close()
       var appButton = test.findItem(target, "headerOpenAppButton")
       if (home && appButton) {
         home.parent.forceLayout()
         test.check(home.x + home.width <= appButton.x, "Home sits left of Open app")
       }
-      var savedDraft = bridge.draftFor("porch")
+      var savedDraft = bridge.draftFor("test_room")
       var navigationCommands = bridge.sent.length
       if (home) home.clicked()
       test.check(content.showingChats && !test.findItem(target, "headerHomeButton"), "Home returns to chats and hides itself")
-      test.check(bridge.draftFor("porch") === savedDraft && bridge.sent.length === navigationCommands, "Home preserves drafts and sends no commands")
+      test.check(bridge.draftFor("test_room") === savedDraft && bridge.sent.length === navigationCommands, "Home preserves drafts and sends no commands")
       if (settings) settings.triggered()
       var before = bridge.sent.length
-      var newRoom = menu ? menu.itemAt(1) : null
+      var newRoom = menu ? menu.itemAt(2) : null
       if (newRoom) newRoom.triggered()
       var dialog = test.findObject(target, "identityRoomManager", [])
       test.check(!!dialog && dialog.opened && dialog.creating, "New Room opens creation dialog")
@@ -498,6 +602,9 @@ ShellRoot {
     onTriggered: {
       test.trayInitialFeed = test.findFeed(compactSurface).height
       test.trayCommandCount = bridge.sent.length
+      var roomsHeader=test.findObject(compactSurface,"roomsSectionHeader",[])
+      var channelsHeader=test.findObject(compactSurface,"serverChannelsHeader",[])
+      test.check(!!roomsHeader && !!channelsHeader && roomsHeader.font.pixelSize===channelsHeader.font.pixelSize,"tray Rooms and Channels use matching section headers")
       test.findItem(compactSurface, "friends-collapse").clicked()
     }
   }
@@ -514,7 +621,7 @@ ShellRoot {
     onTriggered: {
       test.check(test.findFeed(compactSurface).height > test.trayFriendsFeed, "collapsing tray rooms enlarges message history")
       test.check(!test.findItem(compactSurface, "availableRoomCard"), "collapsed rooms hide room cards")
-      test.check(bridge.sent.length === test.trayCommandCount && bridge.draftFor("porch") === "Here's the latest version…", "section collapse preserves draft and sends no commands")
+      test.check(bridge.sent.length === test.trayCommandCount && bridge.draftFor("test_room") === "Here's the latest version…", "section collapse preserves draft and sends no commands")
       test.findItem(compactSurface, "rooms-collapse").clicked()
       test.findItem(compactSurface, "friends-collapse").clicked()
     }
@@ -531,7 +638,7 @@ ShellRoot {
   Timer {
     interval: 600; running: test.mode === "friends"
     onTriggered: {
-      var star = test.findItem(compactSurface, "favorite-charlie")
+      var star = test.findItem(compactSurface, "favorite-member_c")
       var before = bridge.sent.length
       test.check(!!star, "favorite action available in tray")
       if (star) {
@@ -543,12 +650,12 @@ ShellRoot {
         test.check(star.opacity === 1, "keyboard focus reveals favorite action")
       }
       if (star) star.clicked()
-      test.check(bridge.sortedFriends[0].id === "charlie", "offline favorite precedes online non-favorite")
+      test.check(bridge.sortedFriends[0].id === "member_c", "offline favorite precedes online non-favorite")
       var collapse = test.findItem(compactSurface, "friends-collapse")
       if (collapse) collapse.clicked()
-      test.check(bridge.friendPreferences.collapsed && !test.findItem(compactSurface, "favorite-jared"), "collapse hides rows")
+      test.check(bridge.friendPreferences.collapsed && !test.findItem(compactSurface, "favorite-owner"), "collapse hides rows")
       if (collapse) collapse.clicked()
-      test.check(!!test.findItem(compactSurface, "favorite-jared"), "expand restores rows")
+      test.check(!!test.findItem(compactSurface, "favorite-owner"), "expand restores rows")
       test.check(bridge.sent.length === before, "favorite and collapse do not join rooms or send commands")
       var scroll = test.findItem(compactSurface, "dashboardScroll")
       var audio = test.findItem(compactSurface, "globalAudioControls")
@@ -633,7 +740,7 @@ ShellRoot {
     interval:400; running:test.mode==="latest" || test.mode==="panellatest"
     onTriggered:{
       var data=JSON.parse(JSON.stringify(bridge.snapshot))
-      for(var i=0;i<45;i++)data.messages.push({id:"scroll-"+i,conversation_id:"porch",sender:{id:"jared",display_name:"Jared"},created_at:"2026-09-03T17:04:00Z",content_type:"text/plain",payload:"Earlier message "+i+" in this conversation."})
+      for(var i=0;i<45;i++)data.messages.push({id:"scroll-"+i,conversation_id:"test_room",sender:{id:"owner",display_name:"Owner"},created_at:"2026-09-03T17:04:00Z",content_type:"text/plain",payload:"Earlier message "+i+" in this conversation."})
       bridge.snapshot=data
     }
   }
@@ -679,7 +786,7 @@ ShellRoot {
     onTriggered:{
       var feed=test.findFeed(test.compactMode?compactSurface:window.contentItem)
       test.check(!feed.awayFromLatest,"switching to a short or empty chat hides the button")
-      feed.conversationId="porch"
+      feed.conversationId="test_room"
     }
   }
   Timer {
@@ -762,19 +869,19 @@ ShellRoot {
       editor.forceActiveFocus()
       keyDriver.keyClick(Qt.Key_A, Qt.ControlModifier)
       keyDriver.keyClick("x")
-      test.check(bridge.draftFor("porch") === "x", "typed text updates draft")
+      test.check(bridge.draftFor("test_room") === "x", "typed text updates draft")
       var before = bridge.sent.length
       keyDriver.keyClick(Qt.Key_Return)
       var request = "test-" + bridge.requestId
       keyDriver.keyClick(Qt.Key_Return)
       keyDriver.keyClick(Qt.Key_Enter)
-      bridge.sendComposedMessage("porch")
+      bridge.sendComposedMessage("test_room")
       keyDriver.keyClick("z")
       test.check(bridge.sent.length === before + 1, "rapid Enter/click send produces one request")
       test.check(editor.readOnly && editor.text === "x", "pending draft cannot accidentally be extended and resent")
       bridge.finishRequest({id:request,ok:true})
       keyDriver.wait(30)
-      test.check(!editor.readOnly && editor.text === "" && bridge.draftFor("porch") === "", "ack clears editor before unlocking send")
+      test.check(!editor.readOnly && editor.text === "" && bridge.draftFor("test_room") === "", "ack clears editor before unlocking send")
       keyDriver.keyClick(Qt.Key_Return)
       test.check(bridge.sent.length === before + 1, "Enter after acknowledgement cannot resend old text")
       keyDriver.keyClick("y")
@@ -833,7 +940,7 @@ ShellRoot {
     interval:600; running:test.mode==="addchat"
     onTriggered:{
       var chat=test.findItem(window.contentItem,"conversationPane")
-      chat.commit({key:"add-source",id:"porch"});chat.activate("add-source")
+      chat.commit({key:"add-source",id:"test_room"});chat.activate("add-source")
       var original=Tiles.leaves(chat.tree)[0], originalId=original.id
       var pane=test.findItem(chat,"chatTile-"+original.key)
       var add=test.findItem(window.contentItem,"headerAddChatButton")
@@ -850,9 +957,9 @@ ShellRoot {
       dialog.close()
       test.check(chat.paneCount===2,"canceling New chat adds no tile")
       add.clicked();test.findItem(picker.contentItem,"pickerNewChat").clicked()
-      dialog.toggleFriend("jared");dialog.submit()
-      bridge.finishRequest({id:dialog.requestId,ok:true,value:{id:"dm",kind:"direct",label:"Jared",members:[],unread_count:0}})
-      test.check(chat.paneCount===3 && Tiles.find(chat.tree,original.key).id===originalId,"New DM from Add chat opens in a new tile")
+      dialog.toggleFriend("owner");dialog.submit()
+      bridge.finishRequest({id:dialog.requestId,ok:true,value:{id:"dm",kind:"direct",label:"Owner",members:[],unread_count:0}})
+      test.check(chat.paneCount===3 && bridge.conversationById(Tiles.find(chat.tree,original.key).id).raw_id==="test_room","New DM from Add chat opens in a new tile without replacing its source")
       test.findItem(pane,"compactChatSelector").clicked()
       var panePicker=test.findObject(pane,"chatConversationMenu",[])
       panePicker.chosen("dm");panePicker.close()
@@ -884,18 +991,18 @@ ShellRoot {
       test.check(dialog.visible && !dialog.canSubmit,"New chat opens an empty selection form")
       dialog.close()
       test.check(bridge.sent.length===before,"Cancel creates nothing")
-      dialog.begin(); dialog.toggleFriend("jared"); dialog.submit()
+      dialog.begin(); dialog.toggleFriend("owner"); dialog.submit()
       test.check(dialog.busy && bridge.sent[bridge.sent.length-1].name==="open_direct","DM submits existing direct-message API")
       before=bridge.sent.length;dialog.submit()
       test.check(bridge.sent.length===before,"busy guard prevents duplicate submissions")
       bridge.finishRequest({id:dialog.requestId,ok:false,error:{message:"Fixture failure"}})
-      test.check(!dialog.busy && dialog.selectedIds[0]==="jared" && dialog.error,"failed DM retains selected friend")
+      test.check(!dialog.busy && dialog.selectedIds[0]==="owner" && dialog.error,"failed DM retains selected friend")
       dialog.submit()
-      bridge.finishRequest({id:dialog.requestId,ok:true,value:{id:"dm",kind:"direct",label:"Jared",members:[],unread_count:0}})
-      test.check(!dialog.visible && Tiles.find(chat.tree,original).id==="dm","DM opens in its originating pane")
+      bridge.finishRequest({id:dialog.requestId,ok:true,value:{id:"dm",kind:"direct",label:"Owner",members:[],unread_count:0}})
+      test.check(!dialog.visible && Tiles.find(chat.tree,original).id==="local::dm","DM opens in its originating pane")
       dialog.begin();dialog.group=true
       test.findItem(dialog.contentItem,"newChatName").text="Weekend games"
-      dialog.toggleFriend("jared");dialog.toggleFriend("charlie")
+      dialog.toggleFriend("owner");dialog.toggleFriend("member_c")
       test.check(dialog.canSubmit,"offline friends can be selected for group chats")
       dialog.submit()
       var args=bridge.sent[bridge.sent.length-1].args
@@ -914,7 +1021,7 @@ ShellRoot {
       test.check(bridge.sent[bridge.sent.length-1].args.request_id===token,"retry uses same creation token")
       bridge.finishRequest({id:dialog.requestId,ok:true,value:{id:"new-group",kind:"circle",label:"Weekend games",members:[],unread_count:0}})
       var chat=test.findItem(window.contentItem,"conversationPane")
-      test.check(!dialog.visible && Tiles.find(chat.tree,test.tileKeys[0]).id==="new-group","group result opens in originating pane")
+      test.check(!dialog.visible && Tiles.find(chat.tree,test.tileKeys[0]).id==="local::new-group","group result opens in originating pane")
       test.check(bridge.conversationById("new-group"),"creation response is immediately available in picker")
       test.check(!bridge.sent.some(function(c){return ["create_room","join_spot","join_hangout","camera","share"].indexOf(c.name)>=0}),"creating chats never joins rooms or publishes media")
       chat.activate(test.tileKeys[0])
@@ -936,22 +1043,24 @@ ShellRoot {
     interval: 750; running: test.mode === "picker"
     onTriggered: {
       var picker=test.findObject(window.contentItem,"chatConversationMenu",[])
-      test.check(picker.opened && picker.count===84,"picker includes long lists and closed chats")
-      test.check(picker.rows.filter(function(r) { return r.section }).map(function(r) { return r.label }).join(",")==="Rooms,Friends List","picker categories are Rooms and Friends List")
+      test.check(picker.opened && picker.count===85,"picker includes long lists, server channels, and closed chats")
+      test.check(picker.rows.filter(function(r) { return r.section }).map(function(r) { return r.label }).join(",")==="@ Wisp server,Room chats,Channels · Projects,Friends & groups","picker organizes chats by server, room, channel category, and people")
       test.check(test.findItem(picker.contentItem,"conversationSearch").activeFocus,"opening picker focuses search")
       test.check(picker.height<=theme.space(420),"long list has bounded scrolling height")
       var before=bridge.sent.length
       picker.category="Friends List"
-      test.check(picker.count===3 && picker.rows[0].label==="Friends List","category filter jumps directly to friend chats")
+      test.check(picker.count===3 && picker.rows[1].label==="Friends & groups","category filter jumps directly to friend chats")
       picker.category="Rooms"
       test.check(picker.count===81,"category filter shows only room chats")
+      picker.category="Channels"
+      test.check(picker.count===1 && picker.rows[1].label==="Channels · Projects","category filter shows dedicated text channels")
       picker.category=""
-      picker.query="  jArEd  "
-      test.check(picker.count===1 && picker.rows[1].id==="dm","search is trimmed and case-insensitive")
+      picker.query="  oWnEr  "
+      test.check(picker.count===1 && picker.rows[2].id==="local::dm","search is trimmed and case-insensitive")
       picker.resetSelection(); picker.moveSelection(1)
       test.check(bridge.sent.length===before,"search and navigation do not send commands")
       picker.chooseCurrent()
-      test.check(bridge.activeConversationId==="dm" && !picker.visible,"Enter-style selection opens matched DM")
+      test.check(bridge.activeConversationId==="local::dm" && !picker.visible,"Enter-style selection opens matched DM")
       picker.open()
     }
   }
@@ -972,7 +1081,7 @@ ShellRoot {
   Timer {
     interval: 500; running: test.mode === "tilemoves"
     onTriggered: {
-      var pair={key:"pair",axis:"x",ratio:0.4,a:{key:"a",id:"porch"},b:{key:"b",id:"dm"}}
+      var pair={key:"pair",axis:"x",ratio:0.4,a:{key:"a",id:"test_room"},b:{key:"b",id:"dm"}}
       var rects=Tiles.geometry(pair,1000,900,10,280,230)
       var noop=Tiles.planDrop(pair,"a",rects.b.x+40,450,1000,900,10,280,230,26)
       test.check(noop && noop.unchanged && noop.rect.width===rects.a.width,"adjacent left-to-left drop previews its actual existing slot")
@@ -995,7 +1104,7 @@ ShellRoot {
       bridge.snapshot=populated
       bridge.workspaceLayout.activityCollapsed=true
       chat.commit(pair)
-      chat.choose("a","porch")
+      chat.choose("a","test_room")
     }
   }
   Timer {
@@ -1004,7 +1113,7 @@ ShellRoot {
       var chat=test.findItem(window.contentItem,"conversationPane")
       var pane=test.findItem(chat,"chatTile-a")
       var selector=test.findItem(pane,"compactChatSelector")
-      test.check(selector && selector.text==="Porch","pane shows selected chat instead of clipping tabs")
+      test.check(selector && selector.text==="TestRoom","pane shows selected chat instead of clipping tabs")
       if (selector) {
         test.check(selector.width>theme.space(80) && selector.x>=0 && selector.x+selector.width<=pane.width,"compact selector retains a readable click target")
         selector.clicked()
@@ -1014,7 +1123,7 @@ ShellRoot {
       }
       pane.choose("friends")
       test.check(selector && selector.text==="Friends","selected title updates even for conversations beyond the old clipped row")
-      pane.choose("porch")
+      pane.choose("test_room")
       var geometry=chat.rectangles.a
       var p=chat.mapFromItem(pane.parent.parent,geometry.x+geometry.width/2,8)
       chat.dragAt("a",p.x,p.y)
@@ -1033,10 +1142,10 @@ ShellRoot {
       test.check(Tiles.leaves(pure).every(function(n) { return rects[n.key].width>=280 && rects[n.key].height>=230 }),"nested layout preserves minimum readable pane sizes")
       test.check(Tiles.dropEdge(0,50,100,100)==="left" && Tiles.dropEdge(100,50,100,100)==="right" && Tiles.dropEdge(50,0,100,100)==="top" && Tiles.dropEdge(50,100,100,100)==="bottom","all directional drop zones")
       var chat=test.findItem(window.contentItem,"conversationPane")
-      chat.commit({key:"pane-0",id:"porch"})
+      chat.commit({key:"pane-0",id:"test_room"})
       bridge.workspaceLayout.activityCollapsed=true
       var first=Tiles.leaves(chat.tree)[0].key
-      chat.choose(first,"porch")
+      chat.choose(first,"test_room")
       chat.split(first,"right")
       var second=chat.activeKey
       chat.choose(second,"dm")
@@ -1045,8 +1154,8 @@ ShellRoot {
       chat.choose(third,"friends")
       test.tileKeys=[first,second,third]
       test.check(chat.paneCount===3,"three independent chat panes")
-      test.check(Tiles.find(chat.tree,first).id==="porch" && Tiles.find(chat.tree,second).id==="dm","splitting retains existing conversations")
-      bridge.setDraft("porch","Room draft")
+      test.check(Tiles.find(chat.tree,first).id==="test_room" && Tiles.find(chat.tree,second).id==="dm","splitting retains existing conversations")
+      bridge.setDraft("test_room","Room draft")
       bridge.setDraft("dm","DM draft")
       test.tileCommands=bridge.sent.length
     }
@@ -1056,7 +1165,7 @@ ShellRoot {
     onTriggered: {
       var chat=test.findItem(window.contentItem,"conversationPane"), keys=test.tileKeys
       var first=test.findItem(chat,"chatTile-"+keys[0]), second=test.findItem(chat,"chatTile-"+keys[1])
-      test.check(first.currentId==="porch" && second.currentId==="dm","pane feeds select different conversations")
+      test.check(first.currentId==="test_room" && second.currentId==="dm","pane feeds select different conversations")
       test.check(test.findItem(first,"mainComposerEditor").text==="Room draft" && test.findItem(second,"mainComposerEditor").text==="DM draft","drafts are isolated by destination")
       var split=chat.tree.key, original=chat.rectangles[split].first
       chat.resize(split,30)
@@ -1065,7 +1174,7 @@ ShellRoot {
       chat.dragAt(keys[0],point.x,point.y)
       test.check(chat.dropKey===keys[1] && chat.dropEdge==="center","drag center previews a swap")
       chat.finishDrag()
-      test.check(Tiles.find(chat.tree,keys[0]).id==="dm" && Tiles.find(chat.tree,keys[1]).id==="porch","center drop swaps chats")
+      test.check(Tiles.find(chat.tree,keys[0]).id==="dm" && Tiles.find(chat.tree,keys[1]).id==="test_room","center drop swaps chats")
       chat.move(keys[0],keys[2],"bottom")
       test.check(Tiles.valid(chat.tree) && chat.paneCount===3,"edge drop reparents a split without losing a pane")
       test.check(bridge.sent.length===test.tileCommands,"resize and drag send no backend commands")
@@ -1106,7 +1215,7 @@ ShellRoot {
       var host=test.findObject(chat,"chatTileHost-"+key,[])
       host.popoutWindow.contentItem.Window.window.close()
       test.check(!host.detached && !!chat.rectangles[key],"native window close reanchors chat")
-      test.check(bridge.draftFor("porch")==="Room draft" && bridge.draftFor("dm")==="DM draft","pop-out and return preserve drafts")
+      test.check(bridge.draftFor("test_room")==="Room draft" && bridge.draftFor("dm")==="DM draft","pop-out and return preserve drafts")
       var closingPane=test.findItem(chat,"chatTile-"+test.tileKeys[2])
       var closeAction=test.findObject(closingPane,"wispChatOptions",[]).itemAt(0)
       test.check(closeAction.text==="Close tile" && closeAction.enabled,"chat options offer a local tile close")
@@ -1127,14 +1236,14 @@ ShellRoot {
       var chat=test.findItem(window.contentItem,"conversationPane")
       test.check(chat.paneCount===3 && Tiles.valid(chat.tree),"saved multi-chat tree restores after restart")
       test.check(chat.detachedKeys.length===0,"restart anchors every pop-out back into main window")
-      test.check(Tiles.leaves(chat.tree).map(function(n) { return n.id }).sort().join(",")==="dm,friends,porch","restored panes retain conversation destinations")
+      test.check(Tiles.leaves(chat.tree).map(function(n) { return n.id }).sort().join(",")==="local::dm,local::friends,local::test_room","restored panes retain conversation destinations and migrate them to server-scoped IDs")
       var original=bridge.snapshot, closed=JSON.parse(JSON.stringify(original))
       closed.conversations[0].tab_closed=true
       bridge.snapshot=closed
-      bridge.activeConversationId="porch"
+      bridge.activeConversationId="test_room"
       var before=bridge.sent.length
-      chat.choose(chat.activeKey,"porch")
-      test.check(bridge.sent.slice(before).some(function(c) { return c.name==="set_conversation_tab" && c.args.conversation_id==="porch" && c.args.closed===false }),"Chats can reopen a closed conversation even when its id was already active")
+      chat.choose(chat.activeKey,"test_room")
+      test.check(bridge.sent.slice(before).some(function(c) { return c.name==="set_conversation_tab" && c.args.conversation_id==="test_room" && c.args.closed===false }),"Chats can reopen a closed conversation even when its id was already active")
       bridge.snapshot=original
     }
   }
@@ -1184,7 +1293,7 @@ ShellRoot {
       bridge.workspaceLayout.reset()
       bridge.workspaceLayout.settingsSaved()
       test.check(!test.findObject(target,"settingsSavedNotice",[]).shown,"layout saves do not show Changes Saved")
-      bridge.setDraft("porch", "line\n".repeat(30))
+      bridge.setDraft("test_room", "line\n".repeat(30))
       test.check(bridge.sent.length === before, "layout changes never send chat/media commands")
     }
   }
@@ -1194,7 +1303,7 @@ ShellRoot {
       var pane = test.findItem(window.contentItem, "composerPane")
       test.check(pane.height > theme.space(40), "multiline draft grows composer within available space")
       test.check(pane.height <= pane.available * 0.45, "long draft leaves room for history")
-      bridge.setDraft("porch", "Short again")
+      bridge.setDraft("test_room", "Short again")
     }
   }
   Timer {
@@ -1243,12 +1352,12 @@ ShellRoot {
     onTriggered: {
       var data = JSON.parse(JSON.stringify(bridge.snapshot))
       data.self.hangout_id = "own-room"
-      data.hangouts = [{id:"own-room",label:"Porch",members:[{id:"self",display_name:"Tyler"}]}]
-      data.spots = [{id:"porch",name:"Porch",active_hangout_id:"own-room",members:[]},{id:"empty",name:"Empty Room",active_hangout_id:null,members:[]}]
-      data.conversations[0].id = "spot:porch"
+      data.hangouts = [{id:"own-room",label:"TestRoom",members:[{id:"self",display_name:"MemberA"}]}]
+      data.spots = [{id:"test_room",name:"TestRoom",active_hangout_id:"own-room",members:[]},{id:"empty",name:"Empty Room",active_hangout_id:null,members:[]}]
+      data.conversations[0].id = "spot:test_room"
       data.conversations.push({id:"spot:empty",label:"Empty Room",kind:"hangout",spot_id:"empty",members:[],unread_count:0})
-      data.room_invitations = [{id:"invite-1",conversation_id:"dm",hangout_id:"friend-room",room_label:"A friend's voice room",from:{id:"jared",display_name:"Jared"},expires_at:new Date(Date.now()+300000).toISOString()}]
-      data.messages = [{id:"invite-message",conversation_id:"dm",sender:{id:"jared",display_name:"Jared"},created_at:new Date().toISOString(),content_type:"application/vnd.wisp.room-invitation+json",payload:{invitation_id:"invite-1",hangout_id:"friend-room",room_label:"A friend's voice room",status:"pending",expires_at:data.room_invitations[0].expires_at}}]
+      data.room_invitations = [{id:"invite-1",conversation_id:"dm",hangout_id:"friend-room",room_label:"A friend's voice room",from:{id:"owner",display_name:"Owner"},expires_at:new Date(Date.now()+300000).toISOString()}]
+      data.messages = [{id:"invite-message",conversation_id:"dm",sender:{id:"owner",display_name:"Owner"},created_at:new Date().toISOString(),content_type:"application/vnd.wisp.room-invitation+json",payload:{invitation_id:"invite-1",hangout_id:"friend-room",room_label:"A friend's voice room",status:"pending",expires_at:data.room_invitations[0].expires_at}}]
       var before = bridge.sent.length
       bridge.applySnapshot(data,"room_invited")
       test.check(!bridge.sent.slice(before).some(function(c) { return c.name === "respond_room_invitation" || c.name === "join_hangout" || c.name === "camera" }),"receiving an invite never joins or starts media")
@@ -1279,17 +1388,17 @@ ShellRoot {
       var roomChat = test.findItem(surface,"openRoomChat")
       test.check(!!roomChat,"occupied room exposes Chat action")
       if (roomChat) roomChat.clicked()
-      test.check(bridge.activeConversationId === "spot:porch","occupied persistent room opens correct text chat")
+      test.check(bridge.activeConversationId === "local::spot:test_room","occupied persistent room opens correct text chat")
       var emptyChat = test.findItem(surface,"openSpotChat")
       test.check(!!emptyChat,"empty room exposes Chat action")
       if (emptyChat) emptyChat.clicked()
-      test.check(bridge.activeConversationId === "spot:empty","empty room text chat is accessible")
+      test.check(bridge.activeConversationId === "local::spot:empty","empty room text chat is accessible")
       test.check(!bridge.sent.slice(before).some(function(c) { return c.name === "join_hangout" || c.name === "join_spot" }),"room Chat buttons never join voice")
-      bridge.inviteToRoom({id:"jared",display_name:"Jared"})
+      bridge.inviteToRoom({id:"owner",display_name:"Owner"})
       var outgoing = bridge.sent[bridge.sent.length-1]
       test.check(outgoing.name === "send_voice_invite" && outgoing.args.hangout_id === "own-room", "invitation targets current voice room")
       bridge.finishRequest({id:"test-"+bridge.requestId,ok:true,value:{conversation_id:"dm"}})
-      test.check(bridge.activeConversationId === "dm" && bridge.invitationFeedback.length > 0,"sending returns to DM with feedback")
+      test.check(bridge.activeConversationId === "local::dm" && bridge.invitationFeedback.length > 0,"sending returns to DM with feedback")
       bridge.invitationFeedback = ""
     }
   }
@@ -1298,7 +1407,7 @@ ShellRoot {
     onTriggered: {
       var surface = test.compactMode ? compactSurface : window.contentItem
       if (test.mode === "presence" || test.mode === "panelpresence") {
-        for (var entry of [{id:"jared",label:"Open"},{id:"charlie",label:"Knock"},{id:"tyler",label:"Closed"},{id:"morgan",label:"Away"}]) {
+        for (var entry of [{id:"owner",label:"Open"},{id:"member_c",label:"Knock"},{id:"member_a",label:"Closed"},{id:"morgan",label:"Away"}]) {
           var icon = test.findItem(surface, "friendPresence-" + entry.id)
           test.check(icon && icon.imageStatus === Image.Ready && icon.label === entry.label && icon.width === theme.space(16), "presence icon renders with accessible status: " + entry.label)
           var favorite = test.findItem(surface, "favorite-" + entry.id)
@@ -1310,10 +1419,10 @@ ShellRoot {
           test.check(name.width >= name.implicitWidth, "short friend name fits beside compact icon: " + entry.id)
           test.check(!test.findText(row, entry.label.toLowerCase()), "text status replaced by icon")
         }
-        var offlineFavorite = test.findItem(surface, "favorite-jack")
+        var offlineFavorite = test.findItem(surface, "favorite-member_b")
         test.check(!!offlineFavorite, "offline friend row available")
         var offlineRow = offlineFavorite ? offlineFavorite.parent : surface
-        test.check(!test.findItem(offlineRow, "friendPresence-jack") && test.findItem(offlineRow, "friendConnectionDot").presence === "closed", "offline uses hollow connection dot only")
+        test.check(!test.findItem(offlineRow, "friendPresence-member_b") && test.findItem(offlineRow, "friendConnectionDot").presence === "closed", "offline uses hollow connection dot only")
         test.check(!test.findText(offlineRow, "offline"), "offline label no longer takes name space")
       }
       var messageBox = test.findItem(surface, "composerMessageBox")
@@ -1393,6 +1502,23 @@ ShellRoot {
         test.check(privacyView && privacyView.visible, "Privacy settings are visible")
         test.check(!!test.findText(settingsSurface, "Not configured. Chat encryption is separate from voice/video encryption."), "Unconfigured encryption is never described as protected")
         test.check(!bridge.sent.some(function(command) { return command.name === "privacy_enable" || command.name === "privacy_export" }), "Opening Privacy never creates or exports keys")
+      }
+      if (test.mode === "serversettings" || test.mode === "panelserversettings") {
+        var serverView = test.findItem(surface, "serverSettingsView")
+        test.check(!!serverView && serverView.visible, "Server settings are visible to the owner")
+        test.check(!!test.findItem(surface, "newServerCategoryName") && !!test.findItem(surface, "createServerChannel"), "Server settings expose category and dedicated-channel creation")
+        var serverNameField = test.findItem(surface, "serverNameField")
+        var saveServerName = test.findItem(surface, "saveServerName")
+        test.check(!!serverNameField && serverNameField.text === "Northstar" && !!saveServerName, "Server settings expose the shared display name")
+        serverNameField.text = "Evening Star"
+        saveServerName.clicked()
+        test.check(bridge.sent.some(function(command) { return command.name === "rename_server" && command.args.name === "Evening Star" }), "Saving the server name sends a server-scoped rename")
+        var pageMenu = test.findObject(surface, "identityMenu", [])
+        var serverIdentity = test.findItem(surface, "identityMenuButton")
+        if (serverIdentity && pageMenu && !pageMenu.opened) serverIdentity.clicked()
+        var pageHome = pageMenu ? pageMenu.itemAt(0) : null
+        test.check(!!pageHome && pageHome.objectName === "identityHome" && pageHome.text === "[home]", "[home] is the top identity-menu action away from home")
+        test.check(!bridge.sent.some(function(command) { return ["join_spot","join_hangout","camera","share"].indexOf(command.name) >= 0 }), "opening server settings does not join or publish media")
       }
       test.check(window.width === theme.space(test.testWidth), "app width")
       test.check(window.height === theme.space(test.testHeight), "app height")

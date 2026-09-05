@@ -1,19 +1,89 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-labelledby="title desc">
+  <title id="title">Wisp</title>
+  <desc id="desc">A pixel-grid W crossed by a pink, cyan and violet synthesizer waveform.</desc>
   <defs>
-    <linearGradient id="wispGradient" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#32E6F4"/>
-      <stop offset="38%" stop-color="#19BDF5"/>
-      <stop offset="72%" stop-color="#2B72F6"/>
-      <stop offset="100%" stop-color="#6752F4"/>
+    <linearGradient id="letters" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#d7d6eb"/>
+      <stop offset="1" stop-color="#9394bc"/>
+    </linearGradient>
+    <linearGradient id="signal" x1="2.25" y1="0" x2="29.75" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ef70bd"/>
+      <stop offset="0.52" stop-color="#35dfdf"/>
+      <stop offset="1" stop-color="#a68bfa"/>
     </linearGradient>
   </defs>
-  <g fill="url(#wispGradient)">
-    <rect x="154" y="466" width="72" height="92" rx="36"/>
-    <rect x="261" y="398" width="78" height="228" rx="39"/>
-    <rect x="369" y="292" width="82" height="440" rx="41"/>
-    <rect x="469" y="218" width="86" height="588" rx="43"/>
-    <rect x="573" y="292" width="82" height="440" rx="41"/>
-    <rect x="685" y="398" width="78" height="228" rx="39"/>
-    <rect x="798" y="466" width="72" height="92" rx="36"/>
+  <rect x="0.5" y="0.5" width="31" height="31" rx="6" fill="#131725" stroke="#39405b"/>
+  <g fill="url(#letters)">
+    <rect x="4.75" y="4.75" width="2.15" height="2.15"/>
+    <rect x="7.25" y="4.75" width="2.15" height="2.15"/>
+    <rect x="22.25" y="4.75" width="2.15" height="2.15"/>
+    <rect x="24.75" y="4.75" width="2.15" height="2.15"/>
+    <rect x="4.75" y="7.25" width="2.15" height="2.15"/>
+    <rect x="7.25" y="7.25" width="2.15" height="2.15"/>
+    <rect x="22.25" y="7.25" width="2.15" height="2.15"/>
+    <rect x="24.75" y="7.25" width="2.15" height="2.15"/>
+    <rect x="4.75" y="9.75" width="2.15" height="2.15"/>
+    <rect x="7.25" y="9.75" width="2.15" height="2.15"/>
+    <rect x="22.25" y="9.75" width="2.15" height="2.15"/>
+    <rect x="24.75" y="9.75" width="2.15" height="2.15"/>
+    <rect x="4.75" y="12.25" width="2.15" height="2.15"/>
+    <rect x="7.25" y="12.25" width="2.15" height="2.15"/>
+    <rect x="22.25" y="12.25" width="2.15" height="2.15"/>
+    <rect x="24.75" y="12.25" width="2.15" height="2.15"/>
+    <rect x="4.75" y="14.75" width="2.15" height="2.15"/>
+    <rect x="7.25" y="14.75" width="2.15" height="2.15"/>
+    <rect x="22.25" y="14.75" width="2.15" height="2.15"/>
+    <rect x="24.75" y="14.75" width="2.15" height="2.15"/>
+    <rect x="4.75" y="17.25" width="2.15" height="2.15"/>
+    <rect x="7.25" y="17.25" width="2.15" height="2.15"/>
+    <rect x="14.75" y="17.25" width="2.15" height="2.15"/>
+    <rect x="22.25" y="17.25" width="2.15" height="2.15"/>
+    <rect x="24.75" y="17.25" width="2.15" height="2.15"/>
+    <rect x="4.75" y="19.75" width="2.15" height="2.15"/>
+    <rect x="7.25" y="19.75" width="2.15" height="2.15"/>
+    <rect x="12.25" y="19.75" width="2.15" height="2.15"/>
+    <rect x="14.75" y="19.75" width="2.15" height="2.15"/>
+    <rect x="17.25" y="19.75" width="2.15" height="2.15"/>
+    <rect x="22.25" y="19.75" width="2.15" height="2.15"/>
+    <rect x="24.75" y="19.75" width="2.15" height="2.15"/>
+    <rect x="4.75" y="22.25" width="2.15" height="2.15"/>
+    <rect x="7.25" y="22.25" width="2.15" height="2.15"/>
+    <rect x="9.75" y="22.25" width="2.15" height="2.15"/>
+    <rect x="12.25" y="22.25" width="2.15" height="2.15"/>
+    <rect x="17.25" y="22.25" width="2.15" height="2.15"/>
+    <rect x="19.75" y="22.25" width="2.15" height="2.15"/>
+    <rect x="22.25" y="22.25" width="2.15" height="2.15"/>
+    <rect x="24.75" y="22.25" width="2.15" height="2.15"/>
+    <rect x="7.25" y="24.75" width="2.15" height="2.15"/>
+    <rect x="9.75" y="24.75" width="2.15" height="2.15"/>
+    <rect x="19.75" y="24.75" width="2.15" height="2.15"/>
+    <rect x="22.25" y="24.75" width="2.15" height="2.15"/>
+  </g>
+  <g fill="url(#signal)">
+    <rect x="2.25" y="14.75" width="2.15" height="2.15"/>
+    <rect x="4.75" y="14.75" width="2.15" height="2.15"/>
+    <rect x="7.25" y="12.25" width="2.15" height="2.15"/>
+    <rect x="7.25" y="14.75" width="2.15" height="2.15"/>
+    <rect x="7.25" y="17.25" width="2.15" height="2.15"/>
+    <rect x="9.75" y="9.75" width="2.15" height="2.15"/>
+    <rect x="9.75" y="12.25" width="2.15" height="2.15"/>
+    <rect x="9.75" y="14.75" width="2.15" height="2.15"/>
+    <rect x="9.75" y="17.25" width="2.15" height="2.15"/>
+    <rect x="9.75" y="19.75" width="2.15" height="2.15"/>
+    <rect x="12.25" y="14.75" width="2.15" height="2.15"/>
+    <rect x="14.75" y="12.25" width="2.15" height="2.15"/>
+    <rect x="14.75" y="14.75" width="2.15" height="2.15"/>
+    <rect x="14.75" y="17.25" width="2.15" height="2.15"/>
+    <rect x="17.25" y="14.75" width="2.15" height="2.15"/>
+    <rect x="19.75" y="9.75" width="2.15" height="2.15"/>
+    <rect x="19.75" y="12.25" width="2.15" height="2.15"/>
+    <rect x="19.75" y="14.75" width="2.15" height="2.15"/>
+    <rect x="19.75" y="17.25" width="2.15" height="2.15"/>
+    <rect x="19.75" y="19.75" width="2.15" height="2.15"/>
+    <rect x="22.25" y="12.25" width="2.15" height="2.15"/>
+    <rect x="22.25" y="14.75" width="2.15" height="2.15"/>
+    <rect x="22.25" y="17.25" width="2.15" height="2.15"/>
+    <rect x="24.75" y="14.75" width="2.15" height="2.15"/>
+    <rect x="27.25" y="14.75" width="2.15" height="2.15"/>
   </g>
 </svg>

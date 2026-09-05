@@ -7,9 +7,14 @@ mod privacy;
 #[cfg(test)]
 mod privacy_tests;
 mod rooms;
+mod server_management;
 #[cfg(test)]
 mod text_tests;
 
+use argon2::{
+    Argon2, PasswordHash, PasswordHasher, PasswordVerifier,
+    password_hash::{SaltString, rand_core::OsRng},
+};
 use axum::{
     Json, Router,
     extract::{
@@ -32,37 +37,47 @@ use sqlx::{
     Row, SqlitePool,
     sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteRow},
 };
-use std::{collections::HashMap, str::FromStr, sync::Arc, time::Duration};
-use tokio::sync::{RwLock, broadcast};
+use std::{
+    collections::{HashMap, VecDeque},
+    str::FromStr,
+    sync::Arc,
+    time::{Duration, Instant},
+};
+use tokio::sync::{Mutex, RwLock, Semaphore, broadcast};
 use tower_http::trace::TraceLayer;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 use wisp_protocol::{
-    BootstrapDeviceRequest, ConnectionState, ConversationKind, ConversationView,
-    CreateDirectConversationRequest, CreateInviteRequest, DevSession, DevSessionRequest,
-    DeviceCredential, DeviceInvite, DeviceSession, DeviceSessionRequest, DeviceView, FriendState,
-    HangoutId, HangoutView, JoinFriendRequest, JoinFriendResult, JoinHangoutRequest,
-    JoinSpotRequest, KnockId, KnockRequestView, KnockResponse, LiveKitTokenResponse,
+    AccountInvite, AccountInviteKind, BootstrapDeviceRequest, ConnectionState, ConversationKind,
+    ConversationView, CreateAccountInviteRequest, CreateDirectConversationRequest,
+    CreateInviteRequest, DevSession, DevSessionRequest, DeviceCredential, DeviceInvite,
+    DeviceSession, DeviceSessionRequest, DeviceView, FriendState, HangoutId, HangoutView,
+    JoinFriendRequest, JoinFriendResult, JoinHangoutRequest, JoinSpotRequest, KnockId,
+    KnockRequestView, KnockResponse, LiveKitTokenResponse, LoginRequest,
     MarkConversationReadRequest, Message, PROTOCOL_VERSION, Presence, ProtocolError,
-    RegisterDeviceRequest, RespondKnockRequest, RespondKnockResult, SendMessageRequest,
-    ServerEvent, SetConversationTabRequest, SetPresenceRequest, Snapshot, SpotView, UserId,
-    UserSummary,
+    RegisterAccountRequest, RegisterDeviceRequest, RespondKnockRequest, RespondKnockResult,
+    SendMessageRequest, ServerEvent, SetConversationTabRequest, SetPresenceRequest, Snapshot,
+    SpotView, UserId, UserSummary,
 };
 
-const JARED_ID: &str = "00000000-0000-4000-8000-000000000001";
-const TYLER_ID: &str = "00000000-0000-4000-8000-000000000002";
-const JACK_ID: &str = "00000000-0000-4000-8000-000000000003";
-const CHARLIE_ID: &str = "00000000-0000-4000-8000-000000000004";
+const TEST_OWNER_ID: &str = "00000000-0000-4000-8000-000000000001";
+const TEST_MEMBER_A_ID: &str = "00000000-0000-4000-8000-000000000002";
+const TEST_MEMBER_B_ID: &str = "00000000-0000-4000-8000-000000000003";
+const TEST_MEMBER_C_ID: &str = "00000000-0000-4000-8000-000000000004";
 const CIRCLE_ID: &str = "00000000-0000-4000-8000-000000000010";
 const CIRCLE_CONVERSATION_ID: &str = "00000000-0000-4000-8000-000000000011";
-const PORCH_ID: &str = "00000000-0000-4000-8000-000000000020";
+const TEST_ROOM_ID: &str = "00000000-0000-4000-8000-000000000020";
 const SESSION_TTL_HOURS: i64 = 12;
 const INVITE_TTL_MINUTES: u32 = 30;
 const HANGOUT_MESSAGE_RETENTION_HOURS: i64 = 24;
+const LOGIN_FAILURE_WINDOW: Duration = Duration::from_secs(15 * 60);
+const LOGIN_FAILURE_LIMIT: usize = 8;
+const PASSWORD_WORK_LIMIT: usize = 4;
 
 #[derive(Debug, Clone)]
 pub struct AppConfig {
     pub database_url: String,
+    pub public_url: Option<String>,
     pub livekit_url: String,
     pub livekit_api_key: String,
     pub livekit_api_secret: String,
@@ -78,6 +93,8 @@ pub struct AppState {
     runtime: Arc<RwLock<RuntimeState>>,
     events: broadcast::Sender<ServerEvent>,
     config: Arc<AppConfig>,
+    login_failures: Arc<Mutex<HashMap<String, VecDeque<Instant>>>>,
+    password_work: Arc<Semaphore>,
 }
 
 #[derive(Debug, Default)]
@@ -207,7 +224,9 @@ impl AppState {
             privacy::ensure_ciphertext_storage(&pool).await?;
         }
         cleanup_stale_sessions(&pool).await?;
-        seed_development_users(&pool).await?;
+        if config.allow_dev_sessions {
+            seed_development_users(&pool).await?;
+        }
         cleanup_expired_data(&pool).await?;
         attachments::cleanup(&pool, Utc::now()).await?;
         let (events, _) = broadcast::channel(256);
@@ -216,6 +235,8 @@ impl AppState {
             runtime: Arc::new(RwLock::new(RuntimeState::default())),
             events,
             config: Arc::new(config),
+            login_failures: Arc::new(Mutex::new(HashMap::new())),
+            password_work: Arc::new(Semaphore::new(PASSWORD_WORK_LIMIT)),
         })
     }
 
@@ -255,8 +276,12 @@ impl AppState {
     async fn snapshot(&self, self_id: UserId) -> Result<Snapshot, ApiError> {
         let knocks = self.incoming_knocks(self_id).await;
         let hangouts = load_hangouts(&self.pool, self_id).await?;
-        let users =
-            sqlx::query("SELECT id, display_name FROM users ORDER BY display_name COLLATE NOCASE")
+        let users = sqlx::query(
+            "SELECT u.id,u.display_name FROM users u WHERE u.id=? OR EXISTS(SELECT 1 FROM friendships f WHERE (f.first_user_id=? AND f.second_user_id=u.id) OR (f.second_user_id=? AND f.first_user_id=u.id)) ORDER BY u.display_name COLLATE NOCASE",
+        )
+                .bind(self_id.to_string())
+                .bind(self_id.to_string())
+                .bind(self_id.to_string())
                 .fetch_all(&self.pool)
                 .await
                 .map_err(ApiError::internal)?;
@@ -293,11 +318,32 @@ impl AppState {
         let messages = load_recent_messages(&self.pool, self_id).await?;
         let spots = load_spots(&self.pool, self_id).await?;
         let devices = load_devices(&self.pool, self_id).await?;
+        let server_owner: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM server_identity WHERE owner_user_id=?)",
+        )
+        .bind(self_id.to_string())
+        .fetch_one(&self.pool)
+        .await
+        .map_err(ApiError::internal)?;
+        let server_admin: bool =
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM server_admins WHERE user_id=?)")
+                .bind(self_id.to_string())
+                .fetch_one(&self.pool)
+                .await
+                .map_err(ApiError::internal)?;
+        let server_name: String = sqlx::query_scalar("SELECT name FROM server_identity WHERE id=1")
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(ApiError::internal)?
+            .unwrap_or_else(|| "Wisp server".to_owned());
         Ok(Snapshot {
             chat_encryption_required: self.config.require_chat_e2ee,
+            server_name,
             seq,
             self_state: wisp_protocol::SelfState {
                 user: self_user,
+                server_owner,
+                server_admin,
                 presence: self_runtime.presence,
                 connection: if self_hangout.is_some() {
                     ConnectionState::Connected
@@ -320,6 +366,10 @@ impl AppState {
             spots,
             devices,
             last_invite: None,
+            servers: Vec::new(),
+            selected_server_id: String::new(),
+            voice_server_id: String::new(),
+            server_states: Vec::new(),
         })
     }
 
@@ -429,16 +479,20 @@ async fn authenticate_text_body(
     Ok(next.run(request).await)
 }
 
+#[allow(clippy::too_many_lines)]
 pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/healthz", get(health))
         .route("/v1/dev/session", post(dev_session))
         .route("/v1/sessions", post(device_session))
+        .route("/v1/accounts/login", post(login_account))
+        .route("/v1/accounts/register", post(register_account))
         .route("/v1/devices/bootstrap", post(bootstrap_device))
         .route("/v1/devices/register", post(register_device))
         .route("/v1/devices", get(list_devices))
         .route("/v1/devices/{id}", delete(revoke_device))
         .route("/v1/admin/invites", post(create_invite))
+        .route("/v1/account-invites", post(create_account_invite))
         .route("/v1/snapshot", get(snapshot))
         .route("/v1/events", get(events))
         .route("/v1/presence", post(set_presence))
@@ -450,6 +504,31 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/rooms", post(rooms::create))
         .route("/v1/rooms/invite", post(rooms::invite))
         .route("/v1/rooms/admin", post(rooms::set_admin))
+        .route(
+            "/v1/server/settings",
+            get(server_management::settings).patch(server_management::update_profile),
+        )
+        .route("/v1/server/admins", post(server_management::set_admin))
+        .route(
+            "/v1/server/categories",
+            post(server_management::create_category),
+        )
+        .route(
+            "/v1/server/categories/{id}",
+            patch(server_management::rename_category).delete(server_management::delete_category),
+        )
+        .route(
+            "/v1/server/channels",
+            post(server_management::create_channel),
+        )
+        .route(
+            "/v1/server/channels/{id}",
+            patch(server_management::update_channel).delete(server_management::delete_channel),
+        )
+        .route(
+            "/v1/server/rooms/{id}",
+            patch(server_management::rename_room).delete(server_management::delete_room),
+        )
         .route("/v1/livekit/token", post(livekit_token))
         .route("/v1/e2ee/messages", text_body(post(privacy::send), &state))
         .route("/v1/e2ee/state", get(chat_identity::directory))
@@ -497,6 +576,15 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/v1/conversations/direct", post(create_direct_conversation))
         .route("/v1/conversations/group", post(groups::create))
+        .route(
+            "/v1/conversations/groups/{id}/members",
+            post(groups::add_member),
+        )
+        .route(
+            "/v1/conversations/groups/{id}/members/{user_id}",
+            delete(groups::remove_member),
+        )
+        .route("/v1/conversations/groups/{id}/leave", post(groups::leave))
         .route("/v1/room-invitations", post(invitations::create))
         .route(
             "/v1/room-invitations/{id}/respond",
@@ -569,12 +657,12 @@ async fn create_invite(
     Json(request): Json<CreateInviteRequest>,
 ) -> Result<Json<DeviceInvite>, ApiError> {
     let creator = authenticate_headers(&state, &headers).await?;
-    if creator.to_string() != JARED_ID {
+    let user = find_user(&state.pool, request.profile.trim()).await?;
+    if creator != user.id {
         return Err(ApiError::forbidden(
-            "only the circle administrator can create invites",
+            "device enrollment invites can only be created for your own account",
         ));
     }
-    let user = find_user(&state.pool, request.profile.trim()).await?;
     let id = Uuid::new_v4();
     let code = random_token("wisp-invite");
     let expires_at = Utc::now()
@@ -602,6 +690,258 @@ async fn create_invite(
     }))
 }
 
+fn validate_username(value: &str) -> Result<&str, ApiError> {
+    let value = value.trim();
+    if !(3..=32).contains(&value.chars().count())
+        || !value
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || "._-".contains(character))
+    {
+        return Err(ApiError::bad_request(
+            "invalid_username",
+            "username must contain 3–32 letters, numbers, dots, dashes, or underscores",
+        ));
+    }
+    Ok(value)
+}
+
+fn validate_display_name(value: &str) -> Result<&str, ApiError> {
+    let value = value.trim();
+    if value.is_empty() || value.chars().count() > 80 || value.chars().any(char::is_control) {
+        return Err(ApiError::bad_request(
+            "invalid_display_name",
+            "display name must contain 1–80 printable characters",
+        ));
+    }
+    Ok(value)
+}
+
+fn validate_password(value: &str) -> Result<(), ApiError> {
+    if value.chars().count() < 12 || value.len() > 1024 {
+        return Err(ApiError::bad_request(
+            "invalid_password",
+            "password must contain at least 12 characters",
+        ));
+    }
+    Ok(())
+}
+
+async fn hash_password(password: String) -> Result<String, ApiError> {
+    tokio::task::spawn_blocking(move || {
+        let salt = SaltString::generate(&mut OsRng);
+        Argon2::default()
+            .hash_password(password.as_bytes(), &salt)
+            .map(|hash| hash.to_string())
+            .map_err(ApiError::internal)
+    })
+    .await
+    .map_err(ApiError::internal)?
+}
+
+async fn password_matches(password: String, encoded: String) -> Result<bool, ApiError> {
+    tokio::task::spawn_blocking(move || {
+        let Ok(hash) = PasswordHash::new(&encoded) else {
+            return Ok(false);
+        };
+        Ok(Argon2::default()
+            .verify_password(password.as_bytes(), &hash)
+            .is_ok())
+    })
+    .await
+    .map_err(ApiError::internal)?
+}
+
+fn validate_device_name(value: &str) -> Result<&str, ApiError> {
+    let value = value.trim();
+    if value.is_empty() || value.chars().count() > 80 || value.chars().any(char::is_control) {
+        return Err(ApiError::bad_request(
+            "invalid_device_name",
+            "device name must contain 1–80 printable characters",
+        ));
+    }
+    Ok(value)
+}
+
+async fn create_device(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    user_id: UserId,
+    device_name: &str,
+) -> Result<DeviceCredential, ApiError> {
+    let device_id = Uuid::new_v4();
+    let device_token = random_token("wisp-device");
+    let now = Utc::now().to_rfc3339();
+    sqlx::query(
+        "INSERT INTO devices(id, user_id, name, token_hash, created_at, last_seen_at) VALUES (?, ?, ?, ?, ?, ?)",
+    )
+    .bind(device_id.to_string())
+    .bind(user_id.to_string())
+    .bind(device_name)
+    .bind(token_hash(&device_token))
+    .bind(&now)
+    .bind(&now)
+    .execute(&mut **tx)
+    .await
+    .map_err(ApiError::internal)?;
+    let row = sqlx::query("SELECT display_name FROM users WHERE id = ?")
+        .bind(user_id.to_string())
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(ApiError::internal)?;
+    Ok(DeviceCredential {
+        device_id,
+        device_token,
+        user: UserSummary {
+            id: user_id,
+            display_name: row.get("display_name"),
+        },
+    })
+}
+
+async fn add_friendship(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    left: UserId,
+    right: UserId,
+) -> Result<(), ApiError> {
+    if left == right {
+        return Ok(());
+    }
+    let (first, second) = if left.to_string() < right.to_string() {
+        (left, right)
+    } else {
+        (right, left)
+    };
+    sqlx::query("INSERT OR IGNORE INTO friendships(first_user_id, second_user_id, created_at) VALUES (?, ?, ?)")
+        .bind(first.to_string())
+        .bind(second.to_string())
+        .bind(Utc::now().to_rfc3339())
+        .execute(&mut **tx)
+        .await
+        .map_err(ApiError::internal)?;
+    Ok(())
+}
+
+fn login_rate_key(headers: &HeaderMap, username: &str) -> String {
+    let peer = headers
+        .get("x-forwarded-for")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split(',').next())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("direct");
+    token_hash(&format!("{peer}\n{}", username.to_ascii_lowercase()))
+}
+
+async fn check_login_rate(state: &AppState, key: &str) -> Result<(), ApiError> {
+    let now = Instant::now();
+    let mut failures = state.login_failures.lock().await;
+    let attempts = failures.entry(key.to_owned()).or_default();
+    attempts.retain(|attempt| now.duration_since(*attempt) < LOGIN_FAILURE_WINDOW);
+    if attempts.len() >= LOGIN_FAILURE_LIMIT {
+        return Err(ApiError {
+            status: StatusCode::TOO_MANY_REQUESTS,
+            code: "login_rate_limited",
+            message: "too many sign-in attempts; try again later".into(),
+        });
+    }
+    Ok(())
+}
+
+async fn record_login_failure(state: &AppState, key: &str) {
+    let now = Instant::now();
+    let mut failures = state.login_failures.lock().await;
+    let attempts = failures.entry(key.to_owned()).or_default();
+    attempts.retain(|attempt| now.duration_since(*attempt) < LOGIN_FAILURE_WINDOW);
+    attempts.push_back(now);
+}
+
+async fn clear_login_failures(state: &AppState, key: &str) {
+    state.login_failures.lock().await.remove(key);
+}
+
+async fn queue_encrypted_room_admission(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    conversation_id: &str,
+    user_id: UserId,
+    invited_by: UserId,
+    now: &str,
+) -> Result<(), ApiError> {
+    sqlx::query("INSERT OR IGNORE INTO pending_room_admissions(conversation_id,user_id,invited_by,created_at) VALUES (?,?,?,?)")
+        .bind(conversation_id)
+        .bind(user_id.to_string())
+        .bind(invited_by.to_string())
+        .bind(now)
+        .execute(&mut **tx)
+        .await
+        .map_err(ApiError::internal)?;
+    Ok(())
+}
+
+async fn create_account_invite(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<CreateAccountInviteRequest>,
+) -> Result<Json<AccountInvite>, ApiError> {
+    let creator = authenticate_headers(&state, &headers).await?;
+    let conversation_id = match request.kind {
+        AccountInviteKind::Friend => None,
+        AccountInviteKind::Room => {
+            let id = request.conversation_id.as_deref().ok_or_else(|| {
+                ApiError::bad_request("room_required", "room invitations require a room")
+            })?;
+            let role: Option<String> = sqlx::query_scalar(
+                "SELECT cm.role FROM conversation_members cm JOIN conversations c ON c.id=cm.conversation_id WHERE cm.user_id=? AND cm.conversation_id=? AND c.spot_id IS NOT NULL",
+            )
+            .bind(creator.to_string())
+            .bind(id)
+            .fetch_optional(&state.pool)
+            .await
+            .map_err(ApiError::internal)?;
+            if !matches!(role.as_deref(), Some("host" | "admin")) {
+                return Err(ApiError::forbidden(
+                    "only room owners and admins can create room invitations",
+                ));
+            }
+            Some(id.to_owned())
+        }
+    };
+    let id = Uuid::new_v4();
+    let code = random_token("wisp-account-invite");
+    let expires_at = Utc::now()
+        + ChronoDuration::minutes(
+            i64::from(request.expires_in_minutes.unwrap_or(INVITE_TTL_MINUTES)).clamp(1, 24 * 60),
+        );
+    let kind = match request.kind {
+        AccountInviteKind::Friend => "friend",
+        AccountInviteKind::Room => "room",
+    };
+    sqlx::query("INSERT INTO account_invites(id, code_hash, created_by, kind, conversation_id, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+        .bind(id.to_string())
+        .bind(token_hash(&code))
+        .bind(creator.to_string())
+        .bind(kind)
+        .bind(conversation_id.as_deref())
+        .bind(Utc::now().to_rfc3339())
+        .bind(expires_at.to_rfc3339())
+        .execute(&state.pool)
+        .await
+        .map_err(ApiError::internal)?;
+    let uri = state.config.public_url.as_ref().map(|server| {
+        let payload = json!({"v":1,"server":server,"token":&code,"kind":kind});
+        format!(
+            "wisp-invite:{}",
+            URL_SAFE_NO_PAD.encode(payload.to_string())
+        )
+    });
+    Ok(Json(AccountInvite {
+        id,
+        code,
+        kind: request.kind,
+        conversation_id,
+        expires_at,
+        uri,
+    }))
+}
+
 async fn bootstrap_device(
     State(state): State<AppState>,
     Json(request): Json<BootstrapDeviceRequest>,
@@ -615,47 +955,222 @@ async fn bootstrap_device(
     if token_hash(expected) != token_hash(&request.bootstrap_token) {
         return Err(ApiError::unauthorized("bootstrap token is invalid"));
     }
-    let user = find_user(&state.pool, request.profile.trim()).await?;
-    if user.id.to_string() != JARED_ID {
-        return Err(ApiError::forbidden(
-            "only the administrator profile may bootstrap",
-        ));
-    }
-    let name = request.device_name.trim();
-    if name.is_empty() || name.chars().count() > 80 {
-        return Err(ApiError::bad_request(
-            "invalid_device_name",
-            "device name must contain 1–80 characters",
-        ));
-    }
-    let device_id = Uuid::new_v4();
-    let device_token = random_token("wisp-device");
+    let username = validate_username(&request.username)?;
+    let display_name = validate_display_name(&request.display_name)?;
+    validate_password(&request.password)?;
+    let device_name = validate_device_name(&request.device_name)?;
+    let password_hash = hash_password(request.password.clone()).await?;
+    let user_id = Uuid::new_v4();
     let now = Utc::now().to_rfc3339();
-    let inserted = sqlx::query(
-        "INSERT INTO devices(id, user_id, name, token_hash, created_at, last_seen_at) SELECT ?, ?, ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM devices WHERE user_id = ? AND revoked_at IS NULL)",
-    )
-    .bind(device_id.to_string())
-    .bind(user.id.to_string())
-    .bind(name)
-    .bind(token_hash(&device_token))
-    .bind(&now)
-    .bind(&now)
-    .bind(user.id.to_string())
-    .execute(&state.pool)
-    .await
-    .map_err(ApiError::internal)?;
+    let mut tx = state.pool.begin().await.map_err(ApiError::internal)?;
+    sqlx::query("INSERT INTO users(id, display_name, username, password_hash, created_at) VALUES (?, ?, ?, ?, ?)")
+        .bind(user_id.to_string())
+        .bind(display_name)
+        .bind(username)
+        .bind(password_hash)
+        .bind(&now)
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| {
+            if error.as_database_error().is_some_and(sqlx::error::DatabaseError::is_unique_violation) {
+                ApiError::conflict("account_exists", "username or display name is already in use")
+            } else {
+                ApiError::internal(error)
+            }
+        })?;
+    let inserted = sqlx::query("INSERT INTO server_identity(id, owner_user_id) SELECT 1, ? WHERE NOT EXISTS (SELECT 1 FROM server_identity)")
+        .bind(user_id.to_string())
+        .execute(&mut *tx)
+        .await
+        .map_err(ApiError::internal)?;
     if inserted.rows_affected() != 1 {
         return Err(ApiError::conflict(
             "already_bootstrapped",
-            "an administrator device is already registered",
+            "this server already has an owner",
         ));
     }
-    info!(%device_id, user_id = %user.id, "administrator device bootstrapped");
-    Ok(Json(DeviceCredential {
-        device_id,
-        device_token,
-        user,
-    }))
+    let credential = create_device(&mut tx, user_id, device_name).await?;
+    tx.commit().await.map_err(ApiError::internal)?;
+    info!(device_id = %credential.device_id, user_id = %user_id, "server owner bootstrapped");
+    Ok(Json(credential))
+}
+
+async fn login_account(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<LoginRequest>,
+) -> Result<Json<DeviceCredential>, ApiError> {
+    require_protocol(request.protocol_version)?;
+    let username = validate_username(&request.username)?;
+    let device_name = validate_device_name(&request.device_name)?;
+    let rate_key = login_rate_key(&headers, username);
+    check_login_rate(&state, &rate_key).await?;
+    let _password_permit = state
+        .password_work
+        .acquire()
+        .await
+        .map_err(ApiError::internal)?;
+    let row = sqlx::query("SELECT id, password_hash FROM users WHERE username=? COLLATE NOCASE")
+        .bind(username)
+        .fetch_optional(&state.pool)
+        .await
+        .map_err(ApiError::internal)?;
+    let Some(row) = row else {
+        // Run one password hash even for unknown accounts to reduce username
+        // discovery through response timing.
+        let _ = hash_password(request.password).await?;
+        record_login_failure(&state, &rate_key).await;
+        return Err(ApiError::unauthorized("username or password is incorrect"));
+    };
+    let (user_id, encoded) = (
+        parse_uuid(&row.get::<String, _>("id"))?,
+        row.get::<Option<String>, _>("password_hash")
+            .unwrap_or_default(),
+    );
+    if !password_matches(request.password, encoded).await? {
+        record_login_failure(&state, &rate_key).await;
+        return Err(ApiError::unauthorized("username or password is incorrect"));
+    }
+    clear_login_failures(&state, &rate_key).await;
+    let mut tx = state.pool.begin().await.map_err(ApiError::internal)?;
+    if let Some(code) = request.invite_code.as_deref() {
+        let now = Utc::now();
+        let invite = sqlx::query("SELECT id,created_by,kind,conversation_id FROM account_invites WHERE code_hash=? AND used_at IS NULL AND expires_at>?")
+            .bind(token_hash(code))
+            .bind(now.to_rfc3339())
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(ApiError::internal)?
+            .ok_or_else(|| ApiError::bad_request("invalid_invite", "invite is invalid, expired, or already used"))?;
+        let invite_id: String = invite.get("id");
+        let creator = parse_uuid(&invite.get::<String, _>("created_by"))?;
+        add_friendship(&mut tx, creator, user_id).await?;
+        if invite.get::<String, _>("kind") == "room"
+            && let Some(room) = invite.get::<Option<String>, _>("conversation_id")
+        {
+            let encrypted: bool = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM chat_rosters WHERE conversation_id=?)",
+            )
+            .bind(&room)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(ApiError::internal)?;
+            if encrypted {
+                queue_encrypted_room_admission(&mut tx, &room, user_id, creator, &now.to_rfc3339())
+                    .await?;
+            } else {
+                sqlx::query("INSERT OR IGNORE INTO conversation_members(conversation_id,user_id,joined_at,role) VALUES (?, ?, ?, 'member')")
+                    .bind(room)
+                    .bind(user_id.to_string())
+                    .bind(now.to_rfc3339())
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(ApiError::internal)?;
+            }
+        }
+        sqlx::query(
+            "UPDATE account_invites SET used_at=?,used_by=? WHERE id=? AND used_at IS NULL",
+        )
+        .bind(now.to_rfc3339())
+        .bind(user_id.to_string())
+        .bind(invite_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(ApiError::internal)?;
+    }
+    let credential = create_device(&mut tx, user_id, device_name).await?;
+    tx.commit().await.map_err(ApiError::internal)?;
+    if request.invite_code.is_some() {
+        state
+            .emit("friendship_changed", json!({"changed":true}))
+            .await;
+    }
+    info!(device_id = %credential.device_id, user_id = %user_id, "account signed in on a new device");
+    Ok(Json(credential))
+}
+
+async fn register_account(
+    State(state): State<AppState>,
+    Json(request): Json<RegisterAccountRequest>,
+) -> Result<Json<DeviceCredential>, ApiError> {
+    require_protocol(request.protocol_version)?;
+    let username = validate_username(&request.username)?;
+    let display_name = validate_display_name(&request.display_name)?;
+    validate_password(&request.password)?;
+    let device_name = validate_device_name(&request.device_name)?;
+    let password_hash = hash_password(request.password.clone()).await?;
+    let now = Utc::now();
+    let mut tx = state.pool.begin().await.map_err(ApiError::internal)?;
+    let invite = sqlx::query("SELECT id, created_by, kind, conversation_id FROM account_invites WHERE code_hash=? AND used_at IS NULL AND expires_at>?")
+        .bind(token_hash(&request.invite_code))
+        .bind(now.to_rfc3339())
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(ApiError::internal)?
+        .ok_or_else(|| ApiError::bad_request("invalid_invite", "invite is invalid, expired, or already used"))?;
+    let invite_id: String = invite.get("id");
+    let creator = parse_uuid(&invite.get::<String, _>("created_by"))?;
+    let kind: String = invite.get("kind");
+    let conversation_id: Option<String> = invite.get("conversation_id");
+    let user_id = Uuid::new_v4();
+    sqlx::query("INSERT INTO users(id, display_name, username, password_hash, created_at) VALUES (?, ?, ?, ?, ?)")
+        .bind(user_id.to_string())
+        .bind(display_name)
+        .bind(username)
+        .bind(password_hash)
+        .bind(now.to_rfc3339())
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| {
+            if error.as_database_error().is_some_and(sqlx::error::DatabaseError::is_unique_violation) {
+                ApiError::conflict("account_exists", "username or display name is already in use")
+            } else {
+                ApiError::internal(error)
+            }
+        })?;
+    add_friendship(&mut tx, creator, user_id).await?;
+    if kind == "room" {
+        let room = conversation_id
+            .as_deref()
+            .ok_or_else(|| ApiError::internal("room invite has no room"))?;
+        let encrypted: bool =
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM chat_rosters WHERE conversation_id=?)")
+                .bind(room)
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(ApiError::internal)?;
+        if encrypted {
+            queue_encrypted_room_admission(&mut tx, room, user_id, creator, &now.to_rfc3339())
+                .await?;
+        } else {
+            sqlx::query("INSERT OR IGNORE INTO conversation_members(conversation_id,user_id,joined_at,role) VALUES (?, ?, ?, 'member')")
+                .bind(room)
+                .bind(user_id.to_string())
+                .bind(now.to_rfc3339())
+                .execute(&mut *tx)
+                .await
+                .map_err(ApiError::internal)?;
+        }
+    }
+    let consumed = sqlx::query(
+        "UPDATE account_invites SET used_at=?, used_by=? WHERE id=? AND used_at IS NULL",
+    )
+    .bind(now.to_rfc3339())
+    .bind(user_id.to_string())
+    .bind(&invite_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(ApiError::internal)?;
+    if consumed.rows_affected() != 1 {
+        return Err(ApiError::conflict("invite_used", "invite was already used"));
+    }
+    let credential = create_device(&mut tx, user_id, device_name).await?;
+    tx.commit().await.map_err(ApiError::internal)?;
+    state
+        .emit("friendship_changed", json!({"changed":true}))
+        .await;
+    info!(device_id = %credential.device_id, user_id = %user_id, "account registered from invite");
+    Ok(Json(credential))
 }
 
 async fn register_device(
@@ -1579,6 +2094,7 @@ async fn create_direct_conversation(
             "choose a friend to message",
         ));
     }
+    ensure_friendship(&state.pool, self_id, friend.id).await?;
     let conversation_id = find_or_create_direct(&state.pool, self_id, friend.id).await?;
     update_conversation_tab(&state.pool, self_id, &conversation_id, false).await?;
     let conversation = load_conversation(&state.pool, self_id, &conversation_id).await?;
@@ -1804,10 +2320,10 @@ async fn seed_development_users(pool: &SqlitePool) -> anyhow::Result<()> {
         .execute(&mut *tx)
         .await?;
     for (id, display_name) in [
-        (JARED_ID, "Jared"),
-        (TYLER_ID, "Tyler"),
-        (JACK_ID, "Jack"),
-        (CHARLIE_ID, "Charlie"),
+        (TEST_OWNER_ID, "Owner"),
+        (TEST_MEMBER_A_ID, "MemberA"),
+        (TEST_MEMBER_B_ID, "MemberB"),
+        (TEST_MEMBER_C_ID, "MemberC"),
     ] {
         sqlx::query("INSERT OR IGNORE INTO users(id, display_name) VALUES (?, ?)")
             .bind(id)
@@ -1827,14 +2343,30 @@ async fn seed_development_users(pool: &SqlitePool) -> anyhow::Result<()> {
             .execute(&mut *tx)
             .await?;
     }
-    sqlx::query("INSERT OR IGNORE INTO spots(id, name, created_at) VALUES (?, 'Porch', ?)")
-        .bind(PORCH_ID)
+    let fixture_users = [
+        TEST_OWNER_ID,
+        TEST_MEMBER_A_ID,
+        TEST_MEMBER_B_ID,
+        TEST_MEMBER_C_ID,
+    ];
+    for (index, left) in fixture_users.iter().enumerate() {
+        for right in fixture_users.iter().skip(index + 1) {
+            sqlx::query("INSERT OR IGNORE INTO friendships(first_user_id,second_user_id,created_at) VALUES (?,?,?)")
+                .bind(left)
+                .bind(right)
+                .bind(Utc::now().to_rfc3339())
+                .execute(&mut *tx)
+                .await?;
+        }
+    }
+    sqlx::query("INSERT OR IGNORE INTO spots(id, name, created_at) VALUES (?, 'TestRoom', ?)")
+        .bind(TEST_ROOM_ID)
         .bind(Utc::now().to_rfc3339())
         .execute(&mut *tx)
         .await?;
-    ensure_spot_conversation(&mut tx, PORCH_ID, "Porch").await?;
+    ensure_spot_conversation(&mut tx, TEST_ROOM_ID, "TestRoom").await?;
     sqlx::query("UPDATE conversation_members SET role = CASE WHEN conversation_id = ? THEN 'host' ELSE 'admin' END WHERE user_id = ? AND conversation_id IN (?, ?) AND NOT EXISTS(SELECT 1 FROM chat_rosters cr WHERE cr.conversation_id=conversation_members.conversation_id)")
-        .bind(format!("spot:{PORCH_ID}")).bind(JARED_ID).bind(format!("spot:{PORCH_ID}")).bind(CIRCLE_CONVERSATION_ID)
+        .bind(format!("spot:{TEST_ROOM_ID}")).bind(TEST_OWNER_ID).bind(format!("spot:{TEST_ROOM_ID}")).bind(CIRCLE_CONVERSATION_ID)
         .execute(&mut *tx).await?;
     tx.commit().await?;
     info!("development profiles ready");
@@ -2156,6 +2688,7 @@ async fn load_recent_messages(
     rows.iter().map(message_from_row).collect()
 }
 
+#[allow(clippy::too_many_lines)]
 async fn load_conversation(
     pool: &SqlitePool,
     user_id: UserId,
@@ -2218,6 +2751,22 @@ async fn load_conversation(
     .map_err(ApiError::internal)?;
     let stored_label: String = row.get("label");
     let spot_id: Option<String> = row.get("spot_id");
+    let channel: Option<(Option<String>, Option<String>)> = sqlx::query_as(
+        "SELECT sc.category_id,cc.name FROM server_channels sc LEFT JOIN channel_categories cc ON cc.id=sc.category_id WHERE sc.conversation_id=?",
+    )
+    .bind(id)
+    .fetch_optional(pool)
+    .await
+    .map_err(ApiError::internal)?;
+    let room_category: Option<(Option<String>, Option<String>)> = if let Some(spot_id) = &spot_id {
+        sqlx::query_as("SELECT s.category_id,cc.name FROM spots s LEFT JOIN channel_categories cc ON cc.id=s.category_id WHERE s.id=?")
+            .bind(spot_id)
+            .fetch_optional(pool)
+            .await
+            .map_err(ApiError::internal)?
+    } else {
+        None
+    };
     let label = if kind == ConversationKind::Direct {
         members
             .iter()
@@ -2246,6 +2795,12 @@ async fn load_conversation(
         .into_iter()
         .map(|(user, role)| Ok((parse_uuid(&user)?, role)))
         .collect::<Result<_, ApiError>>()?,
+        server_channel: channel.is_some(),
+        category_id: channel
+            .as_ref()
+            .or(room_category.as_ref())
+            .and_then(|value| value.0.clone()),
+        category_name: channel.or(room_category).and_then(|value| value.1),
         can_clear_for_everyone: can_clear_room(pool, user_id, id).await?,
         kind,
         label,
@@ -2262,7 +2817,7 @@ async fn load_conversation(
 }
 
 async fn load_spots(pool: &SqlitePool, user: UserId) -> Result<Vec<SpotView>, ApiError> {
-    let rows = sqlx::query("SELECT s.id, s.name FROM spots s JOIN conversations c ON c.spot_id = s.id JOIN conversation_members cm ON cm.conversation_id = c.id WHERE cm.user_id = ? ORDER BY s.name COLLATE NOCASE")
+    let rows = sqlx::query("SELECT s.id,s.name,s.category_id,cc.name category_name FROM spots s LEFT JOIN channel_categories cc ON cc.id=s.category_id JOIN conversations c ON c.spot_id=s.id JOIN conversation_members cm ON cm.conversation_id=c.id WHERE cm.user_id=? ORDER BY COALESCE(cc.position,9223372036854775807),s.name COLLATE NOCASE")
         .bind(user.to_string())
         .fetch_all(pool)
         .await
@@ -2301,6 +2856,8 @@ async fn load_spots(pool: &SqlitePool, user: UserId) -> Result<Vec<SpotView>, Ap
         spots.push(SpotView {
             id,
             name: row.get("name"),
+            category_id: row.get("category_id"),
+            category_name: row.get("category_name"),
             active_hangout_id,
             members,
         });
@@ -2327,6 +2884,26 @@ async fn find_user(pool: &SqlitePool, selector: &str) -> Result<UserSummary, Api
         id: parse_uuid(&row.get::<String, _>("id"))?,
         display_name: row.get("display_name"),
     })
+}
+
+async fn ensure_friendship(pool: &SqlitePool, left: UserId, right: UserId) -> Result<(), ApiError> {
+    let exists: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM friendships WHERE (first_user_id=? AND second_user_id=?) OR (first_user_id=? AND second_user_id=?))",
+    )
+    .bind(left.to_string())
+    .bind(right.to_string())
+    .bind(right.to_string())
+    .bind(left.to_string())
+    .fetch_one(pool)
+    .await
+    .map_err(ApiError::internal)?;
+    if exists {
+        Ok(())
+    } else {
+        Err(ApiError::forbidden(
+            "this account is not in your friends list",
+        ))
+    }
 }
 
 async fn active_hangout_for(
@@ -2553,6 +3130,7 @@ mod tests {
     pub(super) fn test_config() -> AppConfig {
         AppConfig {
             database_url: "sqlite::memory:".into(),
+            public_url: Some("https://wisp.invalid".into()),
             livekit_url: "ws://127.0.0.1:7880".into(),
             livekit_api_key: "devkey".into(),
             livekit_api_secret: "wisp-local-development-secret-32".into(),
@@ -2571,32 +3149,32 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(count, 4);
-        let jared = find_user(&state.pool, "Jared").await.unwrap();
-        assert_eq!(jared.id.to_string(), JARED_ID);
-        let conversations = load_conversations(&state.pool, jared.id).await.unwrap();
+        let owner = find_user(&state.pool, "Owner").await.unwrap();
+        assert_eq!(owner.id.to_string(), TEST_OWNER_ID);
+        let conversations = load_conversations(&state.pool, owner.id).await.unwrap();
         assert!(conversations.iter().any(|conversation| {
             conversation.kind == ConversationKind::Circle && conversation.label == "Friends"
         }));
-        let porch = conversations
+        let test_room = conversations
             .iter()
-            .find(|conversation| conversation.label == "Porch")
-            .expect("Porch conversation");
-        assert_eq!(porch.id, format!("spot:{PORCH_ID}"));
-        assert_eq!(porch.spot_id.as_deref(), Some(PORCH_ID));
-        assert_eq!(porch.members.len(), 4);
-        let spots = load_spots(&state.pool, Uuid::parse_str(JARED_ID).unwrap())
+            .find(|conversation| conversation.label == "TestRoom")
+            .expect("TestRoom conversation");
+        assert_eq!(test_room.id, format!("spot:{TEST_ROOM_ID}"));
+        assert_eq!(test_room.spot_id.as_deref(), Some(TEST_ROOM_ID));
+        assert_eq!(test_room.members.len(), 4);
+        let spots = load_spots(&state.pool, Uuid::parse_str(TEST_OWNER_ID).unwrap())
             .await
             .unwrap();
         assert_eq!(spots.len(), 1);
-        assert_eq!(spots[0].name, "Porch");
+        assert_eq!(spots[0].name, "TestRoom");
         assert!(spots[0].active_hangout_id.is_none());
     }
 
     #[test]
     fn livekit_token_has_three_segments() {
         let user = UserSummary {
-            id: Uuid::parse_str(JARED_ID).unwrap(),
-            display_name: "Jared".into(),
+            id: Uuid::parse_str(TEST_OWNER_ID).unwrap(),
+            display_name: "Owner".into(),
         };
         let token = issue_livekit_token(&test_config(), &user, "wisp-test").unwrap();
         assert_eq!(token.split('.').count(), 3);
@@ -2623,31 +3201,246 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::too_many_lines)]
+    async fn production_bootstrap_creates_only_the_owner_and_invites_create_friends() {
+        let mut config = test_config();
+        config.allow_dev_sessions = false;
+        let state = AppState::new(config).await.unwrap();
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM users")
+                .fetch_one(&state.pool)
+                .await
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM spots")
+                .fetch_one(&state.pool)
+                .await
+                .unwrap(),
+            0
+        );
+
+        let owner = bootstrap_device(
+            State(state.clone()),
+            Json(BootstrapDeviceRequest {
+                bootstrap_token: "test-bootstrap-token".into(),
+                username: "owner".into(),
+                display_name: "Owner".into(),
+                password: "correct horse battery staple".into(),
+                device_name: "Owner desktop".into(),
+                protocol_version: PROTOCOL_VERSION,
+            }),
+        )
+        .await
+        .unwrap()
+        .0;
+        let stored_hash: String = sqlx::query_scalar("SELECT password_hash FROM users WHERE id=?")
+            .bind(owner.user.id.to_string())
+            .fetch_one(&state.pool)
+            .await
+            .unwrap();
+        assert!(!stored_hash.contains("correct horse battery staple"));
+        assert!(
+            state
+                .snapshot(owner.user.id)
+                .await
+                .unwrap()
+                .self_state
+                .server_owner
+        );
+
+        let owner_session = device_session(
+            State(state.clone()),
+            Json(DeviceSessionRequest {
+                device_id: owner.device_id,
+                device_token: owner.device_token,
+                protocol_version: PROTOCOL_VERSION,
+            }),
+        )
+        .await
+        .unwrap()
+        .0;
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "authorization",
+            format!("Bearer {}", owner_session.token).parse().unwrap(),
+        );
+        let invite = create_account_invite(
+            State(state.clone()),
+            headers.clone(),
+            Json(CreateAccountInviteRequest {
+                kind: AccountInviteKind::Friend,
+                conversation_id: None,
+                expires_in_minutes: Some(30),
+            }),
+        )
+        .await
+        .unwrap()
+        .0;
+        let member = register_account(
+            State(state.clone()),
+            Json(RegisterAccountRequest {
+                invite_code: invite.code,
+                username: "member".into(),
+                display_name: "Member".into(),
+                password: "another correct horse password".into(),
+                device_name: "Member desktop".into(),
+                protocol_version: PROTOCOL_VERSION,
+            }),
+        )
+        .await
+        .unwrap()
+        .0;
+        assert!(
+            ensure_friendship(&state.pool, owner.user.id, member.user.id)
+                .await
+                .is_ok()
+        );
+        let owner_view = state.snapshot(owner.user.id).await.unwrap();
+        assert_eq!(owner_view.friends.len(), 1);
+        assert_eq!(owner_view.friends[0].user.display_name, "Member");
+
+        let spot_id = Uuid::new_v4().to_string();
+        let room_id = format!("spot:{spot_id}");
+        let now = Utc::now().to_rfc3339();
+        sqlx::query(
+            "INSERT INTO spots(id,name,created_at,private) VALUES (?, 'Encrypted room', ?, 1)",
+        )
+        .bind(&spot_id)
+        .bind(&now)
+        .execute(&state.pool)
+        .await
+        .unwrap();
+        sqlx::query("INSERT INTO conversations(id,kind,label,spot_id,created_at) VALUES (?, 'hangout', 'Encrypted room', ?, ?)")
+            .bind(&room_id)
+            .bind(&spot_id)
+            .bind(&now)
+            .execute(&state.pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO conversation_members(conversation_id,user_id,joined_at,role) VALUES (?, ?, ?, 'host')")
+            .bind(&room_id)
+            .bind(owner.user.id.to_string())
+            .bind(&now)
+            .execute(&state.pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO chat_rosters(conversation_id,revision,signed_roster) VALUES (?,0,'{}')",
+        )
+        .bind(&room_id)
+        .execute(&state.pool)
+        .await
+        .unwrap();
+        let room_invite = create_account_invite(
+            State(state.clone()),
+            headers,
+            Json(CreateAccountInviteRequest {
+                kind: AccountInviteKind::Room,
+                conversation_id: Some(room_id.clone()),
+                expires_in_minutes: Some(30),
+            }),
+        )
+        .await
+        .unwrap()
+        .0;
+        let pending_member = register_account(
+            State(state.clone()),
+            Json(RegisterAccountRequest {
+                invite_code: room_invite.code,
+                username: "pending-member".into(),
+                display_name: "Pending Member".into(),
+                password: "third correct horse password".into(),
+                device_name: "Pending member desktop".into(),
+                protocol_version: PROTOCOL_VERSION,
+            }),
+        )
+        .await
+        .unwrap()
+        .0;
+        let pending: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM pending_room_admissions WHERE conversation_id=? AND user_id=?",
+        )
+        .bind(&room_id)
+        .bind(pending_member.user.id.to_string())
+        .fetch_one(&state.pool)
+        .await
+        .unwrap();
+        assert_eq!(pending, 1);
+        assert!(
+            ensure_conversation_member(&state.pool, &room_id, pending_member.user.id)
+                .await
+                .is_err()
+        );
+
+        let signed_in = login_account(
+            State(state),
+            HeaderMap::new(),
+            Json(LoginRequest {
+                username: "member".into(),
+                password: "another correct horse password".into(),
+                device_name: "Member second device".into(),
+                protocol_version: PROTOCOL_VERSION,
+                invite_code: None,
+            }),
+        )
+        .await
+        .unwrap()
+        .0;
+        assert_eq!(signed_in.user.id, member.user.id);
+    }
+
+    #[tokio::test]
+    async fn repeated_login_failures_are_throttled_per_peer_and_account() {
+        let state = AppState::new(test_config()).await.unwrap();
+        let mut headers = HeaderMap::new();
+        headers.insert("x-forwarded-for", "192.0.2.10".parse().unwrap());
+        let key = login_rate_key(&headers, "example-user");
+        for _ in 0..LOGIN_FAILURE_LIMIT {
+            record_login_failure(&state, &key).await;
+        }
+        let error = check_login_rate(&state, &key).await.unwrap_err();
+        assert_eq!(error.status, StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(error.code, "login_rate_limited");
+
+        let other_peer = HeaderMap::from_iter([(
+            "x-forwarded-for".parse().unwrap(),
+            "192.0.2.11".parse().unwrap(),
+        )]);
+        assert!(
+            check_login_rate(&state, &login_rate_key(&other_peer, "example-user"))
+                .await
+                .is_ok()
+        );
+    }
+
+    #[tokio::test]
     async fn direct_conversations_are_scoped_to_their_members() {
         let state = AppState::new(test_config()).await.unwrap();
-        let jared = find_user(&state.pool, "Jared").await.unwrap();
-        let tyler = find_user(&state.pool, "Tyler").await.unwrap();
-        let charlie = find_user(&state.pool, "Charlie").await.unwrap();
-        let id = find_or_create_direct(&state.pool, jared.id, tyler.id)
+        let owner = find_user(&state.pool, "Owner").await.unwrap();
+        let member_a = find_user(&state.pool, "MemberA").await.unwrap();
+        let member_c = find_user(&state.pool, "MemberC").await.unwrap();
+        let id = find_or_create_direct(&state.pool, owner.id, member_a.id)
             .await
             .unwrap();
         assert!(
-            ensure_conversation_member(&state.pool, &id, jared.id)
+            ensure_conversation_member(&state.pool, &id, owner.id)
                 .await
                 .is_ok()
         );
         assert!(
-            ensure_conversation_member(&state.pool, &id, tyler.id)
+            ensure_conversation_member(&state.pool, &id, member_a.id)
                 .await
                 .is_ok()
         );
         assert!(
-            ensure_conversation_member(&state.pool, &id, charlie.id)
+            ensure_conversation_member(&state.pool, &id, member_c.id)
                 .await
                 .is_err()
         );
         assert_eq!(
-            find_or_create_direct(&state.pool, tyler.id, jared.id)
+            find_or_create_direct(&state.pool, member_a.id, owner.id)
                 .await
                 .unwrap(),
             id
@@ -2663,9 +3456,9 @@ mod tests {
     #[tokio::test]
     async fn closed_tabs_keep_history_and_new_dms_reopen_them() {
         let state = AppState::new(test_config()).await.unwrap();
-        let jared = Uuid::parse_str(JARED_ID).unwrap();
-        let tyler = Uuid::parse_str(TYLER_ID).unwrap();
-        let id = find_or_create_direct(&state.pool, jared, tyler)
+        let owner = Uuid::parse_str(TEST_OWNER_ID).unwrap();
+        let member_a = Uuid::parse_str(TEST_MEMBER_A_ID).unwrap();
+        let id = find_or_create_direct(&state.pool, owner, member_a)
             .await
             .unwrap();
         let post = || SendMessageRequest {
@@ -2674,26 +3467,30 @@ mod tests {
             payload: json!("hello"),
             encryption_version: 0,
         };
-        let _ = send_message(State(state.clone()), chat_headers(JARED_ID), Json(post()))
-            .await
-            .unwrap();
-        update_conversation_tab(&state.pool, tyler, &id, true)
+        let _ = send_message(
+            State(state.clone()),
+            chat_headers(TEST_OWNER_ID),
+            Json(post()),
+        )
+        .await
+        .unwrap();
+        update_conversation_tab(&state.pool, member_a, &id, true)
             .await
             .unwrap();
         assert!(
-            load_conversation(&state.pool, tyler, &id)
+            load_conversation(&state.pool, member_a, &id)
                 .await
                 .unwrap()
                 .tab_closed
         );
         assert!(
-            !load_conversation(&state.pool, jared, &id)
+            !load_conversation(&state.pool, owner, &id)
                 .await
                 .unwrap()
                 .tab_closed
         );
         assert_eq!(
-            load_recent_messages(&state.pool, tyler)
+            load_recent_messages(&state.pool, member_a)
                 .await
                 .unwrap()
                 .len(),
@@ -2702,9 +3499,9 @@ mod tests {
         // Explicit reopen through a friend uses the same saved DM, not a new one.
         let reopened = create_direct_conversation(
             State(state.clone()),
-            chat_headers(TYLER_ID),
+            chat_headers(TEST_MEMBER_A_ID),
             Json(CreateDirectConversationRequest {
-                friend: "Jared".into(),
+                friend: "Owner".into(),
             }),
         )
         .await
@@ -2712,20 +3509,24 @@ mod tests {
         .0;
         assert_eq!(reopened.id, id);
         assert!(!reopened.tab_closed);
-        update_conversation_tab(&state.pool, tyler, &id, true)
+        update_conversation_tab(&state.pool, member_a, &id, true)
             .await
             .unwrap();
-        let _ = send_message(State(state.clone()), chat_headers(JARED_ID), Json(post()))
-            .await
-            .unwrap();
+        let _ = send_message(
+            State(state.clone()),
+            chat_headers(TEST_OWNER_ID),
+            Json(post()),
+        )
+        .await
+        .unwrap();
         assert!(
-            !load_conversation(&state.pool, tyler, &id)
+            !load_conversation(&state.pool, member_a, &id)
                 .await
                 .unwrap()
                 .tab_closed
         );
         assert_eq!(
-            load_recent_messages(&state.pool, tyler)
+            load_recent_messages(&state.pool, member_a)
                 .await
                 .unwrap()
                 .len(),
@@ -2737,10 +3538,10 @@ mod tests {
     #[allow(clippy::too_many_lines)]
     async fn image_messages_and_history_clearing_are_private_to_each_member() {
         let state = AppState::new(test_config()).await.unwrap();
-        let jared = Uuid::parse_str(JARED_ID).unwrap();
-        let tyler = Uuid::parse_str(TYLER_ID).unwrap();
-        let charlie = Uuid::parse_str(CHARLIE_ID).unwrap();
-        let id = find_or_create_direct(&state.pool, jared, tyler)
+        let owner = Uuid::parse_str(TEST_OWNER_ID).unwrap();
+        let member_a = Uuid::parse_str(TEST_MEMBER_A_ID).unwrap();
+        let member_c = Uuid::parse_str(TEST_MEMBER_C_ID).unwrap();
+        let id = find_or_create_direct(&state.pool, owner, member_a)
             .await
             .unwrap();
         let mut bytes = std::io::Cursor::new(Vec::new());
@@ -2755,23 +3556,27 @@ mod tests {
         assert!(
             send_image_message(
                 State(state.clone()),
-                chat_headers(CHARLIE_ID),
+                chat_headers(TEST_MEMBER_C_ID),
                 Json(request.clone())
             )
             .await
             .is_err()
         );
-        let sent = send_image_message(State(state.clone()), chat_headers(JARED_ID), Json(request))
-            .await
-            .unwrap()
-            .0;
+        let sent = send_image_message(
+            State(state.clone()),
+            chat_headers(TEST_OWNER_ID),
+            Json(request),
+        )
+        .await
+        .unwrap()
+        .0;
         assert_eq!(sent.content_type, "image/png");
         assert_eq!(sent.payload["width"], 4);
         assert_eq!(sent.payload["height"], 3);
         assert!(sent.payload.get("png_base64").is_none());
         let _ = edit_message(
             State(state.clone()),
-            chat_headers(JARED_ID),
+            chat_headers(TEST_OWNER_ID),
             Path(sent.id),
             Json(wisp_protocol::EditMessageRequest {
                 text: "Updated screenshot caption".into(),
@@ -2779,7 +3584,7 @@ mod tests {
         )
         .await
         .unwrap();
-        let edited_image = load_recent_messages(&state.pool, tyler)
+        let edited_image = load_recent_messages(&state.pool, member_a)
             .await
             .unwrap()
             .remove(0);
@@ -2790,32 +3595,36 @@ mod tests {
         assert_eq!(edited_image.payload["width"], 4);
         assert!(edited_image.edited_at.is_some());
         assert!(
-            get_chat_image(State(state.clone()), chat_headers(TYLER_ID), Path(sent.id))
-                .await
-                .is_ok()
+            get_chat_image(
+                State(state.clone()),
+                chat_headers(TEST_MEMBER_A_ID),
+                Path(sent.id)
+            )
+            .await
+            .is_ok()
         );
         assert!(
             get_chat_image(
                 State(state.clone()),
-                chat_headers(CHARLIE_ID),
+                chat_headers(TEST_MEMBER_C_ID),
                 Path(sent.id)
             )
             .await
             .is_err()
         );
-        assert!(clear_history_for(&state.pool, charlie, &id).await.is_err());
-        clear_history_for(&state.pool, tyler, &id).await.unwrap();
-        let cleared = load_conversation(&state.pool, tyler, &id).await.unwrap();
+        assert!(clear_history_for(&state.pool, member_c, &id).await.is_err());
+        clear_history_for(&state.pool, member_a, &id).await.unwrap();
+        let cleared = load_conversation(&state.pool, member_a, &id).await.unwrap();
         assert_eq!(cleared.unread_count, 0);
         assert!(cleared.last_message.is_none());
         assert!(
-            load_recent_messages(&state.pool, tyler)
+            load_recent_messages(&state.pool, member_a)
                 .await
                 .unwrap()
                 .is_empty()
         );
         assert_eq!(
-            load_recent_messages(&state.pool, jared)
+            load_recent_messages(&state.pool, owner)
                 .await
                 .unwrap()
                 .len(),
@@ -2824,7 +3633,7 @@ mod tests {
         assert!(
             list_messages(
                 State(state.clone()),
-                chat_headers(TYLER_ID),
+                chat_headers(TEST_MEMBER_A_ID),
                 Query(MessageQuery {
                     conversation_id: id.clone(),
                     after: None
@@ -2836,18 +3645,26 @@ mod tests {
             .is_empty()
         );
         assert!(
-            get_chat_image(State(state.clone()), chat_headers(TYLER_ID), Path(sent.id))
-                .await
-                .is_err()
+            get_chat_image(
+                State(state.clone()),
+                chat_headers(TEST_MEMBER_A_ID),
+                Path(sent.id)
+            )
+            .await
+            .is_err()
         );
         assert!(
-            get_chat_image(State(state.clone()), chat_headers(JARED_ID), Path(sent.id))
-                .await
-                .is_ok()
+            get_chat_image(
+                State(state.clone()),
+                chat_headers(TEST_OWNER_ID),
+                Path(sent.id)
+            )
+            .await
+            .is_ok()
         );
         let _ = send_message(
             State(state.clone()),
-            chat_headers(JARED_ID),
+            chat_headers(TEST_OWNER_ID),
             Json(SendMessageRequest {
                 conversation_id: id,
                 content_type: "text/plain".into(),
@@ -2858,7 +3675,7 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(
-            load_recent_messages(&state.pool, tyler)
+            load_recent_messages(&state.pool, member_a)
                 .await
                 .unwrap()
                 .len(),
@@ -2869,14 +3686,14 @@ mod tests {
     #[tokio::test]
     async fn deleting_image_message_removes_stored_attachment() {
         let state = AppState::new(test_config()).await.unwrap();
-        let jared = Uuid::parse_str(JARED_ID).unwrap();
-        let tyler = Uuid::parse_str(TYLER_ID).unwrap();
-        let id = find_or_create_direct(&state.pool, jared, tyler)
+        let owner = Uuid::parse_str(TEST_OWNER_ID).unwrap();
+        let member_a = Uuid::parse_str(TEST_MEMBER_A_ID).unwrap();
+        let id = find_or_create_direct(&state.pool, owner, member_a)
             .await
             .unwrap();
         let message = persist_message(
             &state,
-            jared,
+            owner,
             SendMessageRequest {
                 conversation_id: id,
                 content_type: "image/png".into(),
@@ -2889,7 +3706,7 @@ mod tests {
         .unwrap();
         let _ = edit_message(
             State(state.clone()),
-            chat_headers(JARED_ID),
+            chat_headers(TEST_OWNER_ID),
             Path(message.id),
             Json(wisp_protocol::EditMessageRequest {
                 text: String::new(),
@@ -2898,12 +3715,12 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(
-            load_recent_messages(&state.pool, tyler).await.unwrap()[0].payload["caption"],
+            load_recent_messages(&state.pool, member_a).await.unwrap()[0].payload["caption"],
             ""
         );
         let _ = delete_message(
             State(state.clone()),
-            chat_headers(JARED_ID),
+            chat_headers(TEST_OWNER_ID),
             Path(message.id),
         )
         .await
@@ -2911,7 +3728,7 @@ mod tests {
         assert!(
             get_chat_image(
                 State(state.clone()),
-                chat_headers(JARED_ID),
+                chat_headers(TEST_OWNER_ID),
                 Path(message.id)
             )
             .await
@@ -2930,9 +3747,9 @@ mod tests {
     #[allow(clippy::too_many_lines)]
     async fn file_access_edits_clearing_and_deletion_are_scoped() {
         let state = AppState::new(test_config()).await.unwrap();
-        let jared = Uuid::parse_str(JARED_ID).unwrap();
-        let tyler = Uuid::parse_str(TYLER_ID).unwrap();
-        let conversation_id = find_or_create_direct(&state.pool, jared, tyler)
+        let owner = Uuid::parse_str(TEST_OWNER_ID).unwrap();
+        let member_a = Uuid::parse_str(TEST_MEMBER_A_ID).unwrap();
+        let conversation_id = find_or_create_direct(&state.pool, owner, member_a)
             .await
             .unwrap();
         let request = wisp_protocol::SendFileMessageRequest {
@@ -2944,7 +3761,7 @@ mod tests {
         assert!(
             send_file_message(
                 State(state.clone()),
-                chat_headers(CHARLIE_ID),
+                chat_headers(TEST_MEMBER_C_ID),
                 Json(request.clone())
             )
             .await
@@ -2952,7 +3769,7 @@ mod tests {
         );
         let message = send_file_message(
             State(state.clone()),
-            chat_headers(JARED_ID),
+            chat_headers(TEST_OWNER_ID),
             Json(request.clone()),
         )
         .await
@@ -2964,7 +3781,7 @@ mod tests {
         assert!(
             get_chat_file(
                 State(state.clone()),
-                chat_headers(CHARLIE_ID),
+                chat_headers(TEST_MEMBER_C_ID),
                 Path(message.id)
             )
             .await
@@ -2972,7 +3789,7 @@ mod tests {
         );
         let response = get_chat_file(
             State(state.clone()),
-            chat_headers(TYLER_ID),
+            chat_headers(TEST_MEMBER_A_ID),
             Path(message.id),
         )
         .await
@@ -2987,7 +3804,7 @@ mod tests {
         );
         let _ = edit_message(
             State(state.clone()),
-            chat_headers(JARED_ID),
+            chat_headers(TEST_OWNER_ID),
             Path(message.id),
             Json(wisp_protocol::EditMessageRequest {
                 text: String::new(),
@@ -2995,20 +3812,20 @@ mod tests {
         )
         .await
         .unwrap();
-        let edited = load_recent_messages(&state.pool, tyler)
+        let edited = load_recent_messages(&state.pool, member_a)
             .await
             .unwrap()
             .remove(0);
         assert!(edited.edited_at.is_some());
         assert_eq!(edited.payload["file_name"], "notes.txt");
         assert_eq!(edited.payload["caption"], "");
-        clear_history_for(&state.pool, tyler, &conversation_id)
+        clear_history_for(&state.pool, member_a, &conversation_id)
             .await
             .unwrap();
         assert!(
             get_chat_file(
                 State(state.clone()),
-                chat_headers(TYLER_ID),
+                chat_headers(TEST_MEMBER_A_ID),
                 Path(message.id)
             )
             .await
@@ -3017,7 +3834,7 @@ mod tests {
         assert!(
             get_chat_file(
                 State(state.clone()),
-                chat_headers(JARED_ID),
+                chat_headers(TEST_OWNER_ID),
                 Path(message.id)
             )
             .await
@@ -3025,7 +3842,7 @@ mod tests {
         );
         let _ = delete_message(
             State(state.clone()),
-            chat_headers(JARED_ID),
+            chat_headers(TEST_OWNER_ID),
             Path(message.id),
         )
         .await
@@ -3033,7 +3850,7 @@ mod tests {
         assert!(
             get_chat_file(
                 State(state.clone()),
-                chat_headers(JARED_ID),
+                chat_headers(TEST_OWNER_ID),
                 Path(message.id)
             )
             .await
@@ -3049,22 +3866,30 @@ mod tests {
             let mut invalid = request.clone();
             invalid.file_name = file_name.into();
             assert!(
-                send_file_message(State(state.clone()), chat_headers(JARED_ID), Json(invalid))
-                    .await
-                    .is_err()
+                send_file_message(
+                    State(state.clone()),
+                    chat_headers(TEST_OWNER_ID),
+                    Json(invalid)
+                )
+                .await
+                .is_err()
             );
         }
         let mut invalid = request.clone();
         invalid.data_base64 = "not base64!".into();
         assert!(
-            send_file_message(State(state.clone()), chat_headers(JARED_ID), Json(invalid))
-                .await
-                .is_err()
+            send_file_message(
+                State(state.clone()),
+                chat_headers(TEST_OWNER_ID),
+                Json(invalid)
+            )
+            .await
+            .is_err()
         );
         let mut invalid = request;
         invalid.data_base64 = "A".repeat(wisp_protocol::MAX_CHAT_FILE_BYTES.div_ceil(3) * 4 + 1);
         assert!(
-            send_file_message(State(state), chat_headers(JARED_ID), Json(invalid))
+            send_file_message(State(state), chat_headers(TEST_OWNER_ID), Json(invalid))
                 .await
                 .is_err()
         );
@@ -3080,14 +3905,14 @@ mod tests {
     #[allow(clippy::too_many_lines)]
     async fn message_edit_delete_are_sender_only_and_do_not_create_unread_messages() {
         let state = AppState::new(test_config()).await.unwrap();
-        let jared = Uuid::parse_str(JARED_ID).unwrap();
-        let tyler = Uuid::parse_str(TYLER_ID).unwrap();
-        let id = find_or_create_direct(&state.pool, jared, tyler)
+        let owner = Uuid::parse_str(TEST_OWNER_ID).unwrap();
+        let member_a = Uuid::parse_str(TEST_MEMBER_A_ID).unwrap();
+        let id = find_or_create_direct(&state.pool, owner, member_a)
             .await
             .unwrap();
         let message = send_message(
             State(state.clone()),
-            chat_headers(JARED_ID),
+            chat_headers(TEST_OWNER_ID),
             Json(SendMessageRequest {
                 conversation_id: id.clone(),
                 content_type: "text/plain".into(),
@@ -3101,7 +3926,7 @@ mod tests {
         assert!(message.edited_at.is_none());
         let _ = mark_conversation_read(
             State(state.clone()),
-            chat_headers(TYLER_ID),
+            chat_headers(TEST_MEMBER_A_ID),
             Json(MarkConversationReadRequest {
                 conversation_id: id.clone(),
             }),
@@ -3116,7 +3941,7 @@ mod tests {
         assert!(
             edit_message(
                 State(state.clone()),
-                chat_headers(TYLER_ID),
+                chat_headers(TEST_MEMBER_A_ID),
                 Path(message.id),
                 edit()
             )
@@ -3125,13 +3950,13 @@ mod tests {
         );
         let _ = edit_message(
             State(state.clone()),
-            chat_headers(JARED_ID),
+            chat_headers(TEST_OWNER_ID),
             Path(message.id),
             edit(),
         )
         .await
         .unwrap();
-        let updated = load_recent_messages(&state.pool, tyler)
+        let updated = load_recent_messages(&state.pool, member_a)
             .await
             .unwrap()
             .remove(0);
@@ -3139,7 +3964,7 @@ mod tests {
         assert!(updated.edited_at.is_some());
         assert_eq!(updated.created_at, message.created_at);
         assert_eq!(
-            load_conversation(&state.pool, tyler, &id)
+            load_conversation(&state.pool, member_a, &id)
                 .await
                 .unwrap()
                 .unread_count,
@@ -3147,20 +3972,20 @@ mod tests {
         );
         let _ = edit_message(
             State(state.clone()),
-            chat_headers(JARED_ID),
+            chat_headers(TEST_OWNER_ID),
             Path(message.id),
             edit(),
         )
         .await
         .unwrap();
         assert_eq!(
-            load_recent_messages(&state.pool, tyler).await.unwrap()[0].edited_at,
+            load_recent_messages(&state.pool, member_a).await.unwrap()[0].edited_at,
             updated.edited_at
         );
         assert!(
             delete_message(
                 State(state.clone()),
-                chat_headers(TYLER_ID),
+                chat_headers(TEST_MEMBER_A_ID),
                 Path(message.id)
             )
             .await
@@ -3168,19 +3993,19 @@ mod tests {
         );
         let _ = delete_message(
             State(state.clone()),
-            chat_headers(JARED_ID),
+            chat_headers(TEST_OWNER_ID),
             Path(message.id),
         )
         .await
         .unwrap();
         assert!(
-            load_recent_messages(&state.pool, tyler)
+            load_recent_messages(&state.pool, member_a)
                 .await
                 .unwrap()
                 .is_empty()
         );
         assert!(
-            load_conversation(&state.pool, tyler, &id)
+            load_conversation(&state.pool, member_a, &id)
                 .await
                 .unwrap()
                 .last_message
@@ -3192,7 +4017,7 @@ mod tests {
     async fn spot_messages_survive_transient_hangout_retention() {
         let state = AppState::new(test_config()).await.unwrap();
         let old = "2000-01-01T00:00:00Z";
-        let jared = find_user(&state.pool, "Jared").await.unwrap();
+        let owner = find_user(&state.pool, "Owner").await.unwrap();
         let transient_hangout = Uuid::new_v4();
         let transient_conversation = format!("hangout:{transient_hangout}");
 
@@ -3216,7 +4041,7 @@ mod tests {
         for (id, conversation_id, payload) in [
             (
                 Uuid::new_v4().to_string(),
-                format!("spot:{PORCH_ID}"),
+                format!("spot:{TEST_ROOM_ID}"),
                 "persistent",
             ),
             (
@@ -3228,7 +4053,7 @@ mod tests {
             sqlx::query("INSERT INTO messages(id, conversation_id, sender_id, created_at, content_type, payload, encryption_version) VALUES (?, ?, ?, ?, 'text/plain', ?, 0)")
                 .bind(id)
                 .bind(conversation_id)
-                .bind(jared.id.to_string())
+                .bind(owner.id.to_string())
                 .bind(old)
                 .bind(payload)
                 .execute(&state.pool)
@@ -3238,9 +4063,9 @@ mod tests {
 
         cleanup_expired_messages(&state.pool).await.unwrap();
 
-        let porch_messages: i64 =
+        let room_messages: i64 =
             sqlx::query_scalar("SELECT COUNT(*) FROM messages WHERE conversation_id = ?")
-                .bind(format!("spot:{PORCH_ID}"))
+                .bind(format!("spot:{TEST_ROOM_ID}"))
                 .fetch_one(&state.pool)
                 .await
                 .unwrap();
@@ -3250,14 +4075,14 @@ mod tests {
                 .fetch_one(&state.pool)
                 .await
                 .unwrap();
-        assert_eq!(porch_messages, 1);
+        assert_eq!(room_messages, 1);
         assert_eq!(transient_messages, 0);
     }
 
     #[tokio::test]
     async fn empty_hangout_is_ended() {
         let state = AppState::new(test_config()).await.unwrap();
-        let jared = find_user(&state.pool, "Jared").await.unwrap();
+        let owner = find_user(&state.pool, "Owner").await.unwrap();
         let hangout_id = Uuid::new_v4();
         let mut tx = state.pool.begin().await.unwrap();
         sqlx::query("INSERT INTO hangouts(id, livekit_room, created_at) VALUES (?, ?, ?)")
@@ -3267,8 +4092,8 @@ mod tests {
             .execute(&mut *tx)
             .await
             .unwrap();
-        add_member(&mut tx, hangout_id, jared.id).await.unwrap();
-        leave_active_in_transaction(&mut tx, jared.id)
+        add_member(&mut tx, hangout_id, owner.id).await.unwrap();
+        leave_active_in_transaction(&mut tx, owner.id)
             .await
             .unwrap();
         end_if_empty(&mut tx, hangout_id).await.unwrap();

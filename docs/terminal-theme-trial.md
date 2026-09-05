@@ -80,7 +80,7 @@ selector is `/home/tlt26/.config/wisp/appearance.json`:
 ```
 
 The file is not committed or copied by app-sync. Other installations are not
-enabled. Charlie's machine and Jared's machine were not accessed or modified.
+enabled. MemberC's machine and Owner's machine were not accessed or modified.
 Changing the value to `legacy` and restarting only the UI restores the legacy
 profile in both windows. To re-enable locally, use `terminal-experimental` and
 restart the UI. Use absolute commands to avoid accidentally invoking a different
@@ -139,7 +139,7 @@ Screenshots are in the durable backup directory: `terminal-final-app.png`,
 The `live-app.png` and `live-panel.png` files, if present, are local desktop
 captures and may contain actual conversation content; use fixtures for sharing.
 
-Not verified: a live Omarchy shell on Jared's hardware, Charlie's installation,
+Not verified: a live Omarchy shell on Owner's hardware, MemberC's installation,
 all possible font inventories/display scales, or compositor-owned titlebar
 styling. The host adapter was tested through representative local overrides,
 and Omarchy standalone launch selection was simulated locally. No remote

@@ -14,32 +14,17 @@ livekit-install:
 dev:
     ./scripts/dev.sh
 
-dev-tailscale:
-    ./scripts/dev-tailscale.sh
-
-tailscale-info:
-    ./scripts/tailscale-info.sh
-
 dev-server:
     cargo run -p wisp-server
 
-dev-daemon profile="Jared":
+dev-daemon profile="Owner":
     cargo run -p wispd -- --profile {{profile}}
 
 sim profile *args:
     cargo run -p wisp-sim -- --profile {{profile}} {{args}}
 
-friend host="" profile="":
-    ./scripts/friend-tailscale.sh "{{host}}" "{{profile}}"
-
-friend-config host profile:
-    ./scripts/configure-friend.sh "{{host}}" "{{profile}}"
-
-friend-register host profile:
-    ./scripts/register-friend-device.sh "{{host}}" "{{profile}}"
-
-friend-bootstrap:
-    ./scripts/friend-bootstrap-cachyos.sh
+client:
+    ./scripts/wisp-client.sh
 
 host-services:
     ./scripts/install-host-services.sh

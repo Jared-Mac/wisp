@@ -89,6 +89,7 @@ PATH="$mock_bin:$PATH" \
 XDG_BIN_HOME="$mock_bin" \
 WISP_TEST_STATE_DIR="$state_dir" \
 WISP_UPDATE_TAG=test \
+WISP_UPDATE_REPOSITORY=example/wisp \
 WISP_UPDATE_BASE_URL="file://$release_dir" \
   bash "$repo_dir/scripts/wisp-update.sh" >/dev/null
 

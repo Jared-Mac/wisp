@@ -21,7 +21,7 @@ ShellRoot {
     data.self.media.camera.selected_device_id = device
     data.self.media.camera.devices = [{id:device,name:"Fixture camera"}]
     data.self.media.camera.active = active
-    data.hangouts = [{id:"porch",label:"Porch",members:[]}]
+    data.hangouts = [{id:"test_room",label:"TestRoom",members:[]}]
     bridge.applySnapshot(data)
   }
   function starts() { return bridge.sent.filter(function(command) { return command.name === "camera" && command.args.enabled }).length }
@@ -62,9 +62,9 @@ ShellRoot {
         test.dialog.previewComponent = fakePreview
         content.requestCamera()
         test.check(!test.dialog.visible && test.starts() === 0, "not in room cannot preview or publish")
-        test.state("porch", "fixture-camera", false)
+        test.state("test_room", "fixture-camera", false)
         content.requestCamera()
-        test.check(test.dialog.visible && test.dialog.destination === "Porch", "camera action opens destination confirmation")
+        test.check(test.dialog.visible && test.dialog.destination === "TestRoom", "camera action opens destination confirmation")
         test.dialog.startSharing()
         test.check(!test.dialog.submitting && test.starts() === 0, "cannot start before preview ready")
       } else if (test.step === 1) {
@@ -76,12 +76,12 @@ ShellRoot {
         test.state("other", "fixture-camera", false)
       } else if (test.step === 3) {
         test.check(test.starts() === 0 && !test.dialog.visible, "room change cancels pending confirmation")
-        test.state("porch", "fixture-camera", false)
+        test.state("test_room", "fixture-camera", false)
         content.requestCamera()
-        test.state("porch", "different-camera", false)
+        test.state("test_room", "different-camera", false)
         test.check(!test.dialog.visible, "device change closes preview")
       } else if (test.step === 4) {
-        test.state("porch", "fixture-camera", false)
+        test.state("test_room", "fixture-camera", false)
         content.requestCamera()
         content.visible = false
         test.check(!test.dialog.previewRequested && test.starts() === 0, "hiding presentation cancels preview")
@@ -96,8 +96,8 @@ ShellRoot {
       } else if (test.step === 7) {
         test.check(test.starts() === 1, "explicit confirmation publishes exactly once")
         var command = bridge.sent[bridge.sent.length - 1]
-        test.check(command.args.expected_hangout_id === "porch" && command.args.expected_camera_id === "fixture-camera", "publish pinned to confirmed target and device")
-        test.state("porch", "fixture-camera", true)
+        test.check(command.args.expected_hangout_id === "test_room" && command.args.expected_camera_id === "fixture-camera", "publish pinned to confirmed target and device")
+        test.state("test_room", "fixture-camera", true)
         content.requestCamera()
         test.check(bridge.sent[bridge.sent.length - 1].args.enabled === false, "Camera off remains immediate")
         console.log(test.failed ? "CAMERA_TEST_FAILED" : "CAMERA_CONFIRMATION_OK")
