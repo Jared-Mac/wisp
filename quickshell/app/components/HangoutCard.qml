@@ -5,9 +5,15 @@ Rectangle {
   required property var hangout
   required property var bridge
   required property var theme
+  readonly property bool current: root.bridge.selfState.hangout_id === root.hangout.id
+    && (!root.hangout.server_id || String(root.hangout.server_id) === root.bridge.voiceServerId)
   signal joined()
   TapHandler { acceptedButtons: Qt.RightButton; onTapped: volumeMenu.open() }
-  ParticipantVolumeMenu { id: volumeMenu; bridge: root.bridge; theme: root.theme; people: root.hangout.members || [] }
+  ParticipantMenu { id: participantMenu; bridge: root.bridge; theme: root.theme }
+  ParticipantVolumeMenu {
+    id: volumeMenu; bridge: root.bridge; theme: root.theme; people: (root.hangout.members || []).map(function(p) { return root.bridge.scopedParticipant(Object.assign({},p,{server_id:String(root.hangout.server_id || root.bridge.activeServer.id)})) })
+    roomConversationId: root.bridge.roomSettingsConversationId(root.hangout, false)
+  }
 
   objectName: "roomCard"
   implicitHeight: Math.max(root.theme.space(root.theme.tui ? 42 : 48), hangoutInfo.implicitHeight + root.theme.spacing.sm * 2)
@@ -26,7 +32,7 @@ Rectangle {
   }
 
   Rectangle {
-    visible: root.theme.terminal && root.bridge.selfState.hangout_id === root.hangout.id
+    visible: root.theme.terminal && root.current
     anchors { left: parent.left; top: parent.top; bottom: parent.bottom; margins: 1 }
     width: root.theme.space(2)
     color: root.theme.accent
@@ -36,18 +42,6 @@ Rectangle {
     var members = hangout.members || []
     for (var i = 0; i < members.length; i++)
       if (memberSpeaking(members[i].display_name)) return true
-    return false
-  }
-
-  function isSelf(member) {
-    return member && member.id === bridge.selfState.id
-  }
-
-  function memberMuted(member) {
-    if (root.isSelf(member)) return !!root.bridge.effectiveMuted
-    var muted = root.bridge.remoteMutedParticipants || []
-    for (var i = 0; i < muted.length; i++)
-      if (muted[i] === member.display_name) return true
     return false
   }
 
@@ -72,8 +66,20 @@ Rectangle {
           required property var modelData
           required property int index
           spacing: root.theme.spacing.xs
-          readonly property real iconSpace: (mutedIcon.visible ? mutedIcon.width + spacing : 0)
-            + (deafenedIcon.visible ? deafenedIcon.width + spacing : 0)
+          readonly property var person: root.bridge.scopedParticipant(Object.assign({},modelData,{server_id:String(root.hangout.server_id || root.bridge.activeServer.id)}))
+          readonly property bool self: modelData.id === (root.bridge.participantServer(person).self || {}).id
+          activeFocusOnTab: true
+          Accessible.role: Accessible.Button
+          Accessible.name: modelData.display_name + " participant controls"
+          Accessible.description: voiceStatus.description
+          Keys.onReturnPressed: participantMenu.showPerson(person,memberRow)
+          Keys.onSpacePressed: participantMenu.showPerson(person,memberRow)
+          MouseArea {
+            parent: memberName; anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+            acceptedButtons: Qt.LeftButton | Qt.RightButton
+            onClicked: participantMenu.showPerson(memberRow.person,memberRow)
+          }
+          readonly property real iconSpace: voiceStatus.visible ? voiceStatus.width + spacing : 0
           width: Math.min(hangoutInfo.width, memberName.implicitWidth + iconSpace)
 
           Text {
@@ -92,24 +98,13 @@ Rectangle {
             font.weight: Font.DemiBold
           }
 
-          Image {
-            id: mutedIcon
-            visible: root.memberMuted(modelData)
+          ParticipantVoiceStatus {
+            id: voiceStatus; theme: root.theme
             anchors.verticalCenter: parent.verticalCenter
-            width: visible ? root.theme.space(14) : 0
-            height: width
-            source: Qt.resolvedUrl("../assets/microphone-muted.svg")
-            fillMode: Image.PreserveAspectFit
-          }
-
-          Image {
-            id: deafenedIcon
-            visible: root.isSelf(modelData) && !!root.bridge.selfState.deafened
-            anchors.verticalCenter: parent.verticalCenter
-            width: visible ? root.theme.space(14) : 0
-            height: width
-            source: Qt.resolvedUrl("../assets/deafened.svg")
-            fillMode: Image.PreserveAspectFit
+            moderation: root.bridge.participantModeration(memberRow.person)
+            muted: root.current && (memberRow.self ? root.bridge.effectiveMuted : (root.bridge.remoteMutedParticipants || []).indexOf(modelData.display_name) >= 0)
+            deafened: root.current && memberRow.self && root.bridge.selfState.deafened
+            localMuted: !memberRow.self && root.bridge.participantVolumes.isMuted(memberRow.person)
           }
         }
       }
@@ -119,7 +114,7 @@ Rectangle {
       height: Math.max(implicitHeight, joinButton.height)
       verticalAlignment: Text.AlignVCenter
       elide: Text.ElideRight
-      text: (root.theme.tui ? "# " : "") + (root.hangout.label || "Room")
+      text: "Call"
       color: root.theme.muted
       font.family: root.theme.font.family
       font.pixelSize: root.theme.font.caption
@@ -139,7 +134,7 @@ Rectangle {
     Text {
       id: joinText
       anchors.centerIn: parent
-      text: root.theme.tui ? (root.bridge.selfState.hangout_id === root.hangout.id ? "[here]" : "[join]") : root.bridge.selfState.hangout_id === root.hangout.id ? "HERE" : "JOIN"
+      text: root.theme.tui ? (root.current ? "in call" : "[join]") : root.current ? "In call" : "Join"
       color: root.theme.tui ? root.theme.accent : root.theme.accentText
       font.family: root.theme.font.family
       font.pixelSize: root.theme.font.caption
@@ -149,7 +144,7 @@ Rectangle {
       id: joinMouse
       anchors.fill: parent
       hoverEnabled: true
-      enabled: root.bridge.selfState.hangout_id !== root.hangout.id
+      enabled: !root.current
       cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
       onClicked: {
         root.bridge.joinHangout(root.hangout.id)

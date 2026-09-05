@@ -22,6 +22,7 @@ Item {
     id: participantVolumes
     account: String((root.voiceServerState.self || {}).id || root.configuredProfile || "")
     onVolumesChanged: root.applyParticipantVolumes()
+    onMutedPeopleChanged: root.applyParticipantVolumes()
     onReadyChanged: root.applyParticipantVolumes()
     onSaved: root.settingsSaved()
   }
@@ -29,7 +30,7 @@ Item {
   onDaemonConnectedChanged: {
     lastAppliedVolumes = ""
     if (daemonConnected) applyParticipantVolumes()
-    else { privacySnapshotReady = false; privacyRequestId = ""; privacyBusy = false }
+    else { privacySnapshotReady = false; privacyRequestId = ""; privacyBusy = false; profileBusy = false; profileReady = false; profileRequestId = "" }
   }
   onVoiceFriendsChanged: applyParticipantVolumes()
   onVoiceHangoutsChanged: applyParticipantVolumes()
@@ -38,7 +39,7 @@ Item {
     var people = voiceFriends.slice(), values = ({})
     voiceHangouts.forEach(function(room) { people = people.concat(room.members || []) })
     people.forEach(function(person) {
-      if (person.id !== root.selfState.id) values[String(person.display_name)] = participantVolumes.volumeFor(person) / 100
+      if (person.id !== (voiceServerState.self || {}).id) values[String(person.display_name)] = participantVolumes.effectiveVolumeFor(scopedParticipant(Object.assign({},person,{server_id:voiceServerId}))) / 100
     })
     var serialized = JSON.stringify(values)
     if (serialized !== lastAppliedVolumes && send("set_participant_volumes", {volumes: values})) lastAppliedVolumes = serialized
@@ -56,12 +57,18 @@ Item {
   property bool delegateMediaToDesktop: false
   signal desktopWatchRequested(string participant, string source, bool open)
   property bool delegateConversationsToDesktop: false
-  signal desktopConversationTileRequested(string id)
+  signal desktopConversationTileRequested(string id, bool reuseChannel)
   property var pendingConversationTiles: []
   function openChannel(id, forceNewTile) {
-    if (!forceNewTile && !workspaceLayout.channelsAsTiles) { selectConversation(id); return }
-    if (delegateConversationsToDesktop) { desktopConversationTileRequested(String(id)); return }
-    pendingConversationTiles = pendingConversationTiles.concat([String(id)])
+    requestConversationTile(id, !forceNewTile && !workspaceLayout.channelsAsTiles)
+  }
+  function requestConversationTile(id, reuseChannel) {
+    if (delegateConversationsToDesktop) { desktopConversationTileRequested(String(id), !!reuseChannel); return }
+    pendingConversationTiles = pendingConversationTiles.concat([{id:String(id), reuseChannel:!!reuseChannel}])
+  }
+  function isChannelConversation(id) {
+    var conversation = conversationById(id)
+    return !!conversation && (!!conversation.server_channel || !!conversation.spot_id)
   }
   property var watchedMedia: ({})
   signal mediaWatchReady(var video)
@@ -130,6 +137,32 @@ Item {
   property var serverSettings: ({name:"",role:"",members:[],categories:[],channels:[],rooms:[]})
   property bool serverSettingsBusy: false
   property string serverSettingsFeedback: ""
+  property var accountProfile: ({})
+  property bool profileBusy: false
+  property bool profileReady: false
+  property string profileRequestId: ""
+  property string profileFeedback: ""
+  readonly property string profileServerId: String(activeServer.id || "")
+  onProfileServerIdChanged: {
+    accountProfile = ({})
+    profileRequestId = ""
+    profileBusy = false
+    profileReady = false
+    profileFeedback = ""
+  }
+  function profileAction(action, args) {
+    if (profileBusy) return false
+    var serverId = profileServerId
+    var id = send(action, Object.assign({}, args || {}, {server_id:serverId}))
+    if (id) {
+      requests[id] = {kind:"profile",action:action,serverId:serverId}
+      profileRequestId = id
+      profileBusy = true
+      profileFeedback = ""
+    }
+    return !!id
+  }
+  function refreshProfile() { return profileAction("account_profile", {}) }
   readonly property bool canManageServer: !!selfState.server_owner || !!selfState.server_admin
   onCanManageServerChanged: {
     if (canManageServer) refreshServerSettings()
@@ -170,6 +203,7 @@ Item {
   signal clipboardTextReady(string conversationId, string value)
   signal messageMutationFinished(string messageId, string action, bool success, string error)
   signal historyClearFinished(string conversationId, bool success, string error)
+  property string roomActionFeedback: ""
   signal roomActionFinished(string action, bool success, string error)
   signal chatCreationFinished(string requestId, bool success, string conversationId, string error)
   signal imageCopyFinished(string requestId, bool success, string error)
@@ -346,7 +380,7 @@ Item {
   readonly property var serverStates: {
     if ((snapshot.server_states || []).length) return snapshot.server_states
     var fallback = (snapshot.servers || [])[0] || ({id:"local",name:"Wisp server",connected:daemonConnected})
-    return [{server:fallback,self:snapshot.self,friends:snapshot.friends || [],hangouts:snapshot.hangouts || [],knocks:snapshot.knocks || [],room_invitations:snapshot.room_invitations || [],conversations:snapshot.conversations || [],messages:snapshot.messages || [],spots:snapshot.spots || [],devices:snapshot.devices || []}]
+    return [{server:fallback,self:snapshot.self,voice_moderation:snapshot.voice_moderation || {},friends:snapshot.friends || [],hangouts:snapshot.hangouts || [],knocks:snapshot.knocks || [],room_invitations:snapshot.room_invitations || [],conversations:snapshot.conversations || [],messages:snapshot.messages || [],spots:snapshot.spots || [],devices:snapshot.devices || []}]
   }
   readonly property var servers: {
     var values = (snapshot.servers || []).slice()
@@ -411,8 +445,7 @@ Item {
   }
   function needsEncryptedRoomAccess(friend) {
     if (!currentVoiceRoom || !(privacyStatus.configured || snapshot.chat_encryption_required)) return false
-    var spot = voiceSpots.filter(function(s) { return s.active_hangout_id === root.currentVoiceRoom.id })[0]
-    var conversation = conversationById(spot ? "spot:" + spot.id : "hangout:" + currentVoiceRoom.id)
+    var conversation = conversationById(roomConversationId(currentVoiceRoom, false))
     return !conversation || !(conversation.members || []).some(function(p) { return p.id === friend.id })
   }
   function respondRoomInvitation(invitation, accept) {
@@ -424,11 +457,68 @@ Item {
       requests[id] = {kind:"roomInviteResponse", key:key}
     }
   }
+  function roomConversationId(room, persistent) {
+    var serverId = String(room.server_id || activeServer.id)
+    var state = serverStates.filter(function(s) { return String(s.server.id) === serverId })[0] || ({})
+    var spot = persistent ? room : (state.spots || []).filter(function(s) { return s.active_hangout_id === room.id })[0]
+    var conversation = spot && conversations.filter(function(c) { return c.server_id === serverId && c.spot_id === spot.id })[0]
+    return conversation ? conversation.id : scopedConversationId(serverId,spot ? "spot:" + spot.id : "hangout:" + room.id)
+  }
+  function roomSettingsConversationId(room, persistent) {
+    var id = roomConversationId(room, persistent)
+    var conversation = conversationById(id)
+    return conversation && conversation.spot_id ? id : ""
+  }
   function openRoomChat(room, persistent) {
-    var spot = persistent ? room : spots.filter(function(s) { return s.active_hangout_id === room.id })[0]
-    var id = scopedConversationId(String(room.server_id || activeServer.id),spot ? "spot:" + spot.id : "hangout:" + room.id)
-    if (conversationById(id)) selectConversation(id)
+    var id = roomConversationId(room, persistent)
+    if (conversationById(id)) openChannel(id, false)
     else lastError = "Join this room or ask an administrator for access to its chat."
+  }
+  function roomVoiceTarget(id) {
+    var c = conversationById(id)
+    if (!c || c.kind !== "hangout") return null
+    var state = serverStates.filter(function(s) { return String(s.server.id) === c.server_id })[0]
+    if (!state) return null
+    var spot = c.spot_id && (state.spots || []).filter(function(s) { return s.id === c.spot_id })[0]
+    var hangoutId = spot ? spot.active_hangout_id : String(c.raw_id || "").replace(/^hangout:/, "")
+    var call = (state.hangouts || []).filter(function(h) { return h.id === hangoutId })[0]
+    if (!c.spot_id && !call) return null
+    return {server_id:c.server_id, spot_id:c.spot_id || "", hangout_id:call ? call.id : "",
+      connected:state.server.connected !== false, members:spot ? spot.members || [] : call ? call.members || [] : [],
+      current:!!call && c.server_id === voiceServerId && call.id === selfState.hangout_id}
+  }
+  function joinConversationVoice(id) {
+    var target = roomVoiceTarget(id)
+    if (!target || !target.connected || target.current) return
+    send(target.spot_id ? "join_spot" : "join_hangout", target.spot_id
+      ? {server_id:target.server_id,spot_id:target.spot_id}
+      : {server_id:target.server_id,hangout_id:target.hangout_id})
+  }
+  function directCallTarget(id) {
+    var c = conversationById(id)
+    if (!c || c.kind !== "direct") return null
+    var state = serverStates.filter(function(s) { return String(s.server.id) === c.server_id })[0]
+    if (!state) return null
+    var other = (c.members || []).filter(function(p) { return p.id !== (state.self || {}).id })[0]
+    var friend = (state.friends || []).filter(function(p) { return other ? p.id === other.id : p.display_name === c.label })[0]
+    if (!friend) return null
+    return {server_id:c.server_id,friend_id:friend.id,name:friend.display_name,connected:state.server.connected !== false,
+      available:!!friend.online && ["open","knock"].indexOf(friend.presence) >= 0,
+      knock:friend.presence === "knock",online:!!friend.online,
+      current:c.server_id === voiceServerId && !!currentVoiceRoom && (currentVoiceRoom.members || []).some(function(p) { return p.id === friend.id })}
+  }
+  function callConversation(id) {
+    var target = directCallTarget(id)
+    if (target && target.connected && target.available && !target.current)
+      send("join_friend", {server_id:target.server_id,friend:target.friend_id})
+  }
+  readonly property var temporaryCalls: hangouts.filter(function(call) {
+    return !root.spots.some(function(room) { return room.active_hangout_id === call.id })
+  })
+  readonly property string currentVoiceLabel: {
+    if (!currentVoiceRoom) return ""
+    var spot = voiceSpots.filter(function(s) { return s.active_hangout_id === root.currentVoiceRoom.id })[0]
+    return spot ? String(spot.name) : "Call · " + (currentVoiceRoom.members || []).map(function(p) { return p.display_name }).join(", ")
   }
   readonly property var conversations: {
     var result=[]
@@ -447,15 +537,7 @@ Item {
     return result
   }
   readonly property var spots: (activeServerState.spots || []).map(function(spot) { return Object.assign({},spot,{server_id:String(root.activeServer.id),server_name:String(root.activeServer.name),conversation_id:root.scopedConversationId(root.activeServer.id,"spot:"+spot.id)}) })
-  readonly property int roomCount: {
-    var activeFromSpots = ({})
-    spots.forEach(function(spot) {
-      if (spot.active_hangout_id) activeFromSpots[String(spot.active_hangout_id)] = true
-    })
-    return spots.length + hangouts.filter(function(room) {
-      return !activeFromSpots[String(room.id)]
-    }).length
-  }
+  readonly property int roomCount: spots.length
   readonly property var devices: activeServerState.devices || []
   readonly property var lastInvite: snapshot.last_invite || null
   property var lastAccountInvite: null
@@ -483,7 +565,8 @@ Item {
     "shortcut_backend": null,
     "shortcut_replaced": []
   })
-  readonly property bool effectiveMuted: !!selfState.muted || !!selfState.deafened
+  readonly property var ownModeration: (voiceServerState.voice_moderation || {})[String((voiceServerState.self || {}).id)] || ({})
+  readonly property bool effectiveMuted: !!selfState.muted || !!selfState.deafened || !!ownModeration.muted || !!ownModeration.deafened
     || (!!pushToTalkState.enabled && !pushToTalkState.active)
   readonly property var rawSpeakers: {
     var names = (mediaState.active_speakers || []).slice(), levels = mediaState.remote_audio_levels || ({})
@@ -1046,6 +1129,17 @@ Item {
         if (action.kind === "privacyExport") privacyFeedback = "Recovery file saved locally. Keep it private."
       } else privacyFeedback = message.error ? String(message.error.message) : "Privacy operation failed"
       privacyBusy = false
+    } else if (action.kind === "profile") {
+      if (action.serverId !== profileServerId || message.id !== profileRequestId) return
+      profileRequestId = ""
+      profileBusy = false
+      if (message.ok) {
+        if (action.action !== "change_account_password") { accountProfile = value; profileReady = true }
+        if (action.action !== "account_profile") { profileFeedback = action.action === "change_account_password" ? "Password changed" : "Display name saved"; settingsSaved() }
+      } else {
+        profileFeedback = message.error ? String(message.error.message || "Could not update profile") : "Could not update profile"
+        settingsSaveFailed()
+      }
     } else if (action.kind === "serverSettings") {
       if (message.ok) serverSettings = value
       else serverSettingsFeedback = message.error ? String(message.error.message || "Could not load server settings") : "Could not load server settings"
@@ -1090,10 +1184,12 @@ Item {
       if (created) {
         var server=servers.filter(function(candidate) { return String(candidate.id)===String(action.serverId) })[0] || ({id:action.serverId,name:"Wisp server"})
         pendingCreatedConversations = pendingCreatedConversations.concat([scopedConversation(server,value)])
+        if (action.newTile) openChannel(createdId,true)
       }
       chatCreationFinished(String(message.id), created, createdId,
         created ? "" : message.error ? String(message.error.message || "Could not create chat") : "Could not create chat")
     } else if (action.kind === "room") {
+      roomActionFeedback = value.pending_encrypted_access ? "Invitation approved. Encrypted access will finish when an existing member is online." : "Room access granted."
       if (message.ok && action.action === "create_room" && value.id) activeConversationId = scopedConversationId(action.serverId,value.id)
       roomActionFinished(action.action, !!message.ok, message.error ? String(message.error.message || "Could not update room") : "")
     } else if (action.kind === "send") {
@@ -1143,6 +1239,33 @@ Item {
   function joinFriend(name) { send("join_friend", {server_id:String(activeServer.id || ""), "friend": name }) }
   function joinHangout(id) { send("join_hangout", {server_id:String(activeServer.id || ""), "hangout_id": id }) }
   function joinSpot(id) { send("join_spot", {server_id:String(activeServer.id || ""), "spot_id": id }) }
+  function participantServer(person) {
+    var id = String(person.server_id || activeServer.id || "")
+    return serverStates.filter(function(state) { return String(state.server.id) === id })[0] || ({server:{id:id},self:{},friends:[]})
+  }
+  function scopedParticipant(person) {
+    var state=participantServer(person)
+    return Object.assign({},person,{server_id:String(state.server.id),account_id:String((state.self || {}).id || "")})
+  }
+  function participantModeration(person) { return (participantServer(person).voice_moderation || {})[String(person.id)] || ({muted:false,deafened:false}) }
+  function canModerateParticipant(person) {
+    var state=participantServer(person)
+    return !!state.server.connected && (!!state.self.server_owner || !!state.self.server_admin)
+  }
+  function moderateParticipant(person, changes) {
+    if (!canModerateParticipant(person)) return false
+    return !!send("moderate_voice", Object.assign({server_id:String(person.server_id || activeServer.id),user_id:String(person.id)},changes))
+  }
+  function openParticipantDirect(person) {
+    var state=participantServer(person), serverId=String(state.server.id)
+    var existing=conversations.filter(function(c) {
+      return String(c.server_id)===serverId && c.kind==="direct" && (c.members || []).some(function(p) { return String(p.id)===String(person.id) })
+    })[0]
+    if (existing) { openChannel(existing.id,true); return true }
+    var request=send("open_direct",{server_id:serverId,friend:String(person.id)})
+    if (request) requests[request]={kind:"newChat",serverId:serverId,newTile:true}
+    return !!request
+  }
   function openDirect(friendName) {
     pendingDirectName = String(friendName)
     pendingDirectServerId = String(activeServer.id || "")

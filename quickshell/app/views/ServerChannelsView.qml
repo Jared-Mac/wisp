@@ -11,12 +11,13 @@ Column {
   width: parent ? parent.width : 0
   spacing: root.theme.space(1)
   readonly property var channels: root.bridge.conversations.filter(function(conversation) {
-    return (conversation.server_channel || !!conversation.spot_id)
+    return conversation.server_channel
       && String(conversation.server_id)===String(root.bridge.activeServer.id)
   }).sort(function(left,right) {
     return String(left.category_name || "").localeCompare(String(right.category_name || ""))
       || String(left.label).localeCompare(String(right.label))
   })
+  visible: channels.length > 0
 
   Text {
     objectName: "serverChannelsHeader"

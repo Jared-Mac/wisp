@@ -85,6 +85,8 @@ ShellRoot {
   Wisp.WispBridge {
     id: bridge
     property var sent: []
+    property var delegatedChats: []
+    onDesktopConversationTileRequested: function(id, reuseChannel) { delegatedChats.push({id:id,reuseChannel:reuseChannel}) }
     function send(name, args) { sent.push({name:name,args:args}); requestId++; return "test-" + requestId }
     function localPreviewUrl(stem, revision) { return String(Qt.resolvedUrl("app/assets/waveform.svg")) }
   }
@@ -134,7 +136,7 @@ ShellRoot {
       {id:"friends",kind:"circle",label:"Friends",unread_count:0}
     ]
     if (test.mode === "picker") data.conversations.push({id:"channel:builds",kind:"circle",label:"Builds",server_channel:true,category_id:"projects",category_name:"Projects",unread_count:1})
-    if (test.mode === "serversettings" || test.mode === "panelserversettings") data.self.server_owner = true
+    if (["serversettings","panelserversettings","roomsettings","newroom"].indexOf(test.mode)>=0) data.self.server_owner = true
     if (test.mode === "roomcleanup") {
       data.conversations.push(
         {id:"hangout:ended-empty",kind:"hangout",label:"Room",unread_count:0,last_message:null},
@@ -167,6 +169,7 @@ ShellRoot {
       {id:"3",conversation_id:"test_room",sender:{id:"owner",display_name:"Owner"},created_at:"2026-09-03T17:02:00Z",content_type:"text/plain",payload:"Perfect. We can keep TestRoom and our DMs side by side."}
     ]
     if (["multiserver", "channeltiles", "panelchanneltiles"].indexOf(test.mode) >= 0) {
+      data.conversations.push({id:"channel:builds",kind:"circle",label:"Builds",server_channel:true,unread_count:0})
       var primaryServer={id:"local",name:"Home server",url:"https://home.example",connected:true}
       var secondServer={id:"server-b",name:"Project server",url:"https://project.example",connected:true}
       data.servers=[primaryServer,secondServer]
@@ -322,8 +325,8 @@ ShellRoot {
     onTriggered: {
       var surface = test.compactMode ? compactSurface : window.contentItem
       var chat = test.findObject(window.contentItem, "conversationPane", [])
-      var label = test.findObject(surface, "serverChannel-test_room", [])
-      var tile = test.findObject(surface, "serverChannelTile-test_room", [])
+      var label = test.findObject(surface, "serverChannel-channel:builds", [])
+      var tile = test.findObject(surface, "serverChannelTile-channel:builds", [])
       test.check(label && label.contentItem.horizontalAlignment === Text.AlignLeft, "channel labels remain left aligned")
       test.check(tile && tile.width >= theme.space(28), "channel has a separate tile button")
       if (!chat || !label || !tile) { test.check(false, "channel navigation controls exist"); return }
@@ -332,31 +335,56 @@ ShellRoot {
       var before = bridge.sent.length
       tile.clicked()
       test.check(chat.paneCount === 2 && Tiles.find(chat.tree,"base").id === "local::dm", "explicit tile action preserves the current chat")
-      test.check(bridge.activeConversationId === "local::test_room", "tile opens the selected room chat")
+      test.check(bridge.activeConversationId === "local::channel:builds", "tile opens the selected text channel")
       var channelKey = chat.activeKey
       chat.activate("base"); tile.clicked(); tile.clicked()
       test.check(chat.paneCount === 2 && chat.activeKey === channelKey, "existing and already active tiles are focused without duplicates")
       chat.commit({key:"base",id:"local::dm"}); chat.activate("base")
       label.clicked()
-      test.check(chat.paneCount === 1 && Tiles.find(chat.tree,"base").id === "local::test_room", "default off opens in current tile")
+      test.check(chat.paneCount === 2 && Tiles.find(chat.tree,"base").id === "local::dm", "reuse mode adds a channel tile when only a DM is open")
+      channelKey = chat.activeKey
+      chat.activate("base")
+      bridge.openChannel("server-b::channel:ops",false)
+      test.check(chat.paneCount === 2 && Tiles.find(chat.tree,"base").id === "local::dm" && Tiles.find(chat.tree,channelKey).id === "server-b::channel:ops", "reuse mode switches a channel pane while preserving the active DM")
+      chat.activate("base");label.clicked()
+      test.check(chat.paneCount === 2 && chat.activeKey === channelKey && Tiles.find(chat.tree,channelKey).id === "local::channel:builds", "channel reuse retains its pane and the selected server scope")
+      chat.commit(Tiles.insert({key:"base",id:"local::test_room"},"base",{key:"other-channel",id:"server-b::channel:ops"},"right","two-channels"));chat.activate("other-channel")
+      label.clicked()
+      test.check(chat.paneCount === 2 && Tiles.find(chat.tree,"base").id === "local::test_room" && Tiles.find(chat.tree,"other-channel").id === "local::channel:builds", "reuse mode prefers the active channel pane")
+      chat.commit({key:"base",id:"local::friends"});chat.activate("base");label.clicked()
+      test.check(chat.paneCount === 2 && Tiles.find(chat.tree,"base").id === "local::friends", "reuse mode preserves private group chats")
+      chat.commit({key:"base",id:"local::test_room"});chat.activate("base");label.clicked()
+      test.check(chat.paneCount === 1 && Tiles.find(chat.tree,"base").id === "local::channel:builds", "room-chat panes can be reused for channels")
+      bridge.openRoomChat({id:"test_room",server_id:"local"},true)
+      test.check(chat.paneCount === 1 && Tiles.find(chat.tree,"base").id === "local::test_room", "room clicks also honor channel reuse mode")
       chat.commit({key:"base",id:"local::dm"}); chat.activate("base")
       bridge.workspaceLayout.setChannelsAsTiles(true)
       label.clicked()
       test.check(chat.paneCount === 2 && Tiles.find(chat.tree,"base").id === "local::dm", "default on opens in another tile")
+      bridge.openRoomChat({id:"test_room",server_id:"local"},true)
+      test.check(chat.paneCount === 3 && Tiles.find(chat.tree,"base").id === "local::dm", "room clicks open new tiles with the preference enabled")
       bridge.openChannel("server-b::channel:ops", true)
-      test.check(chat.paneCount === 3 && bridge.activeConversationId === "server-b::channel:ops", "new tiles preserve server scope")
+      test.check(chat.paneCount === 4 && bridge.activeConversationId === "server-b::channel:ops", "new tiles preserve server scope")
       test.check(bridge.sent.slice(before).every(function(command) { return ["mark_conversation_read","set_conversation_tab"].indexOf(command.name) >= 0 }), "opening channel tiles never joins voice or starts media")
       chat.commit({key:"base",id:""})
-      bridge.openChannel("local::test_room",true)
-      test.check(chat.paneCount === 1 && Tiles.find(chat.tree,"base").id === "local::test_room", "empty tile is reused")
+      bridge.openChannel("local::channel:builds",true)
+      test.check(chat.paneCount === 1 && Tiles.find(chat.tree,"base").id === "local::channel:builds", "empty tile is reused")
       var full = {key:"base",id:"local::dm"}
       for (var i=1; i<8; i++) full=Tiles.insert(full,"base",{key:"full-"+i,id:"local::dm"},"right","split-"+i)
       chat.commit(full); chat.activate("base")
       var saved = JSON.stringify(chat.tree), active = bridge.activeConversationId
-      bridge.openChannel("local::test_room",true)
+      bridge.openChannel("local::channel:builds",true)
       test.check(chat.paneCount === 8 && JSON.stringify(chat.tree) === saved && bridge.activeConversationId === active && bridge.lastError.indexOf("8 tiles") >= 0, "full workspace explains limit without replacing a chat")
+      bridge.workspaceLayout.setChannelsAsTiles(false)
+      label.clicked()
+      test.check(chat.paneCount === 8 && JSON.stringify(chat.tree) === saved, "reuse mode also preserves DMs at the tile limit")
+      bridge.delegateConversationsToDesktop=true
+      label.clicked();tile.clicked()
+      test.check(bridge.delegatedChats.length===2 && bridge.delegatedChats[0].id==="local::channel:builds" && bridge.delegatedChats[0].reuseChannel && !bridge.delegatedChats[1].reuseChannel,"panel delegation preserves reuse versus explicit new-tile intent")
+      bridge.delegateConversationsToDesktop=false
+      bridge.workspaceLayout.setChannelsAsTiles(true)
       bridge.lastError = ""
-      chat.commit({key:"base",id:"local::test_room"}); chat.activate("base")
+      chat.commit({key:"base",id:"local::channel:builds"}); chat.activate("base")
       var content = test.compactMode ? compactContent : test.findObject(window.contentItem,"wispContent",[])
       content.toggleSettings()
       test.findItem(surface,"settingsTab-notifications").clicked()
@@ -375,7 +403,7 @@ ShellRoot {
       var roomsHeader=test.findObject(window.contentItem,"roomsSectionHeader",[])
       var channelsHeader=test.findObject(window.contentItem,"serverChannelsHeader",[])
       test.check(!!roomsHeader && !!channelsHeader && roomsHeader.font.pixelSize===channelsHeader.font.pixelSize,"Rooms and Channels use matching section headers")
-      test.check(!!test.findObject(window.contentItem,"serverChannel-test_room",[]),"room text chat is also listed with server channels")
+      test.check(!test.findObject(window.contentItem,"serverChannel-test_room",[]),"saved rooms are not duplicated under channels")
       test.check(bridge.conversationById("server-b::channel:ops") && bridge.messagesFor("server-b::channel:ops").length===1,"secondary server chat and history are independently scoped")
       bridge.selectServer("server-b")
       test.check(bridge.activeServer.name==="Project server" && bridge.friends[0].display_name==="Remote Friend","server selection changes rooms, channels, and friends context")
@@ -488,7 +516,7 @@ ShellRoot {
         test.check(!clearDialog.clearing && clearDialog.error !== "", "failed clearing remains retryable")
       } else if (test.mode === "roomsettings") {
         roomDialog.manage("test_room")
-        test.check(roomDialog.owner && roomDialog.admin, "owner has administration controls")
+        test.check(roomDialog.admin, "server administrator has room controls")
         test.check(roomDialog.invitees.length === 1 && roomDialog.invitees[0].id === "member_c", "only non-members offered invitations")
       } else roomDialog.createRoom()
     }
@@ -572,7 +600,7 @@ ShellRoot {
       var content = test.findItem(target, "wispContent")
       test.check(!!content && content.settingsOpen, "Settings action opens settings")
       var home = test.findItem(target, "headerHomeButton")
-      test.check(!!home && home.text === "[home]", "Settings exposes the [home] header action")
+      test.check(!!home && home.contentItem.text === "[home]", "Settings exposes the [home] header action")
       var identityButton = test.findItem(target, "identityMenuButton")
       if (identityButton) identityButton.clicked()
       var menuHome = menu ? menu.itemAt(0) : null
@@ -620,7 +648,7 @@ ShellRoot {
     interval: 900; running: test.mode === "traycollapse"
     onTriggered: {
       test.check(test.findFeed(compactSurface).height > test.trayFriendsFeed, "collapsing tray rooms enlarges message history")
-      test.check(!test.findItem(compactSurface, "availableRoomCard"), "collapsed rooms hide room cards")
+      test.check(!test.findItem(compactSurface, "savedRoom-test_room"), "collapsed rooms hide room cards")
       test.check(bridge.sent.length === test.trayCommandCount && bridge.draftFor("test_room") === "Here's the latest version…", "section collapse preserves draft and sends no commands")
       test.findItem(compactSurface, "rooms-collapse").clicked()
       test.findItem(compactSurface, "friends-collapse").clicked()
@@ -630,7 +658,7 @@ ShellRoot {
     interval: 1050; running: test.mode === "traycollapse"
     onTriggered: {
       test.check(Math.abs(test.findFeed(compactSurface).height - test.trayInitialFeed) < 1, "expanding sections restores original chat allocation")
-      test.check(!!test.findItem(compactSurface, "availableRoomCard"), "room cards restored")
+      test.check(!!test.findItem(compactSurface, "savedRoom-test_room"), "room cards restored")
       test.findItem(compactSurface, "rooms-collapse").clicked()
       test.findItem(compactSurface, "friends-collapse").clicked()
     }
@@ -854,7 +882,8 @@ ShellRoot {
       editor.forceActiveFocus();editor.text=""
       keyDriver.keyClick("M",Qt.ShiftModifier)
       keyDriver.keyClick("D",Qt.ShiftModifier)
-      test.check(editor.text==="MD" && bridge.sent.length===before+2,"capital M/D remain normal text in chat editors: text="+editor.text+", commands="+(bridge.sent.length-before))
+      // Focusing an unread chat may acknowledge it during key delivery.
+      test.check(editor.text==="MD" && bridge.sent.slice(before+2).every(function(c) { return c.name==="mark_conversation_read" }),"capital M/D remain normal text without call commands")
     }
   }
   TestCase { id:keyDriver; parent:window.contentItem; name:"WindowKeys"; when:false }
@@ -1385,11 +1414,11 @@ ShellRoot {
         bridge.finishRequest({id:"test-"+bridge.requestId,ok:false})
       }
       var before = bridge.sent.length
-      var roomChat = test.findItem(surface,"openRoomChat")
+      var roomChat = test.findItem(surface,"openRoom-test_room")
       test.check(!!roomChat,"occupied room exposes Chat action")
       if (roomChat) roomChat.clicked()
       test.check(bridge.activeConversationId === "local::spot:test_room","occupied persistent room opens correct text chat")
-      var emptyChat = test.findItem(surface,"openSpotChat")
+      var emptyChat = test.findItem(surface,"openRoom-empty")
       test.check(!!emptyChat,"empty room exposes Chat action")
       if (emptyChat) emptyChat.clicked()
       test.check(bridge.activeConversationId === "local::spot:empty","empty room text chat is accessible")

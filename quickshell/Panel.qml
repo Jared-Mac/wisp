@@ -48,8 +48,8 @@ Panel {
     clientName: "omarchy-plugin"
     delegateMediaToDesktop: true
     delegateConversationsToDesktop: true
-    onDesktopConversationTileRequested: function(id) {
-      var launcher = chatLauncher.createObject(root, {command:["env","WISP_INTEGRATION=omarchy","wisp-ui","chat","tile",id]})
+    onDesktopConversationTileRequested: function(id, reuseChannel) {
+      var launcher = chatLauncher.createObject(root, {command:["env","WISP_INTEGRATION=omarchy","wisp-ui","chat",reuseChannel ? "reuse-channel" : "tile",id]})
       launcher.running = true
     }
     onDesktopWatchRequested: function(participant, source, open) {

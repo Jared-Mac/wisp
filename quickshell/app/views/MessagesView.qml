@@ -26,7 +26,7 @@ Column {
     width: parent.width; height: Math.max(root.theme.space(30), chatOptions.implicitHeight)
     Text {
       anchors.left: parent.left
-      anchors.right: returnLastChat.visible ? returnLastChat.left : chatOptions.visible ? chatOptions.left : parent.right
+      anchors.right: returnLastChat.visible ? returnLastChat.left : voiceAction.visible ? voiceAction.left : chatOptions.visible ? chatOptions.left : parent.right
       anchors.rightMargin: root.theme.spacing.md; anchors.verticalCenter: parent.verticalCenter
       elide: Text.ElideRight
       objectName: "trayChatHeading"
@@ -35,8 +35,14 @@ Column {
       font.pixelSize: root.theme.font.caption; font.bold: true
       font.letterSpacing: root.theme.terminal ? 1 : 0
     }
+    ConversationVoiceAction {
+      id: voiceAction
+      anchors.right: chatOptions.left; anchors.rightMargin: visible ? root.theme.spacing.sm : 0
+      anchors.verticalCenter: parent.verticalCenter
+      bridge: root.bridge; theme: root.theme; conversationId: root.bridge.activeConversationId
+    }
     ChatButton {
-      id: chatOptions
+      id: chatOptions; objectName: "trayChatOptions"
       anchors.right: allConversations.left; anchors.verticalCenter: parent.verticalCenter
       anchors.rightMargin: root.theme.spacing.md
       visible: !!root.bridge.activeConversation
@@ -81,10 +87,10 @@ Column {
       id: returnLastChat
       objectName: "returnLastChat"
       visible: !!root.bridge.lastConversation
-      anchors.right: chatOptions.visible ? chatOptions.left : parent.right
+      anchors.right: voiceAction.visible ? voiceAction.left : chatOptions.visible ? chatOptions.left : parent.right
       anchors.rightMargin: chatOptions.visible ? root.theme.spacing.md : 0
       anchors.verticalCenter: parent.verticalCenter
-      width: Math.min(implicitWidth, root.theme.space(120), Math.max(root.theme.space(34), messageHeader.width - (chatOptions.visible ? chatOptions.width + allConversations.width + root.theme.spacing.md * 2 : 0) - root.theme.space(120)))
+      width: Math.min(implicitWidth, root.theme.space(120), Math.max(root.theme.space(34), messageHeader.width - (chatOptions.visible ? chatOptions.width + allConversations.width + (voiceAction.visible ? voiceAction.width + root.theme.spacing.sm : 0) + root.theme.spacing.md * 2 : 0) - root.theme.space(120)))
       theme: root.theme
       text: "↶ " + (root.bridge.lastConversation ? root.conversationLabel(root.bridge.lastConversation) : "")
       Accessible.name: "Return to " + (root.bridge.lastConversation ? root.conversationLabel(root.bridge.lastConversation) : "last chat")
@@ -140,7 +146,7 @@ Column {
           width: parent.width; elide: Text.ElideRight
           text: modelData.last_message
             ? modelData.last_message.sender.display_name + ": " + (modelData.last_message.content_type === "application/vnd.wisp.room-invitation+json" ? "Voice invite · " + modelData.last_message.payload.room_label : modelData.last_message.content_type === "image/png" ? "Image" : modelData.last_message.content_type === "application/octet-stream" ? String(modelData.last_message.payload.file_name || "File") : String(modelData.last_message.payload || ""))
-            : modelData.spot_id ? "persistent spot" : modelData.kind === "hangout" ? "room" : modelData.kind
+            : modelData.spot_id ? "Room · chat and voice" : modelData.kind === "hangout" ? "Temporary call" : modelData.kind
           color: root.theme.muted; font.pixelSize: root.theme.font.caption
         }
       }

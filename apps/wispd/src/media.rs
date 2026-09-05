@@ -272,6 +272,9 @@ impl Drop for DenoiserService {
 
 #[derive(Debug)]
 pub(crate) enum MediaEvent {
+    PermissionsChanged {
+        generation: u64,
+    },
     Reconnecting {
         generation: u64,
     },
@@ -394,6 +397,7 @@ pub(crate) enum MediaEvent {
 }
 
 pub(crate) struct ConnectedMedia {
+    pub microphone_published: bool,
     pub microphone: String,
     pub speaker: String,
     pub audio: AudioState,
@@ -503,7 +507,6 @@ pub(crate) struct MediaManager {
     surface: Option<SurfaceController>,
     event_tx: mpsc::UnboundedSender<MediaEvent>,
     e2ee_key: Mutex<Option<Vec<u8>>>,
-    local_name: String,
 }
 
 impl MediaManager {
@@ -525,7 +528,6 @@ impl MediaManager {
     pub(crate) fn new(
         surface_enabled: bool,
         e2ee_key: Option<String>,
-        local_name: String,
     ) -> (Self, mpsc::UnboundedReceiver<MediaEvent>) {
         remove_local_preview(VideoSource::Camera);
         remove_local_preview(VideoSource::ScreenShare);
@@ -573,7 +575,6 @@ impl MediaManager {
                 surface,
                 event_tx,
                 e2ee_key: Mutex::new(e2ee_key.map(String::into_bytes)),
-                local_name,
             },
             event_rx,
         )
@@ -1031,7 +1032,11 @@ impl MediaManager {
             "microphone",
             RtcAudioSource::Native(microphone_source.clone()),
         );
-        if muted {
+        let microphone_allowed = room.local_participant().permission().is_none_or(|p| {
+            p.can_publish
+                && (p.can_publish_sources.is_empty() || p.can_publish_sources.contains(&2))
+        });
+        if muted || !microphone_allowed {
             microphone_track.mute();
         }
         self.capture_queue_samples.store(0, Ordering::Release);
@@ -1047,16 +1052,17 @@ impl MediaManager {
                 return Err(error).context("create microphone capture");
             }
         };
-        if let Err(error) = room
-            .local_participant()
-            .publish_track(
-                LocalTrack::Audio(microphone_track.clone()),
-                TrackPublishOptions {
-                    source: TrackSource::Microphone,
-                    ..Default::default()
-                },
-            )
-            .await
+        if microphone_allowed
+            && let Err(error) = room
+                .local_participant()
+                .publish_track(
+                    LocalTrack::Audio(microphone_track.clone()),
+                    TrackPublishOptions {
+                        source: TrackSource::Microphone,
+                        ..Default::default()
+                    },
+                )
+                .await
         {
             let _ = room.close().await;
             return Err(error).context("publish microphone to LiveKit");
@@ -1084,6 +1090,11 @@ impl MediaManager {
         self.received_video_frames.store(0, Ordering::Release);
         self.input_level.store(0, Ordering::Release);
         self.connected.store(true, Ordering::Release);
+        let deafened = deafened
+            || room
+                .local_participant()
+                .permission()
+                .is_some_and(|p| !p.can_subscribe);
         self.deafened.store(deafened, Ordering::Release);
         let remote_audio = Arc::new(Mutex::new(HashMap::new()));
         let remote_video = Arc::new(Mutex::new(HashMap::new()));
@@ -1093,7 +1104,7 @@ impl MediaManager {
             generation,
             event_tx: self.event_tx.clone(),
             room: room.clone(),
-            local_name: self.local_name.clone(),
+            local_name: room.local_participant().name().clone(),
             local_identity: room.local_participant().identity().to_string(),
             remote_audio: remote_audio.clone(),
             participant_volumes: self.participant_volumes.clone(),
@@ -1183,6 +1194,7 @@ impl MediaManager {
             "LiveKit media connected"
         );
         Ok(ConnectedMedia {
+            microphone_published: microphone_allowed,
             microphone,
             speaker,
             audio: inventory.state,
@@ -1236,8 +1248,55 @@ impl MediaManager {
         info!("LiveKit media disconnected");
     }
 
+    pub(crate) async fn reconcile_voice_permissions(
+        &self,
+        muted: bool,
+        deafened: bool,
+    ) -> anyhow::Result<bool> {
+        self.set_muted(muted).await;
+        self.set_deafened(deafened).await;
+        let session = self.session.lock().await;
+        let Some(session) = session.as_ref() else {
+            return Ok(false);
+        };
+        let participant = session.room.local_participant();
+        let allowed = participant.permission().is_none_or(|p| {
+            p.can_publish
+                && (p.can_publish_sources.is_empty() || p.can_publish_sources.contains(&2))
+        });
+        if !allowed {
+            return Ok(false);
+        }
+        if !participant
+            .track_publications()
+            .values()
+            .any(|p| p.source() == TrackSource::Microphone)
+        {
+            participant
+                .publish_track(
+                    LocalTrack::Audio(session.microphone.clone()),
+                    TrackPublishOptions {
+                        source: TrackSource::Microphone,
+                        ..Default::default()
+                    },
+                )
+                .await?;
+        }
+        Ok(true)
+    }
+
     pub(crate) async fn set_muted(&self, muted: bool) {
         if let Some(session) = self.session.lock().await.as_ref() {
+            let muted = muted
+                || session
+                    .room
+                    .local_participant()
+                    .permission()
+                    .is_some_and(|p| {
+                        !p.can_publish
+                            || (!p.can_publish_sources.is_empty()
+                                && !p.can_publish_sources.contains(&2))
+                    });
             if muted {
                 session.microphone.mute();
                 self.input_level.store(0, Ordering::Release);
@@ -1252,6 +1311,14 @@ impl MediaManager {
     }
 
     pub(crate) async fn set_deafened(&self, deafened: bool) {
+        let deafened = deafened
+            || self.session.lock().await.as_ref().is_some_and(|session| {
+                session
+                    .room
+                    .local_participant()
+                    .permission()
+                    .is_some_and(|p| !p.can_subscribe)
+            });
         self.deafened.store(deafened, Ordering::Release);
         let remote_audio = self
             .session
@@ -1804,6 +1871,13 @@ async fn run_room_events(
                         publication.set_subscribed(false);
                     }
                 }
+            }
+            RoomEvent::ParticipantPermissionChanged { participant, .. }
+                if participant.identity().to_string() == context.local_identity =>
+            {
+                let _ = context.event_tx.send(MediaEvent::PermissionsChanged {
+                    generation: context.generation,
+                });
             }
             RoomEvent::TrackPublished {
                 publication,

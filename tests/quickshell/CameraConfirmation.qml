@@ -57,6 +57,10 @@ ShellRoot {
       if (test.step === 0) {
         var component = Qt.createComponent("app/components/CameraPreview.qml")
         test.check(component.status !== Component.Error, "real preview QML compiles: " + component.errorString())
+        var decoder = component.createObject(window.contentItem, {deviceId:"no-device",captureActive:false})
+        var bytes = new Uint8Array([47,100,101,118,47,118,105,100,101,111,50])
+        test.check(decoder && decoder.decodedId(bytes.buffer) === "/dev/video2", "Qt camera byte IDs decode exactly to the selected V4L2 path")
+        if (decoder) decoder.destroy()
         test.dialog = test.find(content, "cameraConfirmation")
         test.check(!!test.dialog, "dialog is hosted by this presentation")
         test.dialog.previewComponent = fakePreview

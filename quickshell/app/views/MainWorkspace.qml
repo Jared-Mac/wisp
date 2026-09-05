@@ -9,6 +9,8 @@ Item {
   required property var theme
   signal cameraRequested()
   signal revealMainRequested()
+  signal serverSettingsRequested()
+  signal createRoomRequested()
   readonly property bool canAddChat: chat.paneCount < 8
   function addChat(id) { chat.addConversation(chat.activeKey, id) }
   readonly property var layout: bridge.workspaceLayout
@@ -55,31 +57,26 @@ Item {
       ScrollBar.vertical: ScrollBar {}
       Column {
         id: roomColumn; width: parent.width; spacing: root.theme.spacing.xs
-        ServerSelector { width: parent.width; bridge: root.bridge; theme: root.theme; compact: true }
+        ServerSelector {
+          width: parent.width; bridge: root.bridge; theme: root.theme; compact: true
+          onSettingsRequested: root.serverSettingsRequested()
+        }
         Repeater {
           model: root.bridge.knocks
           KnockCard { required property var modelData; width: roomColumn.width; knock: modelData; bridge: root.bridge; theme: root.theme }
         }
-        Text {
-          objectName: "roomsSectionHeader"
-          width: parent.width
-          height: root.theme.space(22)
-          verticalAlignment: Text.AlignVCenter
-          text: root.theme.tui ? "┌─ /rooms · " + root.bridge.roomCount : "ROOMS"
-          color: root.theme.roomSectionColor
-          font.family: root.theme.font.family
-          font.pixelSize: root.theme.font.caption
-          font.bold: true
+        RoomsHeader {
+          width: parent.width; bridge: root.bridge; theme: root.theme
+          onCreateRequested: root.createRoomRequested()
         }
-        NowView { width: parent.width; showHeader: !root.theme.tui; bridge: root.bridge; theme: root.theme; onCameraRequested: root.cameraRequested() }
         SpotsView { width: parent.width; bridge: root.bridge; theme: root.theme }
-        ServerChannelsView { width: parent.width; bridge: root.bridge; theme: root.theme; showHeader: true }
-        Text {
-          visible: root.theme.tui && !root.bridge.hangouts.length && !root.bridge.spots.length
-          width: parent.width; wrapMode: Text.Wrap
-          text: "(no rooms available)"
-          color: root.theme.muted; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
+        CurrentCallBar {
+          width: parent.width; height: visible ? implicitHeight : 0
+          bridge: root.bridge; theme: root.theme
+          onCameraRequested: root.cameraRequested()
         }
+        ServerChannelsView { width: parent.width; bridge: root.bridge; theme: root.theme; showHeader: true }
+
       }
     }
     ResizeHandle {

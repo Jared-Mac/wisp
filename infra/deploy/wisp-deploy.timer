@@ -1,0 +1,10 @@
+[Unit]
+Description=Check for queued Wisp main releases
+
+[Timer]
+OnBootSec=30
+OnUnitActiveSec=30
+AccuracySec=5
+
+[Install]
+WantedBy=timers.target

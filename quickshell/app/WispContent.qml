@@ -72,6 +72,13 @@ FocusScope {
     root.forceActiveFocus()
   }
 
+  function openServerSettings() {
+    if (!bridge.canManageServer) return
+    settingsMenu.section = "server"
+    if (!settingsOpen) toggleSettings()
+    else bridge.refreshServerSettings()
+  }
+
   // Editors consume typing/paste before the single-letter call shortcuts.
   Keys.priority: Keys.AfterItem
   Keys.onPressed: function(event) { root.handleWindowKey(event) }
@@ -198,7 +205,7 @@ FocusScope {
           objectName: "headerHomeButton"
           visible: !root.showingChats
           theme: root.theme
-          text: "[home]"
+          text: root.theme.tui ? "home" : "[home]"
           height: root.theme.space(30)
           onClicked: root.goHome()
         }
@@ -326,6 +333,7 @@ FocusScope {
       }
 
       SettingsMenu {
+        id: settingsMenu
         // Incoming invites remain reachable even when Activity is collapsed.
         visible: root.settingsOpen
         width: parent.width
@@ -391,7 +399,9 @@ FocusScope {
   }
 
   LocalBroadcastPreviews {
+    objectName: "localBroadcastPreviews"
     anchors.fill: parent
+    anchors.bottomMargin: terminalStatus.visible ? terminalStatus.height : 0
     z: 100
     bridge: root.bridge
     theme: root.theme
@@ -411,6 +421,7 @@ FocusScope {
         bridge: root.bridge
         theme: root.theme
         compact: true
+        onSettingsRequested: root.openServerSettings()
       }
 
       Repeater {
@@ -429,8 +440,11 @@ FocusScope {
         width: parent.width
         bridge: root.bridge
         theme: root.theme
-        onJoined: root.maybeDismiss()
-        onRoomLeft: root.maybeDismiss()
+        onCreateRoomRequested: identityRoomManager.createRoom()
+      }
+      CurrentCallBar {
+        width: parent.width; height: visible ? implicitHeight : 0
+        bridge: root.bridge; theme: root.theme
         onCameraRequested: root.requestCamera()
       }
       ServerChannelsView {
@@ -465,6 +479,8 @@ FocusScope {
       theme: root.theme
       height: dashboardLoader.height
       onCameraRequested: root.requestCamera()
+      onServerSettingsRequested: root.openServerSettings()
+      onCreateRoomRequested: identityRoomManager.createRoom()
       onRevealMainRequested: { root.goHome(); root.appRequested() }
     }
   }

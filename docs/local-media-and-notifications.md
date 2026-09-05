@@ -1,5 +1,12 @@
 # Local media, attention and sound controls
 
+- Saved rooms stay in one list, with **#name /count** above a compact participant row. Clicking
+  a room opens chat; **[join]** on its row or **Join voice** in the chat header
+  starts voice explicitly.
+  **[+]** beside Rooms opens creation. Temporary calls appear beside Friends.
+- The current-call area below the room list shows the voice server and room, with screen share,
+  camera, **Invite**, and **[d/c]**. Its label and actions keep the voice server’s context while browsing
+  another server. Room access invitations remain in Room settings.
 - Tray chat headings use the conversation's assigned color and name. Unread
   shortcuts open the indicated chat; the return shortcut restores the previous chat.
 - Friend/room context menus adjust **your** playback gain, 0–200%. Preferences
@@ -24,7 +31,8 @@
   and reconnect snapshots don't replay room or message sounds. Sound preferences
   are in `~/.config/wisp/notifications.json`; selected custom files must remain
   available at their chosen paths.
-- Settings tabs: Audio / Video, Appearance, Notifications & Chat, Devices & Privacy.
+- Settings tabs: Profile, Audio / Video, Appearance, Notifications & Chat, Privacy,
+  Devices, and Server (for owners/admins).
 
 ## Native viewer/build
 
@@ -67,6 +75,7 @@ migration or remote deployment is required.
 - `cargo test --workspace --locked`
 - `node scripts/test-chat-logic.cjs`
 - `bash scripts/test-chat-ui.sh`
+- `bash scripts/test-settings-access.sh`
 - `bash scripts/test-local-controls.sh` (set `NODE` if Node isn't on PATH)
 - `QT_SCALE_FACTOR=1.25 WISP_TEST_WIDTH=840 bash scripts/test-local-controls.sh`
 
@@ -75,3 +84,32 @@ preferences. They never join a room, publish media, write the system clipboard,
 or contact a real Wisp account. Actual call quality, per-person loudness, GPU
 performance under simultaneous high-resolution streams, and a real Omarchy
 host still need user testing.
+
+Participant names open a menu with local volume, local mute, and a direct message
+in a new tile. Local mute preserves the volume slider value and is scoped to the
+server/account/person; self deafen remains an all-audio control. Server mute and
+server deafen require server administration and are enforced with LiveKit
+participant permissions and subsequent join tokens. Server mute disables audio
+publication; server deafen also suspends receiving media. Camera and screen video
+publishing remain available. Removing a restriction preserves manual mute/deafen
+choices and restores an already-authorized microphone without joining a room.
+Clients predating server moderation must update to restore microphone publishing
+after server unmute; older clients need to reconnect. Participant indicators use
+shield badges for server mute/deafen and a separate crossed-out speaker for local
+mute, with explicit hover text. Both remain visible when restrictions overlap.
+The disconnect control is labeled **[d/c]** beside the single-line room and
+connection status, with matching typography and an accessible descriptive name.
+Share, camera, and invite remain underneath.
+
+Channel and saved-room clicks open another chat tile by default. This can be
+changed in Settings → Notifications & Chat. With the setting off, navigation
+reuses the active channel/room-chat tile or another channel tile; it never
+replaces a DM, private group chat, or video tile. If none is available, a new tile
+is opened. Existing copies of the selected chat are focused without duplicates.
+The explicit + action always requests a tile. At the eight-tile limit, Wisp
+explains that a tile must be closed instead of replacing an unrelated chat.
+The Omarchy panel forwards the requested behavior to the desktop workspace.
+
+The local camera preview decodes Qt byte-array camera IDs byte by byte to match
+V4L2 device paths. It still requires an explicit preview and confirmation before
+publishing, and releases local capture on cancel or target/device changes.

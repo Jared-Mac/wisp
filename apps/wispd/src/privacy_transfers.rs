@@ -7,11 +7,8 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde_json::{Value, json};
 use std::{sync::Arc, time::Duration};
 use uuid::Uuid;
-use wisp_crypto::{
-    message::Content,
-    roster::{Member, Role, SignedRoster},
-};
-use wisp_protocol::{BeginEncryptedUpload, CommandEnvelope, FileUploadStatus, Message};
+use wisp_crypto::{message::Content, roster::SignedRoster};
+use wisp_protocol::{BeginEncryptedUpload, FileUploadStatus, Message};
 
 impl Daemon {
     pub(super) async fn decrypt_attachment(
@@ -240,59 +237,6 @@ impl Daemon {
             self.api
                 .request(reqwest::Method::PUT, &format!("/v1/e2ee/messages/{id}"))
                 .json(&request)
-                .send()
-                .await?,
-        )
-        .await
-    }
-
-    pub(super) async fn change_encrypted_room(
-        &self,
-        command: &CommandEnvelope,
-    ) -> anyhow::Result<()> {
-        let id = super::string_arg(&command.args, "conversation_id")?;
-        let target: Uuid = super::string_arg(&command.args, "user_id")?.parse()?;
-        let (vault, previous) = self.encrypted_recipients(&id).await?;
-        let mut roster = previous.roster.clone();
-        roster.actor = vault.account;
-        roster.revision = roster
-            .revision
-            .checked_add(1)
-            .context("Room version overflow")?;
-        roster.previous = Some(previous.hash()?);
-        if command.name == "invite_to_room" {
-            if roster.members.contains_key(&target) {
-                return Ok(());
-            }
-            let directory = self.privacy.directory(&self.api, &vault).await?;
-            let identity = directory
-                .identities
-                .get(&target)
-                .context("This friend needs to enable encrypted chat first")?
-                .clone();
-            roster.members.insert(
-                target,
-                Member {
-                    identity,
-                    role: Role::Member,
-                },
-            );
-        } else {
-            let admin = command.args["admin"]
-                .as_bool()
-                .context("Admin choice required")?;
-            roster
-                .members
-                .get_mut(&target)
-                .context("Friend is not in this room")?
-                .role = if admin { Role::Admin } else { Role::Member };
-        }
-        let signed = roster.sign(vault.ring.identity())?;
-        signed.verify_successor(&previous)?;
-        ensure_ok(
-            self.api
-                .request(reqwest::Method::POST, "/v1/e2ee/roster")
-                .json(&signed)
                 .send()
                 .await?,
         )

@@ -54,7 +54,7 @@ Item {
       property bool trayRoomsCollapsed: false
       property string chatTiles: "" // Main-window split tree; no message content.
       property bool streamsAsTiles: true
-      property bool channelsAsTiles: false
+      property bool channelsAsTiles: true
       property string selectedServerId: ""
     }
   }

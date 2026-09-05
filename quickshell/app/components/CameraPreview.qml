@@ -10,7 +10,13 @@ Item {
   readonly property bool ready: camera.active && output.sourceRect.width > 0 && !error
   readonly property string error: camera.errorString || (selectedIndex < 0 ? "The selected camera is unavailable for preview." : "")
   function decodedId(value) {
-    if (value instanceof ArrayBuffer) return String.fromCharCode.apply(null, new Uint8Array(value))
+    if (value instanceof ArrayBuffer) {
+      // QV4's Function.apply does not reliably expand a typed-array view.
+      // Decode byte-by-byte so V4L2 paths match the daemon's selected camera.
+      var bytes = new Uint8Array(value), decoded = ""
+      for (var i = 0; i < bytes.length; i++) decoded += String.fromCharCode(bytes[i])
+      return decoded
+    }
     return String(value)
   }
   readonly property int selectedIndex: {

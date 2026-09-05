@@ -9,17 +9,17 @@ Column {
   signal roomLeft()
   signal cameraRequested()
   property bool showHeader: true
-  readonly property var visibleHangouts: root.bridge.hangouts || []
+  readonly property var visibleHangouts: root.bridge.temporaryCalls || []
   width: parent ? parent.width : 0
   spacing: root.theme.spacing.xs
-  visible: true
+  visible: visibleHangouts.length > 0
 
   Item {
     visible: root.showHeader
     width: parent.width; height: root.theme.space(20)
     Text {
     anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
-    text: "ROOMS"
+    text: root.theme.tui ? "/calls · " + root.visibleHangouts.length : "CALLS"
     color: root.theme.roomSectionColor
     font.family: root.theme.font.family
     font.pixelSize: root.theme.font.caption
@@ -44,14 +44,6 @@ Column {
         onJoined: root.joined()
       }
 
-      MediaControls {
-        visible: root.bridge.selfState.hangout_id === hangoutEntry.modelData.id
-        width: parent.width
-        bridge: root.bridge
-        theme: root.theme
-        onLeaveRequested: root.roomLeft()
-        onCameraRequested: root.cameraRequested()
-      }
     }
   }
 }

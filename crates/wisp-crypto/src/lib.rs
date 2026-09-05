@@ -5,6 +5,7 @@
 pub mod attachment;
 pub mod keyring;
 pub mod message;
+pub mod profile;
 pub mod roster;
 
 use age::secrecy::ExposeSecret;

@@ -252,12 +252,19 @@ post_json /v1/conversations/tab "$(jq -cn --arg id "$history_conversation" '{con
 # Private rooms and chunked attachment data must survive a database backup/restore.
 private_room=$(post_json /v1/rooms '{"name":"MemberA test room"}' "$member_a_token")
 private_conversation=$(jq -er '.id' <<<"$private_room")
-jq -e '.self_role == "host" and .can_clear_for_everyone and (.members | length == 1)' <<<"$private_room" >/dev/null
+jq -e '.self_role == "host" and (.can_clear_for_everyone | not) and (.members | length == 1)' <<<"$private_room" >/dev/null
+if post_json /v1/rooms/invite "$(jq -cn --arg id "$private_conversation" --arg user "$member_c_user" '{conversation_id:$id,user_id:$user}')" "$member_a_token" >/dev/null 2>&1; then
+  echo 'Room creation granted server administration' >&2; exit 1
+fi
+post_json /v1/server/admins "$(jq -cn --arg user "$member_a_user_id" '{user_id:$user,admin:true}')" "$owner_token" >/dev/null
 post_json /v1/rooms/invite "$(jq -cn --arg id "$private_conversation" --arg user "$member_c_user" '{conversation_id:$id,user_id:$user}')" "$member_a_token" >/dev/null
 if post_json /v1/conversations/clear "$(jq -cn --arg id "$private_conversation" '{conversation_id:$id,for_everyone:true}')" "$member_c_token" >/dev/null 2>&1; then
   echo 'Ordinary member globally cleared room history' >&2; exit 1
 fi
-post_json /v1/rooms/admin "$(jq -cn --arg id "$private_conversation" --arg user "$member_c_user" '{conversation_id:$id,user_id:$user,admin:true}')" "$member_a_token" >/dev/null
+if post_json /v1/rooms/admin "$(jq -cn --arg id "$private_conversation" --arg user "$member_c_user" '{conversation_id:$id,user_id:$user,admin:true}')" "$member_a_token" >/dev/null 2>&1; then
+  echo 'Legacy room-specific administration was accepted' >&2; exit 1
+fi
+post_json /v1/server/admins "$(jq -cn --arg user "$member_c_user" '{user_id:$user,admin:true}')" "$owner_token" >/dev/null
 curl --silent --fail -H "authorization: Bearer $owner_token" "$server_url/v1/snapshot" \
   | jq -e --arg id "$private_conversation" '[.conversations[] | select(.id == $id)] | length == 0' >/dev/null
 upload_id=$(cat /proc/sys/kernel/random/uuid)
@@ -302,7 +309,7 @@ start_server
 owner_token=$(new_session "$owner_device_id" "$owner_device_token" | jq -er '.token')
 member_a_token=$(new_session "$member_a_device_id" "$member_a_device_token" | jq -er '.token')
 curl --silent --fail -H "authorization: Bearer $member_c_token" "$server_url/v1/snapshot" \
-  | jq -e --arg id "$private_conversation" '.conversations[] | select(.id == $id) | .self_role == "admin" and .can_clear_for_everyone' >/dev/null
+  | jq -e --arg id "$private_conversation" '.self.server_admin and (.conversations[] | select(.id == $id) | .self_role == "member" and .can_clear_for_everyone)' >/dev/null
 curl --silent --fail -H "authorization: Bearer $member_a_token" "$server_url/v1/snapshot" \
   | jq -e '.self.hangout_id == null' >/dev/null
 [[ $(curl --silent --fail -H "authorization: Bearer $member_c_token" "$server_url/v1/messages/$chunked_message/file") == 'streamed payload' ]]

@@ -2,6 +2,29 @@
 
 Local IPC is newline-delimited JSON on `$XDG_RUNTIME_DIR/wisp/wispd.sock`.
 
+### Account profile commands
+
+- `account_profile` reads the selected account through `GET /v1/accounts/profile`.
+  It returns user ID, sign-in username, display name, profile revision, and whether
+  password sign-in is available. Password hashes and credentials are never returned.
+- `update_account_profile` accepts `{server_id,display_name,revision}`. The daemon
+  signs a successor profile with the existing account identity and sends it to
+  `PATCH /v1/accounts/profile`. The server verifies account/network binding,
+  signature, name uniqueness, and the next revision in one transaction. An account
+  in voice must leave before renaming. Username, user ID, and encryption keys stay
+  the same. The E2EE directory relays public signed profiles to existing friends;
+  updated clients verify pinned keys and persist the latest name/revision. Older
+  clients retain their previously pinned names until updated.
+- `change_account_password` accepts `{server_id,current_password,new_password}` and
+  uses `POST /v1/accounts/password`. Current-password verification is throttled and
+  runs behind the bounded password-work semaphore. The new hash replaces the old
+  hash conditionally to reject concurrent changes. Device credentials remain valid
+  and separately revocable. Passwords are never retained for automatic sign-in.
+
+Profile commands are scoped to one independently hosted account. Password inputs
+are cleared on submission, account switching, disconnect, or leaving the page.
+2FA is reserved for a future update; no 2FA enrollment endpoint exists yet.
+
 ### Chat workspace commands
 
 Message text and attachment captions have no fixed character limit, including
@@ -14,13 +37,14 @@ Servers predating this change reject text/captions above 4,000 characters and
 must be updated; changing the desktop client alone does not remove that limit.
 
 - `set_conversation_tab`: `{conversation_id, closed}` persists only that user's tab visibility.
-- `clear_chat_history`: `{conversation_id,for_everyone:false}` hides prior history for that user; two DM participants clearing removes their common cleared prefix from storage. Explicit `for_everyone:true` requires a room owner/admin and deletes room history for all members. The UI requires confirmation, including an irreversible/all-users warning for rooms. Cached images are purged.
-- `create_room`: `{name}` creates a private persistent room with the creator as owner; returns a conversation without joining a call.
-- `invite_to_room`: `{conversation_id,user_id}` adds a circle friend as a member; caller must be owner/admin. Never autojoins a call.
-- `send_voice_invite`: `{hangout_id,user_id}` invites a friend to the caller's current voice room (`POST /v1/room-invitations`). Creates a server-authored DM card with a five-minute lifetime and reopens the DM. It does not join the recipient. Room owners/admins can invite friends without existing room access; other members can invite friends who already have access.
+- `clear_chat_history`: `{conversation_id,for_everyone:false}` hides prior history for that user; two DM participants clearing removes their common cleared prefix from storage. Explicit `for_everyone:true` requires a server owner/admin for server rooms and channels (group roles still govern private groups) and deletes room history for all members. The UI requires confirmation, including an irreversible/all-users warning for rooms. Cached images are purged.
+- `create_room`: `{name}` creates a private persistent room managed by the server administrators; returns a conversation without joining a call.
+- `invite_to_room`: `{conversation_id,user_id}` adds a circle friend as a member; caller must be a server owner/admin. Never autojoins a call.
+- `send_voice_invite`: `{hangout_id,user_id}` invites a friend to the caller's current voice room (`POST /v1/room-invitations`). Creates a server-authored DM card with a five-minute lifetime and reopens the DM. It does not join the recipient. Server owners/admins can invite friends without existing room access; other members can invite friends who already have access.
 - `respond_room_invitation`: `{id,accept}` (`POST /v1/room-invitations/{id}/respond`) accepts or dismisses a received invite. Only explicit acceptance joins voice, rechecking the inviter's presence and access. Camera/share stop before accepting; microphone mute/deafen preferences remain unchanged. Retries do not rejoin after leaving. Expired invites cannot be accepted. Pending invitations appear in the recipient's `room_invitations` snapshot field; older clients ignore it.
 - Voice invitations use server-authored `application/vnd.wisp.room-invitation+json` message cards, with room, expiry, and accepted/dismissed state. They cannot be edited or forged using the text endpoint. Deleting their message also revokes the invitation. A distinct, locally customizable cue and tray attention alert accompany new invites, without joining automatically or replaying sounds on reconnect. The room list's **Chat** action opens text only.
-- `set_room_admin`: `{conversation_id,user_id,admin}` grants/revokes a member's admin role; only the room owner may call it. Owners cannot be demoted.
+- `set_room_admin` is no longer accepted. The legacy HTTP route returns `server_roles_required`; manage administrators in Server settings.
+- `moderate_voice`: `{server_id,user_id,muted?:bool,deafened?:bool}` requires server administration. Omitted fields are preserved. Restrictions persist across rooms and reconnects; the server owner can only be moderated by themselves.
 - `server_settings`: loads server members/roles, room inventory, categories and
   dedicated channels for the server owner or an administrator.
 - `rename_server`: `{name}` changes the human-facing server name. It is shown in
@@ -97,12 +121,18 @@ does not erase old backups. IPC emits `file_transfer_progress` with
 
 ### Persistent rooms
 
-`POST /v1/rooms`, `/v1/rooms/invite`, and `/v1/rooms/admin` match the corresponding
-IPC arguments above. Conversation snapshots expose `self_role` (`host`, `admin`,
+`POST /v1/rooms` and `/v1/rooms/invite` match the corresponding IPC arguments above.
+`POST /v1/server/voice` updates moderation. Snapshots include a `voice_moderation` map keyed by server-local user ID. Conversation snapshots expose `self_role` (`host`, `admin`,
 or `member`), `member_roles` keyed by user ID, and `can_clear_for_everyone`.
-New rooms are private, with persistent membership and owner/admin roles. Owner
-is TestRoom's owner, not a global administrator of other users' rooms. All joining
-paths enforce membership, including joining via a friend or active call ID.
+Room/channel administration comes exclusively from the server owner and server
+admins, including clearing history without private chat membership. Private
+membership still controls encrypted chat and joining voice. Existing signed
+roster roles are retained solely to validate the encrypted membership chain;
+they no longer grant room management privileges and cannot be changed through
+legacy clients. Encrypted invitations queue server-authorized admissions for an
+existing signing client, and recheck the inviting administrator before applying.
+No stored roster is rewritten or trusted again from scratch. Private group roles
+are unchanged.
 
 The socket is mode `0600`. Every client command has a version and request ID:
 

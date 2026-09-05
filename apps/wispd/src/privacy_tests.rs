@@ -16,6 +16,98 @@ async fn client(server: &str, profile: &str) -> ServerApi {
 }
 
 #[tokio::test]
+async fn signed_display_names_propagate_and_reject_identity_changes_and_rollback() {
+    let state = wisp_server::AppState::new(wisp_server::AppConfig {
+        database_url: "sqlite::memory:".into(),
+        public_url: None,
+        livekit_url: "ws://127.0.0.1:1".into(),
+        livekit_api_key: "test".into(),
+        livekit_api_secret: "isolated-no-media".into(),
+        knock_ttl: std::time::Duration::from_secs(30),
+        allow_dev_sessions: true,
+        bootstrap_token: None,
+        require_chat_e2ee: true,
+    })
+    .await
+    .unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let server = format!("http://{}", listener.local_addr().unwrap());
+    let task = tokio::spawn(async move {
+        axum::serve(listener, wisp_server::router(state))
+            .await
+            .unwrap();
+    });
+    let alice = client(&server, "Owner").await;
+    let bob = client(&server, "MemberA").await;
+    let a = alice.snapshot().await.unwrap().self_state.user.id;
+    let b = bob.snapshot().await.unwrap().self_state.user.id;
+    let temp = tempfile::tempdir().unwrap();
+    let av = Privacy::at(temp.path().join("alice"), &server, a);
+    let bv = Privacy::at(temp.path().join("bob"), &server, b);
+    av.initialize(&alice).await.unwrap();
+    bv.initialize(&bob).await.unwrap();
+    let identity = av.active().unwrap().unwrap().ring.identity().public();
+    bv.directory(&bob, &bv.active().unwrap().unwrap())
+        .await
+        .unwrap();
+    for (revision, name) in [(0, "New Owner"), (1, "Another Owner")] {
+        let updated = crate::account_profile::command(
+            &alice,
+            &av,
+            "update_account_profile",
+            &json!({"display_name":name,"revision":revision}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(updated["display_name"], name);
+        let mut own = alice.snapshot().await.unwrap();
+        av.decrypt_snapshot(&alice, &mut own).await;
+        assert_eq!(own.self_state.user.display_name, name);
+        let mut remote = bob.snapshot().await.unwrap();
+        bv.decrypt_snapshot(&bob, &mut remote).await;
+        assert_eq!(
+            remote
+                .friends
+                .iter()
+                .find(|f| f.user.id == a)
+                .unwrap()
+                .user
+                .display_name,
+            name
+        );
+    }
+    assert_eq!(
+        av.active().unwrap().unwrap().ring.identity().public(),
+        identity
+    );
+    let restarted = Privacy::at(temp.path().join("bob"), &server, b);
+    let vault = restarted.active().unwrap().unwrap();
+    assert_eq!(vault.contacts[&a], "Another Owner");
+    let mut directory = restarted.directory(&bob, &vault).await.unwrap();
+    let current = directory.profiles[&a].clone();
+    directory.profiles.get_mut(&a).unwrap().profile.display_name = "Forged name".into();
+    assert!(restarted.sync_signed_profiles(&vault, &directory).is_err());
+    directory
+        .profiles
+        .insert(a, av.signed_profile("New Owner".into(), 1).unwrap());
+    assert!(restarted.sync_signed_profiles(&vault, &directory).is_err());
+    directory
+        .profiles
+        .insert(a, av.signed_profile("Conflicting name".into(), 2).unwrap());
+    assert!(restarted.sync_signed_profiles(&vault, &directory).is_err());
+    directory.profiles.insert(a, current);
+    directory
+        .identities
+        .insert(a, wisp_crypto::Identity::generate().unwrap().public());
+    assert!(Privacy::verify_directory(&vault, &directory).is_err());
+    assert_eq!(
+        restarted.active().unwrap().unwrap().contacts[&a],
+        "Another Owner"
+    );
+    task.abort();
+}
+
+#[tokio::test]
 #[allow(clippy::too_many_lines)]
 async fn automatic_enrollment_persists_retries_and_requires_recovery_on_another_device() {
     let state = wisp_server::AppState::new(wisp_server::AppConfig {
@@ -161,8 +253,13 @@ async fn automatic_enrollment_persists_retries_and_requires_recovery_on_another_
 #[tokio::test]
 #[allow(clippy::too_many_lines)]
 async fn two_clients_encrypt_restore_and_admit_a_friend_without_manual_verification() {
+    let server_storage = tempfile::tempdir().unwrap();
+    let database_url = format!(
+        "sqlite:{}",
+        server_storage.path().join("server.sqlite3").display()
+    );
     let state = wisp_server::AppState::new(wisp_server::AppConfig {
-        database_url: "sqlite::memory:".into(),
+        database_url: database_url.clone(),
         public_url: Some("https://wisp.invalid".into()),
         livekit_url: "ws://127.0.0.1:1".into(),
         livekit_api_key: "test".into(),
@@ -304,6 +401,14 @@ async fn two_clients_encrypt_restore_and_admit_a_friend_without_manual_verificat
     )
     .await
     .unwrap();
+    let pool = sqlx::SqlitePool::connect(&database_url).await.unwrap();
+    sqlx::query("INSERT INTO server_admins(user_id,granted_by,granted_at) VALUES (?,?,?)")
+        .bind(a.to_string())
+        .bind(a.to_string())
+        .bind("2026-09-05T00:00:00Z")
+        .execute(&pool)
+        .await
+        .unwrap();
     let mut next = initial.roster.clone();
     next.revision = 1;
     next.previous = Some(initial.hash().unwrap());

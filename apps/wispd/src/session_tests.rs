@@ -240,7 +240,7 @@ async fn failed_media_is_latched_until_explicit_join_or_leave() {
         url,
         connected: true,
     };
-    let (media, _events) = MediaManager::new(false, None, "Fixture".into());
+    let (media, _events) = MediaManager::new(false, None);
     let daemon = Daemon::new(
         "Owner".into(),
         view.clone(),

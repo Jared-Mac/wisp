@@ -1,5 +1,5 @@
 use super::{
-    ApiError, AppState, ConversationView, HeaderMap, Json, SqlitePool, UserId, Utc, Uuid, Value,
+    ApiError, AppState, ConversationView, HeaderMap, Json, SqlitePool, Utc, Uuid, Value,
     authenticate_headers, ensure_spot_conversation, load_conversation,
 };
 use axum::extract::State;
@@ -49,10 +49,19 @@ pub(super) async fn create(
     ))
 }
 
-async fn role(pool: &SqlitePool, user: UserId, conversation_id: &str) -> Result<String, ApiError> {
-    sqlx::query_scalar("SELECT cm.role FROM conversation_members cm JOIN conversations c ON c.id = cm.conversation_id WHERE cm.user_id = ? AND cm.conversation_id = ? AND c.spot_id IS NOT NULL")
-        .bind(user.to_string()).bind(conversation_id).fetch_optional(pool).await.map_err(ApiError::internal)?
-        .ok_or_else(|| ApiError::forbidden("Room membership required"))
+pub(super) async fn require_room(pool: &SqlitePool, conversation: &str) -> Result<(), ApiError> {
+    let exists: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM conversations WHERE id=? AND spot_id IS NOT NULL)",
+    )
+    .bind(conversation)
+    .fetch_one(pool)
+    .await
+    .map_err(ApiError::internal)?;
+    if exists {
+        Ok(())
+    } else {
+        Err(ApiError::not_found("Room does not exist"))
+    }
 }
 
 pub(super) async fn invite(
@@ -60,71 +69,70 @@ pub(super) async fn invite(
     headers: HeaderMap,
     Json(request): Json<RoomMemberRequest>,
 ) -> Result<Json<Value>, ApiError> {
-    let user = authenticate_headers(&state, &headers).await?;
-    let actor_role = role(&state.pool, user, &request.conversation_id).await?;
-    super::privacy::require_unsigned_room(&state.pool, &request.conversation_id).await?;
-    if !matches!(actor_role.as_str(), "host" | "admin") {
-        return Err(ApiError::forbidden(
-            "Only room owners and admins can invite friends",
-        ));
-    }
+    let user = super::server_management::require_manager(&state, &headers).await?;
+    require_room(&state.pool, &request.conversation_id).await?;
     super::ensure_friendship(&state.pool, user, request.user_id).await?;
-    sqlx::query("INSERT OR IGNORE INTO conversation_members(conversation_id, user_id, joined_at, role) VALUES (?, ?, ?, 'member')")
-        .bind(&request.conversation_id).bind(request.user_id.to_string()).bind(Utc::now().to_rfc3339())
-        .execute(&state.pool).await.map_err(ApiError::internal)?;
+    let mut tx = state.pool.begin().await.map_err(ApiError::internal)?;
+    let signed: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM chat_rosters WHERE conversation_id=?)")
+            .bind(&request.conversation_id)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(ApiError::internal)?;
+    if signed {
+        // Server administration authorizes access; an existing client still
+        // signs the encrypted membership chain. Never forge or reset it.
+        super::queue_encrypted_room_admission(
+            &mut tx,
+            &request.conversation_id,
+            request.user_id,
+            user,
+            &Utc::now().to_rfc3339(),
+        )
+        .await?;
+    } else {
+        sqlx::query("INSERT OR IGNORE INTO conversation_members(conversation_id, user_id, joined_at, role) VALUES (?, ?, ?, 'member')")
+            .bind(&request.conversation_id).bind(request.user_id.to_string()).bind(Utc::now().to_rfc3339())
+            .execute(&mut *tx).await.map_err(ApiError::internal)?;
+    }
+    tx.commit().await.map_err(ApiError::internal)?;
     state.emit("room_invited", json!({"changed":true})).await;
-    Ok(Json(json!({"ok":true})))
+    Ok(Json(json!({"ok":true,"pending_encrypted_access":signed})))
 }
 
+// Keep a clear response for old clients; room roles are no longer assignable.
 pub(super) async fn set_admin(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Json(request): Json<SetRoomAdminRequest>,
+    Json(_request): Json<SetRoomAdminRequest>,
 ) -> Result<Json<Value>, ApiError> {
-    let user = authenticate_headers(&state, &headers).await?;
-    if role(&state.pool, user, &request.conversation_id).await? != "host" {
-        return Err(ApiError::forbidden(
-            "Only the room owner can manage admin access",
-        ));
-    }
-    super::privacy::require_unsigned_room(&state.pool, &request.conversation_id).await?;
-    if role(&state.pool, request.user_id, &request.conversation_id).await? == "host" {
-        return Err(ApiError::forbidden("The owner cannot be demoted"));
-    }
-    sqlx::query("UPDATE conversation_members SET role = ? WHERE conversation_id = ? AND user_id = ? AND role != 'host'")
-        .bind(if request.admin { "admin" } else { "member" }).bind(&request.conversation_id).bind(request.user_id.to_string())
-        .execute(&state.pool).await.map_err(ApiError::internal)?;
-    state
-        .emit("room_permissions_changed", json!({"changed":true}))
-        .await;
-    Ok(Json(json!({"ok":true})))
+    authenticate_headers(&state, &headers).await?;
+    Err(ApiError::bad_request(
+        "server_roles_required",
+        "Manage administrators in Server settings; rooms inherit server permissions",
+    ))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tests::{chat_headers, test_config};
     use crate::{
-        JoinHangoutRequest, JoinSpotRequest, SendMessageRequest, TEST_MEMBER_A_ID,
-        TEST_MEMBER_B_ID, TEST_MEMBER_C_ID, TEST_OWNER_ID, TEST_ROOM_ID, active_hangout_for,
-        can_clear_room, clear_room_history, join_hangout, join_spot, join_users, load_hangouts,
-        load_recent_messages, load_spots, seed_development_users, send_message,
+        TEST_MEMBER_A_ID, TEST_MEMBER_B_ID, TEST_MEMBER_C_ID, TEST_OWNER_ID, can_clear_room,
+        load_spots, server_management,
+        tests::{chat_headers, test_config},
     };
 
     #[tokio::test]
-    #[allow(clippy::too_many_lines)]
-    async fn ownership_invites_admin_permissions_and_private_room_access() {
+    async fn server_authority_replaces_room_roles_without_granting_private_chat_access() {
         let state = AppState::new(test_config()).await.unwrap();
-        let member_a = Uuid::parse_str(TEST_MEMBER_A_ID).unwrap();
-        let member_c = Uuid::parse_str(TEST_MEMBER_C_ID).unwrap();
-        let member_b = Uuid::parse_str(TEST_MEMBER_B_ID).unwrap();
-        let owner = Uuid::parse_str(TEST_OWNER_ID).unwrap();
-        assert_eq!(
-            role(&state.pool, owner, &format!("spot:{TEST_ROOM_ID}"))
-                .await
-                .unwrap(),
-            "host"
-        );
+        sqlx::query("INSERT INTO server_identity(id,owner_user_id) VALUES (1,?)")
+            .bind(TEST_OWNER_ID)
+            .execute(&state.pool)
+            .await
+            .unwrap();
+        let creator: Uuid = TEST_MEMBER_A_ID.parse().unwrap();
+        let owner: Uuid = TEST_OWNER_ID.parse().unwrap();
+        let admin: Uuid = TEST_MEMBER_C_ID.parse().unwrap();
         let room = create(
             State(state.clone()),
             chat_headers(TEST_MEMBER_A_ID),
@@ -135,196 +143,216 @@ mod tests {
         .await
         .unwrap()
         .0;
-        assert_eq!(room.self_role, "host");
-        assert_eq!(room.members.len(), 1);
-        assert!(room.can_clear_for_everyone);
+        assert!(!room.can_clear_for_everyone);
         assert!(
-            active_hangout_for(&state.pool, member_a)
+            !can_clear_room(&state.pool, creator, &room.id)
                 .await
                 .unwrap()
-                .is_none()
         );
+        // Encryption custody does not grant app administration.
+        sqlx::query("UPDATE conversation_members SET role='admin' WHERE conversation_id=?")
+            .bind(&room.id)
+            .execute(&state.pool)
+            .await
+            .unwrap();
+        assert!(
+            !can_clear_room(&state.pool, creator, &room.id)
+                .await
+                .unwrap()
+        );
+        assert!(can_clear_room(&state.pool, owner, &room.id).await.unwrap());
         assert_eq!(load_spots(&state.pool, owner).await.unwrap().len(), 1);
         assert!(
-            join_spot(
+            invite(
                 State(state.clone()),
-                chat_headers(TEST_OWNER_ID),
-                Json(JoinSpotRequest {
-                    spot_id: room.spot_id.clone().unwrap()
+                chat_headers(TEST_MEMBER_A_ID),
+                Json(RoomMemberRequest {
+                    conversation_id: room.id.clone(),
+                    user_id: admin
                 })
             )
             .await
             .is_err()
         );
+        sqlx::query("INSERT INTO server_admins(user_id,granted_by,granted_at) VALUES (?,?,?)")
+            .bind(admin.to_string())
+            .bind(owner.to_string())
+            .bind(Utc::now().to_rfc3339())
+            .execute(&state.pool)
+            .await
+            .unwrap();
+        assert!(
+            server_management::is_manager(&state.pool, admin)
+                .await
+                .unwrap()
+        );
+        assert!(can_clear_room(&state.pool, admin, &room.id).await.unwrap());
         let _ = invite(
             State(state.clone()),
-            chat_headers(TEST_MEMBER_A_ID),
+            chat_headers(TEST_MEMBER_C_ID),
             Json(RoomMemberRequest {
                 conversation_id: room.id.clone(),
-                user_id: member_c,
+                user_id: TEST_MEMBER_B_ID.parse().unwrap(),
             }),
         )
         .await
         .unwrap();
         assert!(
-            active_hangout_for(&state.pool, member_c)
-                .await
-                .unwrap()
-                .is_none()
-        );
-        assert!(
-            invite(
-                State(state.clone()),
-                chat_headers(TEST_MEMBER_C_ID),
-                Json(RoomMemberRequest {
-                    conversation_id: room.id.clone(),
-                    user_id: member_b
-                })
-            )
-            .await
-            .is_err()
-        );
-        assert!(
             set_admin(
                 State(state.clone()),
-                chat_headers(TEST_MEMBER_C_ID),
+                chat_headers(TEST_OWNER_ID),
                 Json(SetRoomAdminRequest {
                     conversation_id: room.id.clone(),
-                    user_id: member_c,
+                    user_id: creator,
                     admin: true
                 })
             )
             .await
             .is_err()
         );
-        let _ = set_admin(
-            State(state.clone()),
-            chat_headers(TEST_MEMBER_A_ID),
-            Json(SetRoomAdminRequest {
-                conversation_id: room.id.clone(),
-                user_id: member_c,
-                admin: true,
-            }),
-        )
-        .await
-        .unwrap();
-        let _ = invite(
-            State(state.clone()),
-            chat_headers(TEST_MEMBER_C_ID),
-            Json(RoomMemberRequest {
-                conversation_id: room.id.clone(),
-                user_id: member_b,
-            }),
-        )
-        .await
-        .unwrap();
-        assert!(
-            can_clear_room(&state.pool, member_c, &room.id)
-                .await
-                .unwrap()
-        );
-        assert!(
-            !can_clear_room(&state.pool, member_b, &room.id)
-                .await
-                .unwrap()
-        );
-        assert!(!can_clear_room(&state.pool, owner, &room.id).await.unwrap());
-        let _ = join_spot(
-            State(state.clone()),
-            chat_headers(TEST_MEMBER_A_ID),
-            Json(JoinSpotRequest {
-                spot_id: room.spot_id.clone().unwrap(),
-            }),
-        )
-        .await
-        .unwrap();
-        let hangout = active_hangout_for(&state.pool, member_a)
+        sqlx::query("DELETE FROM server_admins WHERE user_id=?")
+            .bind(admin.to_string())
+            .execute(&state.pool)
             .await
-            .unwrap()
             .unwrap();
-        assert!(load_hangouts(&state.pool, owner).await.unwrap().is_empty());
+        assert!(!can_clear_room(&state.pool, admin, &room.id).await.unwrap());
+    }
+    #[tokio::test]
+    #[allow(clippy::too_many_lines)]
+    async fn encrypted_custody_cannot_grant_room_roles_or_bypass_server_invitation_authority() {
+        use std::collections::BTreeMap;
+        use wisp_crypto::{
+            Identity,
+            roster::{Member, Role, Roster},
+        };
+        let state = AppState::new(test_config()).await.unwrap();
+        let custodian: Uuid = TEST_MEMBER_A_ID.parse().unwrap();
+        let recipient: Uuid = TEST_MEMBER_B_ID.parse().unwrap();
+        let manager: Uuid = TEST_MEMBER_C_ID.parse().unwrap();
+        let key = Identity::generate().unwrap();
+        let other = Identity::generate().unwrap();
+        for (id, identity) in [(custodian, key.public()), (recipient, other.public())] {
+            sqlx::query("INSERT INTO chat_identities(user_id,public_identity) VALUES (?,?)")
+                .bind(id.to_string())
+                .bind(serde_json::to_string(&identity).unwrap())
+                .execute(&state.pool)
+                .await
+                .unwrap();
+        }
+        let room = create(
+            State(state.clone()),
+            chat_headers(TEST_MEMBER_A_ID),
+            Json(CreateRoomRequest {
+                name: "Encrypted server room".into(),
+            }),
+        )
+        .await
+        .unwrap()
+        .0;
+        let network = crate::chat_identity::network(&state).await.unwrap();
+        let first = Roster {
+            network,
+            conversation: room.id.clone(),
+            revision: 0,
+            previous: None,
+            actor: custodian,
+            members: BTreeMap::from([(
+                custodian,
+                Member {
+                    identity: key.public(),
+                    role: Role::Host,
+                },
+            )]),
+        }
+        .sign(&key)
+        .unwrap();
+        let _ = crate::chat_identity::update_roster(
+            State(state.clone()),
+            chat_headers(TEST_MEMBER_A_ID),
+            Json(first.clone()),
+        )
+        .await
+        .unwrap();
+        let mut next = first.roster.clone();
+        next.revision = 1;
+        next.previous = Some(first.hash().unwrap());
+        next.members.insert(
+            recipient,
+            Member {
+                identity: other.public(),
+                role: Role::Member,
+            },
+        );
+        let signed = next.clone().sign(&key).unwrap();
         assert!(
-            join_hangout(
+            crate::chat_identity::update_roster(
                 State(state.clone()),
-                chat_headers(TEST_OWNER_ID),
-                Json(JoinHangoutRequest {
-                    hangout_id: hangout
-                })
+                chat_headers(TEST_MEMBER_A_ID),
+                Json(signed.clone())
             )
             .await
             .is_err()
         );
-        assert!(join_users(&state, owner, member_a).await.is_err());
-        assert!(
-            active_hangout_for(&state.pool, owner)
-                .await
-                .unwrap()
-                .is_none()
-        );
-        let _ = send_message(
+        sqlx::query("INSERT INTO server_admins(user_id,granted_by,granted_at) VALUES (?,?,?)")
+            .bind(manager.to_string())
+            .bind(TEST_OWNER_ID)
+            .bind(Utc::now().to_rfc3339())
+            .execute(&state.pool)
+            .await
+            .unwrap();
+        let response = invite(
             State(state.clone()),
-            chat_headers(TEST_MEMBER_A_ID),
-            Json(SendMessageRequest {
+            chat_headers(TEST_MEMBER_C_ID),
+            Json(RoomMemberRequest {
                 conversation_id: room.id.clone(),
-                content_type: "text/plain".into(),
-                payload: json!("Room history"),
-                encryption_version: 0,
+                user_id: recipient,
             }),
         )
         .await
-        .unwrap();
-        assert!(
-            clear_room_history(&state.pool, member_b, &room.id)
-                .await
-                .is_err()
-        );
-        clear_room_history(&state.pool, member_c, &room.id)
+        .unwrap()
+        .0;
+        assert_eq!(response["pending_encrypted_access"], true);
+        sqlx::query("DELETE FROM server_admins WHERE user_id=?")
+            .bind(manager.to_string())
+            .execute(&state.pool)
             .await
             .unwrap();
         assert!(
-            load_recent_messages(&state.pool, member_a)
-                .await
-                .unwrap()
-                .is_empty()
+            crate::chat_identity::update_roster(
+                State(state.clone()),
+                chat_headers(TEST_MEMBER_A_ID),
+                Json(signed.clone())
+            )
+            .await
+            .is_err()
         );
-        assert!(
-            load_conversation(&state.pool, member_b, &room.id)
-                .await
-                .unwrap()
-                .history_cleared_at
-                .is_some()
-        );
-        seed_development_users(&state.pool).await.unwrap();
-        assert_eq!(
-            role(&state.pool, member_c, &room.id).await.unwrap(),
-            "admin"
-        );
-        assert!(role(&state.pool, owner, &room.id).await.is_err());
-        let _ = set_admin(
+        sqlx::query("INSERT INTO server_admins(user_id,granted_by,granted_at) VALUES (?,?,?)")
+            .bind(manager.to_string())
+            .bind(TEST_OWNER_ID)
+            .bind(Utc::now().to_rfc3339())
+            .execute(&state.pool)
+            .await
+            .unwrap();
+        let _ = crate::chat_identity::update_roster(
             State(state.clone()),
             chat_headers(TEST_MEMBER_A_ID),
-            Json(SetRoomAdminRequest {
-                conversation_id: room.id.clone(),
-                user_id: member_c,
-                admin: false,
-            }),
+            Json(signed.clone()),
         )
         .await
         .unwrap();
         assert!(
-            !can_clear_room(&state.pool, member_c, &room.id)
+            crate::ensure_conversation_member(&state.pool, &room.id, recipient)
                 .await
-                .unwrap()
+                .is_ok()
         );
+        next.revision = 2;
+        next.previous = Some(signed.hash().unwrap());
+        next.members.get_mut(&recipient).unwrap().role = Role::Admin;
         assert!(
-            set_admin(
-                State(state.clone()),
+            crate::chat_identity::update_roster(
+                State(state),
                 chat_headers(TEST_MEMBER_A_ID),
-                Json(SetRoomAdminRequest {
-                    conversation_id: room.id,
-                    user_id: member_a,
-                    admin: false
-                })
+                Json(next.sign(&key).unwrap())
             )
             .await
             .is_err()

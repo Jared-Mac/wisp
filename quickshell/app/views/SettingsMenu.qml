@@ -34,7 +34,7 @@ Column {
 
     Text {
       width: parent.width
-      text: "Manage devices, privacy, and how Wisp captures and publishes media."
+      text: "Manage your profile, devices, privacy, and Wisp preferences."
       color: root.theme.muted
       wrapMode: Text.WordWrap
       font.family: root.theme.font.family
@@ -47,7 +47,7 @@ Column {
     spacing: root.theme.spacing.sm
     Repeater {
       model: {
-        var tabs = [{id:"media",label:"Audio / Video"},{id:"appearance",label:"Appearance"},{id:"notifications",label:"Notifications & Chat"},{id:"privacy",label:"Privacy"},{id:"devices",label:"Devices"}]
+        var tabs = [{id:"profile",label:"Profile"},{id:"media",label:"Audio / Video"},{id:"appearance",label:"Appearance"},{id:"notifications",label:"Notifications & Chat"},{id:"privacy",label:"Privacy"},{id:"devices",label:"Devices"}]
         if (root.bridge.canManageServer) tabs.push({id:"server",label:"Server"})
         return tabs
       }
@@ -58,6 +58,21 @@ Column {
         primary: root.section === modelData.id
         onClicked: root.section = modelData.id
       }
+    }
+  }
+
+  Rectangle {
+    visible: root.section === "profile"
+    width: parent.width
+    height: visible ? profileSettings.implicitHeight + root.theme.spacing.xxl * 2 : 0
+    radius: root.theme.cornerRadius
+    color: root.theme.tui ? root.theme.background : root.theme.alpha(root.theme.foreground, 0.035)
+    border.width: 1; border.color: root.theme.separator
+    ProfileSettingsView {
+      id: profileSettings
+      anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
+      anchors.margins: root.theme.spacing.xxl
+      bridge: root.bridge; theme: root.theme
     }
   }
 

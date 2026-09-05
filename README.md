@@ -64,8 +64,9 @@ button. Muted and deafened states update the tray icon, tooltip, checked menu
 items, and compact icons in the panel. Microphone mute is orange; deafen is red
 and always forces microphone mute. Clicking the headset again leaves the
 microphone muted; clicking the microphone while deafened clears both states.
-The lower in-call controls contain only video, sharing, and leave actions;
-small mute/deafen icons appear beside the local member name in a hangout.
+The current-call area below the room list places **[d/c]** beside the room and
+connection status, with sharing, camera, and invitations underneath. Participant
+names and speaking/mute status remain visible below each room name.
 The panel always opens on the operating system's primary display and remembers
 its corner choice under **Settings → Desktop position**. Auto uses the tray
 click's edge when the tray is on the primary display and otherwise falls back
@@ -160,6 +161,19 @@ file…** lets you save a separate recovery copy. Keep that copy somewhere safe
 away from the server. A second or reinstalled device must restore the account's
 existing recovery file; Wisp never silently replaces an existing identity.
 
+**Settings → Profile** manages the selected server account's display name and
+password. Display-name changes are signed by the account's existing encryption
+identity; updated clients verify them before replacing a remembered name. Leave
+voice on that account's devices before renaming. The sign-in username stays the
+same. Password changes require the current password and keep existing device
+credentials signed in; revoke unwanted devices under **Settings → Devices**.
+Two-factor authentication is planned and is not available yet.
+
+Right-click an active or empty saved room for **[room settings]** above the local
+participant-volume sliders. Use the separate button beside the server selector for **[settings]**
+(**[stngs]** when space is tight). It stays visible for server owners and
+administrators and never overlaps the dropdown. Both the server name and dropdown arrow open the server picker.
+
 The desktop daemon also maintains a private `~/.config/wisp/accounts.json`
 registry. Each accepted invite or login adds or updates one independently
 hosted server account; credentials are never shared between servers. The
@@ -181,7 +195,7 @@ chats, and the current ad-hoc room timeline. Messages are committed to SQLite
 before acknowledgement, missed messages synchronize after reconnect, and
 unread cursors are per user. Ad-hoc room messages expire after 24 hours.
 Persistent rooms keep durable chat while their voice/video sessions exist only
-while occupied. Any account can create a room and becomes that room's owner.
+while occupied. Any account can create a room; administration comes from the server role.
 The server owner can grant persistent server-admin access from **Settings →
 Server**. Server admins can rename and remove inactive rooms and organize
 dedicated encrypted text channels into categories. Only the owner can grant or
@@ -207,7 +221,7 @@ or opening that friend's DM restores it; the chat picker also lists closed chats
 **Clear Chat History…** is a
 separate confirmed action. In DMs it clears your view first; messages and attached
 files cleared by both participants are then removed from active server storage.
-Newer messages not yet cleared by both remain. Room owners/admins clear history
+Newer messages not yet cleared by both remain. Server owners/admins clear room and channel history
 for everyone, with an irreversible-action warning, red **Yes, clear**, and normal
 **Cancel**. Other members can clear only their own view. These preferences are
 saved per user on the host. Clearing overrides file Keep flags; it does not erase
@@ -246,8 +260,8 @@ rules while rooms/friends remain neutral. Color identity assignments survive
 turning accents off and on. See [appearance and palettes](docs/appearance-and-palettes.md).
 
 Presence choices, microphone mute, and deafen stay pinned in the header in
-both windows, including outside a room and while scrolling. Room-specific camera,
-screen-share, and Leave controls remain with the room. Click the **Friends** header
+both windows, including outside a room and while scrolling. The current-call controls
+sit directly below the room list, including while browsing another server. Its label and invitations always refer to the server hosting your call. Click the **Friends** header
 to collapse/expand the tray list. Use the star beside a friend to favorite them.
 Order is online favorites, offline favorites, online non-favorites, then offline
 non-favorites, alphabetically within each group. Favorites apply in both windows;
@@ -364,10 +378,29 @@ Wisp-managed windows, menus, dialogs, and local video previews use a shared thin
 border for clear separation. Borders follow the selected color palette; Omarchy
 continues using its host-provided frames.
 
-Use **Account menu → New Room** to create a private room you own. **Chat options → Room
-settings…** lets owners/admins invite friends, and lets owners grant or revoke
-admin access. Membership and permissions survive restarts. Owner owns TestRoom;
-owning TestRoom does not confer privileges in someone else's room. Creating or
+Use **[+] beside Rooms** to create a private room managed by the server administrators. Saved rooms keep
+their name and list position whether empty or occupied. Click a room to open
+its chat; **[join]** on the room row or **Join voice** in the chat header
+explicitly starts voice. Rooms are listed once, separately from dedicated text
+channels. Temporary friend calls appear under **Calls** beside Friends. Room
+headings show occupancy as **#name /2**, with participants in compact wrapping
+rows below. Room context menus include **Open chat in new pane**. The chat header
+places the alternate **Join voice** beside its options menu; DMs offer **Call**,
+respecting the peer’s Open/Knock/Closed presence.
+
+**Invite to room** grants persistent chat/voice access; **Invite** sends
+a voice invitation from your current call.
+
+Room and channel clicks open new chat tiles by default. **Settings →
+Notifications & Chat → Open channels and rooms in new tiles** can switch this
+to reusing a channel or room-chat pane. DMs and private group chats stay in place;
+without a channel pane, another tile opens. Already-open chats are focused without
+duplicates.
+
+The account menu also provides New Room. **Chat options → Room settings…** lets
+server owners/admins invite friends. The server owner grants or revokes server
+administration in **Settings → Server**; there are no separate room admins.
+Private membership still controls access to encrypted chat and voice. Creating or
 being invited to a room never automatically joins a voice/video call.
 
 Both the full app and tray chat accept **Ctrl+V** screenshot pastes and local
@@ -427,13 +460,17 @@ mute, volume, and a custom local sound file; these settings live only on this
 device in `~/.config/wisp/notifications.json`. Playback uses PipeWire's `pw-play`.
 The explicit **Test sound** button works while Settings is focused.
 
-Invite friends into your current voice room with **[+]** beside Camera/Leave or the
+Invite friends into your current call with **Invite** below the room list or the
 friend's right-click menu. An invitation card appears in your DM; **Accept & Join
 Voice** joins the named room using the recipient's existing mute/deafen settings,
 with camera and screen sharing off. Invites expire after five minutes or when the
 sender leaves. A distinct sound (customizable in Notifications) and tray alert
-make pending invites noticeable. **Chat** on a room card opens its text chat
+make pending invites noticeable. Clicking a saved room opens its text chat
 without joining voice.
+
+The configured production VPS receives successful `main` builds automatically
+from GitHub, waiting for voice rooms to empty before a server restart. See
+[automatic server deployment](docs/automatic-server-deployment.md).
 
 Deploy the updated host and clients together: database migrations 0004–0011 add
 per-user conversation preferences, authenticated attachment storage, edit timestamps,

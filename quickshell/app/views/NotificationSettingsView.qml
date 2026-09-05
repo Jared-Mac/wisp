@@ -18,7 +18,7 @@ Column {
     id: channelTilePreference
     objectName: "channelsAsTilesSetting"
     width: parent.width
-    text: "Open channels in new tiles"
+    text: "Open channels and rooms in new tiles"
     checked: root.bridge.workspaceLayout.channelsAsTiles
     onClicked: root.bridge.workspaceLayout.setChannelsAsTiles(checked)
     ThemeControlStyle { theme: root.theme; control: channelTilePreference }
@@ -30,7 +30,7 @@ Column {
   }
   Text {
     width: parent.width; wrapMode: Text.Wrap
-    text: "Keep your current chats when opening a channel or room chat from the channel list. The + button always opens a tile. Chats already in a tile are brought into focus."
+    text: "On by default. When off, channel and room clicks reuse a channel or room-chat tile. DMs and private group chats stay in place; if no channel tile is open, a new tile is added. An already-open chat is focused, and + always opens a tile."
     color: root.theme.muted; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
   }
   Text {

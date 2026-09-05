@@ -22,6 +22,7 @@ use wisp_crypto::{
     PublicIdentity,
     keyring::Keyring,
     message::{Content, MessageContext},
+    profile::{Profile, SignedProfile},
     roster::{Member, Role, Roster, SignedRoster},
 };
 use wisp_protocol::{ConversationView, EncryptedMessageRequest, Message, Snapshot};
@@ -32,6 +33,8 @@ struct Setup {
     network: Uuid,
     account: Uuid,
     contacts: BTreeMap<Uuid, String>,
+    #[serde(default)]
+    profile_revisions: BTreeMap<Uuid, u64>,
 }
 
 #[derive(Deserialize)]
@@ -39,6 +42,8 @@ pub(super) struct Directory {
     pub network: Uuid,
     pub identities: BTreeMap<Uuid, PublicIdentity>,
     pub rosters: BTreeMap<String, Vec<SignedRoster>>,
+    #[serde(default)]
+    pub profiles: BTreeMap<Uuid, SignedProfile>,
     #[serde(default)]
     pub pending_admissions: Vec<PendingAdmission>,
 }
@@ -66,6 +71,7 @@ pub(super) struct Privacy {
     last_error: Mutex<Option<String>>,
     setup_error: Mutex<Option<String>>,
     enrollment: tokio::sync::Mutex<()>,
+    contact_updates: Mutex<()>,
 }
 
 pub(super) fn local_path(value: &str) -> anyhow::Result<PathBuf> {
@@ -166,6 +172,7 @@ impl Privacy {
             last_error: Mutex::new(None),
             setup_error: Mutex::new(None),
             enrollment: tokio::sync::Mutex::new(()),
+            contact_updates: Mutex::new(()),
         }
     }
 
@@ -337,6 +344,7 @@ impl Privacy {
                 network: directory.network,
                 account: self.account,
                 contacts,
+                profile_revisions: BTreeMap::new(),
             }
         };
         if read_setup(&self.binding)?.is_none() {
@@ -352,6 +360,7 @@ impl Privacy {
     /// gains a new friend. Existing contacts are never removed or replaced,
     /// and the keyring separately refuses changes to an already pinned key.
     fn sync_contacts(&self, snapshot: &Snapshot) -> anyhow::Result<bool> {
+        let _guard = self.contact_updates.lock().expect("contact update lock");
         let Some(vault) = self.active()? else {
             return Ok(false);
         };
@@ -445,7 +454,69 @@ impl Privacy {
         )
         .await?;
         Self::verify_directory(vault, &directory)?;
+        self.sync_signed_profiles(vault, &directory)?;
         Ok(directory)
+    }
+
+    pub fn signed_profile(&self, name: String, revision: u64) -> anyhow::Result<SignedProfile> {
+        let vault = self
+            .active()?
+            .context("Restore account encryption before changing your display name")?;
+        Profile {
+            network: vault.network,
+            account: vault.account,
+            revision,
+            display_name: name,
+        }
+        .sign(vault.ring.identity())
+    }
+
+    fn sync_signed_profiles(&self, vault: &Vault, directory: &Directory) -> anyhow::Result<()> {
+        let _guard = self.contact_updates.lock().expect("contact update lock");
+        let mut setup = read_setup(&self.binding)?.context("Missing privacy binding")?;
+        ensure!(
+            setup.network == vault.network && setup.account == vault.account,
+            "Privacy binding changed"
+        );
+        let mut changed = false;
+        for (account, signed) in &directory.profiles {
+            ensure!(
+                signed.profile.network == vault.network
+                    && signed.profile.account == *account
+                    && setup.contacts.contains_key(account),
+                "Invalid profile account"
+            );
+            let key = directory
+                .identities
+                .get(account)
+                .context("Missing profile identity")?;
+            signed.verify(key)?;
+            let previous = setup.profile_revisions.get(account).copied().unwrap_or(0);
+            ensure!(
+                signed.profile.revision >= previous,
+                "Account profile rollback blocked"
+            );
+            if signed.profile.revision == previous {
+                ensure!(
+                    setup.contacts.get(account) == Some(&signed.profile.display_name),
+                    "Conflicting account profile blocked"
+                );
+            } else {
+                setup
+                    .contacts
+                    .insert(*account, signed.profile.display_name.clone());
+                setup
+                    .profile_revisions
+                    .insert(*account, signed.profile.revision);
+                changed = true;
+            }
+        }
+        if changed {
+            write_setup(&self.binding, &setup, true)?;
+            *self.active.write().expect("privacy state lock") =
+                Ok(Some(Arc::new(Self::load(&self.root, &setup)?)));
+        }
+        Ok(())
     }
 
     fn verify_directory(vault: &Vault, directory: &Directory) -> anyhow::Result<()> {
@@ -666,6 +737,8 @@ impl Privacy {
                 .active()?
                 .context("Restore or enable chat encryption to read this message")?;
             let directory = self.directory(api, &vault).await?;
+            let vault = self.active()?.context("Missing account encryption")?;
+            Self::restore_contact_names(&vault, snapshot);
             for (conversation, chain) in &directory.rosters {
                 vault
                     .ring

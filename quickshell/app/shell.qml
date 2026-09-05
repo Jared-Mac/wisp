@@ -173,6 +173,7 @@ ShellRoot {
   IpcHandler {
     target: "dev.wisp.chat"
     function open(id: string): void { bridge.openChannel(id, true) }
+    function reuseChannel(id: string): void { bridge.requestConversationTile(id, true) }
   }
   IpcHandler {
     target: "dev.wisp.media"

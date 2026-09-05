@@ -17,3 +17,11 @@
   deployed server has no required delta and remains healthy. Never deploy to a
   friend's or otherwise unrelated host.
 - Only push changes when the user requests a push.
+- Every push to `main` includes updating the configured owner-managed production
+  server to the matching release and verifying its schema, integrity, services,
+  and public health. If that exact server build is already deployed, verify it
+  instead of restarting it. Continue to check for active rooms before any restart.
+- GitHub CI automatically submits successful `main` builds for production
+  deployment. The VPS queues releases while voice rooms are active. Check the
+  workflow and deployment status after pushing; report queued or failed releases
+  accurately. See `docs/automatic-server-deployment.md` for the deployment path.

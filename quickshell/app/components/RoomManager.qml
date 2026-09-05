@@ -12,19 +12,19 @@ Dialog {
   property string conversationId: ""
   property bool busy: false
   property string error: ""
+  property string feedback: ""
   readonly property var conversation: bridge.conversationById(conversationId)
-  readonly property bool owner: conversation && conversation.self_role === "host"
-  readonly property bool admin: owner || (conversation && conversation.self_role === "admin")
   readonly property var conversationServerState: bridge.serverStates.filter(function(state) {
     return conversation && String(state.server.id)===String(conversation.server_id)
   })[0] || ({friends:[]})
+  readonly property bool admin: !!(conversationServerState.self || {}).server_owner || !!(conversationServerState.self || {}).server_admin
   readonly property var invitees: {
     var members = conversation ? conversation.members || [] : []
     return (conversationServerState.friends || []).filter(function(friend) { return !members.some(function(member) { return member.id === friend.id }) })
   }
   function createRoom() { creating = true; conversationId = ""; nameField.text = ""; error = ""; busy = false; open() }
   function manage(id) { creating = false; conversationId = String(id); error = ""; busy = false; open() }
-  function perform(action, args) { error = ""; busy = bridge.roomAction(action, args) }
+  function perform(action, args) { error = ""; feedback = ""; busy = bridge.roomAction(action, args) }
   parent: Overlay.overlay
   x: parent ? (parent.width - width) / 2 : 0; y: parent ? (parent.height - height) / 2 : 0
   width: parent ? Math.min(parent.width - 32, 500) : 500
@@ -40,8 +40,8 @@ Dialog {
       Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
       Binding on font.pixelSize { when: root.theme.terminal; value: root.theme.font.body; restoreMode: Binding.RestoreBindingOrValue }
       width: parent.width; wrapMode: Text.Wrap
-      text: root.creating ? "You'll own this room. Invite friends after creating it; nobody joins a call automatically."
-        : "Owners manage admin access. Owners and admins can invite friends and clear the room's chat for everyone."
+      text: root.creating ? "This room uses the server’s administrators. Creating it does not join voice."
+        : "Server administrators manage every room and channel. Change admin access in Server settings."
       color: root.theme.muted
     }
     TextField {
@@ -58,6 +58,7 @@ Dialog {
       }
     }
     ScrollView {
+      objectName: "roomSettingsMembers"
       width: parent.width; height: root.theme.space(260); visible: !root.creating
       contentWidth: availableWidth
       Column {
@@ -66,27 +67,21 @@ Dialog {
           model: root.conversation ? root.conversation.members || [] : []
           Row {
             required property var modelData
-            readonly property string role: root.conversation && root.conversation.member_roles ? root.conversation.member_roles[modelData.id] || "member" : "member"
             width: parent.width; spacing: root.theme.spacing.md
             Text {
               Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
               Binding on font.pixelSize { when: root.theme.terminal; value: root.theme.font.body; restoreMode: Binding.RestoreBindingOrValue }
-              width: parent.width - roleButton.width - parent.spacing; anchors.verticalCenter: parent.verticalCenter
-              text: modelData.display_name + " · " + (parent.role === "host" ? "owner" : parent.role)
+              width: parent.width; anchors.verticalCenter: parent.verticalCenter
+              text: modelData.display_name
               elide: Text.ElideRight; color: root.theme.foreground
             }
-            ChatButton {
-              id: roleButton
-              theme: root.theme; visible: root.owner && parent.role !== "host"; enabled: !root.busy
-              text: parent.role === "admin" ? "Remove admin" : "Make admin"
-              onClicked: root.perform("set_room_admin", {conversation_id:root.conversationId,user_id:modelData.id,admin:parent.role !== "admin"})
-            }
+
           }
         }
         Text {
           Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
           Binding on font.pixelSize { when: root.theme.terminal; value: root.theme.font.body; restoreMode: Binding.RestoreBindingOrValue }
-           visible: root.admin && root.invitees.length > 0; text: "Invite friends"; color: root.theme.muted }
+           visible: root.admin && root.invitees.length > 0; text: "Invite to room · chat and voice access"; color: root.theme.muted }
         Repeater {
           model: root.admin ? root.invitees : []
           Row {
@@ -98,7 +93,7 @@ Dialog {
                width: parent.width - inviteButton.width - parent.spacing; anchors.verticalCenter: parent.verticalCenter; text: modelData.display_name; color: root.theme.foreground }
             ChatButton {
               id: inviteButton
-              theme: root.theme; text: "Invite"; enabled: !root.busy
+              theme: root.theme; text: "Invite to room"; enabled: !root.busy
               onClicked: root.perform("invite_to_room", {conversation_id:root.conversationId,user_id:modelData.id})
             }
           }
@@ -109,6 +104,7 @@ Dialog {
       Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
       Binding on font.pixelSize { when: root.theme.terminal; value: root.theme.font.body; restoreMode: Binding.RestoreBindingOrValue }
        width: parent.width; visible: root.error !== ""; text: root.error; color: root.theme.danger; wrapMode: Text.Wrap }
+    Text { width: parent.width; visible: root.feedback !== ""; text: root.feedback; wrapMode: Text.Wrap; color: root.theme.muted; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption }
     Row {
       spacing: root.theme.spacing.lg
       ChatButton { theme: root.theme; text: root.creating ? "Cancel" : "Done"; enabled: !root.busy; onClicked: root.close() }
@@ -122,6 +118,7 @@ Dialog {
       root.busy = false
       if (success && action === "create_room") root.manage(root.bridge.activeConversationId)
       else if (!success) root.error = error
+      else if (action === "invite_to_room") root.feedback = root.bridge.roomActionFeedback
     }
     function onDaemonConnectedChanged() { if (!root.bridge.daemonConnected) root.busy = false }
   }

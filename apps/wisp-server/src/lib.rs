@@ -1,3 +1,4 @@
+mod account_profile;
 mod attachments;
 mod chat_identity;
 mod groups;
@@ -10,6 +11,7 @@ mod rooms;
 mod server_management;
 #[cfg(test)]
 mod text_tests;
+mod voice_moderation;
 
 use argon2::{
     Argon2, PasswordHash, PasswordHasher, PasswordVerifier,
@@ -337,6 +339,7 @@ impl AppState {
             .map_err(ApiError::internal)?
             .unwrap_or_else(|| "Wisp server".to_owned());
         Ok(Snapshot {
+            voice_moderation: voice_moderation::load(&self.pool).await?,
             chat_encryption_required: self.config.require_chat_e2ee,
             server_name,
             seq,
@@ -486,6 +489,14 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/dev/session", post(dev_session))
         .route("/v1/sessions", post(device_session))
         .route("/v1/accounts/login", post(login_account))
+        .route(
+            "/v1/accounts/profile",
+            get(account_profile::get).patch(account_profile::update),
+        )
+        .route(
+            "/v1/accounts/password",
+            post(account_profile::change_password),
+        )
         .route("/v1/accounts/register", post(register_account))
         .route("/v1/devices/bootstrap", post(bootstrap_device))
         .route("/v1/devices/register", post(register_device))
@@ -509,6 +520,7 @@ pub fn router(state: AppState) -> Router {
             get(server_management::settings).patch(server_management::update_profile),
         )
         .route("/v1/server/admins", post(server_management::set_admin))
+        .route("/v1/server/voice", post(voice_moderation::update))
         .route(
             "/v1/server/categories",
             post(server_management::create_category),
@@ -858,6 +870,21 @@ async fn clear_login_failures(state: &AppState, key: &str) {
     state.login_failures.lock().await.remove(key);
 }
 
+async fn require_inviting_manager(
+    tx: &mut sqlx::SqliteConnection,
+    creator: UserId,
+) -> Result<(), ApiError> {
+    let allowed: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM server_identity WHERE owner_user_id=?) OR EXISTS(SELECT 1 FROM server_admins WHERE user_id=?)")
+        .bind(creator.to_string()).bind(creator.to_string()).fetch_one(&mut *tx).await.map_err(ApiError::internal)?;
+    if allowed {
+        Ok(())
+    } else {
+        Err(ApiError::forbidden(
+            "The room invitation's server administrator no longer has permission",
+        ))
+    }
+}
+
 async fn queue_encrypted_room_admission(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     conversation_id: &str,
@@ -888,17 +915,10 @@ async fn create_account_invite(
             let id = request.conversation_id.as_deref().ok_or_else(|| {
                 ApiError::bad_request("room_required", "room invitations require a room")
             })?;
-            let role: Option<String> = sqlx::query_scalar(
-                "SELECT cm.role FROM conversation_members cm JOIN conversations c ON c.id=cm.conversation_id WHERE cm.user_id=? AND cm.conversation_id=? AND c.spot_id IS NOT NULL",
-            )
-            .bind(creator.to_string())
-            .bind(id)
-            .fetch_optional(&state.pool)
-            .await
-            .map_err(ApiError::internal)?;
-            if !matches!(role.as_deref(), Some("host" | "admin")) {
+            rooms::require_room(&state.pool, id).await?;
+            if !server_management::is_manager(&state.pool, creator).await? {
                 return Err(ApiError::forbidden(
-                    "only room owners and admins can create room invitations",
+                    "Only server administrators can create room invitations",
                 ));
             }
             Some(id.to_owned())
@@ -1048,6 +1068,7 @@ async fn login_account(
         if invite.get::<String, _>("kind") == "room"
             && let Some(room) = invite.get::<Option<String>, _>("conversation_id")
         {
+            require_inviting_manager(&mut tx, creator).await?;
             let encrypted: bool = sqlx::query_scalar(
                 "SELECT EXISTS(SELECT 1 FROM chat_rosters WHERE conversation_id=?)",
             )
@@ -1130,6 +1151,7 @@ async fn register_account(
         })?;
     add_friendship(&mut tx, creator, user_id).await?;
     if kind == "room" {
+        require_inviting_manager(&mut tx, creator).await?;
         let room = conversation_id
             .as_deref()
             .ok_or_else(|| ApiError::internal("room invite has no room"))?;
@@ -1649,7 +1671,8 @@ async fn livekit_token(
         .fetch_one(&state.pool)
         .await
         .map_err(ApiError::internal)?;
-    let token = issue_livekit_token(&state.config, &user, &room)?;
+    let moderation = voice_moderation::for_user(&state.pool, user_id).await?;
+    let token = issue_livekit_token(&state.config, &user, &room, &moderation)?;
     Ok(Json(LiveKitTokenResponse {
         url: state.config.livekit_url.clone(),
         room,
@@ -2195,7 +2218,15 @@ async fn clear_conversation_history(
     Ok(Json(json!({"ok": true})))
 }
 
+async fn server_conversation(pool: &SqlitePool, id: &str) -> Result<bool, ApiError> {
+    sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM conversations c WHERE c.id=? AND (c.spot_id IS NOT NULL OR EXISTS(SELECT 1 FROM server_channels sc WHERE sc.conversation_id=c.id)))")
+        .bind(id).fetch_one(pool).await.map_err(ApiError::internal)
+}
+
 async fn can_clear_room(pool: &SqlitePool, user: UserId, id: &str) -> Result<bool, ApiError> {
+    if server_conversation(pool, id).await? {
+        return server_management::is_manager(pool, user).await;
+    }
     let allowed: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM conversation_members cm JOIN conversations c ON c.id = cm.conversation_id WHERE cm.conversation_id = ? AND cm.user_id = ? AND c.kind != 'direct' AND cm.role IN ('host','admin'))")
         .bind(id).bind(user.to_string()).fetch_one(pool).await.map_err(ApiError::internal)?;
     Ok(allowed)
@@ -2204,7 +2235,7 @@ async fn can_clear_room(pool: &SqlitePool, user: UserId, id: &str) -> Result<boo
 async fn clear_room_history(pool: &SqlitePool, user: UserId, id: &str) -> Result<(), ApiError> {
     if !can_clear_room(pool, user, id).await? {
         return Err(ApiError::forbidden(
-            "Only a room host or administrator can clear everyone's history",
+            "Server administrators manage room/channel history; group history requires its owner or administrator",
         ));
     }
     let now = Utc::now().to_rfc3339();
@@ -3092,12 +3123,14 @@ struct LiveKitVideoGrant<'a> {
     room: &'a str,
     can_publish: bool,
     can_subscribe: bool,
+    can_publish_sources: Vec<&'static str>,
 }
 
 fn issue_livekit_token(
     config: &AppConfig,
     user: &UserSummary,
     room: &str,
+    moderation: &wisp_protocol::VoiceModeration,
 ) -> Result<String, ApiError> {
     let now = Utc::now();
     let header = URL_SAFE_NO_PAD.encode(br#"{"alg":"HS256","typ":"JWT"}"#);
@@ -3111,7 +3144,12 @@ fn issue_livekit_token(
             room_join: true,
             room,
             can_publish: true,
-            can_subscribe: true,
+            can_subscribe: !moderation.deafened,
+            can_publish_sources: if moderation.muted || moderation.deafened {
+                vec!["camera", "screen_share"]
+            } else {
+                vec!["camera", "microphone", "screen_share", "screen_share_audio"]
+            },
         },
     };
     let body = URL_SAFE_NO_PAD.encode(serde_json::to_vec(&claims).map_err(ApiError::internal)?);
@@ -3176,7 +3214,13 @@ mod tests {
             id: Uuid::parse_str(TEST_OWNER_ID).unwrap(),
             display_name: "Owner".into(),
         };
-        let token = issue_livekit_token(&test_config(), &user, "wisp-test").unwrap();
+        let token = issue_livekit_token(
+            &test_config(),
+            &user,
+            "wisp-test",
+            &wisp_protocol::VoiceModeration::default(),
+        )
+        .unwrap();
         assert_eq!(token.split('.').count(), 3);
     }
 

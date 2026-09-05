@@ -91,6 +91,10 @@ messages have no product-level character cap.
   Private keys are durably saved locally before publishing the public identity;
   setup retries reuse the same keys. Missing or different existing identities
   require recovery, never silent replacement. Chat remains blocked until ready.
+- Display-name changes carry a domain-separated account signature bound to the
+  server network, account ID and increasing revision. Clients verify the existing
+  pinned identity and reject forged, conflicting or rolled-back profiles before
+  changing remembered contact names. Names remain public coordination metadata.
 - Privacy is a separate Settings tab with status, optional recovery export, and
   recovery import. Opening Settings never exports a key or asks for a backup path.
 - The fresh server, owner account, local recovery identity, public TLS endpoint,

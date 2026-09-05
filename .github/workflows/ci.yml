@@ -88,6 +88,9 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
 
+      - name: Test production deployment guards
+        run: python3 -m unittest discover -s tests -p 'test_deploy_server.py'
+
       - name: Run Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
@@ -139,6 +142,42 @@ jobs:
           path: dist/*
           if-no-files-found: error
           retention-days: 14
+
+  deploy-production:
+    name: Deploy main to production
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+    concurrency:
+      group: wisp-production-deployment
+      cancel-in-progress: false
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Download verified build
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: wisp-linux-x86_64
+          path: dist
+      - name: Submit server release
+        env:
+          WISP_DEPLOY_CONFIG: ${{ secrets.WISP_PRODUCTION_DEPLOY }}
+          WISP_RELEASE_COMMIT: ${{ github.sha }}
+          WISP_RELEASE_RUN: ${{ github.run_number }}
+          WISP_RELEASE_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          (cd dist && sha256sum --check wisp-main-linux-x86_64.tar.gz.sha256)
+          deployment_dir=$(mktemp -d)
+          trap 'rm -rf -- "$deployment_dir"' EXIT
+          tar -xzf dist/wisp-main-linux-x86_64.tar.gz --directory "$deployment_dir" \
+            --strip-components=2 wisp-main-linux-x86_64/bin/wisp-server
+          deployment_sequence=$((WISP_RELEASE_RUN * 1000 + WISP_RELEASE_ATTEMPT))
+          python3 scripts/deploy-production-server.py "$deployment_dir/wisp-server" \
+            "$WISP_RELEASE_COMMIT" "$deployment_sequence"
 
   release:
     name: Publish GitHub release

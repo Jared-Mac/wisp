@@ -493,6 +493,8 @@ pub struct ServerView {
 /// as the durable local identity.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ServerStateView {
+    #[serde(default)]
+    pub voice_moderation: std::collections::BTreeMap<UserId, VoiceModeration>,
     pub server: ServerView,
     #[serde(rename = "self")]
     pub self_state: SelfState,
@@ -590,8 +592,23 @@ pub struct SelfState {
     pub media: MediaState,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VoiceModeration {
+    pub muted: bool,
+    pub deafened: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModerateVoiceRequest {
+    pub user_id: UserId,
+    pub muted: Option<bool>,
+    pub deafened: Option<bool>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Snapshot {
+    #[serde(default)]
+    pub voice_moderation: std::collections::BTreeMap<UserId, VoiceModeration>,
     #[serde(default)]
     pub chat_encryption_required: bool,
     /// Human-facing name chosen by the server's administrators. The desktop
@@ -883,6 +900,22 @@ pub struct LoginRequest {
     pub protocol_version: u8,
     #[serde(default)]
     pub invite_code: Option<String>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ChangePasswordRequest {
+    pub current_password: String,
+    pub new_password: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AccountProfile {
+    pub user_id: UserId,
+    pub username: Option<String>,
+    pub display_name: String,
+    pub revision: u64,
+    pub password_available: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

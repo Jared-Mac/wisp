@@ -107,7 +107,8 @@ Item {
     if (!loaded || !bridge.pendingConversationTiles.length) return
     var pending = bridge.pendingConversationTiles
     bridge.pendingConversationTiles = []
-    pending.forEach(function(id) {
+    pending.forEach(function(request) {
+      var id = typeof request === "string" ? request : request.id
       var conversation = root.bridge.conversationById(id)
       if (!conversation) { root.bridge.lastError = "This channel is no longer available."; return }
       id = String(conversation.id)
@@ -119,8 +120,18 @@ Item {
         if (root.detachedKeys.indexOf(existing.key) < 0) root.revealMainRequested()
         return
       }
+      var reusable = null
+      if (request.reuseChannel && root.bridge.isChannelConversation(id)) {
+        var channels = leaves.filter(function(n) { return root.bridge.isChannelConversation(n.id) })
+        reusable = channels.filter(function(n) { return n.key === root.activeKey })[0] || channels[0]
+      }
       var empty = leaves.filter(function(n) { return !n.id })[0]
-      if (empty) root.choose(empty.key, id)
+      if (reusable) {
+        root.choose(reusable.key, id)
+        root.route(id) // Also reveal a reused channel in a detached window.
+        if (root.detachedKeys.indexOf(reusable.key) >= 0) return
+      }
+      else if (empty) root.choose(empty.key, id)
       else if (root.paneCount < 8) root.addConversation(root.activeKey, id)
       else {
         root.bridge.lastError = "All 8 tiles are in use. Close a tile before opening another."

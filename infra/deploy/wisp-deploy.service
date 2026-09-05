@@ -1,0 +1,9 @@
+[Unit]
+Description=Apply queued Wisp main release when voice rooms are empty
+After=network-online.target wisp-server.service livekit-server.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/wisp-deploy-server apply
+UMask=0077
+TimeoutStartSec=180

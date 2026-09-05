@@ -45,6 +45,12 @@ Column {
     }
   }
 
+  NowView {
+    objectName: "friendCalls"
+    width: parent.width; visible: !root.collapsed && visibleHangouts.length > 0
+    bridge: root.bridge; theme: root.theme
+    onJoined: root.selected()
+  }
   Repeater {
     model: root.collapsed ? [] : root.bridge.sortedFriends
     delegate: FriendRow {

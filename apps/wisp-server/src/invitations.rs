@@ -32,17 +32,11 @@ async fn authorize(
         let conversation = format!("spot:{spot}");
         let member: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM conversation_members WHERE conversation_id = ? AND user_id = ?)")
             .bind(&conversation).bind(recipient.to_string()).fetch_one(&mut *db).await.map_err(ApiError::internal)?;
-        let role: Option<String> = sqlx::query_scalar(
-            "SELECT role FROM conversation_members WHERE conversation_id = ? AND user_id = ?",
-        )
-        .bind(&conversation)
-        .bind(actor.to_string())
-        .fetch_optional(&mut *db)
-        .await
-        .map_err(ApiError::internal)?;
-        if role.is_none() || (!member && !matches!(role.as_deref(), Some("host" | "admin"))) {
+        let manager: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM server_identity WHERE owner_user_id=?) OR EXISTS(SELECT 1 FROM server_admins WHERE user_id=?)")
+            .bind(actor.to_string()).bind(actor.to_string()).fetch_one(&mut *db).await.map_err(ApiError::internal)?;
+        if !member && !manager {
             return Err(ApiError::forbidden(
-                "Only room owners or admins can invite friends without room access",
+                "Only server administrators can invite friends without room access",
             ));
         }
         return Ok(Some(conversation));
@@ -481,6 +475,13 @@ mod tests {
     #[tokio::test]
     async fn nonmembers_require_admin_and_revoked_authority_is_rechecked() {
         let (state, app, room) = setup().await;
+        sqlx::query("INSERT INTO server_admins(user_id,granted_by,granted_at) VALUES (?,?,?)")
+            .bind(TEST_OWNER_ID)
+            .bind(TEST_OWNER_ID)
+            .bind(Utc::now().to_rfc3339())
+            .execute(&state.pool)
+            .await
+            .unwrap();
         sqlx::query(
             "DELETE FROM conversation_members WHERE user_id = ? AND conversation_id LIKE 'spot:%'",
         )
@@ -512,7 +513,11 @@ mod tests {
             StatusCode::FORBIDDEN
         );
         let invitation = invite(&app, &room, TEST_MEMBER_A_ID).await;
-        sqlx::query("UPDATE conversation_members SET role='member' WHERE user_id=? AND conversation_id LIKE 'spot:%'").bind(TEST_OWNER_ID).execute(&state.pool).await.unwrap();
+        sqlx::query("DELETE FROM server_admins WHERE user_id=?")
+            .bind(TEST_OWNER_ID)
+            .execute(&state.pool)
+            .await
+            .unwrap();
         assert_eq!(
             request(
                 &app,

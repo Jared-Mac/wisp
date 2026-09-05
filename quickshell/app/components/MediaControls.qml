@@ -7,6 +7,7 @@ Column {
   required property var theme
   signal leaveRequested()
   signal cameraRequested()
+  property bool showLeave: true
   spacing: root.theme.spacing.sm
   RoomInvitePicker { id: invitePicker; bridge: root.bridge; theme: root.theme }
 
@@ -20,18 +21,19 @@ Column {
     Repeater {
       id: controlRepeater
       model: [
-        { "label": root.bridge.sharing ? "Stop sharing screen" : root.bridge.shareStarting ? "Choosing…" : "Share screen", "action": "share" },
-        { "label": root.bridge.cameraActive ? "Stop camera" : root.bridge.cameraStarting ? "Starting…" : "Camera on", "action": "camera" },
-        { "label": "inv", "action": "invite" },
-        { "label": "Leave", "action": "leave" }
-      ]
+        { "label": root.bridge.sharing ? "Stop share" : root.bridge.shareStarting ? "Choosing…" : "Share", "action": "share" },
+        { "label": root.bridge.cameraActive ? "Stop cam" : root.bridge.cameraStarting ? "Starting…" : "Camera", "action": "camera" },
+        { "label": "Invite", "action": "invite" },
+        { "label": "d/c", "action": "leave" }
+      ].filter(function(action) { return root.showLeave || action.action !== "leave" })
       delegate: Rectangle {
         required property var modelData
         objectName: "mediaAction-" + modelData.action
-        Accessible.name: modelData.action === "invite" ? "Invite friends to voice" : modelData.label
+        Accessible.name: modelData.action === "share" ? (publishing ? "Stop sharing screen" : "Share screen")
+          : modelData.action === "camera" ? (publishing ? "Stop camera" : "Start camera") : modelData.action === "leave" ? "Disconnect from voice" : modelData.label
         ToolTip {
           visible: modelData.action === "invite" && controlMouse.containsMouse
-          text: "Invite friends to voice"
+          text: "Invite friends"
           y: parent.height + root.theme.spacing.sm
         }
         readonly property bool publishing: (modelData.action === "share" && root.bridge.sharing)
@@ -39,7 +41,7 @@ Column {
         readonly property bool controlEnabled: publishing || ((modelData.action !== "share" || !root.bridge.shareStarting)
           && (modelData.action !== "camera" || (!root.bridge.cameraStarting
             && root.bridge.cameraState.devices.length > 0)))
-        width: modelData.action === "invite" ? controlLabel.implicitWidth + root.theme.space(16) : Math.min(root.width, root.theme.tui ? controlLabel.implicitWidth + root.theme.space(16) : Math.max(controlLabel.implicitWidth + root.theme.space(20), (root.width
+        width: Math.min(root.width, root.theme.tui ? controlLabel.implicitWidth + root.theme.space(16) : Math.max(controlLabel.implicitWidth + root.theme.space(20), (root.width
           - controls.spacing * (controlRepeater.count - 1))
           / Math.max(1, controlRepeater.count)))
         height: Math.max(root.theme.space(root.theme.tui ? 28 : 34), controlLabel.implicitHeight + root.theme.space(10))
@@ -58,7 +60,7 @@ Column {
           width: Math.min(implicitWidth, parent.width - root.theme.space(16))
           wrapMode: modelData.action === "invite" ? Text.NoWrap : Text.Wrap
           horizontalAlignment: Text.AlignHCenter
-          text: modelData.action === "invite" ? "[inv]" : root.theme.tui ? "[" + modelData.label.toLowerCase() + "]" : modelData.label
+          text: root.theme.tui ? "[" + modelData.label.toLowerCase() + "]" : modelData.action === "leave" ? "Disconnect from voice" : modelData.label
           color: parent.publishing || modelData.action === "leave" ? root.theme.danger : root.theme.foreground
           font.weight: parent.publishing ? Font.Bold : Font.Normal
           font.family: root.theme.font.family

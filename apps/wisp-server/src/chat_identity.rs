@@ -28,6 +28,16 @@ pub(super) async fn directory(
     let user = authenticate_headers(&state, &headers).await?;
     let identities=sqlx::query("SELECT ci.user_id,ci.public_identity FROM chat_identities ci WHERE ci.user_id=? OR EXISTS(SELECT 1 FROM friendships f WHERE (f.first_user_id=? AND f.second_user_id=ci.user_id) OR (f.second_user_id=? AND f.first_user_id=ci.user_id))")
         .bind(user.to_string()).bind(user.to_string()).bind(user.to_string()).fetch_all(&state.pool).await.map_err(ApiError::internal)?;
+    let mut profiles = BTreeMap::<String, Value>::new();
+    let profile_rows = sqlx::query("SELECT p.user_id,p.signed_profile FROM account_profiles p WHERE p.user_id=? OR EXISTS(SELECT 1 FROM friendships f WHERE (f.first_user_id=? AND f.second_user_id=p.user_id) OR (f.second_user_id=? AND f.first_user_id=p.user_id))")
+        .bind(user.to_string()).bind(user.to_string()).bind(user.to_string()).fetch_all(&state.pool).await.map_err(ApiError::internal)?;
+    for row in profile_rows {
+        profiles.insert(
+            row.get("user_id"),
+            serde_json::from_str(&row.get::<String, _>("signed_profile"))
+                .map_err(ApiError::internal)?,
+        );
+    }
     let mut keys = BTreeMap::<String, Value>::new();
     for row in identities {
         keys.insert(
@@ -54,7 +64,7 @@ pub(super) async fn directory(
         .map(|row| json!({"conversation_id":row.get::<String,_>("conversation_id"),"user_id":row.get::<String,_>("user_id")}))
         .collect::<Vec<_>>();
     Ok(Json(
-        json!({"network":network(&state).await?,"required":state.config.require_chat_e2ee,"identities":keys,"rosters":rosters,"pending_admissions":pending}),
+        json!({"network":network(&state).await?,"required":state.config.require_chat_e2ee,"identities":keys,"profiles":profiles,"rosters":rosters,"pending_admissions":pending}),
     ))
 }
 
@@ -145,6 +155,52 @@ pub(super) async fn apply_roster(
         let previous: SignedRoster = serde_json::from_str(&previous).map_err(ApiError::internal)?;
         if &previous == request {
             return Ok(());
+        }
+        let server_room: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM conversations c WHERE c.id=? AND (c.spot_id IS NOT NULL OR EXISTS(SELECT 1 FROM server_channels sc WHERE sc.conversation_id=c.id)))")
+            .bind(&roster.conversation).fetch_one(&mut *tx).await.map_err(ApiError::internal)?;
+        if server_room {
+            for (id, old) in &previous.roster.members {
+                if roster
+                    .members
+                    .get(id)
+                    .is_some_and(|new| new.role != old.role)
+                {
+                    return Err(ApiError::forbidden(
+                        "Room roles cannot be changed; use Server settings",
+                    ));
+                }
+            }
+            let manager: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM server_identity WHERE owner_user_id=?) OR EXISTS(SELECT 1 FROM server_admins WHERE user_id=?)")
+                .bind(user.to_string()).bind(user.to_string()).fetch_one(&mut *tx).await.map_err(ApiError::internal)?;
+            if !manager {
+                if !previous
+                    .roster
+                    .members
+                    .iter()
+                    .all(|(id, member)| roster.members.get(id) == Some(member))
+                {
+                    return Err(ApiError::forbidden("Server administrator required"));
+                }
+                for (id, member) in &roster.members {
+                    if previous.roster.members.contains_key(id) {
+                        continue;
+                    }
+                    let authorized: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM pending_room_admissions p WHERE p.conversation_id=? AND p.user_id=? AND (EXISTS(SELECT 1 FROM server_identity WHERE owner_user_id=p.invited_by) OR EXISTS(SELECT 1 FROM server_admins WHERE user_id=p.invited_by)))")
+                        .bind(&roster.conversation).bind(id.to_string()).fetch_one(&mut *tx).await.map_err(ApiError::internal)?;
+                    if !authorized || member.role != Role::Member {
+                        return Err(ApiError::forbidden(
+                            "Server administrator approval required for encrypted access",
+                        ));
+                    }
+                }
+            }
+            if roster.members.iter().any(|(id, member)| {
+                !previous.roster.members.contains_key(id) && member.role != Role::Member
+            }) {
+                return Err(ApiError::forbidden(
+                    "Room roles cannot be granted; use Server settings",
+                ));
+            }
         }
         request.verify_successor(&previous).map_err(|_| {
             ApiError::conflict(

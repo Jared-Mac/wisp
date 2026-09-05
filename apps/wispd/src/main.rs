@@ -1,3 +1,4 @@
+mod account_profile;
 mod accounts;
 #[cfg(test)]
 #[path = "../../../third_party/livekit/src/platform_audio/device_count.rs"]
@@ -588,6 +589,7 @@ impl Daemon {
 
     fn scoped_state(server: ServerView, snapshot: &Snapshot) -> ServerStateView {
         ServerStateView {
+            voice_moderation: snapshot.voice_moderation.clone(),
             server: Self::server_view_for_snapshot(server, snapshot),
             self_state: snapshot.self_state.clone(),
             friends: snapshot.friends.clone(),
@@ -967,7 +969,7 @@ impl Daemon {
                 };
                 let mut media = MediaState {
                     livekit_connected: true,
-                    microphone_published: true,
+                    microphone_published: connected.microphone_published,
                     e2ee_enabled: connected.e2ee_enabled,
                     microphone: Some(connected.microphone),
                     speaker: Some(connected.speaker),
@@ -1542,16 +1544,22 @@ impl Daemon {
                 self.refresh("group_members_changed").await?;
                 Ok(None)
             }
-            "create_room" | "invite_to_room" | "set_room_admin" => {
-                if command.name != "create_room" && self.privacy.active()?.is_some() {
-                    self.change_encrypted_room(command).await?;
-                    self.refresh("room_changed").await?;
-                    return Ok(None);
-                }
+            "moderate_voice" => {
+                let value = decode(
+                    self.api
+                        .request(reqwest::Method::POST, "/v1/server/voice")
+                        .json(&command.args)
+                        .send()
+                        .await?,
+                )
+                .await?;
+                self.refresh("voice_moderated").await?;
+                Ok(Some(value))
+            }
+            "create_room" | "invite_to_room" => {
                 let endpoint = match command.name.as_str() {
                     "create_room" => "/v1/rooms",
-                    "invite_to_room" => "/v1/rooms/invite",
-                    _ => "/v1/rooms/admin",
+                    _ => "/v1/rooms/invite",
                 };
                 let value: Value = decode(
                     self.api
@@ -1908,6 +1916,19 @@ impl Daemon {
                     .await?;
                 Ok(Some(serde_json::to_value(invite)?))
             }
+            "account_profile" | "update_account_profile" | "change_account_password" => {
+                let value = account_profile::command(
+                    &self.api,
+                    &self.privacy,
+                    &command.name,
+                    &command.args,
+                )
+                .await?;
+                if command.name == "update_account_profile" {
+                    self.refresh("account_profile_changed").await?;
+                }
+                Ok(Some(value))
+            }
             "server_settings" => Ok(Some(
                 self.api
                     .server_request(reqwest::Method::GET, "/v1/server/settings", None)
@@ -2171,72 +2192,6 @@ impl Daemon {
         .await
     }
 
-    async fn change_linked_room(
-        server: &LinkedServer,
-        command: &str,
-        args: &Value,
-    ) -> anyhow::Result<()> {
-        let conversation_id = string_arg(args, "conversation_id")?;
-        let target: uuid::Uuid = string_arg(args, "user_id")?.parse()?;
-        let vault = server
-            .privacy
-            .active()?
-            .context("Encrypted chat is not configured for this server")?;
-        let snapshot = server.api.snapshot().await?;
-        let conversation = snapshot
-            .conversations
-            .iter()
-            .find(|conversation| conversation.id == conversation_id)
-            .context("Room is not available")?;
-        let (_, previous) = server.privacy.recipients(&server.api, conversation).await?;
-        let mut roster = previous.roster.clone();
-        roster.actor = vault.account;
-        roster.revision = roster
-            .revision
-            .checked_add(1)
-            .context("Room version overflow")?;
-        roster.previous = Some(previous.hash()?);
-        if command == "invite_to_room" {
-            if roster.members.contains_key(&target) {
-                return Ok(());
-            }
-            let directory = server.privacy.directory(&server.api, &vault).await?;
-            let identity = directory
-                .identities
-                .get(&target)
-                .context("This friend needs to enable encrypted chat first")?
-                .clone();
-            roster.members.insert(
-                target,
-                Member {
-                    identity,
-                    role: Role::Member,
-                },
-            );
-        } else {
-            let admin = args
-                .get("admin")
-                .and_then(Value::as_bool)
-                .context("Admin choice required")?;
-            roster
-                .members
-                .get_mut(&target)
-                .context("Friend is not in this room")?
-                .role = if admin { Role::Admin } else { Role::Member };
-        }
-        let signed = roster.sign(vault.ring.identity())?;
-        signed.verify_successor(&previous)?;
-        ensure_ok(
-            server
-                .api
-                .request(reqwest::Method::POST, "/v1/e2ee/roster")
-                .json(&signed)
-                .send()
-                .await?,
-        )
-        .await
-    }
-
     async fn edit_linked_message(
         server: &LinkedServer,
         id: uuid::Uuid,
@@ -2443,34 +2398,39 @@ impl Daemon {
                 }
                 None
             }
-            "create_room" | "invite_to_room" | "set_room_admin" => {
-                if command.name != "create_room" && server.privacy.active()?.is_some() {
-                    Self::change_linked_room(server, &command.name, &args).await?;
-                    None
-                } else {
-                    let endpoint = match command.name.as_str() {
-                        "create_room" => "/v1/rooms",
-                        "invite_to_room" => "/v1/rooms/invite",
-                        _ => "/v1/rooms/admin",
-                    };
-                    let value: Value = decode(
-                        server
-                            .api
-                            .request(reqwest::Method::POST, endpoint)
-                            .json(&args)
-                            .send()
-                            .await?,
-                    )
-                    .await?;
-                    if command.name == "create_room" && server.privacy.active()?.is_some() {
-                        let conversation = serde_json::from_value(value.clone())?;
-                        server
-                            .privacy
-                            .recipients(&server.api, &conversation)
-                            .await?;
-                    }
-                    Some(value)
+            "moderate_voice" => Some(
+                decode(
+                    server
+                        .api
+                        .request(reqwest::Method::POST, "/v1/server/voice")
+                        .json(&args)
+                        .send()
+                        .await?,
+                )
+                .await?,
+            ),
+            "create_room" | "invite_to_room" => {
+                let endpoint = match command.name.as_str() {
+                    "create_room" => "/v1/rooms",
+                    _ => "/v1/rooms/invite",
+                };
+                let value: Value = decode(
+                    server
+                        .api
+                        .request(reqwest::Method::POST, endpoint)
+                        .json(&args)
+                        .send()
+                        .await?,
+                )
+                .await?;
+                if command.name == "create_room" && server.privacy.active()?.is_some() {
+                    let conversation = serde_json::from_value(value.clone())?;
+                    server
+                        .privacy
+                        .recipients(&server.api, &conversation)
+                        .await?;
                 }
+                Some(value)
             }
             "group_leave" => {
                 ensure!(
@@ -2516,6 +2476,10 @@ impl Daemon {
                 server.api.conversation_action(action, &args).await?;
                 None
             }
+            "account_profile" | "update_account_profile" | "change_account_password" => Some(
+                account_profile::command(&server.api, &server.privacy, &command.name, &args)
+                    .await?,
+            ),
             "server_settings" => Some(
                 server
                     .api
@@ -3219,7 +3183,7 @@ fn clear_local_speaker(snapshot: &mut Snapshot, profile: &str) {
         .self_state
         .media
         .active_speakers
-        .retain(|name| name != profile);
+        .retain(|name| name != profile && name != &snapshot.self_state.user.display_name);
     snapshot.self_state.media.audio.input_level = 0;
 }
 
@@ -3496,7 +3460,8 @@ async fn synchronize_media_events(
 ) {
     while let Some(event) = events.recv().await {
         let generation = match &event {
-            MediaEvent::Reconnecting { generation }
+            MediaEvent::PermissionsChanged { generation }
+            | MediaEvent::Reconnecting { generation }
             | MediaEvent::Reconnected { generation }
             | MediaEvent::Disconnected { generation, .. }
             | MediaEvent::AudioSubscribed { generation, .. }
@@ -3528,6 +3493,36 @@ async fn synchronize_media_events(
             continue;
         }
         match event {
+            MediaEvent::PermissionsChanged { .. } => {
+                let (muted, deafened) = {
+                    let state = daemon.state.read().await;
+                    (
+                        effective_muted(
+                            state.self_state.muted,
+                            state.self_state.deafened,
+                            &state.self_state.push_to_talk,
+                        ),
+                        state.self_state.deafened,
+                    )
+                };
+                match daemon
+                    .media
+                    .reconcile_voice_permissions(muted, deafened)
+                    .await
+                {
+                    Ok(published) => {
+                        daemon
+                            .update_media_state(None, "voice_permissions_changed", |media| {
+                                media.microphone_published = published;
+                            })
+                            .await;
+                    }
+                    Err(error) => {
+                        warn!(%error, "could not restore microphone after server permission change");
+                    }
+                }
+            }
+
             MediaEvent::Reconnecting { .. } => {
                 warn!("LiveKit media reconnecting");
                 daemon
@@ -3736,7 +3731,8 @@ async fn synchronize_track_event(daemon: &Daemon, event: MediaEvent) {
                 )
             };
             if effective {
-                speakers.retain(|name| name != &daemon.profile);
+                let state = daemon.state.read().await;
+                speakers.retain(|name| name != &state.self_state.user.display_name);
             }
             daemon
                 .update_media_state(None, "active_speakers_changed", |media| {
@@ -4516,7 +4512,6 @@ async fn start_connected_daemon(
     let (media, media_events) = MediaManager::new(
         !args.disable_media && !args.disable_surfaces,
         e2ee_key.clone(),
-        snapshot.self_state.user.display_name.clone(),
     );
     snapshot.self_state.media.video = media.video_settings();
     let daemon = Arc::new(Daemon::new(

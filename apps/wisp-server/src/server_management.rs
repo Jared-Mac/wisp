@@ -31,7 +31,10 @@ pub(super) async fn is_manager(pool: &SqlitePool, user: Uuid) -> Result<bool, Ap
         .map_err(ApiError::internal)
 }
 
-async fn require_manager(state: &AppState, headers: &HeaderMap) -> Result<Uuid, ApiError> {
+pub(super) async fn require_manager(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> Result<Uuid, ApiError> {
     let user = authenticate_headers(state, headers).await?;
     if !is_manager(&state.pool, user).await? {
         return Err(ApiError::forbidden(
@@ -364,44 +367,13 @@ pub(super) async fn delete_channel(
     Ok(Json(json!({"ok":true})))
 }
 
-async fn room_permission(
-    state: &AppState,
-    user: Uuid,
-    id: &str,
-    deleting: bool,
-) -> Result<(), ApiError> {
-    if is_manager(&state.pool, user).await? {
-        return Ok(());
-    }
-    let role: Option<String> = sqlx::query_scalar(
-        "SELECT role FROM conversation_members WHERE conversation_id=? AND user_id=?",
-    )
-    .bind(id)
-    .bind(user.to_string())
-    .fetch_optional(&state.pool)
-    .await
-    .map_err(ApiError::internal)?;
-    if matches!(role.as_deref(), Some("host"))
-        || (!deleting && matches!(role.as_deref(), Some("admin")))
-    {
-        Ok(())
-    } else {
-        Err(ApiError::forbidden(if deleting {
-            "Only the room owner or a server administrator can delete this room"
-        } else {
-            "Room owner or administrator required"
-        }))
-    }
-}
-
 pub(super) async fn rename_room(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<String>,
     Json(request): Json<UpdateServerRoomRequest>,
 ) -> Result<Json<Value>, ApiError> {
-    let actor = authenticate_headers(&state, &headers).await?;
-    room_permission(&state, actor, &id, false).await?;
+    require_manager(&state, &headers).await?;
     let name = valid_name(&request.name, 60)?;
     ensure_category(&state.pool, request.category_id.as_deref()).await?;
     let mut tx = state.pool.begin().await.map_err(ApiError::internal)?;
@@ -716,8 +688,7 @@ pub(super) async fn delete_room(
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<Json<Value>, ApiError> {
-    let actor = authenticate_headers(&state, &headers).await?;
-    room_permission(&state, actor, &id, true).await?;
+    require_manager(&state, &headers).await?;
     let spot: Option<String> =
         sqlx::query_scalar("SELECT spot_id FROM conversations WHERE id=? AND spot_id IS NOT NULL")
             .bind(&id)

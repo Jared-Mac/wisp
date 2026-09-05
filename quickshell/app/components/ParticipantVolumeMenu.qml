@@ -8,6 +8,12 @@ Popup {
   required property var bridge
   required property var theme
   property var people: []
+  property string roomConversationId: ""
+  Loader {
+    id: roomManager
+    active: root.roomConversationId !== ""
+    sourceComponent: RoomManager { objectName: "contextRoomManager"; bridge: root.bridge; theme: root.theme }
+  }
   readonly property var participants: people.filter(function(p) { return p.id !== root.bridge.selfState.id })
   width: root.theme.space(300)
   padding: root.theme.spacing.lg
@@ -15,11 +21,27 @@ Popup {
   background: Rectangle { color: root.theme.surface; radius: root.theme.cornerRadius; border.width: 1; border.color: root.theme.separator }
   contentItem: Column {
     spacing: root.theme.spacing.md
+    ChatButton {
+      objectName: "roomContextSettings"
+      theme: root.theme; text: "room settings"
+      width: parent.width
+      visible: root.roomConversationId !== ""
+      onClicked: { root.close(); roomManager.item.manage(root.roomConversationId) }
+    }
+    ChatButton {
+      objectName: "roomContextNewPane"
+      theme: root.theme; text: "open chat in new pane"; width: parent.width
+      visible: root.roomConversationId !== ""
+      onClicked: { root.close(); root.bridge.openChannel(root.roomConversationId, true) }
+    }
     Text { text: "Volume · only for you"; color: root.theme.foreground; font.family: root.theme.font.family; font.pixelSize: root.theme.font.body; font.bold: true }
     ChatButton {
-      theme: root.theme; text: "Invite to your voice room"
+      theme: root.theme; text: "Invite to your call"
       width: parent.width
       visible: root.participants.length === 1 && !!root.bridge.currentVoiceRoom
+        && String(root.participants[0].server_id || root.bridge.activeServer.id) === String(root.bridge.currentVoiceRoom.server_id || root.bridge.activeServer.id)
+        && (!(root.bridge.currentVoiceRoom.members || []).some(function(p) { return p.id === root.participants[0].id })
+          || (typeof root.bridge.needsEncryptedRoomAccess === "function" && root.bridge.needsEncryptedRoomAccess(root.participants[0])))
       onClicked: { root.bridge.inviteToRoom(root.participants[0]); root.close() }
     }
     Repeater {

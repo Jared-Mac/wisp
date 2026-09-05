@@ -16,10 +16,17 @@ ShellRoot {
   QtObject { id: appearance; property string palette: "ash_olive"; property bool managed: false }
   QtObject {
     id: testBridge
+    function roomSettingsConversationId(room, persistent) { return "" }
+    property var activeServer: ({id:"local",connected:true})
+    function scopedParticipant(person) { return Object.assign({},person,{server_id:"local",account_id:"self"}) }
+    function participantServer(person) { return {server:activeServer,self:selfState,friends:[]} }
+    function participantModeration(person) { return person.id === "owner" ? {muted:true,deafened:true} : {muted:false,deafened:false} }
+    function canModerateParticipant(person) { return false }
     property var friends: []
     property var participantVolumes: QtObject {
       property string error: ""
       function volumeFor(person) { return 100 }
+      function isMuted(person) { return person.id === "owner" }
     }
     property var selfState: ({id:"self",hangout_id:"test_room",deafened:true,muted:true})
     property bool effectiveMuted: true
@@ -79,19 +86,23 @@ ShellRoot {
           var pos = row.mapToItem(room, 0, 0)
           test.check(pos.x >= 0 && pos.y >= 0 && pos.x + row.width <= room.width && pos.y + row.height <= room.height, "member fits card")
         }
+        var selfRow = test.find(room, "roomMember-1"), moderatedRow = test.find(room, "roomMember-2")
+        test.check(String(test.find(selfRow,"participantMicrophoneStatus").source).endsWith("/microphone-muted.svg") && String(test.find(selfRow,"participantDeafenStatus").source).endsWith("/deafened.svg"),"self mute and deafen retain the ordinary icons")
+        test.check(test.find(moderatedRow,"participantMicrophoneStatus").visible && String(test.find(moderatedRow,"participantMicrophoneStatus").source).endsWith("/microphone-server-muted.svg"),"calls show server mute with a shield")
+        test.check(test.find(moderatedRow,"participantDeafenStatus").visible && String(test.find(moderatedRow,"participantDeafenStatus").source).endsWith("/server-deafened.svg") && test.find(moderatedRow,"participantLocalMuteStatus").visible,"calls distinguish server deafen and local mute together")
         var share = test.find(column, "mediaAction-share")
         var camera = test.find(column, "mediaAction-camera")
         var invite = test.find(column, "mediaAction-invite")
-        test.check(!!invite && invite.modelData.label === "inv", "compact invite action exists")
+        test.check(!!invite && invite.modelData.label === "Invite", "compact invite action exists")
         if (invite) {
-          var inviteLabel = invite.children.find(function(child) { return child.text === "[inv]" })
+          var inviteLabel = invite.children.find(function(child) { return child.text === "[invite]" || child.text === "Invite" })
           test.check(!!inviteLabel && inviteLabel.width >= inviteLabel.implicitWidth && inviteLabel.lineCount === 1, "invite brackets never wrap")
           test.check(invite.parent.children.indexOf(invite) > invite.parent.children.indexOf(camera), "invite follows camera")
           test.check(invite.parent.children.indexOf(invite) < invite.parent.children.indexOf(test.find(column, "mediaAction-leave")), "invite precedes leave")
         }
         test.check(share.publishing && camera.publishing && share.border.width === 1 && camera.border.width === 1, "both live controls highlighted")
         test.check(share.controlEnabled && camera.controlEnabled, "stop actions stay enabled")
-        test.check(share.modelData.label === "Stop sharing screen" && camera.modelData.label === "Stop camera", "explicit stop labels")
+        test.check(share.modelData.label === "Stop share" && camera.modelData.label === "Stop cam", "explicit stop labels")
         test.check(share.width <= column.width && camera.width <= column.width, "controls fit narrow rail")
         clicks.mouseClick(share, share.width / 2, share.height / 2)
         clicks.mouseClick(camera, camera.width / 2, camera.height / 2)
@@ -113,7 +124,7 @@ ShellRoot {
         if (!share) continue
         var camera = test.find(column, "mediaAction-camera")
         test.check(!share.publishing && !camera.publishing && share.border.width === 0 && camera.border.width === 0, "idle controls not highlighted")
-        test.check(camera.modelData.label === "Camera on" && !camera.controlEnabled, "idle camera still needs device")
+        test.check(camera.modelData.label === "Camera" && !camera.controlEnabled, "idle camera still needs device")
       }
       if (!test.failed) console.log("ROOM_MEDIA_OK")
       Qt.quit()

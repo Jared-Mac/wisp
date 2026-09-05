@@ -118,6 +118,7 @@ Rectangle {
       id: toolbarActions
       anchors.right: parent.right
       spacing: root.theme.spacing.xs
+      ConversationVoiceAction { bridge: root.bridge; theme: root.theme; conversationId: root.currentId }
       ChatButton { id: optionsButton; objectName: "chatOptionsButton"; theme: root.theme; text: "⋯"; implicitWidth: root.theme.space(34); visible: !!root.current; Accessible.name: "Chat options"; onClicked: optionsMenu.open() }
     }
     TextMetrics {
