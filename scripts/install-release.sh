@@ -42,6 +42,12 @@ done
 
 "$release_dir/scripts/app-sync.sh"
 
+# Update an adapter the user already installed, but never install or enable
+# Omarchy integration on their behalf.
+if [[ -d "$config_root/omarchy/plugins/dev.wisp" ]]; then
+  "$release_dir/scripts/plugin-sync.sh" --existing
+fi
+
 echo "Installed Wisp binaries to $bin_root"
 if [[ -n "$backup_dir" ]]; then
   echo "Backed up previous Wisp binaries to $backup_dir"

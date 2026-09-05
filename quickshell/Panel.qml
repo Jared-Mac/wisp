@@ -17,6 +17,7 @@ Panel {
   implicitHeight: barButton.implicitHeight
 
   onOpenedChanged: if (opened) {
+    sessionLauncher.ensureRunning()
     Qt.callLater(function() { content.forceActiveFocus() })
   } else content.resetNavigation()
 
@@ -75,9 +76,12 @@ Panel {
     }
   }
 
-  Process {
-    id: appLauncher
-    command: ["env", "WISP_INTEGRATION=omarchy", "wisp-ui", "app", "open"]
+  WispSessionLauncher {
+    id: sessionLauncher
+    daemonConnected: bridge.daemonConnected
+    onCompleted: function(action, exitCode) {
+      if (exitCode !== 0) bridge.lastError = "Couldn't start Wisp account sign-in. Try wisp-onboarding from a terminal."
+    }
   }
 
   IpcHandler {
@@ -297,7 +301,7 @@ Panel {
       dismissOnNavigate: true
       onAppRequested: {
         root.close()
-        if (!appLauncher.running) appLauncher.running = true
+        sessionLauncher.openApp()
       }
       onCloseRequested: root.close()
     }

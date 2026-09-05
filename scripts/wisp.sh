@@ -2,6 +2,12 @@
 set -euo pipefail
 
 bin_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+ensure_running=false
+case "${1:-}" in
+  --ensure-running) ensure_running=true ;;
+  "") ;;
+  *) echo "usage: wisp [--ensure-running]" >&2; exit 2 ;;
+esac
 config_file=${XDG_CONFIG_HOME:-${HOME:?HOME is required}/.config}/wisp/account.env
 if [[ -f "$config_file" ]]; then
   configured_profile=$(sed -n 's/^WISP_PROFILE=//p' "$config_file" | tail -n 1)
@@ -17,11 +23,12 @@ if command -v systemctl >/dev/null 2>&1 \
     already_running=true
   fi
   systemctl --user start wisp.service
-  if [[ "$already_running" == true ]]; then
+  if [[ "$already_running" == true && "$ensure_running" == false ]]; then
     exec "$bin_dir/wisp-ui" app open >/dev/null 2>&1
   fi
 else
   if pgrep -u "$(id -u)" -x wispd >/dev/null 2>&1; then
+    [[ "$ensure_running" == true ]] && exit 0
     exec "$bin_dir/wisp-ui" app open >/dev/null 2>&1
   fi
   nohup "$bin_dir/wisp-launch" </dev/null >/dev/null 2>&1 &

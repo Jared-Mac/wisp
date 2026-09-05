@@ -133,6 +133,9 @@ or provider account. A fresh server has no built-in users or rooms. Its one-time
 bootstrap creates the server owner account. Everyone else creates an account
 from an encoded friend or room invitation, or signs in to an existing account.
 Launching Wisp without saved account credentials opens the sign-in window.
+Opening the Omarchy popup also starts this account-aware flow when its daemon
+is not running; its **Open app** action uses the same launcher. An already-running
+client is left alone when opening the popup, including while its server is offline.
 Choose **[create account]** there to enter an invitation and register, or
 **[new server]** to bootstrap a server you own. Closing the prompt exits Wisp;
 it does not reopen repeatedly. Saved credentials still sign in automatically.
@@ -596,6 +599,9 @@ installing the desktop runtime dependencies, extract it and run:
 ./install.sh
 wisp
 ```
+
+Release installation also backs up and refreshes an already-installed Omarchy
+adapter, without enabling a disabled adapter or adding one on other desktops.
 
 The release job uses GitHub's short-lived repository token. It does not require
 or receive deployment credentials, LiveKit secrets, or a personal access token.
