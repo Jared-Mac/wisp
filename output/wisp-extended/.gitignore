@@ -1,0 +1,4 @@
+# Large/intermediate TTFX captures are recreated by generate.py.
+/ttfx-colorshift.ansi
+/wave-envelope.ansi
+/wave-envelope.txt
