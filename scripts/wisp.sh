@@ -5,8 +5,16 @@ bin_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 ensure_running=false
 case "${1:-}" in
   --ensure-running) ensure_running=true ;;
+  wisp-invite:*)
+    # Pass invitations as data, never shell code or diagnostic output.
+    [[ $# == 1 && ${#1} -le 16384 && "$1" =~ ^wisp-invite:[A-Za-z0-9_-]+$ ]] || {
+      echo "This Wisp invitation is invalid." >&2; exit 2;
+    }
+    WISP_ONBOARDING_MODE=register WISP_ONBOARDING_INVITE="$1" "$bin_dir/wisp-onboarding" || exit "$?"
+    exec "$bin_dir/wisp"
+    ;;
   "") ;;
-  *) echo "usage: wisp [--ensure-running]" >&2; exit 2 ;;
+  *) echo "usage: wisp [--ensure-running | wisp-invite:…]" >&2; exit 2 ;;
 esac
 config_file=${XDG_CONFIG_HOME:-${HOME:?HOME is required}/.config}/wisp/account.env
 if [[ -f "$config_file" ]]; then

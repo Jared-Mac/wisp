@@ -63,6 +63,32 @@ ShellRoot {
       window.busy = false
       test.findChild(window, "accountMode-login").clicked()
       check(window.mode === "login", "can return to sign in")
+      // A valid invitation becomes a focused screen without losing legacy entry.
+      var payload = {v:1, server:"https://friends.example.com", token:"test-only-token"}
+      var encoded = Qt.btoa(JSON.stringify(payload)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")
+      window.selectMode("register")
+      invite.text = "wisp-invite:" + encoded
+      check(window.acceptingInvite, "valid invitation is recognized")
+      check(!invite.visible && !test.findChild(window, "accountServer").visible, "connection fields are hidden")
+      name.text = "Alex Example"
+      check(test.findChild(window, "accountUsername").text === "alex_example", "username follows chosen name")
+      var username = test.findChild(window, "accountUsername")
+      username.text = "my_handle"
+      username.textEdited()
+      name.text = "Another Name"
+      check(username.text === "my_handle", "custom username is preserved")
+      check(test.findChild(window, "accountSubmit").text === "Join server", "invitation has a clear join action")
+      window.selectMode("login")
+      check(window.acceptingInvite && !name.visible, "existing accounts can accept an invitation")
+      check(window.parseInvitation("wisp-invite:broken") === null, "malformed payload is rejected")
+      for (var bad of ["http://friends.example.com", "https://user:password@friends.example.com", "https://friends.example.com/redirect", "https://friends.example.com?token=secret"]) {
+        payload.server = bad
+        var badEncoded = Qt.btoa(JSON.stringify(payload)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")
+        check(window.parseInvitation("wisp-invite:" + badEncoded) === null, "unsafe invite destination rejected")
+      }
+      invite.text = "wisp-invite:broken"
+      window.submit()
+      check(!window.busy && window.feedback.indexOf("invalid") >= 0, "invalid invite never submits")
       console.log("ONBOARDING_OK")
       window.closed()
     }

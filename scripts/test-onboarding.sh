@@ -53,6 +53,32 @@ PATH="$test_root/bin:$PATH" XDG_CONFIG_HOME="$test_root/config" \
   "$test_root/bin/wisp" --ensure-running
 [[ ! -s "$test_root/popup-active/calls" ]]
 
+# URI launches pass the invitation intact and do not restart an active daemon.
+mkdir -p "$test_root/invite"
+cat > "$test_root/bin/wisp-onboarding" <<'MOCK'
+#!/usr/bin/env bash
+[[ $WISP_ONBOARDING_MODE == register ]]
+[[ $WISP_ONBOARDING_INVITE == wisp-invite:dGVzdA ]]
+printf 'invite-prompt\n' >> "$WISP_TEST_STATE/calls"
+exit "${WISP_TEST_INVITE_RESULT:-0}"
+MOCK
+chmod +x "$test_root/bin/wisp-onboarding"
+for result in 0 2; do
+  state="$test_root/invite/$result"
+  mkdir -p "$state"
+  touch "$state/active"
+  actual=0
+  PATH="$test_root/bin:$PATH" XDG_CONFIG_HOME="$test_root/config" \
+    WISP_TEST_STATE="$state" WISP_TEST_INVITE_RESULT="$result" \
+    "$test_root/bin/wisp" wisp-invite:dGVzdA || actual=$?
+  [[ $actual == "$result" ]]
+  [[ $(rg -c '^invite-prompt$' "$state/calls") == 1 ]]
+  if [[ $result == 0 ]]; then rg -q '^ui:app open$' "$state/calls"; else ! rg -q '^ui:' "$state/calls"; fi
+done
+for invalid in 'https://example.com' 'wisp-invite:$(touch /tmp/wisp-invalid)' 'wisp-invite:'; do
+  if "$test_root/bin/wisp" "$invalid" >/dev/null 2>&1; then exit 1; fi
+done
+
 if command -v qs >/dev/null 2>&1; then
   cp -a "$repo_dir/quickshell/onboarding" "$test_root/onboarding"
   cp "$repo_dir/tests/quickshell/Onboarding.qml" "$test_root/shell.qml"
@@ -65,6 +91,13 @@ if command -v qs >/dev/null 2>&1; then
     rg -q 'ONBOARDING_OK' "$test_root/qml.log"
     if rg 'ONBOARDING_FAILED|ReferenceError|TypeError|Failed to load' "$test_root/qml.log"; then exit 1; fi
   done
+  cp -a "$repo_dir/quickshell/app" "$test_root/app"
+  cp "$repo_dir/tests/quickshell/ServerInvite.qml" "$test_root/shell.qml"
+  XDG_CONFIG_HOME="$test_root/config" XDG_RUNTIME_DIR="$test_root/runtime" \
+    QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software \
+    timeout 10 qs --path "$test_root" >"$test_root/qml.log" 2>&1 || { cat "$test_root/qml.log"; exit 1; }
+  rg -q SERVER_INVITE_OK "$test_root/qml.log"
+  if rg 'ReferenceError|TypeError|Failed to load|Cannot assign|Binding loop' "$test_root/qml.log"; then exit 1; fi
   mkdir -p "$test_root/app" "$test_root/session"
   cp "$repo_dir/quickshell/app/WispSessionLauncher.qml" "$test_root/app/"
   cp "$repo_dir/tests/quickshell/SessionLauncher.qml" "$test_root/shell.qml"

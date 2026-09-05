@@ -14,16 +14,36 @@ ShellRoot {
     id: window
     objectName: "accountWindow"
     visible: true
-    title: mode === "login" ? "Sign in to Wisp" : mode === "register" ? "Create a Wisp account" : "Set up a Wisp server"
+    title: acceptingInvite ? "Accept invitation" : mode === "login" ? "Sign in to Wisp" : mode === "register" ? "Create a Wisp account" : "Set up a Wisp server"
     implicitWidth: 560
-    implicitHeight: 650
-    minimumSize: Qt.size(440, 540)
+    implicitHeight: acceptingInvite ? 500 : 650
+    minimumSize: Qt.size(440, acceptingInvite ? 460 : 540)
     color: "#151821"
     onClosed: Qt.exit(2)
 
     property string mode: {
       var requested = Quickshell.env("WISP_ONBOARDING_MODE") || "login"
       return ["register", "login", "bootstrap"].indexOf(requested) >= 0 ? requested : "login"
+    }
+    readonly property var invitation: parseInvitation(invite.text.trim())
+    readonly property bool acceptingInvite: mode !== "bootstrap" && invitation !== null
+    property bool usernameEdited: false
+    function parseInvitation(value) {
+      if (!/^wisp-invite:[A-Za-z0-9_-]+$/.test(value) || value.length > 16384) return null
+      try {
+        var encoded = value.slice(12).replace(/-/g, "+").replace(/_/g, "/")
+        while (encoded.length % 4) encoded += "="
+        var bytes = Qt.atob(encoded), escaped = ""
+        for (var i = 0; i < bytes.length; i++) escaped += "%" + ("0" + bytes.charCodeAt(i).toString(16)).slice(-2)
+        var payload = JSON.parse(decodeURIComponent(escaped))
+        if (payload.v !== 1 || typeof payload.token !== "string" || !payload.token.length
+            || typeof payload.server !== "string" || !/^https:\/\/[a-z0-9.-]+(?::[0-9]+)?\/?$/i.test(payload.server)) return null
+        return {server: payload.server}
+      } catch (error) { return null }
+    }
+    function suggestUsername(value) {
+      var result = value.toLowerCase().replace(/[^a-z0-9._-]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 32)
+      return result.length >= 3 ? result : result ? (result + "_friend") : ""
     }
     property bool busy: false
     property string feedback: ""
@@ -40,7 +60,11 @@ ShellRoot {
     function submit() {
       if (busy) return
       feedback = ""
-      var embeddedServer = mode !== "bootstrap" && invite.text.trim().indexOf("wisp-invite:") === 0
+      if (mode !== "bootstrap" && invite.text.trim().indexOf("wisp-invite:") === 0 && !invitation) {
+        feedback = "This invitation is invalid or needs a newer Wisp version. Ask your friend for a new invite."
+        return
+      }
+      var embeddedServer = acceptingInvite
       if ((!server.text.trim() && !embeddedServer) || !username.text.trim() || !password.text) {
         feedback = "Server, username, and password are required."
         return
@@ -81,14 +105,15 @@ ShellRoot {
           spacing: 14
 
           Text {
-            text: window.mode === "login" ? "Sign in to Wisp" : window.mode === "register" ? "Create your account" : "Set up your server"
+            text: window.acceptingInvite ? "Accept invitation" : window.mode === "login" ? "Sign in to Wisp" : window.mode === "register" ? "Create your account" : "Set up your server"
             color: "#e8ecf3"
             font.family: "Hack"
             font.pixelSize: 22
             font.weight: Font.DemiBold
           }
           Text {
-            text: "Connect directly to a Wisp server. Your password authenticates the account; encrypted chat keys remain on your devices."
+            text: window.acceptingInvite ? "Join " + window.invitation.server.replace(/^https:\/\//, "").replace(/\/$/, "") + ". " + (window.mode === "login" ? "Sign in to your existing account." : "Choose your name and a password to get started.") : "A place to hang out with your friends. Sign in, or use an invitation to create your account."
+            textFormat: Text.PlainText
             color: "#8d96a8"
             font.family: "Hack"
             font.pixelSize: 12
@@ -100,11 +125,14 @@ ShellRoot {
             Layout.fillWidth: true
             spacing: 7
             Repeater {
-              model: [
+              model: (window.acceptingInvite ? [
+                {key:"register", label:"[new account]"},
+                {key:"login", label:"[already have an account]"}
+              ] : [
                 {key:"login", label:"[sign in]"},
                 {key:"register", label:"[create account]"},
                 {key:"bootstrap", label:"[new server]"}
-              ]
+              ])
               delegate: Button {
                 required property var modelData
                 objectName: "accountMode-" + modelData.key
@@ -129,9 +157,10 @@ ShellRoot {
             }
           }
 
-          Text { text: "server"; color: "#8d96a8"; font.family: "Hack"; font.pixelSize: 12 }
+          Text { visible: !window.acceptingInvite; text: "server"; color: "#8d96a8"; font.family: "Hack"; font.pixelSize: 12 }
           TextField {
             id: server
+            visible: !window.acceptingInvite
             objectName: "accountServer"
             Layout.fillWidth: true
             text: Quickshell.env("WISP_ONBOARDING_SERVER") || ""
@@ -143,11 +172,12 @@ ShellRoot {
             background: Rectangle { color: "#1c202b"; border.color: server.activeFocus ? "#2f8cff" : "#3b4353"; radius: 3 }
           }
 
-          Text { visible: window.mode !== "bootstrap"; text: window.mode === "login" ? "invite (optional)" : "invite"; color: "#8d96a8"; font.family: "Hack"; font.pixelSize: 12 }
+          Text { visible: window.mode !== "bootstrap" && !window.acceptingInvite; text: window.mode === "login" ? "invite (optional)" : "invite"; color: "#8d96a8"; font.family: "Hack"; font.pixelSize: 12 }
           TextField {
             id: invite
+            text: Quickshell.env("WISP_ONBOARDING_INVITE") || ""
             objectName: "accountInvite"
-            visible: window.mode !== "bootstrap"
+            visible: window.mode !== "bootstrap" && !window.acceptingInvite
             Layout.fillWidth: true
             placeholderText: "paste friend or room invitation"
             color: "#e8ecf3"; placeholderTextColor: "#667085"; font.family: "Hack"; font.pixelSize: 13
@@ -165,25 +195,27 @@ ShellRoot {
             background: Rectangle { color: "#1c202b"; border.color: bootstrapToken.activeFocus ? "#2f8cff" : "#3b4353"; radius: 3 }
           }
 
-          Text { text: "username"; color: "#8d96a8"; font.family: "Hack"; font.pixelSize: 12 }
-          TextField {
-            id: username
-            objectName: "accountUsername"
-            Layout.fillWidth: true
-            placeholderText: "username"
-            color: "#e8ecf3"; placeholderTextColor: "#667085"; font.family: "Hack"; font.pixelSize: 13
-            background: Rectangle { color: "#1c202b"; border.color: username.activeFocus ? "#2f8cff" : "#3b4353"; radius: 3 }
-          }
-
-          Text { visible: window.mode !== "login"; text: "display name"; color: "#8d96a8"; font.family: "Hack"; font.pixelSize: 12 }
+          Text { visible: window.mode !== "login"; text: "Your name"; color: "#8d96a8"; font.family: "Hack"; font.pixelSize: 12 }
           TextField {
             id: displayName
+            onTextChanged: if (window.mode === "register" && !window.usernameEdited) username.text = window.suggestUsername(text)
             objectName: "accountDisplayName"
             visible: window.mode !== "login"
             Layout.fillWidth: true
             placeholderText: "name shown to friends"
             color: "#e8ecf3"; placeholderTextColor: "#667085"; font.family: "Hack"; font.pixelSize: 13
             background: Rectangle { color: "#1c202b"; border.color: displayName.activeFocus ? "#2f8cff" : "#3b4353"; radius: 3 }
+          }
+
+          Text { text: "username"; color: "#8d96a8"; font.family: "Hack"; font.pixelSize: 12 }
+          TextField {
+            id: username
+            onTextEdited: window.usernameEdited = true
+            objectName: "accountUsername"
+            Layout.fillWidth: true
+            placeholderText: "username"
+            color: "#e8ecf3"; placeholderTextColor: "#667085"; font.family: "Hack"; font.pixelSize: 13
+            background: Rectangle { color: "#1c202b"; border.color: username.activeFocus ? "#2f8cff" : "#3b4353"; radius: 3 }
           }
 
           Text { text: "password"; color: "#8d96a8"; font.family: "Hack"; font.pixelSize: 12 }
@@ -225,7 +257,7 @@ ShellRoot {
             Layout.fillWidth: true
             Layout.preferredHeight: 38
             enabled: !window.busy
-            text: window.busy ? "working…" : window.mode === "login" ? "sign in" : window.mode === "bootstrap" ? "create owner account" : "create account"
+            text: window.busy ? "working…" : window.mode === "login" ? "sign in" : window.mode === "bootstrap" ? "create owner account" : window.acceptingInvite ? "Join server" : "create account"
             font.family: "Hack"
             font.pixelSize: 13
             onClicked: window.submit()
@@ -241,7 +273,7 @@ ShellRoot {
         stdinEnabled: true
         onStarted: write(JSON.stringify({
           action: window.mode,
-          server_url: server.text.trim(),
+          server_url: window.acceptingInvite ? window.invitation.server : server.text.trim(),
           username: username.text.trim(),
           display_name: displayName.text.trim(),
           password: password.text,
