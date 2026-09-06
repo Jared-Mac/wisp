@@ -9,7 +9,7 @@ Item {
   property bool compact: false
   property bool showInvite: true
   signal settingsRequested()
-  implicitHeight: selector.height + (inviteButton.visible ? inviteButton.height + root.theme.spacing.xs : 0)
+  implicitHeight: selector.height + (root.showInvite ? inviteButton.height + root.theme.spacing.xs : 0)
   TextMetrics { id: serverMetrics; font: selector.font; text: serverLabel.text }
   TextMetrics { id: settingsMetrics; font: selector.font; text: root.theme.tui ? "[settings]" : "settings" }
 
@@ -130,7 +130,7 @@ Item {
   }
   // Status snapshots replace the server object; only a selection change dismisses the invite.
   readonly property string inviteServerId: String(root.bridge.activeServer.id || "")
-  onInviteServerIdChanged: invitePopup.close()
+  onInviteServerIdChanged: if (invitePopup.visible) invitePopup.close()
   Popup {
     id: invitePopup
     objectName: "serverInvitePopup"

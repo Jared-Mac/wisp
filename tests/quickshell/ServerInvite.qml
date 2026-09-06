@@ -36,6 +36,21 @@ ShellRoot {
     if (!button || !button.enabled) throw new Error("Invite action must be reachable")
     var settings = find(selector, "serverSettingsShortcut")
     if (!settings || !settings.visible || settings.y >= button.y) throw new Error("Server settings must remain above invite action")
+    var expandedHeight = selector.implicitHeight
+    selector.visible = false
+    input.wait(50)
+    if (selector.implicitHeight !== expandedHeight) throw new Error("Hiding the selector must not change its layout during window teardown")
+    selector.visible = true
+    selector.showInvite = false
+    input.wait(50)
+    if (button.visible || selector.implicitHeight >= expandedHeight) throw new Error("The explicit invite setting controls reserved space")
+    var compactHeight = selector.implicitHeight
+    selector.visible = false
+    input.wait(50)
+    if (selector.implicitHeight !== compactHeight) throw new Error("Compact selector height must remain stable while hidden")
+    selector.visible = true
+    selector.showInvite = true
+    input.wait(50)
     input.mouseClick(button)
     input.wait(50)
     var popup = find(selector, "serverInvitePopup")
