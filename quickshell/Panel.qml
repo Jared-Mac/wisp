@@ -52,8 +52,8 @@ Panel {
       var launcher = chatLauncher.createObject(root, {command:["env","WISP_INTEGRATION=omarchy","wisp-ui","chat",reuseChannel ? "reuse-channel" : "tile",id]})
       launcher.running = true
     }
-    onDesktopWatchRequested: function(participant, source, open) {
-      var launcher = mediaLauncher.createObject(root, {command:["env","WISP_INTEGRATION=omarchy","wisp-ui","media",open ? "watch" : "stop",participant,source]})
+    onDesktopWatchRequested: function(participant, source, open, presentation) {
+      var launcher = mediaLauncher.createObject(root, {command:["env","WISP_INTEGRATION=omarchy","wisp-ui","media",open ? (presentation === "window" ? "watch-window" : presentation === "tile" ? "watch-tile" : "watch") : "stop",participant,source]})
       launcher.running = true
     }
   }

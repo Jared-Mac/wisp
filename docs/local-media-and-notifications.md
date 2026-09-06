@@ -15,7 +15,10 @@
   not change anyone's microphone or another listener's audio.
 - Speaking indicators combine LiveKit activity with measured audio levels and a
   700 ms release hold. Muting and leaving take precedence over that hold.
-- Watched screens/cameras join the main split tree when the main window is open.
+- **Watch** offers **Watch in dedicated window** and **Watch in app**. Dedicated
+  windows remain visible while the main app window is closed; Wisp keeps running
+  in the background to receive the stream.
+  Watched screens/cameras opened without an explicit choice join the main split tree when the main window is open.
   Otherwise they open separately. Pop-out, anchor, drag and resize are local UI
   operations. Closing a pop-out anchors it; the × inside the stream stops watching.
   Closing the main window pops its watched streams out rather than hiding them.

@@ -192,6 +192,12 @@ ShellRoot {
     function open(participant: string, source: string): void {
       app.pendingMedia=app.pendingMedia.concat([{participant:participant,source:source}])
     }
+    function openWindow(participant: string, source: string): void {
+      app.pendingMedia=app.pendingMedia.concat([{participant:participant,source:source,presentation:"window"}])
+    }
+    function openTile(participant: string, source: string): void {
+      app.pendingMedia=app.pendingMedia.concat([{participant:participant,source:source,presentation:"tile"}])
+    }
     function close(participant: string, source: string): void {
       app.pendingMedia=app.pendingMedia.filter(function(v) { return v.participant!==participant || v.source!==source })
       bridge.watchVideo({participant:participant,source:source},false)

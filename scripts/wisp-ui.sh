@@ -101,7 +101,7 @@ call_or_start() {
   fi
 
   case "$action" in
-    open|show|toggle|activate|anchor|reuseChannel)
+    open|openWindow|openTile|show|toggle|activate|anchor|reuseChannel)
       lock_ui_start
       if call_ui "$endpoint" "$action" "$@" >/dev/null 2>&1; then
         return
@@ -134,9 +134,11 @@ case "$surface" in
     ;;
   media)
     case "${2:-}" in
+      watch-window) call_or_start dev.wisp.media openWindow "${3:?participant required}" "${4:?source required}" ;;
+      watch-tile) call_or_start dev.wisp.media openTile "${3:?participant required}" "${4:?source required}" ;;
       watch) call_or_start dev.wisp.media open "${3:?participant required}" "${4:?source required}" ;;
       stop) call_or_start dev.wisp.media close "${3:?participant required}" "${4:?source required}" ;;
-      *) echo "usage: wisp-ui media {watch|stop} PARTICIPANT SOURCE" >&2; exit 2 ;;
+      *) echo "usage: wisp-ui media {watch|watch-window|watch-tile|stop} PARTICIPANT SOURCE" >&2; exit 2 ;;
     esac
     ;;
   app|panel)

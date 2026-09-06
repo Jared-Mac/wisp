@@ -35,6 +35,9 @@ independent cryptographic audit.
   Room participants need not be direct friends: their identities are accepted
   through the room's verified membership chain, with saved identity pins and
   rollback protection still enforced. Room admission does not add a friendship.
+  After verifying that chain, clients remember a room member's initial display
+  name using the same TOFU model as friend enrollment. Ordinary snapshots cannot
+  overwrite remembered names; later name changes require signed profiles.
 - Joining a room must not automatically re-encrypt or disclose prior history.
   Default to messages sent after admission; history sharing needs a separate
   explicit policy/action. Removing a member excludes them from future messages,

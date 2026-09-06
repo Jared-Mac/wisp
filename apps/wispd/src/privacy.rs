@@ -386,6 +386,54 @@ impl Privacy {
         Ok(changed)
     }
 
+    /// Remember initial names only after `directory` has verified the signed
+    /// room chains and pinned their identities. As with friend enrollment,
+    /// names use TOFU; later snapshots cannot rename an existing contact.
+    fn sync_room_names(
+        &self,
+        vault: &Vault,
+        directory: &Directory,
+        snapshot: &Snapshot,
+    ) -> anyhow::Result<()> {
+        let _guard = self.contact_updates.lock().expect("contact update lock");
+        let mut setup = read_setup(&self.binding)?.context("Missing privacy binding")?;
+        ensure!(
+            setup.network == vault.network && setup.account == vault.account,
+            "Privacy binding changed"
+        );
+        let mut changed = false;
+        for conversation in &snapshot.conversations {
+            let Some(roster) = directory
+                .rosters
+                .get(&conversation.id)
+                .and_then(|chain| chain.last())
+            else {
+                continue;
+            };
+            for member in &conversation.members {
+                if !roster.roster.members.contains_key(&member.id)
+                    || member.display_name.trim().is_empty()
+                    || member.display_name.chars().count() > 80
+                    || member.display_name.chars().any(char::is_control)
+                {
+                    continue;
+                }
+                if let std::collections::btree_map::Entry::Vacant(entry) =
+                    setup.contacts.entry(member.id)
+                {
+                    entry.insert(member.display_name.clone());
+                    changed = true;
+                }
+            }
+        }
+        if changed {
+            write_setup(&self.binding, &setup, true)?;
+            *self.active.write().expect("privacy state lock") =
+                Ok(Some(Arc::new(Self::load(&self.root, &setup)?)));
+        }
+        Ok(())
+    }
+
     /// Complete accepted encrypted-room account invitations with an
     /// owner/admin signature. At most one admission per room is published per
     /// pass so every signature is based on the latest roster and snapshot.
@@ -719,9 +767,6 @@ impl Privacy {
 
     #[allow(clippy::too_many_lines)] // Keep authenticated decode and redaction together.
     pub async fn decrypt_snapshot(&self, api: &ServerApi, snapshot: &mut Snapshot) {
-        if let Ok(Some(vault)) = self.active() {
-            Self::restore_contact_names(&vault, snapshot);
-        }
         if !snapshot.chat_encryption_required
             && matches!(self.active(), Ok(None))
             && !snapshot.messages.iter().any(|m| m.encryption_version != 0)
@@ -744,11 +789,16 @@ impl Privacy {
                 .active()?
                 .context("Restore or enable chat encryption to read this message")?;
             let directory = self.directory(api, &vault).await?;
+            self.sync_room_names(&vault, &directory, snapshot)?;
             let vault = self.active()?.context("Missing account encryption")?;
-            Self::restore_contact_names(&vault, snapshot);
             Ok::<_, anyhow::Error>((vault, directory))
         }
         .await;
+        // Always redact unrecognized names, including when directory validation
+        // fails. Preserve the raw names only long enough to enroll verified peers.
+        if let Ok(Some(vault)) = self.active() {
+            Self::restore_contact_names(&vault, snapshot);
+        }
         *self.last_error.lock().expect("privacy error lock") =
             result.as_ref().err().map(ToString::to_string);
         self.decrypted.lock().expect("decrypted cache").clear();

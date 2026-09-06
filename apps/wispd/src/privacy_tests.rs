@@ -131,6 +131,200 @@ fn signed_room_admissions_do_not_require_direct_friendship() {
 }
 
 #[tokio::test]
+#[allow(clippy::too_many_lines)]
+async fn verified_room_names_survive_restart_without_adding_friends_or_trusting_injected_names() {
+    let storage = tempfile::tempdir().unwrap();
+    let database_url = format!("sqlite:{}", storage.path().join("server.sqlite3").display());
+    let state = wisp_server::AppState::new(wisp_server::AppConfig {
+        database_url: database_url.clone(),
+        public_url: None,
+        livekit_url: "ws://127.0.0.1:1".into(),
+        livekit_api_key: "test".into(),
+        livekit_api_secret: "isolated-no-media".into(),
+        knock_ttl: std::time::Duration::from_secs(30),
+        allow_dev_sessions: true,
+        bootstrap_token: None,
+        require_chat_e2ee: true,
+    })
+    .await
+    .unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let server = format!("http://{}", listener.local_addr().unwrap());
+    let task = tokio::spawn(async move {
+        axum::serve(listener, wisp_server::router(state))
+            .await
+            .unwrap();
+    });
+    let alice = client(&server, "MemberA").await;
+    let bob = client(&server, "Owner").await;
+    let a = alice.snapshot().await.unwrap().self_state.user.id;
+    let b = bob.snapshot().await.unwrap().self_state.user.id;
+    let conversation = alice.create_direct("Owner".into()).await.unwrap();
+    let pool = sqlx::SqlitePool::connect(&database_url).await.unwrap();
+    let av = Privacy::at(storage.path().join("alice"), &server, a);
+    let root = storage.path().join("bob");
+    let original = Privacy::at(storage.path().join("original-bob"), &server, b);
+    av.initialize(&alice).await.unwrap();
+    original.initialize(&bob).await.unwrap();
+    let ak = av.active().unwrap().unwrap();
+    let bk = original.active().unwrap().unwrap();
+    let roster = Roster {
+        network: ak.network,
+        conversation: conversation.id.clone(),
+        revision: 0,
+        previous: None,
+        actor: a,
+        members: BTreeMap::from([
+            (
+                a,
+                Member {
+                    identity: ak.ring.identity().public(),
+                    role: Role::Member,
+                },
+            ),
+            (
+                b,
+                Member {
+                    identity: bk.ring.identity().public(),
+                    role: Role::Member,
+                },
+            ),
+        ]),
+    }
+    .sign(ak.ring.identity())
+    .unwrap();
+    crate::ensure_ok(
+        alice
+            .request(reqwest::Method::POST, "/v1/e2ee/roster")
+            .json(&roster)
+            .send()
+            .await
+            .unwrap(),
+    )
+    .await
+    .unwrap();
+
+    // Room membership survives a removed friendship. Restore Bob on a device
+    // whose initial contact list no longer contains Alice.
+    sqlx::query("DELETE FROM friendships WHERE (first_user_id=? AND second_user_id=?) OR (first_user_id=? AND second_user_id=?)")
+        .bind(a.to_string()).bind(b.to_string()).bind(b.to_string()).bind(a.to_string())
+        .execute(&pool).await.unwrap();
+    let initial_backup = storage.path().join("initial-recovery.key");
+    bk.ring.export_recovery(&initial_backup).unwrap();
+    let bv = Privacy::at(root.clone(), &server, b);
+    bv.enable(
+        &bob,
+        &storage.path().join("bob-backup.key"),
+        Some(&initial_backup),
+    )
+    .await
+    .unwrap();
+    assert!(!bv.active().unwrap().unwrap().contacts.contains_key(&a));
+    let raw = bob.snapshot().await.unwrap();
+    let mut snapshot = raw.clone();
+    let injected_id = Uuid::new_v4();
+    snapshot
+        .conversations
+        .iter_mut()
+        .find(|c| c.id == conversation.id)
+        .unwrap()
+        .members
+        .push(wisp_protocol::UserSummary {
+            id: injected_id,
+            display_name: "Injected name".into(),
+        });
+    bv.decrypt_snapshot(&bob, &mut snapshot).await;
+    let members = &snapshot
+        .conversations
+        .iter()
+        .find(|c| c.id == conversation.id)
+        .unwrap()
+        .members;
+    assert_eq!(
+        members.iter().find(|m| m.id == a).unwrap().display_name,
+        "MemberA"
+    );
+    assert_eq!(
+        members
+            .iter()
+            .find(|m| m.id == injected_id)
+            .unwrap()
+            .display_name,
+        "Unrecognized account"
+    );
+    assert!(!snapshot.friends.iter().any(|f| f.user.id == a));
+    assert!(bv.status()["error"].is_null());
+
+    let restarted = Privacy::at(root, &server, b);
+    assert_eq!(restarted.active().unwrap().unwrap().contacts[&a], "MemberA");
+    let mut forged = raw.clone();
+    forged
+        .conversations
+        .iter_mut()
+        .find(|c| c.id == conversation.id)
+        .unwrap()
+        .members
+        .iter_mut()
+        .find(|m| m.id == a)
+        .unwrap()
+        .display_name = "Impostor".into();
+    restarted.decrypt_snapshot(&bob, &mut forged).await;
+    assert_eq!(
+        forged
+            .conversations
+            .iter()
+            .find(|c| c.id == conversation.id)
+            .unwrap()
+            .members
+            .iter()
+            .find(|m| m.id == a)
+            .unwrap()
+            .display_name,
+        "MemberA"
+    );
+
+    // A fresh device must not learn even a plausible name from a forged chain.
+    let fresh = Privacy::at(storage.path().join("fresh"), &server, b);
+    let backup = storage.path().join("recovery.key");
+    bk.ring.export_recovery(&backup).unwrap();
+    fresh
+        .enable(
+            &bob,
+            &storage.path().join("fresh-backup.key"),
+            Some(&backup),
+        )
+        .await
+        .unwrap();
+    let mut invalid = roster;
+    invalid.roster.members.get_mut(&a).unwrap().identity =
+        wisp_crypto::Identity::generate().unwrap().public();
+    sqlx::query("UPDATE chat_rosters SET signed_roster=? WHERE conversation_id=?")
+        .bind(serde_json::to_string(&invalid).unwrap())
+        .bind(&conversation.id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let mut blocked = raw;
+    fresh.decrypt_snapshot(&bob, &mut blocked).await;
+    assert!(!fresh.active().unwrap().unwrap().contacts.contains_key(&a));
+    assert!(fresh.status()["error"].is_string());
+    assert_eq!(
+        blocked
+            .conversations
+            .iter()
+            .find(|c| c.id == conversation.id)
+            .unwrap()
+            .members
+            .iter()
+            .find(|m| m.id == a)
+            .unwrap()
+            .display_name,
+        "Unrecognized account"
+    );
+    task.abort();
+}
+
+#[tokio::test]
 async fn signed_display_names_propagate_and_reject_identity_changes_and_rollback() {
     let state = wisp_server::AppState::new(wisp_server::AppConfig {
         database_url: "sqlite::memory:".into(),

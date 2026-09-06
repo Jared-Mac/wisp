@@ -88,6 +88,7 @@ Column {
     model: root.bridge.remoteVideos
 
     delegate: Rectangle {
+      id: remoteStream
       required property var modelData
       readonly property bool watching: !!modelData.surface_open || !!modelData.subscribed
       width: root.width
@@ -111,6 +112,25 @@ Column {
         font.weight: Font.DemiBold
         Binding on width { when: root.theme.terminal; value: Math.max(0, watchButton.x - remoteVideoLabel.x - root.theme.spacing.md); restoreMode: Binding.RestoreBindingOrValue }
         elide: root.theme.terminal ? Text.ElideRight : Text.ElideNone
+      }
+
+      Menu {
+        id: watchMenu
+        function watch(presentation) {
+          root.bridge.watchVideo(Object.assign({}, remoteStream.modelData, {presentation: presentation}), true)
+        }
+        MenuItem {
+          id: separateStream
+          text: "Watch in dedicated window"
+          onTriggered: watchMenu.watch("window")
+          ThemeControlStyle { theme: root.theme; control: separateStream }
+        }
+        MenuItem {
+          id: tiledStream
+          text: "Watch in app"
+          onTriggered: watchMenu.watch("tile")
+          ThemeControlStyle { theme: root.theme; control: tiledStream }
+        }
       }
 
       Rectangle {
@@ -139,7 +159,7 @@ Column {
           anchors.fill: parent
           hoverEnabled: true
           cursorShape: Qt.PointingHandCursor
-          onClicked: root.bridge.watchVideo(modelData, !parent.parent.watching)
+          onClicked: remoteStream.watching ? root.bridge.watchVideo(modelData, false) : watchMenu.popup()
         }
       }
     }

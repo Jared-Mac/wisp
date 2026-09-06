@@ -40,12 +40,18 @@ Item {
   function openVideo(video) {
     var id = "video:" + JSON.stringify({participant:String(video.participant),source:String(video.source)})
     var existing = Tiles.leaves(tree).filter(function(n) { return n.id === id })[0]
-    if (existing) return
+    if (existing) {
+      if (video.presentation === "window") detach(existing.key)
+      else if (video.presentation === "tile") attach(existing.key)
+      return
+    }
     if (paneCount >= 16) { bridge.lastError = "Close a tile before watching another stream."; bridge.watchVideo(video,false); return }
     // Streaming leaves are ephemeral and never automatically re-watch on launch.
     var leaf = {key:key(),id:id}
     commit(Tiles.insert(Tiles.copy(tree), activeKey, leaf, "right", key()))
-    if (!bridge.mainWindowOpen || !bridge.workspaceLayout.streamsAsTiles || paneCount > 8) detach(leaf.key)
+    if (video.presentation === "window" || paneCount > 8
+        || (video.presentation !== "tile" && (!bridge.mainWindowOpen || !bridge.workspaceLayout.streamsAsTiles))) detach(leaf.key)
+    else if (video.presentation === "tile") revealMainRequested()
   }
   function syncVideos() {
     var next = Tiles.copy(tree)
@@ -292,7 +298,7 @@ Item {
           objectName: "chatPopout-" + tileHost.nodeKey
           visible: tileHost.detached
           title: (tileHost.video ? tileHost.video.participant + " · " + tileHost.video.source : workspace.current ? workspace.label(workspace.current) : "Chat") + " — Wisp"
-          implicitWidth: root.theme.space(tileHost.video ? 800 : 640); implicitHeight: root.theme.space(tileHost.video ? 500 : 720)
+          implicitWidth: root.theme.space(tileHost.video ? 960 : 640); implicitHeight: root.theme.space(tileHost.video ? 580 : 720)
           minimumSize: Qt.size(root.minWidth,root.minHeight)
           color: root.theme.background
           function reveal() {

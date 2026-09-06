@@ -60,7 +60,7 @@ Item {
   property bool mainWindowOpen: false
   property var mediaTileHost: null
   property bool delegateMediaToDesktop: false
-  signal desktopWatchRequested(string participant, string source, bool open)
+  signal desktopWatchRequested(string participant, string source, bool open, string presentation)
   property bool delegateConversationsToDesktop: false
   signal desktopConversationTileRequested(string id, bool reuseChannel)
   property var pendingConversationTiles: []
@@ -1416,7 +1416,7 @@ Item {
   function toggleSurface() { mediaState.surface_open ? closeSurface() : openSurface() }
   function watchVideo(video, open) {
     if (!video) return
-    if (delegateMediaToDesktop) { desktopWatchRequested(String(video.participant),String(video.source),open); return }
+    if (delegateMediaToDesktop) { desktopWatchRequested(String(video.participant),String(video.source),open,String(video.presentation || "")); return }
     var key = JSON.stringify([String(video.participant), String(video.source)])
     var id = send("watch_video", {
       "participant": String(video.participant || ""),
