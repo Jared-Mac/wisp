@@ -32,6 +32,9 @@ independent cryptographic audit.
   Initial friend account IDs and names are also remembered locally; arbitrary
   new server-supplied accounts are rejected. Explicit one-use friend invitations
   expand the local trusted-contact set under the selected TOFU model.
+  Room participants need not be direct friends: their identities are accepted
+  through the room's verified membership chain, with saved identity pins and
+  rollback protection still enforced. Room admission does not add a friendship.
 - Joining a room must not automatically re-encrypt or disclose prior history.
   Default to messages sent after admission; history sharing needs a separate
   explicit policy/action. Removing a member excludes them from future messages,

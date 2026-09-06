@@ -15,6 +15,121 @@ async fn client(server: &str, profile: &str) -> ServerApi {
     }
 }
 
+#[test]
+#[allow(clippy::too_many_lines)] // Exercise admission, restart, and rejection against the same saved pins.
+fn signed_room_admissions_do_not_require_direct_friendship() {
+    let temp = tempfile::tempdir().unwrap();
+    fs::set_permissions(temp.path(), fs::Permissions::from_mode(0o700)).unwrap();
+    let account = Uuid::new_v4();
+    let host = Uuid::new_v4();
+    let newcomer = Uuid::new_v4();
+    let host_key = wisp_crypto::Identity::generate().unwrap();
+    let newcomer_key = wisp_crypto::Identity::generate().unwrap();
+    let vault = Vault {
+        ring: Keyring::create(temp.path(), account).unwrap(),
+        network: Uuid::new_v4(),
+        account,
+        temporary: temp.path().join("temporary"),
+        contacts: BTreeMap::from([(account, "Me".into()), (host, "Host".into())]),
+    };
+    let first = Roster {
+        network: vault.network,
+        conversation: "room".into(),
+        revision: 0,
+        previous: None,
+        actor: host,
+        members: BTreeMap::from([
+            (
+                account,
+                Member {
+                    identity: vault.ring.identity().public(),
+                    role: Role::Member,
+                },
+            ),
+            (
+                host,
+                Member {
+                    identity: host_key.public(),
+                    role: Role::Host,
+                },
+            ),
+        ]),
+    }
+    .sign(&host_key)
+    .unwrap();
+    let mut directory = Directory {
+        network: vault.network,
+        identities: BTreeMap::from([
+            (account, vault.ring.identity().public()),
+            (host, host_key.public()),
+        ]),
+        rosters: BTreeMap::from([("room".into(), vec![first.clone()])]),
+        profiles: BTreeMap::new(),
+        pending_admissions: vec![],
+    };
+    Privacy::verify_directory(&vault, &directory).unwrap();
+    let mut addition = first.roster.clone();
+    addition.revision = 1;
+    addition.previous = Some(first.hash().unwrap());
+    addition.members.insert(
+        newcomer,
+        Member {
+            identity: newcomer_key.public(),
+            role: Role::Member,
+        },
+    );
+    let admitted = addition.clone().sign(&host_key).unwrap();
+    directory
+        .rosters
+        .get_mut("room")
+        .unwrap()
+        .push(admitted.clone());
+    Privacy::verify_directory(&vault, &directory).unwrap();
+    assert!(
+        !vault.contacts.contains_key(&newcomer),
+        "Room access does not create a direct friendship"
+    );
+
+    // Pins and the accepted room head survive a client restart.
+    let vault = Vault {
+        ring: Keyring::open(temp.path(), account).unwrap(),
+        ..vault
+    };
+    Privacy::verify_directory(&vault, &directory).unwrap();
+    directory.rosters.insert("room".into(), vec![first.clone()]);
+    assert!(
+        Privacy::verify_directory(&vault, &directory).is_err(),
+        "Room rollback must remain blocked"
+    );
+    directory.rosters.insert(
+        "room".into(),
+        vec![first.clone(), addition.sign(&newcomer_key).unwrap()],
+    );
+    assert!(
+        Privacy::verify_directory(&vault, &directory).is_err(),
+        "The server cannot forge the host's admission"
+    );
+    directory
+        .rosters
+        .insert("room".into(), vec![first, admitted.clone()]);
+    let mut replacement = admitted.roster.clone();
+    replacement.revision = 2;
+    replacement.previous = Some(admitted.hash().unwrap());
+    replacement.members.get_mut(&newcomer).unwrap().identity =
+        wisp_crypto::Identity::generate().unwrap().public();
+    directory
+        .rosters
+        .get_mut("room")
+        .unwrap()
+        .push(replacement.sign(&host_key).unwrap());
+    assert!(
+        Privacy::verify_directory(&vault, &directory).is_err(),
+        "Even the host cannot replace a member's pinned identity"
+    );
+    directory.rosters.get_mut("room").unwrap().pop();
+    Privacy::verify_directory(&vault, &directory).unwrap();
+}
+
 #[tokio::test]
 async fn signed_display_names_propagate_and_reject_identity_changes_and_rollback() {
     let state = wisp_server::AppState::new(wisp_server::AppConfig {

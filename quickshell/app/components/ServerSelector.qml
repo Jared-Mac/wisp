@@ -7,8 +7,9 @@ Item {
   required property var bridge
   required property var theme
   property bool compact: false
+  property bool showInvite: true
   signal settingsRequested()
-  implicitHeight: selector.height + inviteButton.height + root.theme.spacing.xs
+  implicitHeight: selector.height + (inviteButton.visible ? inviteButton.height + root.theme.spacing.xs : 0)
   TextMetrics { id: serverMetrics; font: selector.font; text: serverLabel.text }
   TextMetrics { id: settingsMetrics; font: selector.font; text: root.theme.tui ? "[settings]" : "settings" }
 
@@ -114,6 +115,7 @@ Item {
     anchors.right: parent.right
     height: root.theme.space(28)
     text: "Invite friend"
+    visible: root.showInvite
     enabled: root.bridge.activeServer.connected !== false
     font.family: root.theme.font.family
     font.pixelSize: root.theme.font.caption
@@ -126,7 +128,9 @@ Item {
       root.bridge.createAccountInvite("friend", "", 30)
     }
   }
-  Connections { target: root.bridge; function onActiveServerChanged() { invitePopup.close() } }
+  // Status snapshots replace the server object; only a selection change dismisses the invite.
+  readonly property string inviteServerId: String(root.bridge.activeServer.id || "")
+  onInviteServerIdChanged: invitePopup.close()
   Popup {
     id: invitePopup
     objectName: "serverInvitePopup"

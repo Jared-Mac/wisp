@@ -528,12 +528,7 @@ impl Privacy {
             directory
                 .identities
                 .keys()
-                .all(|id| vault.contacts.contains_key(id))
-                && directory.rosters.values().flatten().all(|roster| roster
-                    .roster
-                    .members
-                    .keys()
-                    .all(|id| vault.contacts.contains_key(id))),
+                .all(|id| vault.contacts.contains_key(id)),
             "Friend account roster changed. Refusing automatic enrollment of a new account; verify it before changing your trusted contacts"
         );
         for (id, key) in &directory.identities {
@@ -545,6 +540,14 @@ impl Privacy {
             } else {
                 vault.ring.trust_first_use(*id, key)?;
             }
+        }
+        // A room owner can admit someone who is not every member's direct
+        // friend. Authorize those identities through the signed room chain,
+        // including saved heads and key pins, rather than the friend list.
+        for (conversation, chain) in &directory.rosters {
+            vault
+                .ring
+                .accept_rosters(vault.network, conversation, vault.account, chain)?;
         }
         Ok(())
     }
@@ -743,11 +746,6 @@ impl Privacy {
             let directory = self.directory(api, &vault).await?;
             let vault = self.active()?.context("Missing account encryption")?;
             Self::restore_contact_names(&vault, snapshot);
-            for (conversation, chain) in &directory.rosters {
-                vault
-                    .ring
-                    .accept_rosters(vault.network, conversation, vault.account, chain)?;
-            }
             Ok::<_, anyhow::Error>((vault, directory))
         }
         .await;

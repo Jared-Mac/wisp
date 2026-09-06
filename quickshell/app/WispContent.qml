@@ -465,6 +465,7 @@ FocusScope {
         bridge: root.bridge
         theme: root.theme
         compact: true
+        showInvite: false
         onSettingsRequested: root.openServerSettings()
       }
 
