@@ -102,9 +102,9 @@ pub(super) async fn settings(
     let channels = sqlx::query("SELECT sc.conversation_id,c.label,sc.category_id,sc.position FROM server_channels sc JOIN conversations c ON c.id=sc.conversation_id ORDER BY sc.position,c.label COLLATE NOCASE")
         .fetch_all(&state.pool).await.map_err(ApiError::internal)?
         .into_iter().map(|row| json!({"id":row.get::<String,_>("conversation_id"),"name":row.get::<String,_>("label"),"category_id":row.get::<Option<String>,_>("category_id"),"position":row.get::<i64,_>("position")})).collect::<Vec<_>>();
-    let rooms = sqlx::query("SELECT c.id,s.name,s.category_id,EXISTS(SELECT 1 FROM hangouts h WHERE h.spot_id=s.id AND h.ended_at IS NULL) active FROM spots s JOIN conversations c ON c.spot_id=s.id ORDER BY s.name COLLATE NOCASE")
+    let rooms = sqlx::query("SELECT c.id,s.name,s.private,s.category_id,EXISTS(SELECT 1 FROM hangouts h WHERE h.spot_id=s.id AND h.ended_at IS NULL) active FROM spots s JOIN conversations c ON c.spot_id=s.id ORDER BY s.name COLLATE NOCASE")
         .fetch_all(&state.pool).await.map_err(ApiError::internal)?
-        .into_iter().map(|row| json!({"id":row.get::<String,_>("id"),"name":row.get::<String,_>("name"),"category_id":row.get::<Option<String>,_>("category_id"),"active":row.get::<bool,_>("active")})).collect::<Vec<_>>();
+        .into_iter().map(|row| json!({"id":row.get::<String,_>("id"),"name":row.get::<String,_>("name"),"category_id":row.get::<Option<String>,_>("category_id"),"private":row.get::<bool,_>("private"),"active":row.get::<bool,_>("active")})).collect::<Vec<_>>();
     Ok(Json(
         json!({"name":name,"role":if owner {"owner"} else {"admin"},"members":members,"categories":categories,"channels":channels,"rooms":rooms}),
     ))
@@ -384,6 +384,25 @@ pub(super) async fn rename_room(
             .await
             .map_err(ApiError::internal)?;
     let spot = spot.ok_or_else(|| ApiError::not_found("Room does not exist"))?;
+    if let Some(private) = request.private {
+        sqlx::query("UPDATE spots SET private=? WHERE id=?")
+            .bind(private)
+            .bind(&spot)
+            .execute(&mut *tx)
+            .await
+            .map_err(ApiError::internal)?;
+        if private {
+            sqlx::query(
+                "DELETE FROM pending_room_admissions WHERE conversation_id=? AND automatic=1",
+            )
+            .bind(&id)
+            .execute(&mut *tx)
+            .await
+            .map_err(ApiError::internal)?;
+        } else {
+            super::room_access::queue_public_admissions(&mut tx).await?;
+        }
+    }
     sqlx::query("UPDATE spots SET name=? WHERE id=?")
         .bind(name)
         .bind(&spot)

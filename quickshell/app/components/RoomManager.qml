@@ -13,22 +13,24 @@ Dialog {
   property bool busy: false
   property string error: ""
   property string feedback: ""
+  property bool newRoomPrivate: false
   readonly property var conversation: bridge.conversationById(conversationId)
   readonly property var conversationServerState: bridge.serverStates.filter(function(state) {
-    return conversation && String(state.server.id)===String(conversation.server_id)
+    return String(state.server.id)===String(root.creating ? bridge.activeServer.id : (conversation || {}).server_id)
   })[0] || ({friends:[]})
+  readonly property var spot: (conversationServerState.spots || []).filter(function(room) { return root.conversation && String(room.id) === String(root.conversation.spot_id) })[0] || ({})
   readonly property bool admin: !!(conversationServerState.self || {}).server_owner || !!(conversationServerState.self || {}).server_admin
   readonly property var invitees: {
     var members = conversation ? conversation.members || [] : []
     return (conversationServerState.friends || []).filter(function(friend) { return !members.some(function(member) { return member.id === friend.id }) })
   }
-  function createRoom() { creating = true; conversationId = ""; nameField.text = ""; error = ""; busy = false; open() }
+  function createRoom() { creating = true; newRoomPrivate = false; conversationId = ""; nameField.text = ""; error = ""; busy = false; open() }
   function manage(id) { creating = false; conversationId = String(id); error = ""; busy = false; open() }
   function perform(action, args) { error = ""; feedback = ""; busy = bridge.roomAction(action, args) }
   parent: Overlay.overlay
   x: parent ? (parent.width - width) / 2 : 0; y: parent ? (parent.height - height) / 2 : 0
   width: parent ? Math.min(parent.width - 32, 500) : 500
-  height: creating ? 260 : 470
+  height: creating ? 310 : 530
   modal: true
   closePolicy: busy ? Popup.NoAutoClose : Popup.CloseOnEscape
   title: creating ? "Create a room" : "Room settings · " + (conversation ? conversation.label : "")
@@ -40,7 +42,7 @@ Dialog {
       Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
       Binding on font.pixelSize { when: root.theme.terminal; value: root.theme.font.body; restoreMode: Binding.RestoreBindingOrValue }
       width: parent.width; wrapMode: Text.Wrap
-      text: root.creating ? "This room uses the server’s administrators. Creating it does not join voice."
+      text: root.creating ? "Rooms are visible to everyone on this server unless marked private."
         : "Server administrators manage every room and channel. Change admin access in Server settings."
       color: root.theme.muted
     }
@@ -55,6 +57,22 @@ Dialog {
         color: root.theme.background; radius: root.theme.cornerRadius
         border.width: root.theme.terminal ? 1 : 0
         border.color: nameField.activeFocus ? root.theme.focusBorder : root.theme.separator
+      }
+    }
+    CheckBox {
+      id: roomPrivacy
+      objectName: "roomInviteOnly"
+      visible: !root.creating || root.admin
+      enabled: root.admin && !root.busy
+      checked: root.creating ? root.newRoomPrivate : !!root.spot.private
+      text: "Private / invite-only"
+      font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
+      ThemeControlStyle { theme: root.theme; control: roomPrivacy }
+      ToolTip.visible: hovered
+      ToolTip.text: "Only current members and invitees can access this room."
+      onClicked: {
+        if (root.creating) root.newRoomPrivate = checked
+        else root.perform("rename_server_room", {conversation_id:root.conversationId,id:String(root.conversation.raw_id || root.conversation.id),name:root.conversation.label,category_id:root.conversation.category_id || null,private:checked})
       }
     }
     ScrollView {
@@ -108,7 +126,7 @@ Dialog {
     Row {
       spacing: root.theme.spacing.lg
       ChatButton { theme: root.theme; text: root.creating ? "Cancel" : "Done"; enabled: !root.busy; onClicked: root.close() }
-      ChatButton { theme: root.theme; primary: true; visible: root.creating; text: root.busy ? "Creating…" : "Create room"; enabled: !root.busy && nameField.text.trim().length > 0; onClicked: root.perform("create_room", {name:nameField.text.trim()}) }
+      ChatButton { theme: root.theme; primary: true; visible: root.creating; text: root.busy ? "Creating…" : "Create room"; enabled: !root.busy && nameField.text.trim().length > 0; onClicked: root.perform("create_room", {name:nameField.text.trim(),private:root.admin && root.newRoomPrivate}) }
     }
   }
   Connections {

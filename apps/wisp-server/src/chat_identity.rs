@@ -61,7 +61,13 @@ pub(super) async fn directory(
         .await
         .map_err(ApiError::internal)?
         .into_iter()
-        .map(|row| json!({"conversation_id":row.get::<String,_>("conversation_id"),"user_id":row.get::<String,_>("user_id")}))
+        // Automatic public-room admissions include accounts that have not
+        // enrolled yet. Only offer identities this signer can resolve, so an
+        // ineligible entry cannot stall later admissions to the same room.
+        .filter_map(|row| {
+            let user_id = row.get::<String,_>("user_id");
+            keys.contains_key(&user_id).then(|| json!({"conversation_id":row.get::<String,_>("conversation_id"),"user_id":user_id}))
+        })
         .collect::<Vec<_>>();
     Ok(Json(
         json!({"network":network(&state).await?,"required":state.config.require_chat_e2ee,"identities":keys,"profiles":profiles,"rosters":rosters,"pending_admissions":pending}),

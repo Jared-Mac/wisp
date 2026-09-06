@@ -12,6 +12,9 @@ mod presence_tests;
 mod privacy;
 #[cfg(test)]
 mod privacy_tests;
+mod room_access;
+#[cfg(test)]
+mod room_access_tests;
 mod rooms;
 mod server_management;
 #[cfg(test)]
@@ -224,6 +227,9 @@ impl AppState {
         if config.allow_dev_sessions {
             seed_development_users(&pool).await?;
         }
+        room_access::queue_public_admissions(&mut *pool.acquire().await?)
+            .await
+            .map_err(|e| anyhow::anyhow!(e.message))?;
         cleanup_expired_data(&pool).await?;
         attachments::cleanup(&pool, Utc::now()).await?;
         let (events, _) = broadcast::channel(256);
@@ -908,7 +914,7 @@ async fn queue_encrypted_room_admission(
     invited_by: UserId,
     now: &str,
 ) -> Result<(), ApiError> {
-    sqlx::query("INSERT OR IGNORE INTO pending_room_admissions(conversation_id,user_id,invited_by,created_at) VALUES (?,?,?,?)")
+    sqlx::query("INSERT INTO pending_room_admissions(conversation_id,user_id,invited_by,created_at) VALUES (?,?,?,?) ON CONFLICT(conversation_id,user_id) DO UPDATE SET invited_by=excluded.invited_by,automatic=0")
         .bind(conversation_id)
         .bind(user_id.to_string())
         .bind(invited_by.to_string())
@@ -1166,6 +1172,7 @@ async fn register_account(
             }
         })?;
     add_friendship(&mut tx, creator, user_id).await?;
+    room_access::queue_public_admissions(&mut tx).await?;
     if kind == "room" {
         require_inviting_manager(&mut tx, creator).await?;
         let room = conversation_id
@@ -1634,9 +1641,9 @@ async fn join_spot(
         .ok_or_else(|| ApiError::not_found("spot does not exist"))?;
     let spot_id: String = spot.get("id");
     let spot_name: String = spot.get("name");
-    ensure_conversation_member(&state.pool, &format!("spot:{spot_id}"), self_id).await?;
+    room_access::ensure_voice_access(&state.pool, &spot_id, self_id).await?;
     let mut tx = state.pool.begin().await.map_err(ApiError::internal)?;
-    ensure_spot_conversation(&mut tx, &spot_id, &spot_name)
+    ensure_spot_conversation(&mut tx, &spot_id, &spot_name, false)
         .await
         .map_err(ApiError::internal)?;
     let previous_hangout = active_hangout_for_tx(&mut tx, self_id).await?;
@@ -2414,7 +2421,7 @@ async fn seed_development_users(pool: &SqlitePool) -> anyhow::Result<()> {
         .bind(Utc::now().to_rfc3339())
         .execute(&mut *tx)
         .await?;
-    ensure_spot_conversation(&mut tx, TEST_ROOM_ID, "TestRoom").await?;
+    ensure_spot_conversation(&mut tx, TEST_ROOM_ID, "TestRoom", true).await?;
     sqlx::query("UPDATE conversation_members SET role = CASE WHEN conversation_id = ? THEN 'host' ELSE 'admin' END WHERE user_id = ? AND conversation_id IN (?, ?) AND NOT EXISTS(SELECT 1 FROM chat_rosters cr WHERE cr.conversation_id=conversation_members.conversation_id)")
         .bind(format!("spot:{TEST_ROOM_ID}")).bind(TEST_OWNER_ID).bind(format!("spot:{TEST_ROOM_ID}")).bind(CIRCLE_CONVERSATION_ID)
         .execute(&mut *tx).await?;
@@ -2708,7 +2715,7 @@ async fn load_conversations(
     user_id: UserId,
 ) -> Result<Vec<ConversationView>, ApiError> {
     let ids = sqlx::query_scalar::<_, String>(
-        "SELECT c.id FROM conversations c JOIN conversation_members cm ON cm.conversation_id = c.id WHERE cm.user_id = ? ORDER BY COALESCE((SELECT MAX(created_at) FROM messages WHERE conversation_id = c.id), c.created_at) DESC",
+        "SELECT c.id FROM conversations c WHERE EXISTS(SELECT 1 FROM conversation_members cm WHERE cm.conversation_id=c.id AND cm.user_id=?) OR EXISTS(SELECT 1 FROM spots s WHERE s.id=c.spot_id AND s.private=0) ORDER BY COALESCE((SELECT MAX(created_at) FROM messages WHERE conversation_id = c.id), c.created_at) DESC",
     )
     .bind(user_id.to_string())
     .fetch_all(pool)
@@ -2744,7 +2751,12 @@ async fn load_conversation(
     user_id: UserId,
     id: &str,
 ) -> Result<ConversationView, ApiError> {
-    ensure_conversation_member(pool, id, user_id).await?;
+    if let Err(error) = ensure_conversation_member(pool, id, user_id).await {
+        if error.status != StatusCode::FORBIDDEN {
+            return Err(error);
+        }
+        return room_access::preview(pool, id).await?.ok_or(error);
+    }
     let row = sqlx::query("SELECT c.kind, c.label, c.spot_id, cm.tab_closed, cm.history_cleared_at FROM conversations c JOIN conversation_members cm ON cm.conversation_id = c.id WHERE c.id = ? AND cm.user_id = ?")
         .bind(id)
         .bind(user_id.to_string())
@@ -2851,6 +2863,7 @@ async fn load_conversation(
             .or(room_category.as_ref())
             .and_then(|value| value.0.clone()),
         category_name: channel.or(room_category).and_then(|value| value.1),
+        pending_access: false,
         can_clear_for_everyone: can_clear_room(pool, user_id, id).await?,
         kind,
         label,
@@ -2867,7 +2880,7 @@ async fn load_conversation(
 }
 
 async fn load_spots(pool: &SqlitePool, user: UserId) -> Result<Vec<SpotView>, ApiError> {
-    let rows = sqlx::query("SELECT s.id,s.name,s.category_id,cc.name category_name FROM spots s LEFT JOIN channel_categories cc ON cc.id=s.category_id JOIN conversations c ON c.spot_id=s.id JOIN conversation_members cm ON cm.conversation_id=c.id WHERE cm.user_id=? ORDER BY COALESCE(cc.position,9223372036854775807),s.name COLLATE NOCASE")
+    let rows = sqlx::query("SELECT s.id,s.name,s.private,s.category_id,cc.name category_name FROM spots s LEFT JOIN channel_categories cc ON cc.id=s.category_id JOIN conversations c ON c.spot_id=s.id WHERE s.private=0 OR EXISTS(SELECT 1 FROM conversation_members cm WHERE cm.conversation_id=c.id AND cm.user_id=?) ORDER BY COALESCE(cc.position,9223372036854775807),s.name COLLATE NOCASE")
         .bind(user.to_string())
         .fetch_all(pool)
         .await
@@ -2904,6 +2917,7 @@ async fn load_spots(pool: &SqlitePool, user: UserId) -> Result<Vec<SpotView>, Ap
             Vec::new()
         };
         spots.push(SpotView {
+            private: row.get("private"),
             id,
             name: row.get("name"),
             category_id: row.get("category_id"),
@@ -2978,7 +2992,7 @@ async fn active_hangout_for_tx(
 
 async fn load_hangouts(pool: &SqlitePool, user: UserId) -> Result<Vec<HangoutView>, ApiError> {
     let rows =
-        sqlx::query("SELECT h.id, h.label FROM hangouts h WHERE h.ended_at IS NULL AND (h.spot_id IS NULL OR EXISTS(SELECT 1 FROM conversations c JOIN conversation_members cm ON cm.conversation_id = c.id WHERE c.spot_id = h.spot_id AND cm.user_id = ?)) ORDER BY h.created_at")
+        sqlx::query("SELECT h.id, h.label FROM hangouts h WHERE h.ended_at IS NULL AND (h.spot_id IS NULL OR EXISTS(SELECT 1 FROM spots s WHERE s.id=h.spot_id AND s.private=0) OR EXISTS(SELECT 1 FROM conversations c JOIN conversation_members cm ON cm.conversation_id = c.id WHERE c.spot_id = h.spot_id AND cm.user_id = ?)) ORDER BY h.created_at")
             .bind(user.to_string())
             .fetch_all(pool)
             .await
@@ -3026,7 +3040,7 @@ async fn add_member(
     hangout_id: HangoutId,
     user_id: UserId,
 ) -> Result<(), ApiError> {
-    let allowed: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM hangouts h WHERE h.id = ? AND (h.spot_id IS NULL OR EXISTS(SELECT 1 FROM conversations c JOIN conversation_members cm ON cm.conversation_id = c.id WHERE c.spot_id = h.spot_id AND cm.user_id = ?)))")
+    let allowed: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM hangouts h WHERE h.id = ? AND (h.spot_id IS NULL OR EXISTS(SELECT 1 FROM spots s WHERE s.id=h.spot_id AND s.private=0) OR EXISTS(SELECT 1 FROM conversations c JOIN conversation_members cm ON cm.conversation_id = c.id WHERE c.spot_id = h.spot_id AND cm.user_id = ?)))")
         .bind(hangout_id.to_string()).bind(user_id.to_string()).fetch_one(&mut **tx).await.map_err(ApiError::internal)?;
     if !allowed {
         return Err(ApiError::forbidden(
@@ -3079,6 +3093,7 @@ async fn ensure_spot_conversation(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     spot_id: &str,
     label: &str,
+    include_legacy_circle: bool,
 ) -> anyhow::Result<String> {
     let conversation_id = format!("spot:{spot_id}");
     let now = Utc::now().to_rfc3339();
@@ -3091,7 +3106,8 @@ async fn ensure_spot_conversation(
     .bind(&now)
     .execute(&mut **tx)
     .await?;
-    sqlx::query(
+    if include_legacy_circle {
+        sqlx::query(
         "INSERT OR IGNORE INTO conversation_members(conversation_id, user_id, joined_at) SELECT ?, user_id, ? FROM circle_members WHERE EXISTS(SELECT 1 FROM spots WHERE id = ? AND private = 0) AND NOT EXISTS(SELECT 1 FROM chat_rosters WHERE conversation_id=?)",
     )
     .bind(&conversation_id)
@@ -3100,6 +3116,7 @@ async fn ensure_spot_conversation(
     .bind(&conversation_id)
     .execute(&mut **tx)
     .await?;
+    }
     Ok(conversation_id)
 }
 

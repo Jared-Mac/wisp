@@ -56,6 +56,12 @@ ShellRoot {
       if(choice)choice.clicked()
       test.check(bridge.draftFor("local::chat").indexOf(":wisp_wave:")>=0,"picker inserts emoji into the draft")
       test.check(!bridge.sent.some(function(c){return c.name==="send_message" || /^(join|watch_video|share|camera)/.test(c.name)}),"previewing emojis does not send or publish")
+      var pending=JSON.parse(JSON.stringify(bridge.snapshot));pending.server_states[0].conversations[0].pending_access=true;bridge.applySnapshot(pending);input.wait(40)
+      test.check(!test.find(composer,"composerSendButton").enabled && test.find(composer,"trayComposerEditor").readOnly,"pending room chat cannot compose or send")
+      var beforePending=bridge.sent.length;bridge.sendComposedMessage("local::chat");bridge.pasteClipboard("local::chat");bridge.importChatFiles("local::chat",["file:///tmp/test"])
+      test.check(bridge.sent.length===beforePending,"pending access blocks message and attachment commands")
+      bridge.selectConversation("local::chat");bridge.exitConversation("local::chat")
+      test.check(bridge.sent.length===beforePending,"opening or closing a room preview does not issue unauthorized chat commands")
       var screenshot=Quickshell.env("WISP_CHAT_EXTRAS_SCREENSHOT")
       if(screenshot)scene.grabToImage(function(image){image.saveToFile(screenshot);console.log(test.failed?"CHAT_EXTRAS_FAILED":"CHAT_EXTRAS_OK");Qt.quit()})
       else {console.log(test.failed?"CHAT_EXTRAS_FAILED":"CHAT_EXTRAS_OK");Qt.quit()}

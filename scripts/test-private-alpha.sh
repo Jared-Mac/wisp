@@ -257,6 +257,8 @@ if post_json /v1/rooms/invite "$(jq -cn --arg id "$private_conversation" --arg u
   echo 'Room creation granted server administration' >&2; exit 1
 fi
 post_json /v1/server/admins "$(jq -cn --arg user "$member_a_user_id" '{user_id:$user,admin:true}')" "$owner_token" >/dev/null
+curl --silent --fail -X PATCH -H "authorization: Bearer $member_a_token" -H 'content-type: application/json' \
+  -d '{"name":"MemberA test room","private":true}' "$server_url/v1/server/rooms/$private_conversation" >/dev/null
 post_json /v1/rooms/invite "$(jq -cn --arg id "$private_conversation" --arg user "$member_c_user" '{conversation_id:$id,user_id:$user}')" "$member_a_token" >/dev/null
 if post_json /v1/conversations/clear "$(jq -cn --arg id "$private_conversation" '{conversation_id:$id,for_everyone:true}')" "$member_c_token" >/dev/null 2>&1; then
   echo 'Ordinary member globally cleared room history' >&2; exit 1

@@ -355,44 +355,57 @@ Column {
     }
     Repeater {
       model: root.bridge.serverSettings.rooms || []
-      delegate: Row {
+      delegate: Column {
         required property var modelData
-        width: root.width; spacing: root.theme.spacing.sm
-        TextField {
-          id: roomName
-          property bool wispTextEditor: true
-          width: parent.width * 0.34
-          height: root.theme.space(34); maximumLength: 60; text: String(modelData.name)
-          color: root.theme.foreground; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
-          background: Rectangle { color: root.theme.background; border.width: 1; border.color: roomName.activeFocus ? root.theme.accent : root.theme.separator; radius: root.theme.cornerRadius }
-        }
-        ComboBox {
-          id: roomCategory
-          width: parent.width * 0.25; height: root.theme.space(34)
-          model: root.categories; textRole: "name"
-          currentIndex: root.categoryIndex(modelData.category_id)
-          font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
-          ThemeControlStyle { theme: root.theme; control: roomCategory; outline: true }
-        }
-        Text {
-          id: roomState; width: root.theme.space(48); anchors.verticalCenter: parent.verticalCenter
-          text: modelData.active ? "active" : "empty"; color: modelData.active ? root.theme.open : root.theme.muted
-          font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
-        }
-        ChatButton {
-          id: saveRoom; theme: root.theme; text: "save"; height: root.theme.space(34)
-          enabled: !!roomName.text.trim() && !root.bridge.serverSettingsBusy
-            && (roomName.text.trim() !== String(modelData.name)
-              || String((root.categories[roomCategory.currentIndex] || {}).id || "") !== String(modelData.category_id || ""))
-          onClicked: {
-            var category=root.categories[roomCategory.currentIndex]
-            root.bridge.serverMutation("rename_server_room", {id:String(modelData.id),name:roomName.text.trim(),category_id:category && category.id ? String(category.id) : null})
+        width: root.width; spacing: root.theme.spacing.xs
+        Row {
+          width: parent.width; spacing: root.theme.spacing.sm
+          TextField {
+            id: roomName
+            property bool wispTextEditor: true
+            width: parent.width * 0.34
+            height: root.theme.space(34); maximumLength: 60; text: String(modelData.name)
+            color: root.theme.foreground; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
+            background: Rectangle { color: root.theme.background; border.width: 1; border.color: roomName.activeFocus ? root.theme.accent : root.theme.separator; radius: root.theme.cornerRadius }
+          }
+          ComboBox {
+            id: roomCategory
+            width: parent.width * 0.25; height: root.theme.space(34)
+            model: root.categories; textRole: "name"
+            currentIndex: root.categoryIndex(modelData.category_id)
+            font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
+            ThemeControlStyle { theme: root.theme; control: roomCategory; outline: true }
+          }
+          Text {
+            id: roomState; width: root.theme.space(48); anchors.verticalCenter: parent.verticalCenter
+            text: modelData.active ? "active" : "empty"; color: modelData.active ? root.theme.open : root.theme.muted
+            font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
+          }
+          ChatButton {
+            id: saveRoom; theme: root.theme; text: "save"; height: root.theme.space(34)
+            enabled: !!roomName.text.trim() && !root.bridge.serverSettingsBusy
+              && (roomName.text.trim() !== String(modelData.name)
+                || roomPrivacy.checked !== !!modelData.private
+                || String((root.categories[roomCategory.currentIndex] || {}).id || "") !== String(modelData.category_id || ""))
+            onClicked: {
+              var category=root.categories[roomCategory.currentIndex]
+              root.bridge.serverMutation("rename_server_room", {id:String(modelData.id),name:roomName.text.trim(),category_id:category && category.id ? String(category.id) : null,private:roomPrivacy.checked})
+            }
+          }
+          ChatButton {
+            id: deleteRoom; theme: root.theme; text: "delete"; destructive: true; height: root.theme.space(34)
+            enabled: !modelData.active && !root.bridge.serverSettingsBusy
+            onClicked: root.confirmDelete("room", modelData.id, modelData.name)
           }
         }
-        ChatButton {
-          id: deleteRoom; theme: root.theme; text: "delete"; destructive: true; height: root.theme.space(34)
-          enabled: !modelData.active && !root.bridge.serverSettingsBusy
-          onClicked: root.confirmDelete("room", modelData.id, modelData.name)
+        CheckBox {
+          id: roomPrivacy
+          objectName: "serverRoomInviteOnly-" + String(modelData.id)
+          text: "Private / invite-only"; checked: !!modelData.private
+          enabled: !root.bridge.serverSettingsBusy
+          font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
+          ThemeControlStyle { theme: root.theme; control: roomPrivacy }
+          ToolTip.visible: hovered; ToolTip.text: "Only current members and invitees can access this room."
         }
       }
     }

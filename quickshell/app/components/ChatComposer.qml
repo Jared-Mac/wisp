@@ -16,9 +16,18 @@ Column {
   readonly property var attachments: bridge.attachmentsFor(conversationId)
   readonly property var conversation: bridge.conversationById(conversationId)
   readonly property string destination: conversation && conversation.label ? (conversation.label === "Hangout" ? "Room" : String(conversation.label)) : ""
+  readonly property bool pendingAccess: !!(conversation && conversation.pending_access)
   readonly property bool busy: !!bridge.sendingConversations[conversationId] || !!bridge.importingConversations[conversationId]
   spacing: autoGrow ? theme.spacing.xs : theme.tui ? theme.spacing.sm : theme.spacing.lg
 
+
+  Text {
+    objectName: "roomChatAccessPending"
+    visible: root.pendingAccess
+    width: parent.width; wrapMode: Text.WordWrap
+    text: "Chat access is pending. You can join voice now."
+    color: root.theme.muted; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
+  }
 
   Text {
     objectName: "terminalChatPrompt"
@@ -112,12 +121,12 @@ Column {
         objectName: root.autoGrow ? "mainComposerEditor" : "trayComposerEditor"
         property bool wispTextEditor: true
         // Keep the submitted draft stable until its acknowledgement arrives.
-        readOnly: root.busy
+        readOnly: root.busy || root.pendingAccess
         onActiveFocusChanged: if (activeFocus) root.editorFocused()
         text: root.bridge.draftFor(root.conversationId)
         onTextChanged: root.bridge.setDraft(root.conversationId, text)
         color: root.theme.foreground
-        placeholderText: root.destination ? "Message " + root.destination : "Message"
+        placeholderText: root.pendingAccess ? "Waiting for chat access" : root.destination ? "Message " + root.destination : "Message"
         placeholderTextColor: root.theme.muted
         font.family: root.theme.font.family
         font.pixelSize: root.theme.font.body
@@ -135,6 +144,7 @@ Column {
         }
         Binding { target: editor; property: "cursorDelegate"; value: terminalCaret; when: root.theme.tui; restoreMode: Binding.RestoreBindingOrValue }
         Keys.onPressed: function(event) {
+          if (root.pendingAccess) return
           if (event.matches(StandardKey.Paste)) {
             root.bridge.pasteClipboard(root.conversationId)
             event.accepted = true
@@ -150,7 +160,7 @@ Column {
     }
   ChatButton {
     id:emojiButton;anchors.right:sendButton.left;anchors.bottom:parent.bottom;anchors.margins:root.theme.space(4);width:root.theme.space(36);height:root.theme.space(32)
-    objectName:"composerEmojiButton";theme:root.theme;text:"☺";enabled:!root.busy
+    objectName:"composerEmojiButton";theme:root.theme;text:"☺";enabled:!root.busy && !root.pendingAccess
     onClicked:composerEmojiPicker.open()
     EmojiPicker {
       id:composerEmojiPicker;bridge:root.bridge;theme:root.theme;serverId:String((root.conversation || {}).server_id || root.bridge.activeServer.id)
@@ -169,7 +179,7 @@ Column {
       Accessible.name: statusText
       ToolTip.visible: hovered
       ToolTip.text: statusText
-      enabled: !root.busy
+      enabled: !root.busy && !root.pendingAccess
         && (root.attachments.length > 0 || root.bridge.draftFor(root.conversationId).trim().length > 0)
       onClicked: root.bridge.sendComposedMessage(root.conversationId)
       contentItem: Item {

@@ -1052,6 +1052,7 @@ Item {
     if (id && draftFor(id) !== value) drafts = replaceConversationEntry(drafts, id, value)
   }
   function pasteClipboard(conversationId) {
+    if ((conversationById(conversationId) || {}).pending_access) return
     if (!conversationId || conversationValue(sendingConversations,conversationId,false)) return
     var id = send("paste_clipboard", {})
     if (id) {
@@ -1070,6 +1071,7 @@ Item {
     return value && value.total > 0 ? " " + Math.min(100, Math.floor(value.bytes * 100 / value.total)) + "%" : "…"
   }
   function importChatFiles(conversationId, urls) {
+    if ((conversationById(conversationId) || {}).pending_access) return
     if (!conversationId || conversationValue(sendingConversations,conversationId,false)) return
     var values = []
     for (var i = 0; i < urls.length; i++) values.push(String(urls[i]))
@@ -1093,6 +1095,7 @@ Item {
     } else sendingConversations = replaceConversationEntry(sendingConversations, conversationId, undefined)
   }
   function sendComposedMessage(conversationId) {
+    if ((conversationById(conversationId) || {}).pending_access) return
     if (!conversationId || conversationValue(sendingConversations,conversationId,false) || conversationValue(importingConversations,conversationId,0)) return
     var text = draftFor(conversationId).trim()
     var attachments = attachmentsFor(conversationId)
@@ -1328,10 +1331,12 @@ Item {
   function selectConversation(id) {
     var c = conversationById(id)
     activeConversationId = c ? String(c.id) : String(id)
+    if (c && c.pending_access) return
     if (c && c.tab_closed) send("set_conversation_tab", withConversationScope(id, {closed:false}))
     send("mark_conversation_read", withConversationScope(activeConversationId))
   }
   function exitConversation(id) {
+    if ((conversationById(id) || {}).pending_access) { closeConversation(); return }
     send("set_conversation_tab", withConversationScope(id, {closed:true}))
   }
   function clearChatHistory(id, forEveryone) {

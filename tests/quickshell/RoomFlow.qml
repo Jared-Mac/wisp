@@ -69,7 +69,7 @@ ShellRoot {
     data.servers=[first,second]; data.selected_server_id="local"; data.voice_server_id="local"
     var rooms=[{id:"lounge",name:"Lounge",active_hangout_id:"active",members:people},{id:"quiet",name:"Quiet",members:[]}]
     var chats=[{id:"spot:lounge",kind:"hangout",label:"Lounge",spot_id:"lounge",self_role:"host",members:people},
-      {id:"spot:quiet",kind:"hangout",label:"Quiet",spot_id:"quiet",self_role:"host",members:people},
+      {id:"spot:quiet",kind:"hangout",label:"Quiet",spot_id:"quiet",pending_access:true,members:[]},
       {id:"hangout:private",kind:"hangout",label:"Hangout",members:people},
       {id:"dm:friend",kind:"direct",label:"Jared",members:people}]
     var calls=[{id:"active",label:"Lounge",members:people},{id:"private",label:null,members:people}]
@@ -112,6 +112,7 @@ ShellRoot {
       var open=test.find(page,"openRoom-quiet")
       test.click(open); input.wait(120)
       test.check(bridge.activeConversationId==="local::spot:quiet","room click opens its chat")
+      test.check(!bridge.sent.slice(before).some(function(c){return c.name==="mark_conversation_read" || c.name==="set_conversation_tab"}),"public preview opens without requiring encrypted chat membership")
       test.check(!bridge.sent.slice(before).some(function(c){return c.name.indexOf("join_")===0}),"browsing does not join voice")
       var joins=test.visibleItems(page,"joinConversationVoice",[]).filter(function(button) { return button.conversationId==="local::spot:quiet" })
       test.check(joins.length===1,"selected room offers one explicit voice action")

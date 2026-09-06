@@ -611,7 +611,7 @@ async fn two_clients_encrypt_restore_and_admit_a_friend_without_manual_verificat
     let voice_room: ConversationView = decode(
         alice
             .request(reqwest::Method::POST, "/v1/rooms")
-            .json(&json!({"name":"Private voice invite"}))
+            .json(&json!({"name":"Private voice invite","private":true}))
             .send()
             .await
             .unwrap(),

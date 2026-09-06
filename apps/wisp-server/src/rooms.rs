@@ -12,6 +12,9 @@ pub(super) async fn create(
     Json(request): Json<CreateRoomRequest>,
 ) -> Result<Json<ConversationView>, ApiError> {
     let user = authenticate_headers(&state, &headers).await?;
+    if request.private {
+        super::server_management::require_manager(&state, &headers).await?;
+    }
     let name = request.name.trim();
     if name.is_empty() || name.chars().count() > 60 || name.chars().any(char::is_control) {
         return Err(ApiError::bad_request(
@@ -21,10 +24,11 @@ pub(super) async fn create(
     }
     let spot_id = Uuid::new_v4().to_string();
     let mut tx = state.pool.begin().await.map_err(ApiError::internal)?;
-    sqlx::query("INSERT INTO spots(id, name, created_at, private) VALUES (?, ?, ?, 1)")
+    sqlx::query("INSERT INTO spots(id, name, created_at, private) VALUES (?, ?, ?, ?)")
         .bind(&spot_id)
         .bind(name)
         .bind(Utc::now().to_rfc3339())
+        .bind(request.private)
         .execute(&mut *tx)
         .await
         .map_err(|error| {
@@ -37,11 +41,12 @@ pub(super) async fn create(
                 ApiError::internal(error)
             }
         })?;
-    let conversation_id = ensure_spot_conversation(&mut tx, &spot_id, name)
+    let conversation_id = ensure_spot_conversation(&mut tx, &spot_id, name, false)
         .await
         .map_err(ApiError::internal)?;
     sqlx::query("INSERT INTO conversation_members(conversation_id, user_id, joined_at, role) VALUES (?, ?, ?, 'host')")
         .bind(&conversation_id).bind(user.to_string()).bind(Utc::now().to_rfc3339()).execute(&mut *tx).await.map_err(ApiError::internal)?;
+    super::room_access::queue_public_admissions(&mut tx).await?;
     tx.commit().await.map_err(ApiError::internal)?;
     state.emit("room_created", json!({"changed":true})).await;
     Ok(Json(
@@ -138,11 +143,17 @@ mod tests {
             chat_headers(TEST_MEMBER_A_ID),
             Json(CreateRoomRequest {
                 name: "Test room".into(),
+                private: false,
             }),
         )
         .await
         .unwrap()
         .0;
+        sqlx::query("UPDATE spots SET private=1 WHERE id=?")
+            .bind(room.spot_id.as_ref().unwrap())
+            .execute(&state.pool)
+            .await
+            .unwrap();
         assert!(!room.can_clear_for_everyone);
         assert!(
             !can_clear_room(&state.pool, creator, &room.id)
@@ -244,6 +255,7 @@ mod tests {
             chat_headers(TEST_MEMBER_A_ID),
             Json(CreateRoomRequest {
                 name: "Encrypted server room".into(),
+                private: false,
             }),
         )
         .await

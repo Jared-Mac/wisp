@@ -405,6 +405,7 @@ pub enum ConversationKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[allow(clippy::struct_excessive_bools)] // Independent wire-level view flags.
 pub struct ConversationView {
     pub id: String,
     pub kind: ConversationKind,
@@ -432,6 +433,9 @@ pub struct ConversationView {
     pub category_id: Option<String>,
     #[serde(default)]
     pub category_name: Option<String>,
+    /// Public room metadata is visible while encrypted membership is pending.
+    #[serde(default)]
+    pub pending_access: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -446,6 +450,8 @@ pub struct SpotView {
     pub active_hangout_id: Option<HangoutId>,
     #[serde(default)]
     pub members: Vec<UserSummary>,
+    #[serde(default)]
+    pub private: bool,
 }
 
 /// One independently hosted Wisp community known to this client. The stable
@@ -1107,6 +1113,8 @@ pub struct ClearChatHistoryRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateRoomRequest {
     pub name: String,
+    #[serde(default)]
+    pub private: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1151,6 +1159,8 @@ pub struct UpdateServerRoomRequest {
     pub name: String,
     #[serde(default)]
     pub category_id: Option<String>,
+    #[serde(default)]
+    pub private: Option<bool>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RoomMemberRequest {
