@@ -6,6 +6,7 @@ Rectangle {
   required property var bridge
   required property var theme
   property bool compact: false
+  property bool horizontal: false
   property bool adaptive: false
   readonly property real inset: adaptive ? Math.min(theme.spacing.md, Math.max(0,(width-theme.space(20))/8)) : theme.spacing.md
   readonly property bool narrow: adaptive && width < theme.space(140)
@@ -17,15 +18,16 @@ Rectangle {
   signal cameraRequested()
   readonly property bool inCall: !!bridge.currentVoiceRoom
   visible: inCall
-  implicitHeight: inCall ? header.height + root.inset * 2 + (theme.friendly ? theme.space(4) : 0)
-    + Math.min(controls.implicitHeight, Math.max(root.theme.space(40), maximumHeight - header.height - root.inset * 2 - (theme.friendly ? theme.space(4) : 0))) : 0
+  implicitHeight: !inCall ? 0 : horizontal ? root.inset * 2 + Math.max(header.height, Math.min(controls.implicitHeight, maximumHeight - root.inset * 2)) : header.height + root.inset * 2 + (theme.friendly ? theme.space(4) : 0)
+    + Math.min(controls.implicitHeight, Math.max(root.theme.space(40), maximumHeight - header.height - root.inset * 2 - (theme.friendly ? theme.space(4) : 0)))
   color: theme.friendly ? theme.alpha(theme.accent,0.045) : theme.surface
   radius: theme.cornerRadius
   Rectangle { width: parent.width; height: 1; color: root.theme.separator }
   Item {
     id: header
-    anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
-    anchors.margins: root.inset; height: disconnect.height
+    x: root.inset; y: root.inset
+    width: root.horizontal ? Math.min(root.theme.space(270), (root.width - root.inset * 2) * 0.46) : root.width - root.inset * 2
+    height: disconnect.height
     Item {
       anchors.left: parent.left; anchors.leftMargin: root.narrow ? 0 : root.theme.space(8)
       anchors.right: disconnect.left; anchors.rightMargin: root.theme.spacing.sm
@@ -42,7 +44,7 @@ Rectangle {
         ToolTip.visible: locationHover.hovered && truncated; ToolTip.text: text
       }
       Text {
-        id: connection; visible: !root.narrow; objectName: "currentCallConnection"
+        id: connection; visible: !root.narrow && (!root.horizontal || header.width >= root.theme.space(240)); objectName: "currentCallConnection"
         anchors.left: location.right; anchors.leftMargin: root.theme.spacing.sm
         anchors.verticalCenter: parent.verticalCenter
         text: root.bridge.mediaState.livekit_connected ? "· connected" : "· connecting…"
@@ -62,9 +64,9 @@ Rectangle {
     }
   }
   Flickable {
-    anchors.left: parent.left; anchors.right: parent.right; anchors.top: header.bottom; anchors.bottom: parent.bottom
+    anchors.left: root.horizontal ? header.right : parent.left; anchors.right: parent.right; anchors.top: root.horizontal ? parent.top : header.bottom; anchors.bottom: parent.bottom
     anchors.leftMargin: root.inset; anchors.rightMargin: root.inset; anchors.bottomMargin: root.inset
-    anchors.topMargin: root.theme.friendly ? root.theme.space(4) : 0
+    anchors.topMargin: root.horizontal ? root.inset : root.theme.friendly ? root.theme.space(4) : 0
     contentWidth: width; contentHeight: controls.implicitHeight
     clip: true; boundsBehavior: Flickable.StopAtBounds
     ScrollBar.vertical: ScrollBar {}

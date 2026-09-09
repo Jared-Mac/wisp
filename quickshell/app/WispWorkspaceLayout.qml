@@ -8,6 +8,8 @@ Item {
   property bool ready: false
   property alias dock: preferences.dock
   property alias activityWidth: preferences.activityWidth
+  property alias activityHeight: preferences.activityHeight
+  property alias activityColumnsRatio: preferences.activityColumnsRatio
   property alias activityRatio: preferences.activityRatio
   property alias activityCollapsed: preferences.activityCollapsed
   property alias roomsRatio: preferences.roomsRatio
@@ -27,7 +29,7 @@ Item {
   signal resetRequested()
   property string error: ""
   function reset() {
-    dock = "auto"; activityWidth = 0; activityRatio = 0.25; activityCollapsed = false; roomsRatio = 0
+    dock = "auto"; activityWidth = 0; activityHeight = 0; activityColumnsRatio = 0.58; activityRatio = 0.25; activityCollapsed = false; roomsRatio = 0
     resetRequested()
   }
   function bounded(value, fallback) { return isFinite(value) ? Math.max(0.08, Math.min(0.85, value)) : fallback }
@@ -50,6 +52,8 @@ Item {
       id: preferences
       property string dock: "auto"
       property real activityWidth: 0 // Explicit sidebar width; zero keeps automatic sizing.
+      property real activityHeight: 0 // Top/bottom dock height; independent of sidebar width.
+      property real activityColumnsRatio: 0.58
       property real activityRatio: 0.25
       property bool activityCollapsed: false
       property real roomsRatio: 0 // Fit the room list until its divider is moved.

@@ -12,6 +12,7 @@ ShellRoot {
         layout.setStreamsAsTiles(true)
         if (!layout.channelsAsTiles) console.error("LAYOUT_FAILED channels should open new tiles by default")
         layout.dock = "right"; layout.activityWidth = 24; layout.activityRatio = 0.35
+        layout.activityHeight = 270; layout.activityColumnsRatio = 0.64
         layout.roomsRatio = 0.6; layout.activityCollapsed = true
         layout.trayRoomsCollapsed = true
         layout.setChannelsAsTiles(false)
@@ -23,6 +24,7 @@ ShellRoot {
     interval: 500; running: true
     onTriggered: {
       if (layout.activityWidth !== 24 || layout.dock !== "right" || Math.abs(layout.activityRatio - 0.35) > 0.001
+          || layout.activityHeight !== 270 || Math.abs(layout.activityColumnsRatio - 0.64) > 0.001
           || Math.abs(layout.roomsRatio - 0.6) > 0.001 || !layout.activityCollapsed || !layout.trayRoomsCollapsed || JSON.parse(layout.chatTiles).b.id !== "dm" || layout.channelsAsTiles || !layout.streamsAsTiles || layout.error)
         console.error("LAYOUT_FAILED persistence")
       else console.log("LAYOUT_OK")

@@ -103,6 +103,12 @@ ShellRoot {
     onTriggered: {
       var lounge=test.find(page,"savedRoom-lounge"), quiet=test.find(page,"savedRoom-quiet")
       test.check(lounge && quiet,"occupied and empty rooms share a single list")
+      for (var roomCard of [lounge, quiet]) {
+        var joinButton=test.find(roomCard,"joinRoom-"+roomCard.room.id), moreButton=test.find(roomCard,"roomMoreButton")
+        var joinPos=joinButton.mapToItem(roomCard,0,0), morePos=moreButton.mapToItem(roomCard,0,0)
+        test.check(Math.abs(joinPos.y-morePos.y)<1 && joinPos.x+joinButton.width<=morePos.x,"join and room menu keep separate hit areas on one row")
+        test.check(morePos.x+moreButton.width<=roomCard.width && morePos.y+moreButton.height<=roomCard.height,"room actions fit inside their card")
+      }
       test.check(bridge.roomCount===2 && bridge.temporaryCalls.length===1,"temporary calls do not inflate room count")
       test.check(!test.find(page,"serverChannel-spot:lounge"),"rooms are not duplicated as text channels")
       test.check(test.find(page,"friendCalls").visible,"temporary calls appear beside friends")
@@ -164,6 +170,7 @@ ShellRoot {
       test.check(test.find(lounge,"roomParticipant-friend").visible,"participants stay visible after snapshots")
       var roomAction=test.find(lounge,"joinRoom-lounge")
       test.check(test.compact ? !roomAction.visible : roomAction.visible && roomAction.text==="inv","main app replaces join with inv; tray hides redundant join")
+      test.check(roomAction.iconName==="invite" && roomAction.iconOnly && roomAction.forceIcon,"room invite always uses the person-plus icon")
       if (!test.compact) {
         var beforeInvite=bridge.sent.length
         test.click(roomAction); input.wait(50)
@@ -175,6 +182,7 @@ ShellRoot {
       test.check(lounge.y<quiet.y && test.find(lounge,"roomName").text===(theme.friendly ? "Lounge  · 2" : "#Lounge /2"),"joining preserves room order and name")
       var bar=test.find(page,"currentCallBar")
       test.check(test.compact ? !!test.find(bar,"mediaAction-invite") : !test.find(bar,"mediaAction-invite"),"main room invite moves out of the media controls; tray retains it")
+      if (test.compact) test.check(test.find(bar,"mediaAction-invite").forceIcon,"tray invite always uses the person-plus icon")
       var disconnect=test.find(bar,"currentCallDisconnect"), location=test.find(bar,"currentCallLocation"), connection=test.find(bar,"currentCallConnection")
       test.check(disconnect && Math.abs(disconnect.mapToItem(bar,0,disconnect.height/2).y-location.mapToItem(bar,0,location.height/2).y)<1,"disconnect aligns vertically with the room status")
       test.check(location.y===connection.y && connection.text==="· connected","room and connection status share one line")

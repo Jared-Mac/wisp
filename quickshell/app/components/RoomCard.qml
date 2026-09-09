@@ -40,25 +40,31 @@ Column {
     contentItem: Column {
       id: body; spacing: root.theme.spacing.xs
       Item {
-        id: roomHeader; width: parent.width; height: root.theme.space(root.theme.friendly ? 36 : 28) + (root.narrow ? actions.height : 0)
+        id: roomHeader; width: parent.width
+        height: root.narrow ? root.theme.space(root.theme.friendly ? 36 : 28) + actions.height : Math.max(root.theme.space(root.theme.friendly ? 36 : 28),actions.height)
         WispIcon { id: roomIcon; theme: root.theme; name: "volume"; visible: root.theme.friendly && !root.narrow; anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter }
         Text {
           objectName: "roomName"
           anchors.left: roomIcon.visible ? roomIcon.right : parent.left; anchors.leftMargin: roomIcon.visible ? root.theme.space(8) : 0; anchors.right: root.narrow ? parent.right : actions.left; anchors.rightMargin: root.theme.spacing.xs
-          y: root.theme.space(8); elide: Text.ElideRight
+          y: root.narrow ? root.theme.space(8) : (parent.height-height)/2; elide: Text.ElideRight
           text: root.tiny ? String(root.room.name).slice(0,1).toUpperCase() : root.theme.friendly ? root.room.name + "  · " + root.people.length : "#" + root.room.name + " /" + root.people.length
           color: root.theme.foreground; font.family: root.theme.font.family
           font.pixelSize: root.theme.font.body; font.weight: Font.DemiBold
         }
-        Flow {
-          id: actions; anchors.right: parent.right; y: root.narrow ? root.theme.space(root.theme.friendly ? 36 : 28) : 0
-          width: root.narrow ? parent.width : implicitWidth
+        Item {
+          id: actions; anchors.right: parent.right
+          y: root.narrow ? root.theme.space(root.theme.friendly ? 36 : 28) : (parent.height-height)/2
+          readonly property real spacing: root.theme.space(4)
+          readonly property bool wrapActions: root.narrow && joinAction.visible && joinAction.width + spacing + moreAction.width > width
+          // Keep ordinary rows on one line; only the narrow rail stacks actions.
+          width: root.narrow ? parent.width : (joinAction.visible ? joinAction.width + spacing : 0) + moreAction.width
+          height: wrapActions ? joinAction.height + spacing + moreAction.height : Math.max(joinAction.visible ? joinAction.height : 0, moreAction.height)
           ChatButton {
-            objectName: "joinRoom-" + root.room.id
+            id: joinAction; objectName: "joinRoom-" + root.room.id
             visible: !root.current || root.mainApp; enabled: root.bridge.activeServer.connected !== false
             theme: root.theme; text: root.current ? "inv" : "join"
-            iconName: root.narrow ? (root.current ? "invite" : "phone") : ""; iconOnly: root.narrow; forceIcon: root.narrow
-            width: root.narrow ? Math.min(actions.width,root.theme.space(28)) : implicitWidth
+            iconName: root.current ? "invite" : root.narrow ? "phone" : ""; iconOnly: root.current || root.narrow; forceIcon: root.current || root.narrow
+            width: root.narrow ? Math.min(body.width,root.theme.space(28)) : root.current ? root.theme.space(32) : implicitWidth
             height: root.narrow ? root.theme.space(28) : implicitHeight
             primary: root.theme.friendly && !root.current
             Accessible.name: (root.current ? "Invite to " : "Join voice in ") + root.room.name
@@ -66,7 +72,9 @@ Column {
             onClicked: if (root.current) invitePicker.open(); else root.bridge.joinConversationVoice(root.conversationId)
           }
           ChatButton {
-            objectName: "roomMoreButton"; theme: root.theme; text: "···"; iconName: "more"; iconOnly: root.theme.friendly || root.narrow; forceIcon: root.narrow; implicitWidth: root.narrow ? Math.min(body.width,root.theme.space(28)) : root.theme.space(30)
+            id: moreAction; objectName: "roomMoreButton"; theme: root.theme; text: "···"; iconName: "more"; iconOnly: root.theme.friendly || root.narrow; forceIcon: root.narrow; implicitWidth: root.narrow ? Math.min(body.width,root.theme.space(28)) : root.theme.space(30)
+            x: !joinAction.visible || actions.wrapActions ? 0 : joinAction.width + actions.spacing
+            y: actions.wrapActions ? joinAction.height + actions.spacing : 0
             height: root.narrow ? root.theme.space(28) : implicitHeight
             Accessible.name: "Room settings and participant volumes"; onClicked: menu.open()
           }

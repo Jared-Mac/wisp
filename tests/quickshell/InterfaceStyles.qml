@@ -97,6 +97,13 @@ ShellRoot {
               var friend = test.find(page,"friendName")
               test.check(!friend.visible || friend.mapToItem(rail,0,0).x + friend.width <= rail.width + 1,"friend names fit at " + railWidth)
               test.check(drop.width >= theme.space(18) && gear.width <= rail.width,"server controls fit at "+railWidth)
+              for (var roomId of ["lounge","quiet"]) {
+                var room=test.find(page,"savedRoom-"+roomId)
+                var join=test.find(room,"joinRoom-"+roomId), more=test.find(room,"roomMoreButton")
+                var jp=join.mapToItem(room,0,0), mp=more.mapToItem(room,0,0)
+                test.check(jp.x>=0 && mp.x>=0 && jp.x+join.width<=room.width+1 && mp.x+more.width<=room.width+1 && jp.y+join.height<=room.height+1 && mp.y+more.height<=room.height+1,"room action bounds at "+railWidth)
+                test.check(jp.x+join.width<=mp.x || jp.y+join.height<=mp.y,"room actions do not overlap at "+railWidth)
+              }
               drop.popup.open(); input.wait(30)
               test.check(drop.popup.width >= theme.space(220),"server menu remains readable")
               drop.popup.close()
@@ -114,6 +121,41 @@ ShellRoot {
           appearance.setShowAvatars(true)
           bridge.workspaceLayout.dock = "left"; bridge.workspaceLayout.activityWidth = 0; input.wait(60)
         }
+        for (var horizontalDock of ["top","bottom"]) {
+          bridge.workspaceLayout.dock=horizontalDock
+          for (var windowHeight of [800,600]) {
+            window.implicitHeight=windowHeight; input.wait(80)
+            var horizontalRail=test.find(page,"activityPane"), roomPane=test.find(page,"roomsPane"), friendPane=test.find(page,"friendsPane")
+            var callBar=test.find(page,"currentCallBar"), roomSplit=test.find(page,"roomsResizeHandle")
+            var callPos=callBar.mapToItem(horizontalRail,0,0)
+            test.check(roomPane.y===friendPane.y && roomPane.x+roomPane.width<friendPane.x,"horizontal dock shows rooms beside friends")
+            test.check(test.find(page,"serverInviteFriend").width===theme.space(36),"inline server invite keeps a compact hit area after changing docks")
+            test.check(roomPane.height>=theme.space(90) && friendPane.height>=theme.space(90),"both lists retain readable height")
+            test.check(callPos.y>=roomPane.y+roomPane.height && callPos.y>=friendPane.y+friendPane.height,"voice toolbar stays below both lists")
+            test.check(callPos.y+callBar.height<=horizontalRail.height && callBar.height<=theme.space(64),"compact horizontal voice toolbar fits")
+            test.check(test.find(callBar,"currentCallConnection").visible,"horizontal voice toolbar retains connection status")
+            test.check(pane.height>=theme.space(190),"chat remains usable below or above Activity")
+            roomPane.contentY=Math.max(0,roomPane.contentHeight-roomPane.height); input.wait(20)
+            var lastRoom=test.find(page,"joinRoom-quiet"), lp=lastRoom.mapToItem(roomPane,0,0)
+            test.check(lp.y>=0 && lp.y+lastRoom.height<=roomPane.height,"scrolling exposes the last room action")
+            roomPane.contentY=0
+            for (var control of ["mute","deafen","share","camera"]) {
+              var controlButton=test.find(callBar,"mediaAction-"+control), cp=controlButton.mapToItem(callBar,0,0)
+              test.check(cp.x>=0 && cp.y>=0 && cp.x+controlButton.width<=callBar.width && cp.y+controlButton.height<=callBar.height,"horizontal toolbar exposes "+control)
+            }
+            if(windowHeight===800) test.capture(style+"-"+horizontalDock+"-"+canvas.width)
+            var oldRoomsWidth=roomPane.width, oldVerticalRatio=bridge.workspaceLayout.roomsRatio
+            roomSplit.moved(20); input.wait(30)
+            test.check(roomPane.width>oldRoomsWidth && bridge.workspaceLayout.roomsRatio===oldVerticalRatio,"horizontal divider adjusts columns independently")
+            roomSplit.resetRequested()
+            var oldHeight=horizontalRail.height, outerSplit=test.find(page,"activityResizeHandle")
+            outerSplit.moved(horizontalDock==="top" ? -20 : 20); input.wait(30)
+            test.check(horizontalRail.height<oldHeight && !bridge.workspaceLayout.activityCollapsed,"top and bottom height dividers follow their edge")
+            outerSplit.resetRequested()
+          }
+          window.implicitHeight=800
+        }
+        bridge.workspaceLayout.dock="left"; input.wait(60)
         page.toggleSettings(); input.wait(40)
         for (var tab of ["profile","media","video","appearance","notifications","privacy","devices"]) {
           test.find(page,"settingsTab-" + tab).clicked(); input.wait(40)
