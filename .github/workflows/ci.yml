@@ -91,6 +91,9 @@ jobs:
       - name: Test production deployment guards
         run: python3 -m unittest discover -s tests -p 'test_deploy_server.py'
 
+      - name: Test Discord patch-note formatting
+        run: python3 -m unittest discover -s tests -p 'test_discord_patch_notes.py'
+
       - name: Run Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
 

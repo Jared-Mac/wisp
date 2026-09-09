@@ -1,0 +1,23 @@
+name: Discord patch notes
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+concurrency:
+  group: discord-patch-notes-${{ github.sha }}
+  cancel-in-progress: false
+jobs:
+  announce:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Post notes for this merge
+        env:
+          WISP_DISCORD_PATCH_NOTES: ${{ secrets.WISP_DISCORD_PATCH_NOTES }}
+          WISP_BEFORE: ${{ github.event.before }}
+          WISP_AFTER: ${{ github.sha }}
+        run: python3 scripts/discord-patch-notes.py
