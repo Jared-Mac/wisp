@@ -7,6 +7,7 @@ var paths = {
   more: '<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
   chevron: '<path d="m6 9 6 6 6-6"/>',
   back: '<path d="m14 6-6 6 6 6"/>',
+  returnChat: '<path d="m9 4-5 5 5 5M4 9h9a7 7 0 0 1 0 14"/>',
   forward: '<path d="m10 6 6 6-6 6"/>',
   check: '<path d="m5 12 4 4L19 6"/>',
   settings: '<path d="m10 3-.7 2.4-2 .9L5 5.5 3 9l1.8 1.6v2.8L3 15l2 3.5 2.3-.8 2 .9L10 21h4l.7-2.4 2-.9 2.3.8 2-3.5-1.8-1.6v-2.8L21 9l-2-3.5-2.3.8-2-.9L14 3z"/><circle cx="12" cy="12" r="3"/>',

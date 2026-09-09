@@ -5,6 +5,7 @@ Rectangle {
   id: root; objectName: "currentCallBar"
   required property var bridge
   required property var theme
+  property bool compact: false
   property real maximumHeight: theme.space(210)
   property bool roomInvitesInHeader: false
   readonly property bool inviteInRoomHeader: roomInvitesInHeader
@@ -50,8 +51,8 @@ Rectangle {
       anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
       theme: root.theme; text: "d/c"; destructive: true
       iconName: "disconnect"; iconOnly: root.theme.friendly
-      Binding on implicitWidth { when: root.theme.friendly; value: root.theme.space(40); restoreMode: Binding.RestoreBindingOrValue }
-      Binding on implicitHeight {when:root.theme.friendly;value:root.theme.space(40);restoreMode:Binding.RestoreBindingOrValue}
+      Binding on implicitWidth { when: root.theme.friendly; value: root.theme.space(root.compact ? 32 : 40); restoreMode: Binding.RestoreBindingOrValue }
+      Binding on implicitHeight {when:root.theme.friendly;value:root.theme.space(root.compact ? 32 : 40);restoreMode:Binding.RestoreBindingOrValue}
       Accessible.name: "Disconnect from voice"
       ToolTip.visible: hovered; ToolTip.text: Accessible.name
       onClicked: root.bridge.leave()
@@ -65,7 +66,7 @@ Rectangle {
     clip: true; boundsBehavior: Flickable.StopAtBounds
     ScrollBar.vertical: ScrollBar {}
     MediaControls {
-      id: controls; width: parent.width; bridge: root.bridge; theme: root.theme; showLeave: false
+      id: controls; width: parent.width; bridge: root.bridge; theme: root.theme; compact: root.compact; showLeave: false
       showInvite: !root.inviteInRoomHeader
       showRemoteStreams: !root.inviteInRoomHeader
       onCameraRequested: root.cameraRequested()

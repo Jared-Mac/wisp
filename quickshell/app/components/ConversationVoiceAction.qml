@@ -13,7 +13,7 @@ ChatButton {
   enabled: !!target && target.connected && !target.current && (!direct || target.available)
   text: direct ? "call" : "join voice"
   Accessible.name: direct ? "Call " + (target ? target.name : "friend") : "Join voice in this conversation"
-  ToolTip.visible: hovered
+  ToolTip.visible: hovered || visualFocus
   ToolTip.text: direct && target ? target.current ? "Already in voice with " + target.name
     : !target.online ? target.name + " is offline" : !target.available ? target.name + " is not available for calls"
     : target.knock ? "Ask " + target.name + " to call" : Accessible.name : Accessible.name

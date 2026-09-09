@@ -450,6 +450,7 @@ FocusScope {
         onCreateRoomRequested: identityRoomManager.createRoom()
       }
       CurrentCallBar {
+        compact: true
         width: parent.width; height: visible ? implicitHeight : 0
         bridge: root.bridge; theme: root.theme
         onCameraRequested: root.requestCamera()
