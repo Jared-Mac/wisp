@@ -13,9 +13,10 @@ Rectangle {
   signal cameraRequested()
   readonly property bool inCall: !!bridge.currentVoiceRoom
   visible: inCall
-  implicitHeight: inCall ? header.height + root.theme.spacing.md * 2
-    + Math.min(controls.implicitHeight, Math.max(root.theme.space(40), maximumHeight - header.height - root.theme.spacing.md * 2)) : 0
-  color: theme.surface
+  implicitHeight: inCall ? header.height + root.theme.spacing.md * 2 + (theme.friendly ? theme.space(4) : 0)
+    + Math.min(controls.implicitHeight, Math.max(root.theme.space(40), maximumHeight - header.height - root.theme.spacing.md * 2 - (theme.friendly ? theme.space(4) : 0))) : 0
+  color: theme.friendly ? theme.alpha(theme.accent,0.045) : theme.surface
+  radius: theme.cornerRadius
   Rectangle { width: parent.width; height: 1; color: root.theme.separator }
   Item {
     id: header
@@ -32,7 +33,7 @@ Rectangle {
         width: Math.max(1, Math.min(implicitWidth, parent.width - connection.implicitWidth - root.theme.spacing.sm))
         elide: Text.ElideRight
         text: root.bridge.currentVoiceRoom ? (root.bridge.voiceServerId === String(root.bridge.activeServer.id) ? "" : (root.bridge.currentVoiceRoom.server_name || "Wisp") + " / ") + root.bridge.currentVoiceLabel : ""
-        color: root.theme.accent; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
+        color: root.theme.accent; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption; font.weight: root.theme.friendly ? Font.DemiBold : Font.Normal
         HoverHandler { id: locationHover }
         ToolTip.visible: locationHover.hovered && truncated; ToolTip.text: text
       }
@@ -48,6 +49,9 @@ Rectangle {
       id: disconnect; objectName: "currentCallDisconnect"
       anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
       theme: root.theme; text: "d/c"; destructive: true
+      iconName: "disconnect"; iconOnly: root.theme.friendly
+      Binding on implicitWidth { when: root.theme.friendly; value: root.theme.space(40); restoreMode: Binding.RestoreBindingOrValue }
+      Binding on implicitHeight {when:root.theme.friendly;value:root.theme.space(40);restoreMode:Binding.RestoreBindingOrValue}
       Accessible.name: "Disconnect from voice"
       ToolTip.visible: hovered; ToolTip.text: Accessible.name
       onClicked: root.bridge.leave()
@@ -56,12 +60,14 @@ Rectangle {
   Flickable {
     anchors.left: parent.left; anchors.right: parent.right; anchors.top: header.bottom; anchors.bottom: parent.bottom
     anchors.leftMargin: root.theme.spacing.md; anchors.rightMargin: root.theme.spacing.md; anchors.bottomMargin: root.theme.spacing.md
+    anchors.topMargin: root.theme.friendly ? root.theme.space(4) : 0
     contentWidth: width; contentHeight: controls.implicitHeight
     clip: true; boundsBehavior: Flickable.StopAtBounds
     ScrollBar.vertical: ScrollBar {}
     MediaControls {
       id: controls; width: parent.width; bridge: root.bridge; theme: root.theme; showLeave: false
       showInvite: !root.inviteInRoomHeader
+      showRemoteStreams: !root.inviteInRoomHeader
       onCameraRequested: root.cameraRequested()
     }
   }

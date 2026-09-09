@@ -32,12 +32,12 @@ Button {
     border.color: root.theme.focusBorder
   }
   contentItem: Item {
-    Image {
+    Item {
       id: logo
       width: visible ? root.theme.space(30) : 0; height: width
       visible: !root.theme.tui && !root.useWordmark
       anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
-      source: root.logoSource; fillMode: Image.PreserveAspectFit
+      Image { anchors.fill: parent; source: root.logoSource; fillMode: Image.PreserveAspectFit }
     }
     Column {
       anchors.left: logo.visible ? logo.right : parent.left
@@ -87,8 +87,10 @@ Button {
         }
       }
     }
+    WispIcon { anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; theme: root.theme; name: "chevron"; visible: root.theme.friendly }
     Text {
       id: arrow
+      opacity: root.theme.friendly ? 0 : 1
       anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
       text: root.theme.tui ? "[≡]" : "▾"; color: root.theme.muted
       font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
@@ -104,17 +106,23 @@ Button {
     font.family: root.theme.font.family; font.pixelSize: root.theme.font.body
     palette.window: root.theme.surface; palette.windowText: root.theme.foreground; palette.text: root.theme.foreground
     MenuItem {
+    id: styledControl1
+      ThemeControlStyle { theme: root.theme; control: styledControl1 }
       objectName: "identityHome"
       visible: root.homeAvailable
       height: visible ? implicitHeight : 0
-      text: "[home]"
+      text: root.theme.friendly ? "Home" : "[home]"
       onTriggered: root.homeRequested()
     }
     MenuItem {
+    id: styledControl2
+      ThemeControlStyle { theme: root.theme; control: styledControl2 }
       objectName: "identitySettings"
       text: "Settings"; onTriggered: root.settingsRequested()
     }
     MenuItem {
+    id: styledControl3
+      ThemeControlStyle { theme: root.theme; control: styledControl3 }
       objectName: "identityNewRoom"
       text: "New Room"; onTriggered: root.newRoomRequested()
     }

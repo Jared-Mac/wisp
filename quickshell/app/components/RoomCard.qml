@@ -23,7 +23,7 @@ Column {
     id: openRoom; objectName: "openRoom-" + root.room.id
     width: parent.width
     implicitHeight: body.implicitHeight + topPadding + bottomPadding
-    padding: root.theme.spacing.sm; leftPadding: root.theme.spacing.md
+    padding: root.theme.friendly ? root.theme.space(8) : root.theme.spacing.sm; leftPadding: root.theme.spacing.md
     Accessible.name: "Open " + root.room.name + " chat; " + root.people.length + " in voice"
     onClicked: root.bridge.openRoomChat(root.room, true)
     TapHandler { acceptedButtons: Qt.RightButton; onTapped: menu.open() }
@@ -36,12 +36,13 @@ Column {
     contentItem: Column {
       id: body; spacing: root.theme.spacing.xs
       Item {
-        width: parent.width; height: root.theme.space(28)
+        width: parent.width; height: root.theme.space(root.theme.friendly ? 36 : 28)
+        WispIcon { id: roomIcon; theme: root.theme; name: "volume"; visible: root.theme.friendly; anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter }
         Text {
           objectName: "roomName"
-          anchors.left: parent.left; anchors.right: actions.left; anchors.rightMargin: root.theme.spacing.xs
+          anchors.left: root.theme.friendly ? roomIcon.right : parent.left; anchors.leftMargin: root.theme.friendly ? root.theme.space(8) : 0; anchors.right: actions.left; anchors.rightMargin: root.theme.spacing.xs
           anchors.verticalCenter: parent.verticalCenter; elide: Text.ElideRight
-          text: "#" + root.room.name + " /" + root.people.length
+          text: root.theme.friendly ? root.room.name + "  · " + root.people.length : "#" + root.room.name + " /" + root.people.length
           color: root.theme.foreground; font.family: root.theme.font.family
           font.pixelSize: root.theme.font.body; font.weight: Font.DemiBold
         }
@@ -51,6 +52,7 @@ Column {
             objectName: "joinRoom-" + root.room.id
             visible: !root.current || root.mainApp; enabled: root.bridge.activeServer.connected !== false
             theme: root.theme; text: root.current ? "inv" : "join"
+            iconName: ""; primary: root.theme.friendly && !root.current
             Accessible.name: (root.current ? "Invite to " : "Join voice in ") + root.room.name
             ToolTip.visible: hovered; ToolTip.text: Accessible.name
             onClicked: if (root.current) invitePicker.open(); else root.bridge.joinConversationVoice(root.conversationId)
@@ -86,22 +88,23 @@ Column {
                 Accessible.description: voiceStatus.description
                 Keys.onReturnPressed: participantMenu.showPerson(person, participant)
                 Keys.onSpacePressed: participantMenu.showPerson(person, participant)
-                MouseArea {
-                  parent: name
-                  anchors.fill: parent; cursorShape: Qt.PointingHandCursor; acceptedButtons: Qt.LeftButton | Qt.RightButton
-                  onClicked: participantMenu.showPerson(participant.person, participant)
+                TapHandler {
+                  acceptedButtons: Qt.LeftButton | Qt.RightButton
+                  onTapped: participantMenu.showPerson(participant.person, participant)
                 }
                 readonly property bool speaking: root.current && (root.bridge.activeSpeakers || []).indexOf(modelData.display_name) >= 0
                 readonly property bool self: modelData.id === (root.bridge.participantServer(person).self || {}).id
-                readonly property real iconSpace: voiceStatus.visible ? voiceStatus.width + spacing : 0
+                readonly property real iconSpace: (voiceStatus.visible ? voiceStatus.width + spacing : 0) + (avatar.visible ? avatar.width + root.theme.space(8) : 0)
                 width: Math.min(members.width, name.implicitWidth + iconSpace)
-                height: Math.max(implicitHeight, streams.visible ? root.theme.space(22) : 0)
+                height: Math.max(root.theme.friendly ? root.theme.space(36) : 0, name.implicitHeight, voiceStatus.height, streams.visible ? root.theme.space(22) : 0)
+                WispAvatar { id: avatar; theme: root.theme; name: modelData.display_name; speaking: parent.speaking; visible: root.theme.friendly; anchors.verticalCenter: parent.verticalCenter
+                }
                 Text {
                   id: name
                   anchors.verticalCenter: parent.verticalCenter
                   width: Math.max(1,parent.width-parent.iconSpace); wrapMode: Text.WrapAnywhere
                   text: (!root.mainApp && index > 0 ? "· " : "") + (parent.speaking ? "● " : "") + modelData.display_name
-                  color: parent.speaking ? root.theme.accent : root.theme.muted
+                  color: parent.speaking ? root.theme.accent : root.theme.friendly ? root.theme.foreground : root.theme.muted
                   font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
                 }
                 ParticipantVoiceStatus {

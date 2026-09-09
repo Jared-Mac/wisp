@@ -23,10 +23,10 @@ Item {
   readonly property real available: Math.max(1, (stacked ? height : width) - dividerSize)
   readonly property real activitySize: {
     if (collapsed) return 0
-    if (theme.cleanTui && !stacked) {
+    if ((theme.cleanTui || theme.friendly) && !stacked) {
       var cleanMaximum = Math.max(1, Math.min(theme.space(360), available - theme.space(320)))
-      var cleanRequested = available * layout.bounded(layout.activityRatio, 0.25) * 0.72
-      return Math.min(cleanMaximum, Math.max(theme.space(220), cleanRequested))
+      var cleanRequested = available * layout.bounded(layout.activityRatio, 0.25) * (theme.friendly ? 1 : 0.72)
+      return Math.min(cleanMaximum, Math.max(theme.space(theme.friendly ? 260 : 220), cleanRequested))
     }
     return Math.max(
       Math.min(available * 0.3, theme.space(stacked ? 70 : theme.tui ? 220 : 180)),
@@ -42,21 +42,30 @@ Item {
     y: root.stacked && root.reversed ? root.height - height : 0
     width: root.stacked ? root.width : root.activitySize
     height: root.stacked ? root.activitySize : root.height
+    Rectangle { anchors.fill: parent; visible: root.theme.friendly; color: root.theme.sidebar; radius: root.theme.cornerRadius }
     readonly property real available: Math.max(1, height - root.handleSize)
     readonly property real minimumPane: root.theme.space(root.stacked ? 70 : 44)
-    readonly property real frameInset: root.theme.tui ? root.theme.space(root.theme.cleanTui ? 10 : 8) : 0
-    readonly property real frameTop: root.theme.tui ? root.theme.space(22) : 0
-    readonly property real roomsSize: Math.max(Math.min(minimumPane, available / 2), Math.min(available - Math.min(minimumPane, available / 2), root.layout.roomsRatio <= 0 ? Math.min(available * 0.55, roomColumn.implicitHeight + frameTop + frameInset) : available * root.layout.bounded(root.layout.roomsRatio, 0.28)))
+    readonly property real frameInset: root.theme.friendly ? root.theme.space(10) : root.theme.tui ? root.theme.space(root.theme.cleanTui ? 10 : 8) : 0
+    readonly property real frameTop: root.theme.friendly ? root.theme.space(12) : root.theme.tui ? root.theme.space(22) : 0
+    readonly property real roomsSize: {
+      var callSpace = roomCallBar.height + (roomCallBar.visible ? root.theme.space(8) : 0)
+      var minimumRooms = Math.min(available/2, minimumPane + callSpace + frameTop + frameInset)
+      var minimumFriends = Math.min(available/2, minimumPane)
+      var preferred = root.layout.roomsRatio <= 0
+        ? Math.min(available - Math.min(available*0.3, root.theme.space(160)), roomColumn.implicitHeight + callSpace + frameTop + frameInset)
+        : available * root.layout.bounded(root.layout.roomsRatio, 0.28)
+      return Math.max(minimumRooms, Math.min(available-minimumFriends, preferred))
+    }
     Flickable {
       id: rooms
       objectName: "roomsPane"
       x: activity.frameInset; y: activity.frameTop
-      width: parent.width - activity.frameInset * 2; height: Math.max(1, activity.roomsSize - activity.frameTop - activity.frameInset)
+      width: parent.width - activity.frameInset * 2; height: Math.max(1, activity.roomsSize - activity.frameTop - activity.frameInset - roomCallBar.height - (roomCallBar.visible ? root.theme.space(8) : 0))
       contentWidth: width; contentHeight: roomColumn.implicitHeight
       clip: true; boundsBehavior: Flickable.StopAtBounds
       ScrollBar.vertical: ScrollBar {}
       Column {
-        id: roomColumn; width: parent.width; spacing: root.theme.spacing.xs
+      id: roomColumn; width: parent.width; spacing: root.theme.friendly ? root.theme.space(8) : root.theme.spacing.xs
         ServerSelector {
           width: parent.width; bridge: root.bridge; theme: root.theme; compact: true
           onSettingsRequested: root.serverSettingsRequested()
@@ -70,16 +79,19 @@ Item {
           onCreateRequested: root.createRoomRequested()
         }
         SpotsView { width: parent.width; bridge: root.bridge; theme: root.theme; mainApp: true }
-        CurrentCallBar {
-          width: parent.width; height: visible ? implicitHeight : 0
-          bridge: root.bridge; theme: root.theme
-          roomInvitesInHeader: true
-          onCameraRequested: root.cameraRequested()
-        }
         ServerChannelsView { width: parent.width; bridge: root.bridge; theme: root.theme; showHeader: true }
 
       }
     }
+    CurrentCallBar {
+          id: roomCallBar
+          x: activity.frameInset; y: rooms.y + rooms.height + (visible ? root.theme.space(8) : 0)
+          width: rooms.width; height: visible ? implicitHeight : 0
+          bridge: root.bridge; theme: root.theme
+          maximumHeight: Math.min(root.theme.space(210), activity.available/2)
+          roomInvitesInHeader: true
+          onCameraRequested: root.cameraRequested()
+        }
     ResizeHandle {
       objectName: "roomsResizeHandle"
       theme: root.theme; verticalLine: false

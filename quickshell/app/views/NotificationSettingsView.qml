@@ -10,35 +10,6 @@ Column {
   property string selectedSoundEvent: ""
   spacing: theme.spacing.lg
 
-  Text {
-    text: "Channel navigation · this device"; color: root.theme.foreground
-    font.family: root.theme.font.family; font.pixelSize: root.theme.font.body; font.bold: true
-  }
-  CheckBox {
-    id: channelTilePreference
-    objectName: "channelsAsTilesSetting"
-    width: parent.width
-    text: "Open channels and rooms in new tiles"
-    checked: root.bridge.workspaceLayout.channelsAsTiles
-    onClicked: root.bridge.workspaceLayout.setChannelsAsTiles(checked)
-    ThemeControlStyle { theme: root.theme; control: channelTilePreference }
-    contentItem: Text {
-      text: channelTilePreference.text; wrapMode: Text.Wrap
-      leftPadding: channelTilePreference.indicator.width + channelTilePreference.spacing
-      color: root.theme.foreground; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
-    }
-  }
-  Text {
-    width: parent.width; wrapMode: Text.Wrap
-    text: "On by default. When off, channel and room clicks reuse a channel or room-chat tile. DMs and private group chats stay in place; if no channel tile is open, a new tile is added. An already-open chat is focused, and + always opens a tile."
-    color: root.theme.muted; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
-  }
-  Text {
-    width: parent.width; wrapMode: Text.Wrap
-    visible: !!root.bridge.workspaceLayout.error
-    text: root.bridge.workspaceLayout.error
-    color: root.theme.danger; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
-  }
 
   Text {
     Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
@@ -47,7 +18,7 @@ Column {
   Text {
     Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
     width: parent.width
-    text: "Choose when messages make a sound. Muted chats stay unread and keep their badges, but do not play sounds. Chat muting is saved on this device and follows the conversation across tiles and windows."
+    text: "Muted chats keep unread badges without playing a sound."
     wrapMode: Text.Wrap
     color: root.theme.muted
     font.pixelSize: root.theme.font.caption
@@ -134,55 +105,98 @@ Column {
     }
     onRejected: root.selectedSoundEvent = ""
   }
-  Text { objectName: "settingsRoomSounds"; text: "Room sounds"; color: root.theme.foreground; font.family: root.theme.font.family; font.pixelSize: root.theme.font.body; font.bold: true }
-  Text {
-    width: parent.width; wrapMode: Text.Wrap
-    text: "Distinct sounds for your own joins/leaves and other people entering/leaving your room. Room sounds also play while Wisp is focused. Custom files and preferences stay on this device."
-    color: root.theme.muted; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
-  }
-  Flow {
-    width: parent.width; spacing: root.theme.spacing.sm
-    ChatButton {
-      theme: root.theme; text: root.bridge.roomNotificationSounds ? "Others · Sound on" : "Others · Muted"
-      onClicked: root.bridge.roomNotificationSounds = !root.bridge.roomNotificationSounds
+  SettingsSection {
+    theme: root.theme; title: "Room sounds"; summary: "Invites, joins, leaves, and custom recordings"
+    objectName: "roomSoundsSection"; expanded: false
+    Text { objectName: "settingsRoomSounds"; text: "Room sounds"; color: root.theme.foreground; font.family: root.theme.font.family; font.pixelSize: root.theme.font.body; font.bold: true }
+    Text {
+      width: parent.width; wrapMode: Text.Wrap
+      text: "Choose sounds for invitations and people joining or leaving voice."
+      color: root.theme.muted; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
     }
-    ChatButton {
-      theme: root.theme; text: root.bridge.selfRoomNotificationSounds ? "My joins/leaves · Sound on" : "My joins/leaves · Muted"
-      onClicked: root.bridge.selfRoomNotificationSounds = !root.bridge.selfRoomNotificationSounds
-    }
-  }
-  Repeater {
-    model: [{id:"room_invite",label:"Voice room invitation"},{id:"member_join",label:"Someone joins your room"},{id:"member_leave",label:"Someone leaves your room"},{id:"self_join",label:"You join a room"},{id:"self_leave",label:"You leave a room"}]
-    Column {
-      id: eventSoundRow
-      required property var modelData
+    Flow {
       width: parent.width; spacing: root.theme.spacing.sm
-      Text { text: eventSoundRow.modelData.label; color: root.theme.foreground; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption; font.bold: true }
-      Text {
-        width: parent.width; elide: Text.ElideMiddle
-        text: root.bridge.eventSoundPaths[eventSoundRow.modelData.id] || "Default Wisp sound"
-        color: root.theme.muted; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
+      ChatButton {
+        theme: root.theme; text: root.bridge.roomNotificationSounds ? "Others · Sound on" : "Others · Muted"
+        onClicked: root.bridge.roomNotificationSounds = !root.bridge.roomNotificationSounds
       }
-      Flow {
+      ChatButton {
+        theme: root.theme; text: root.bridge.selfRoomNotificationSounds ? "My joins/leaves · Sound on" : "My joins/leaves · Muted"
+        onClicked: root.bridge.selfRoomNotificationSounds = !root.bridge.selfRoomNotificationSounds
+      }
+    }
+    Repeater {
+      model: [{id:"room_invite",label:"Voice room invitation"},{id:"member_join",label:"Someone joins your room"},{id:"member_leave",label:"Someone leaves your room"},{id:"self_join",label:"You join a room"},{id:"self_leave",label:"You leave a room"}]
+      Column {
+        id: eventSoundRow
+        required property var modelData
         width: parent.width; spacing: root.theme.spacing.sm
-        ChatButton { theme: root.theme; text: "Choose sound…"; onClicked: { root.selectedSoundEvent=eventSoundRow.modelData.id; soundPicker.title=eventSoundRow.modelData.label; soundPicker.open() } }
-        ChatButton {
-          theme: root.theme; text: "Test"
-          enabled: !root.bridge.notificationMuted && root.bridge.notificationVolume > 0 && (eventSoundRow.modelData.id === "room_invite" || (eventSoundRow.modelData.id.indexOf("self_") === 0 ? root.bridge.selfRoomNotificationSounds : root.bridge.roomNotificationSounds))
-          onClicked: root.bridge.playNotificationSound(eventSoundRow.modelData.id)
+        Text { text: eventSoundRow.modelData.label; color: root.theme.foreground; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption; font.bold: true }
+        Text {
+          width: parent.width; elide: Text.ElideMiddle
+          text: root.bridge.eventSoundPaths[eventSoundRow.modelData.id] || "Default Wisp sound"
+          color: root.theme.muted; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
         }
-        ChatButton { theme: root.theme; text: "Restore default"; onClicked: root.bridge.setEventSound(eventSoundRow.modelData.id, "") }
+        Flow {
+          width: parent.width; spacing: root.theme.spacing.sm
+          ChatButton { theme: root.theme; text: "Choose sound…"; onClicked: { root.selectedSoundEvent=eventSoundRow.modelData.id; soundPicker.title=eventSoundRow.modelData.label; soundPicker.open() } }
+          ChatButton {
+            theme: root.theme; text: "Test"
+            enabled: !root.bridge.notificationMuted && root.bridge.notificationVolume > 0 && (eventSoundRow.modelData.id === "room_invite" || (eventSoundRow.modelData.id.indexOf("self_") === 0 ? root.bridge.selfRoomNotificationSounds : root.bridge.roomNotificationSounds))
+            onClicked: root.bridge.playNotificationSound(eventSoundRow.modelData.id)
+          }
+          ChatButton { theme: root.theme; text: "Restore default"; onClicked: root.bridge.setEventSound(eventSoundRow.modelData.id, "") }
+        }
       }
     }
   }
-  Text { objectName: "settingsChatNotifications"; text: "Chat notifications"; color: root.theme.foreground; font.family: root.theme.font.family; font.pixelSize: root.theme.font.body; font.bold: true }
-  Repeater {
-    model: root.bridge.conversations
-    ChatButton {
-      required property var modelData
-      width: parent.width; theme: root.theme
-      text: (root.bridge.chatNotificationsMuted(modelData.id) ? "Muted · " : "Sound on · ") + modelData.label
-      onClicked: root.bridge.toggleChatNotifications(modelData.id)
+  SettingsSection {
+    theme: root.theme; title: "Per-chat notifications"; summary: "Mute sounds for individual conversations"
+    objectName: "chatSoundsSection"; expanded: false
+    Text { objectName: "settingsChatNotifications"; text: "Chat notifications"; color: root.theme.foreground; font.family: root.theme.font.family; font.pixelSize: root.theme.font.body; font.bold: true }
+    Repeater {
+      model: root.bridge.conversations
+      ChatButton {
+        required property var modelData
+        width: parent.width; theme: root.theme
+        text: (root.bridge.chatNotificationsMuted(modelData.id) ? "Muted · " : "Sound on · ") + modelData.label
+        onClicked: root.bridge.toggleChatNotifications(modelData.id)
+      }
     }
   }
+
+  SettingsSection {
+    theme: root.theme; title: "Chat navigation"; summary: "Choose how rooms open in your workspace"
+    objectName: "chatNavigationSection"; expanded: false
+    Text {
+      text: "Channel navigation · this device"; color: root.theme.foreground
+      font.family: root.theme.font.family; font.pixelSize: root.theme.font.body; font.bold: true
+    }
+    CheckBox {
+      id: channelTilePreference
+      objectName: "channelsAsTilesSetting"
+      width: parent.width
+      text: "Open channels and rooms in new tiles"
+      checked: root.bridge.workspaceLayout.channelsAsTiles
+      onClicked: root.bridge.workspaceLayout.setChannelsAsTiles(checked)
+      ThemeControlStyle { theme: root.theme; control: channelTilePreference }
+      contentItem: Text {
+        text: channelTilePreference.text; wrapMode: Text.Wrap
+        leftPadding: channelTilePreference.indicator.width + channelTilePreference.spacing
+        color: root.theme.foreground; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
+      }
+    }
+    Text {
+      width: parent.width; wrapMode: Text.Wrap
+      text: "When off, reuse a room or channel tile. Direct messages stay in place."
+      color: root.theme.muted; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
+    }
+    Text {
+      width: parent.width; wrapMode: Text.Wrap
+      visible: !!root.bridge.workspaceLayout.error
+      text: root.bridge.workspaceLayout.error
+      color: root.theme.danger; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
+    }
+  }
+
 }

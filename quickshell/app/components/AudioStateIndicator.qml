@@ -30,7 +30,7 @@ Row {
     border.width: root.theme.tui && !activeFocus ? 0 : 1
 
     Image {
-      visible: !root.theme.tui
+      visible: !root.theme.tui && !root.theme.friendly
       anchors.centerIn: parent
       width: root.theme.space(20)
       height: width
@@ -39,6 +39,7 @@ Row {
         : "../assets/microphone.svg")
       fillMode: Image.PreserveAspectFit
     }
+    WispIcon { anchors.centerIn: parent; theme: root.theme; name: root.muted ? "microphone-off" : "microphone"; ink: root.muted ? root.theme.warning : root.theme.foreground; visible: root.theme.friendly }
     Text {
       anchors.centerIn: parent; visible: root.theme.tui
       text: "[M]"; color: root.muted ? root.theme.warning : root.theme.foreground
@@ -99,7 +100,7 @@ Row {
     border.width: root.theme.tui && !activeFocus ? 0 : 1
 
     Image {
-      visible: !root.theme.tui
+      visible: !root.theme.tui && !root.theme.friendly
       anchors.centerIn: parent
       width: root.theme.space(20)
       height: width
@@ -108,6 +109,7 @@ Row {
         : "../assets/headphones.svg")
       fillMode: Image.PreserveAspectFit
     }
+    WispIcon { anchors.centerIn: parent; theme: root.theme; name: root.deafened ? "headphones-off" : "headphones"; ink: root.deafened ? root.theme.danger : root.theme.foreground; visible: root.theme.friendly }
     Text {
       anchors.centerIn: parent; visible: root.theme.tui
       text: "[D]"; color: root.deafened ? root.theme.danger : root.theme.foreground

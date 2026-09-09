@@ -20,6 +20,8 @@ Item {
     anchors.verticalCenter: selector.verticalCenter
     height: selector.height - 2
     theme: root.theme
+    iconName: "settings"; iconOnly: root.theme.friendly
+    Binding on implicitWidth { when: root.theme.friendly; value: root.theme.space(36); restoreMode: Binding.RestoreBindingOrValue }
     visible: root.bridge.canManageServer
     text: serverMetrics.advanceWidth + settingsMetrics.advanceWidth + root.theme.space(12)
       + arrow.width + root.theme.spacing.sm * 3 > root.width ? "stngs" : "settings"
@@ -29,13 +31,14 @@ Item {
     onClicked: { selector.popup.close(); root.settingsRequested() }
   }
 
-  ComboBox {
+  WispComboBox {
+    theme: root.theme
     id: selector
     objectName: "activeServerSelector"
     anchors.left: parent.left
     anchors.right: settingsButton.visible ? settingsButton.left : parent.right
     anchors.rightMargin: settingsButton.visible ? root.theme.spacing.sm : 0
-    height: root.theme.space(root.compact ? 28 : 32)
+    height: root.theme.space(root.theme.friendly ? 40 : root.compact ? 28 : 32)
     padding: 0
     leftPadding: root.theme.spacing.sm
     rightPadding: arrow.width
@@ -53,7 +56,8 @@ Item {
       if (server) root.bridge.selectServer(server.id)
     }
     font.family: root.theme.font.family
-    font.pixelSize: root.theme.font.caption
+    font.pixelSize: root.theme.friendly ? root.theme.font.body : root.theme.font.caption
+    font.weight: root.theme.friendly ? Font.DemiBold : Font.Normal
     contentItem: Text {
       id: serverLabel
       verticalAlignment: Text.AlignVCenter
@@ -70,9 +74,11 @@ Item {
       width: root.theme.space(26)
       height: selector.height
       Text {
+        visible: !root.theme.friendly
         anchors.centerIn: parent; text: "▾"
         color: root.theme.foreground; font: selector.font
       }
+      WispIcon { anchors.centerIn: parent; theme: root.theme; name: "chevron"; visible: root.theme.friendly }
       MouseArea {
         anchors.fill: parent
         cursorShape: Qt.PointingHandCursor
@@ -90,6 +96,7 @@ Item {
       radius: root.theme.cornerRadius
     }
     delegate: ItemDelegate {
+    id: styledControl1
       required property var modelData
       width: selector.width
       height: root.theme.space(32)
@@ -97,7 +104,7 @@ Item {
       highlighted: String(modelData.id)===String(root.bridge.activeServer.id)
       font.family: root.theme.font.family
       font.pixelSize: root.theme.font.caption
-      ThemeControlStyle { theme: root.theme; control: parent }
+      ThemeControlStyle { theme: root.theme; control: styledControl1 }
     }
     popup.background: Rectangle {
       color: root.theme.surface
@@ -106,7 +113,8 @@ Item {
       radius: root.theme.cornerRadius
     }
   }
-  Button {
+  ChatButton {
+    theme: root.theme
     id: inviteButton
     objectName: "serverInviteFriend"
     anchors.top: selector.bottom
@@ -119,7 +127,7 @@ Item {
     enabled: root.bridge.activeServer.connected !== false
     font.family: root.theme.font.family
     font.pixelSize: root.theme.font.caption
-    ThemeControlStyle { theme: root.theme; control: parent }
+    ThemeControlStyle { theme: root.theme; control: inviteButton }
     onClicked: {
       root.bridge.lastAccountInvite = null
       root.bridge.lastError = ""
@@ -166,13 +174,15 @@ Item {
         readOnly: true
         selectByMouse: true
         text: root.bridge.lastAccountInvite ? String(root.bridge.lastAccountInvite.uri || root.bridge.lastAccountInvite.code) : ""
-        ThemeControlStyle { theme: root.theme; control: parent }
+        ThemeControlStyle { theme: root.theme; control: inviteLink }
       }
-      Button {
+      ChatButton {
+    id: styledControl2
+        theme: root.theme
         width: parent.width
         text: invitePopup.copied ? "Copied!" : "Copy invite link"
         enabled: !!root.bridge.lastAccountInvite
-        ThemeControlStyle { theme: root.theme; control: parent }
+        ThemeControlStyle { theme: root.theme; control: styledControl2 }
         onClicked: { inviteLink.selectAll(); inviteLink.copy(); inviteLink.deselect(); invitePopup.copied = true }
       }
     }

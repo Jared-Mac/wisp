@@ -19,7 +19,7 @@ Column {
     width: parent.width; height: root.theme.space(20)
     Text {
     anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
-    text: root.theme.tui ? "/calls · " + root.visibleHangouts.length : "CALLS"
+    text: root.theme.tui ? "/calls · " + root.visibleHangouts.length : root.theme.friendly ? "Calls" : "CALLS"
     color: root.theme.roomSectionColor
     font.family: root.theme.font.family
     font.pixelSize: root.theme.font.caption

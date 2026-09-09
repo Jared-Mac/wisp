@@ -15,7 +15,7 @@ Column {
   Text {
     width: parent.width; wrapMode: Text.Wrap
     visible: !root.bridge.spots.length
-    text: "No rooms yet. Create one with [+]."
+    text: root.theme.friendly ? "No rooms yet. Use + to create one." : "No rooms yet. Create one with [+]."
     color: root.theme.muted; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
   }
 }

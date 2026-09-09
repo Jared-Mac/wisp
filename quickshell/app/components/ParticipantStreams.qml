@@ -20,14 +20,14 @@ Flow {
       readonly property bool watching: !!modelData.subscribed || !!modelData.surface_open
       Text {
         anchors.verticalCenter: parent.verticalCenter
-        text: modelData.source === "camera" ? " · cam" : " · live"
+        text: root.theme.friendly ? (modelData.source === "camera" ? "CAM" : "LIVE") : modelData.source === "camera" ? " · cam" : " · live"
         color: modelData.source === "camera" ? root.theme.accent : root.theme.danger
         font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
         Accessible.name: root.person.display_name + (modelData.source === "camera" ? " is sharing a camera" : " is streaming")
       }
       ChatButton {
         objectName: "participantStream-" + root.person.id + "-" + modelData.source
-        theme: root.theme; text: parent.watching ? "leave" : "watch"
+        theme: root.theme; text: parent.watching ? "leave" : "watch"; iconName: ""
         implicitHeight: root.theme.space(22)
         Accessible.name: (parent.watching ? "Stop watching " : "Watch ") + root.person.display_name + (modelData.source === "camera" ? "'s camera" : "'s stream")
         ToolTip.visible: hovered; ToolTip.text: Accessible.name

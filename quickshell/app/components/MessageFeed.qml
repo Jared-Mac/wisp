@@ -57,7 +57,7 @@ Rectangle {
   radius: theme.cornerRadius
   border.width: theme.tui ? 0 : theme.terminal ? 1 : 0
   border.color: theme.separator
-  color: theme.tui ? (theme.cleanTui ? "transparent" : theme.background) : theme.alpha(theme.foreground, 0.025)
+  color: theme.friendly ? "transparent" : theme.tui ? (theme.cleanTui ? "transparent" : theme.background) : theme.alpha(theme.foreground, 0.025)
   onConversationIdChanged: { messages.followBottom = true; Qt.callLater(messages.followLatest) }
   ListView {
     id: messages
@@ -78,8 +78,9 @@ Rectangle {
       id: messageScrollBar
       onPressedChanged: messages.followBottom = pressed ? false : !root.awayFromLatest
     }
-    delegate: Column {
+    delegate: Item {
       id: message
+      implicitHeight: transcript.implicitHeight
       required property var modelData
       readonly property bool isImage: modelData.content_type === "image/png"
       readonly property bool isFile: modelData.content_type === "application/octet-stream"
@@ -89,9 +90,14 @@ Rectangle {
       readonly property string imageUrl: root.bridge.chatImageUrls[String(modelData.id)] || ""
       readonly property string serverId: String(modelData.server_id || root.bridge.activeServer.id)
       width: messages.width
-      spacing: root.theme.tui ? root.theme.space(2) : root.theme.spacing.md
       Component.onCompleted: { if (isImage) root.bridge.loadChatImage(String(modelData.id));root.bridge.chatExtras.loadText(serverId,copyText) }
       onCopyTextChanged:root.bridge.chatExtras.loadText(serverId,copyText)
+      WispAvatar { theme: root.theme; name: message.modelData.sender.display_name || ""; visible: root.theme.friendly; width: root.theme.space(32); height: width }
+      Column {
+        id: transcript
+        x: root.theme.friendly ? root.theme.space(44) : 0
+        width: parent.width-x
+        spacing: root.theme.tui ? root.theme.space(2) : root.theme.spacing.md
       Row {
         spacing: root.theme.spacing.lg
         Text {
@@ -101,7 +107,7 @@ Rectangle {
         }
         Text {
           Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
-          text: root.theme.cleanTui ? Qt.formatDateTime(new Date(message.modelData.created_at), "HH:mm") : root.theme.tui ? "[" + Qt.formatDateTime(new Date(message.modelData.created_at), "HH:mm:ss") + "]" : Qt.formatDateTime(new Date(message.modelData.created_at), "MMM d · h:mm AP")
+          text: root.theme.friendly ? Qt.formatDateTime(new Date(message.modelData.created_at), "h:mm AP") : root.theme.cleanTui ? Qt.formatDateTime(new Date(message.modelData.created_at), "HH:mm") : root.theme.tui ? "[" + Qt.formatDateTime(new Date(message.modelData.created_at), "HH:mm:ss") + "]" : Qt.formatDateTime(new Date(message.modelData.created_at), "MMM d · h:mm AP")
           color: root.theme.muted; font.pixelSize: root.theme.font.caption
         }
         Text {
@@ -240,9 +246,18 @@ Rectangle {
           }
         }
       }
-      TextEdit {
-        objectName:"messageBody-"+String(message.modelData.id)
+      Rectangle {
         width: parent.width
+        height: bodyText.implicitHeight + (root.theme.hearth ? root.theme.space(16) : 0)
+        color: root.theme.hearth ? root.theme.bubble : "transparent"
+        radius: root.theme.cornerRadius
+        visible: !message.isInvitation && bodyText.text !== ""
+      TextEdit {
+        id: bodyText
+        x: root.theme.hearth ? root.theme.space(12) : 0
+        y: root.theme.hearth ? root.theme.space(8) : 0
+        objectName:"messageBody-"+String(message.modelData.id)
+        width: Math.max(1,parent.width-x*2)
         text: root.bridge.chatExtras.richText(message.serverId,message.copyText,Math.round(root.theme.font.body*1.5),root.theme.accent)
         visible: !message.isInvitation && text !== ""
         color: root.theme.foreground
@@ -252,6 +267,7 @@ Rectangle {
         onLinkActivated:link=>{if(Markup.safeLink(link))Qt.openUrlExternally(link)}
         wrapMode: TextEdit.Wrap
         font.family: root.theme.font.family; font.pixelSize: root.theme.font.body
+      }
       }
       ReactionBar {width:parent.width;bridge:root.bridge;theme:root.theme;serverId:message.serverId;messageId:String(message.modelData.id)}
       Repeater {
@@ -264,6 +280,7 @@ Rectangle {
         sourceComponent: RoomInvitationCard { bridge: root.bridge; theme: root.theme; invitation: message.modelData.payload; outgoing: message.modelData.sender.id === root.bridge.selfState.id }
       }
     }
+  }
   }
   ChatImageWindow { id:imageViewer;objectName:"chatImageViewer";theme:root.theme;bridge:root.bridge }
   ChatButton {

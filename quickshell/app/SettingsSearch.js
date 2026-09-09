@@ -1,22 +1,24 @@
 // Index labels and aliases only; never search account fields or private content.
 var entries = [
+  {section:"media",target:"audioTestSection",label:"Microphone test",keywords:"audio hear yourself record sample original processed voice playback"},
+  {section:"media",target:"audioDiagnosticsSection",label:"Processing status",keywords:"audio noise cleanup quality performance latency diagnostics"},
   {section:"profile",target:"accountEmojiLibrary",label:"My custom emojis",keywords:"account emoji library upload reactions"},
   {section:"server",target:"serverEmojiLibrary",label:"Server custom emojis",keywords:"admin emoji library upload reactions"},
   {section:"media", target:"voiceReconnectSetting", label:"Automatically reconnect voice", keywords:"audio connection disconnect server restart network retry recovery"},
   {section:"profile", target:"profileDisplayName", label:"Display name", keywords:"account profile username nickname"},
   {section:"profile", target:"profileCurrentPassword", label:"Change password", keywords:"account profile login security"},
   {section:"profile", target:"profileTwoFactorStatus", label:"Two-factor authentication (planned)", keywords:"account profile security 2fa mfa"},
-  {section:"media", target:"streamsAsTilesSetting", label:"Open streams in windows or tiles", keywords:"audio video screen share watch popout pop-out default dock anchor"},
-  {section:"media", target:"settingsCamera", label:"Camera", keywords:"audio video webcam device input"},
-  {section:"media", target:"settingsVideoQuality", label:"Publishing quality", keywords:"audio video stream screen share resolution 720p 1080p 1440p fps"},
-  {section:"media", target:"settingsVideoCodec", label:"Video codec", keywords:"audio stream encoding h264 vp8 av1 hardware"},
+  {section:"video", target:"streamsAsTilesSetting", label:"Open streams in windows or tiles", keywords:"audio video screen share watch popout pop-out default dock anchor"},
+  {section:"video", target:"settingsCamera", label:"Camera", keywords:"audio video webcam device input"},
+  {section:"video", target:"settingsVideoQuality", label:"Publishing quality", keywords:"audio video stream screen share resolution 720p 1080p 1440p fps"},
+  {section:"video", target:"settingsVideoCodec", label:"Video codec", keywords:"audio stream encoding h264 vp8 av1 hardware"},
   {section:"media", target:"settingsMicrophone", label:"Microphone", keywords:"audio input device volume level mic"},
   {section:"media", target:"settingsSpeaker", label:"Speaker", keywords:"audio output device headphones sound"},
   {section:"media", target:"settingsProcessing", label:"Audio processing and echo cancellation", keywords:"microphone noise suppression denoiser filter natural clear studio deepfilter deepnet aec echo cancellation"},
   {section:"media", target:"settingsPushToTalk", label:"Push to talk", keywords:"audio microphone ptt mute"},
   {section:"media", target:"settingsShortcut", label:"Push-to-talk shortcut", keywords:"audio ptt global keyboard hotkey keybind"},
-  {section:"appearance", target:"settingsAppearance", label:"Interface style", keywords:"appearance theme clean tui performative herdr terminal"},
-  {section:"appearance", target:"settingsPalette", label:"Color palette", keywords:"appearance theme colors solarized japan ash olive"},
+  {section:"appearance", target:"settingsAppearance", label:"Interface style", keywords:"appearance theme soft graphite daylight hearth clean tui performative herdr terminal classic"},
+  {section:"appearance", target:"settingsPalette", label:"Color palette", keywords:"appearance theme colors graphite daylight hearth solarized japan ash olive"},
   {section:"appearance", target:"settingsAccents", label:"Color accents", keywords:"appearance colors names chats highlights"},
   {section:"appearance", target:"settingsDesktopPosition", label:"Desktop position", keywords:"tray panel screen corner display anchor", panel:true},
   {section:"notifications", target:"channelsAsTilesSetting", label:"Open channels and rooms in new tiles", keywords:"chat navigation default reuse pane window"},
@@ -24,7 +26,8 @@ var entries = [
   {section:"notifications", target:"settingsNotificationVolume", label:"Notification volume and custom sound", keywords:"chat alert chime test file"},
   {section:"notifications", target:"settingsRoomSounds", label:"Room sounds", keywords:"notifications voice join leave disconnect custom sound"},
   {section:"notifications", target:"settingsChatNotifications", label:"Chat notifications", keywords:"mute individual conversation sound"},
-  {section:"privacy", target:"privacySettingsView", label:"Chat encryption and recovery files", keywords:"privacy security backup restore keys fingerprint e2ee"},
+  {section:"privacy", target:"privacySettingsView", label:"Chat encryption and recovery files", keywords:"privacy security backup restore keys e2ee"},
+  {section:"privacy", target:"privacyDetailsSection", label:"Encryption details", keywords:"privacy security fingerprint metadata trust model"},
   {section:"devices", target:"settingsDevices", label:"Devices", keywords:"account linked revoke access sign out sessions"},
   {section:"devices", target:"settingsAccountInvite", label:"Invite a friend", keywords:"devices account create invite"},
   {section:"server", target:"serverNameField", label:"Server name", keywords:"identity rename settings"},
@@ -45,5 +48,5 @@ function search(query, canManageServer, hasPanel) {
 }
 
 function sectionLabel(section) {
-  return {profile:"Profile",media:"Audio / Video",appearance:"Appearance",notifications:"Notifications & Chat",privacy:"Privacy",devices:"Devices",server:"Server"}[section] || section
+  return {profile:"Profile",media:"Audio",video:"Video",appearance:"Appearance",notifications:"Notifications",privacy:"Privacy",devices:"Devices",server:"Server"}[section] || section
 }

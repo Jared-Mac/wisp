@@ -19,11 +19,11 @@ Rectangle {
     anchors.leftMargin: root.theme.spacing.lg
     anchors.verticalCenter: parent.verticalCenter
     spacing: root.theme.spacing.xs
-    Binding on width { when: root.theme.terminal; value: Math.max(0, knockActions.x - knockInfo.x - root.theme.spacing.lg); restoreMode: Binding.RestoreBindingOrValue }
+    Binding on width { when: root.theme.terminal || root.theme.friendly; value: Math.max(0, knockActions.x - knockInfo.x - root.theme.spacing.lg); restoreMode: Binding.RestoreBindingOrValue }
 
     Text {
-      Binding on width { when: root.theme.terminal; value: knockInfo.width; restoreMode: Binding.RestoreBindingOrValue }
-      elide: root.theme.terminal ? Text.ElideRight : Text.ElideNone
+      Binding on width { when: root.theme.terminal || root.theme.friendly; value: knockInfo.width; restoreMode: Binding.RestoreBindingOrValue }
+      elide: root.theme.terminal || root.theme.friendly ? Text.ElideRight : Text.ElideNone
       text: String(root.knock.from.display_name || "A friend") + " wants to hang out"
       color: root.theme.foreground
       font.family: root.theme.font.family
@@ -50,34 +50,10 @@ Rectangle {
         { "label": "Later", "response": "later", "primary": false },
         { "label": "Join", "response": "accept", "primary": true }
       ]
-      delegate: Rectangle {
+      delegate: ChatButton {
         required property var modelData
-        width: actionText.implicitWidth + root.theme.spacing.lg * 2
-        height: root.theme.space(30)
-        radius: root.theme.cornerRadius
-        color: modelData.primary
-          ? (actionMouse.containsMouse ? Qt.lighter(root.theme.accent, 1.12) : root.theme.accent)
-          : root.theme.alpha(root.theme.foreground, actionMouse.containsMouse ? 0.14 : 0.08)
-
-        Text {
-          id: actionText
-          anchors.centerIn: parent
-          text: modelData.label
-          color: modelData.primary ? root.theme.accentText : root.theme.foreground
-          font.family: root.theme.font.family
-          font.pixelSize: root.theme.font.caption
-          font.weight: Font.Bold
-        }
-        MouseArea {
-          id: actionMouse
-          anchors.fill: parent
-          hoverEnabled: true
-          cursorShape: Qt.PointingHandCursor
-          onClicked: {
-            root.bridge.respondKnock(root.knock.id, modelData.response)
-            if (modelData.response === "accept") root.accepted()
-          }
-        }
+        theme:root.theme;text:modelData.label;primary:modelData.primary
+        onClicked:{root.bridge.respondKnock(root.knock.id,modelData.response);if(modelData.response==="accept")root.accepted()}
       }
     }
   }

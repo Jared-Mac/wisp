@@ -45,6 +45,7 @@ Column {
         width: Math.max(0, channelRow.width - tileButton.width - channelRow.spacing)
         height: channelRow.height
         theme: root.theme
+        iconName: "hash"; formatLabel: false
         textAlignment: Text.AlignLeft
         leftPadding: root.theme.space(6)
         text: (root.theme.tui ? "# " : "") + String(channelRow.modelData.label)
