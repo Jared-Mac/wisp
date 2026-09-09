@@ -17,6 +17,7 @@ ShellRoot {
   QtObject {
     id: fake
     property bool daemonConnected: true
+    property var snapshot: ({})
     property var requests: ({})
     property var sent: []
     property int serial: 0
@@ -55,7 +56,8 @@ ShellRoot {
       avatars.reply({id:first.id,ok:true,value:{url:"data:image/png;base64,A"}},action)
       test.check(avatars.url("a",user)!==avatars.url("b",user),"servers cannot borrow each other's picture")
       var second=fake.sent[1], stale=fake.requests[second.id]
-      avatars.invalidate()
+      fake.snapshot={server_states:[{server:{id:"a",connected:true}}]}
+      test.check(!avatars.url("a",user),"server reconnection refreshes cached pictures")
       avatars.reply({id:second.id,ok:true,value:{url:"stale"}},stale)
       test.check(!avatars.url("b",user),"stale image replies are discarded")
       avatars.save("a","file:///tmp/picture.png")

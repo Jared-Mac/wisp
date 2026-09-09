@@ -8,6 +8,12 @@ Item {
   property var busy: ({})
   property var feedback: ({})
   property int epoch: 0
+  // A server can reconnect while the local daemon stays connected. Reload any
+  // pictures that may have changed while its event stream was unavailable.
+  readonly property string connections: JSON.stringify(((bridge.snapshot || {}).server_states || []).map(function(state) {
+    return [String(state.server.id),!!state.server.connected]
+  }).sort(function(a,b) { return a[0].localeCompare(b[0]) }))
+  onConnectionsChanged: invalidate()
   function key(server,user) { return String(server) + "::" + String(user) }
   function url(server,user) { return images[key(server,user)] || "" }
   function request(name,args,action) {
