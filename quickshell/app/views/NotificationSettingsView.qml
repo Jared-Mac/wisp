@@ -105,8 +105,14 @@ Column {
     }
     onRejected: root.selectedSoundEvent = ""
   }
+  CheckBox {
+    id: audioCues; objectName: "audioControlSoundsSetting"; width: parent.width
+    text: "Mute and deafen sounds"; checked: root.bridge.audioControlSounds
+    onToggled: root.bridge.audioControlSounds = checked
+    ThemeControlStyle { theme: root.theme; control: audioCues }
+  }
   SettingsSection {
-    theme: root.theme; title: "Room sounds"; summary: "Invites, joins, leaves, and custom recordings"
+    theme: root.theme; title: "Voice sounds"; summary: "Joins, leaves, mute, deafen, and custom recordings"
     objectName: "roomSoundsSection"; expanded: false
     Text { objectName: "settingsRoomSounds"; text: "Room sounds"; color: root.theme.foreground; font.family: root.theme.font.family; font.pixelSize: root.theme.font.body; font.bold: true }
     Text {
@@ -126,7 +132,7 @@ Column {
       }
     }
     Repeater {
-      model: [{id:"room_invite",label:"Voice room invitation"},{id:"member_join",label:"Someone joins your room"},{id:"member_leave",label:"Someone leaves your room"},{id:"self_join",label:"You join a room"},{id:"self_leave",label:"You leave a room"}]
+      model: [{id:"room_invite",label:"Voice room invitation"},{id:"member_join",label:"Someone joins your room"},{id:"member_leave",label:"Someone leaves your room"},{id:"self_join",label:"You join a room"},{id:"self_leave",label:"You leave a room"},{id:"audio_mute",label:"Microphone muted"},{id:"audio_unmute",label:"Microphone unmuted"},{id:"audio_deafen",label:"Deafened"},{id:"audio_undeafen",label:"Undeafened"}]
       Column {
         id: eventSoundRow
         required property var modelData
@@ -142,7 +148,7 @@ Column {
           ChatButton { theme: root.theme; text: "Choose sound…"; onClicked: { root.selectedSoundEvent=eventSoundRow.modelData.id; soundPicker.title=eventSoundRow.modelData.label; soundPicker.open() } }
           ChatButton {
             theme: root.theme; text: "Test"
-            enabled: !root.bridge.notificationMuted && root.bridge.notificationVolume > 0 && (eventSoundRow.modelData.id === "room_invite" || (eventSoundRow.modelData.id.indexOf("self_") === 0 ? root.bridge.selfRoomNotificationSounds : root.bridge.roomNotificationSounds))
+            enabled: !root.bridge.notificationMuted && root.bridge.notificationVolume > 0 && (eventSoundRow.modelData.id.indexOf("audio_") === 0 ? root.bridge.audioControlSounds : eventSoundRow.modelData.id === "room_invite" || (eventSoundRow.modelData.id.indexOf("self_") === 0 ? root.bridge.selfRoomNotificationSounds : root.bridge.roomNotificationSounds))
             onClicked: root.bridge.playNotificationSound(eventSoundRow.modelData.id)
           }
           ChatButton { theme: root.theme; text: "Restore default"; onClicked: root.bridge.setEventSound(eventSoundRow.modelData.id, "") }

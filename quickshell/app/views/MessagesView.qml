@@ -40,9 +40,6 @@ Column {
       anchors.right: chatOptions.left; anchors.rightMargin: visible ? root.theme.spacing.sm : 0
       anchors.verticalCenter: parent.verticalCenter
       bridge: root.bridge; theme: root.theme; conversationId: root.bridge.activeConversationId
-      iconOnly: root.theme.friendly && direct
-      Binding on implicitWidth {when:root.theme.friendly && voiceAction.direct;value:root.theme.space(32);restoreMode:Binding.RestoreBindingOrValue}
-      Binding on implicitHeight {when:root.theme.friendly;value:root.theme.space(32);restoreMode:Binding.RestoreBindingOrValue}
     }
     ChatButton {
       id: chatOptions; objectName: "trayChatOptions"

@@ -75,11 +75,44 @@ ShellRoot {
           var pos = bar.mapToItem(page,0,0), friendPos = friends.mapToItem(page,0,0)
           test.check(bar.visible && pos.y + bar.height <= friendPos.y, "voice controls remain above friends at " + style + "/" + w)
           var mute = test.find(bar,"mediaAction-mute"), camera = test.find(bar,"mediaAction-camera")
-          test.check(mute.visible && mute.width >= 40 && camera.mapToItem(bar,0,0).y + camera.height <= bar.height, "all voice controls fit at " + style + "/" + w)
+          test.check(mute.visible && mute.width >= 32 && camera.mapToItem(bar,0,0).y + camera.height <= bar.height, "all voice controls fit at " + style + "/" + w)
           var watch = test.find(page,"roomParticipants")
           test.check(watch.visible && watch.height > 40, "participants stay visible on separate rows")
           test.check(pane.paneCount === 2, "both chats survive appearance changes")
           test.capture(style + "-" + w)
+        }
+        if (Quickshell.env("WISP_TEST_ADAPTIVE") === "1") {
+          var rail = test.find(page,"activityPane"), divider = test.find(page,"activityResizeHandle")
+          for (var dock of ["left","right"]) {
+            bridge.workspaceLayout.dock = dock
+            for (var railWidth of [24,48,88,140,200,360]) {
+              bridge.workspaceLayout.activityWidth = railWidth; input.wait(80)
+              test.check(Math.abs(rail.width-theme.space(railWidth)) < 1,"sidebar honors width " + railWidth)
+              var controls = test.find(page,"currentCallBar")
+              for (var action of ["mute","deafen","share","camera"]) {
+                var button = test.find(controls,"mediaAction-"+action), p = button.mapToItem(rail,0,0)
+                test.check(button.visible && button.width >= theme.space(18) && p.x >= 0 && p.x+button.width <= rail.width+1,"reachable "+action+" at "+railWidth)
+              }
+              var drop = test.find(page,"activeServerSelector"), gear = test.find(page,"serverSettingsShortcut")
+              var friend = test.find(page,"friendName")
+              test.check(!friend.visible || friend.mapToItem(rail,0,0).x + friend.width <= rail.width + 1,"friend names fit at " + railWidth)
+              test.check(drop.width >= theme.space(18) && gear.width <= rail.width,"server controls fit at "+railWidth)
+              drop.popup.open(); input.wait(30)
+              test.check(drop.popup.width >= theme.space(220),"server menu remains readable")
+              drop.popup.close()
+              if (dock === "left" && [24,140,200].indexOf(railWidth)>=0) test.capture(style+"-rail-"+railWidth)
+            }
+            divider.moved(dock === "right" ? 10000 : -10000); input.wait(30)
+            test.check(rail.width === theme.space(24) && !bridge.workspaceLayout.activityCollapsed,"drag clamps to visible minimum")
+            bridge.workspaceLayout.activityCollapsed = true; input.wait(20)
+            test.check(!rail.visible,"explicit collapse hides sidebar")
+            bridge.workspaceLayout.activityCollapsed = false; input.wait(20)
+            test.check(rail.visible && rail.width === theme.space(24),"expand restores saved rail")
+          }
+          appearance.setShowAvatars(false); input.wait(50)
+          test.check(!theme.showAvatars,"avatar visibility preference applies")
+          appearance.setShowAvatars(true)
+          bridge.workspaceLayout.dock = "left"; bridge.workspaceLayout.activityWidth = 0; input.wait(60)
         }
         page.toggleSettings(); input.wait(40)
         for (var tab of ["profile","media","video","appearance","notifications","privacy","devices"]) {

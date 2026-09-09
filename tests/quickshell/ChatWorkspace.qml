@@ -1292,7 +1292,7 @@ ShellRoot {
       var preservedRatio = bridge.workspaceLayout.activityRatio
       for (var dock of ["left", "right", "top", "bottom"]) {
         bridge.workspaceLayout.dock = dock
-        var openButton = test.findItem(target,"presence-open")
+        var openButton = test.findItem(target,theme.friendly ? "availabilityPicker" : "presence-open")
         test.check(toggle.parent===openButton.parent && toggle.x<openButton.x,"activity arrow is beside Open: " + dock)
         var beforeSize = workspace.stacked ? chat.height : chat.width
         toggle.clicked()

@@ -5,6 +5,9 @@ Column {
   id: root
   required property var bridge
   required property var theme
+  property bool adaptive: false
+  readonly property bool narrow: adaptive && width < theme.space(140)
+  readonly property bool tiny: adaptive && width < theme.space(56)
   signal joined()
   signal roomLeft()
   signal cameraRequested()
@@ -15,7 +18,7 @@ Column {
   visible: visibleHangouts.length > 0
 
   Item {
-    visible: root.showHeader
+    visible: root.showHeader && !root.tiny
     width: parent.width; height: root.theme.space(20)
     Text {
     anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
@@ -40,7 +43,7 @@ Column {
         width: parent.width
         hangout: hangoutEntry.modelData
         bridge: root.bridge
-        theme: root.theme
+        theme: root.theme; adaptive: root.adaptive
         onJoined: root.joined()
       }
 

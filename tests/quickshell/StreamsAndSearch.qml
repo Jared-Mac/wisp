@@ -74,7 +74,7 @@ ShellRoot {
       test.check(watch && watch.visible && watch.text === "watch" && camera && camera.visible,"voice list shows screen and camera watch controls")
       test.check(!bridge.workspaceLayout.streamsAsTiles && test.videoLeaves(host).length === 0 && !test.lastWatch(),"default is windows without auto-watching")
       if (!watch || !camera || !host) { Qt.quit(); return }
-      test.check(watch.mapToItem(room,0,0).x + watch.width <= room.width && camera.mapToItem(room,0,0).x + camera.width <= room.width,"stream actions fit the narrow room rail")
+      test.check(watch.width > 0 && camera.width > 0 && watch.mapToItem(room,0,0).x + watch.width <= room.width && camera.mapToItem(room,0,0).x + camera.width <= room.width,"stream actions fit the narrow room rail")
       test.screenshot("room",room)
       input.mouseClick(watch,watch.width/2,watch.height/2)
       test.check(test.lastWatch().args.open && test.lastWatch().args.hosted && test.lastWatch().args.source === "screen_share","participant watch subscribes to that screen through the desktop host")

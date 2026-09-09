@@ -48,6 +48,7 @@ Column {
     onClicked: root.bridge.refreshProfile()
   }
   Label { text: root.bridge.profileFeedback; visible: text !== ""; color: root.theme.foreground }
+  ProfilePicture { width: parent.width; bridge: root.bridge; theme: root.theme; serverId: root.serverId }
   Label { text: "Display name"; color: root.theme.foreground; font.bold: true }
   Field {
     id: displayName; objectName: "profileDisplayName"

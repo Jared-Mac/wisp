@@ -8,20 +8,23 @@ Button {
   id: root
   required property var theme
   property string iconName: Icons.icon(text)
+  property bool forceIcon: false
+  readonly property bool iconTreatment: theme.friendly || forceIcon
   property bool iconOnly: Icons.symbolOnly(text)
   property bool formatLabel: true
   readonly property string displayText: theme.friendly && formatLabel ? Icons.label(text) : text
-  readonly property bool showIcon: theme.friendly && iconName !== ""
+  readonly property bool showIcon: iconTreatment && iconName !== ""
   readonly property color labelColor: theme.tui && (primary || down) ? theme.selectionText : primary ? (destructive ? (theme.friendly ? "white" : "#151821") : theme.terminal ? theme.accent : theme.accentText) : destructive ? theme.danger : theme.cleanTui ? (hovered ? theme.foreground : theme.muted) : theme.foreground
   Accessible.name: Icons.accessible(text)
-  ToolTip.visible: theme.friendly && iconOnly && (hovered || visualFocus)
+  ToolTip.visible: iconTreatment && iconOnly && (hovered || visualFocus)
   ToolTip.text: Accessible.name
-  Binding { target: root; property: "padding"; value: 2; when: root.theme.tui; restoreMode: Binding.RestoreBindingOrValue }
+  Binding { target: root; property: "padding"; value: 2; when: root.theme.tui && !root.forceIcon; restoreMode: Binding.RestoreBindingOrValue }
+  Binding {target:root;property:"padding";when:root.iconTreatment && Math.min(root.width,root.height)<32;value:Math.max(0,(Math.min(root.width,root.height)-18)/2);restoreMode:Binding.RestoreBindingOrValue}
   property bool primary: false
   property bool destructive: false
   property int textAlignment: Text.AlignHCenter
   implicitHeight: theme.space(theme.tui ? 28 : 34)
-  implicitWidth: (theme.friendly && iconOnly ? 0 : labelMetrics.advanceWidth) + (showIcon ? theme.space(iconOnly ? 18 : 26) : 0) + theme.space(theme.tui ? 12 : 24)
+  implicitWidth: (iconTreatment && iconOnly ? 0 : labelMetrics.advanceWidth) + (showIcon ? theme.space(iconOnly ? 18 : 26) : 0) + theme.space(theme.tui ? 12 : 24)
   background: Rectangle {
     radius: root.theme.cornerRadius
     color: root.theme.tui ? (root.primary || root.down ? (root.destructive ? root.theme.danger : root.theme.selectionBackground) : root.hovered ? root.theme.alpha(root.theme.accent, 0.16) : "transparent") : root.primary ? (root.destructive ? root.theme.danger : root.theme.terminal ? root.theme.alpha(root.theme.accent, root.hovered ? 0.24 : 0.12) : root.theme.accent) : root.theme.alpha(root.destructive
@@ -50,7 +53,7 @@ Button {
     Text {
     id: label
     textFormat: Text.PlainText
-    visible: !(root.theme.friendly && root.iconOnly)
+    visible: !(root.iconTreatment && root.iconOnly)
     x: root.showIcon ? actionIcon.x + actionIcon.width + root.theme.space(8) : 0
     width: Math.max(0,parent.width-x); height: parent.height
     text: root.theme.tui ? "[" + (["···", "⋯", "…"].indexOf(root.text) >= 0 ? ":" : root.text) + "]" : root.displayText

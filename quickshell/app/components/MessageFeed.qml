@@ -92,10 +92,10 @@ Rectangle {
       width: messages.width
       Component.onCompleted: { if (isImage) root.bridge.loadChatImage(String(modelData.id));root.bridge.chatExtras.loadText(serverId,copyText) }
       onCopyTextChanged:root.bridge.chatExtras.loadText(serverId,copyText)
-      WispAvatar { theme: root.theme; name: message.modelData.sender.display_name || ""; visible: root.theme.friendly; width: root.theme.space(32); height: width }
+      WispAvatar { bridge: root.bridge; userId: String(message.modelData.sender.id); serverId: message.serverId; theme: root.theme; name: message.modelData.sender.display_name || ""; visible: root.theme.friendly && root.theme.showAvatars; width: root.theme.space(32); height: width }
       Column {
         id: transcript
-        x: root.theme.friendly ? root.theme.space(44) : 0
+        x: root.theme.friendly && root.theme.showAvatars ? root.theme.space(44) : 0
         width: parent.width-x
         spacing: root.theme.tui ? root.theme.space(2) : root.theme.spacing.md
       Row {

@@ -23,3 +23,33 @@ Settings now show common options first, with expandable sections for passwords, 
 - The release workspace build succeeds. This branch changes no server code or migrations and does not deploy to production. The current production build includes separate soundboard work above this branch's base; it must be preserved.
 
 No Windows build is introduced by this UI experiment. The shared QML controls use local SVGs rather than icon fonts or downloaded assets.
+
+## September 9 refinements
+
+The activity divider now remembers an explicit width and stops at 24 logical
+pixels. Narrow sidebars shorten names, wrap room and voice actions, and move
+friend actions into a keyboard-accessible menu. Server selection, settings and
+invitations retain separate targets; menus keep a readable width. Collapse is
+still explicit. Main-window call controls use the same compact icons as the tray.
+
+Appearance includes a persistent avatar visibility option. Profile has a local
+preview, upload, and removal for account pictures. The server authenticates each
+write as the current account, bounds image size and decoding, crops to 256px PNG,
+and announces changes. Clients validate and mask thumbnails again, cache by
+server and user, and discard stale image responses. Old servers show placeholder
+avatars and an actionable update message when uploading. Migration 25 adds avatar
+storage; version 24 is reserved for the existing unpublished soundboard release.
+Do not replace that production build without recovering its matching source.
+
+Confirmed mute/deafen state changes play four original cues. Startup, repeated
+snapshots, server moderation and push-to-talk transitions do not produce those
+cues. Notifications includes a separate control-sound switch and per-event audio
+file customization, honoring global sound mute and volume.
+
+Validation: workspace Rust tests (138 passed, three pre-existing ignored),
+Clippy for server and daemon, profile-image lifecycle and hostile-image tests,
+UI checks at 24/48/88/140/200/360px on both sides in all three styles, persistence,
+profile shortcuts, stream window/tile/leave behavior, settings search, room flow,
+chat navigation, and audio preferences. Synthetic UI previews contain no real
+account or server information. Discord notes have payload/privacy tests and are
+sent only by the main-push workflow.

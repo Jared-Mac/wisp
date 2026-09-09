@@ -5,6 +5,7 @@ mod audio;
 #[path = "../../../third_party/livekit/src/platform_audio/device_count.rs"]
 mod audio_device_count_tests;
 mod audio_test;
+mod avatars;
 mod chat_extras;
 mod chat_images;
 mod chat_transfers;

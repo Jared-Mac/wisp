@@ -68,6 +68,12 @@ Column {
       ThemeControlStyle {theme:root.theme;control:otherStyles}
     }
   }
+  CheckBox {
+    id: avatarSetting; objectName: "showAvatarsSetting"; width: parent.width
+    text: "Show user avatars"; checked: root.theme.showAvatars; enabled: !!root.appearance
+    onToggled: root.appearance.setShowAvatars(checked)
+    ThemeControlStyle { theme: root.theme; control: avatarSetting }
+  }
   SettingsSection {
     objectName:"appearanceCustomization"; theme:root.theme; title:"Customize colors"; summary:"Palette, names, borders, and section accents"; sectionIcon:"palette"
     Text {objectName:"settingsPalette";text:"Color palette";color:root.theme.foreground;font.family:root.theme.font.family;font.pixelSize:root.theme.font.body}

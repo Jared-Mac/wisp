@@ -21,6 +21,8 @@ Item {
     })
     return result
   }
+  readonly property bool showAvatars: preferences.showAvatars
+  function setShowAvatars(value) { preferences.showAvatars = !!value; settings.writeAdapter() }
   property string error: ""
   signal settingsSaved()
   signal settingsSaveFailed()
@@ -83,6 +85,7 @@ Item {
       property int version: 0
       property var colorOptions: ({})
       property var stylePalettes: ({})
+      property bool showAvatars: true
     }
   }
 }

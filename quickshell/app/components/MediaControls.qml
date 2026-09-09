@@ -8,6 +8,8 @@ Column {
   signal leaveRequested()
   signal cameraRequested()
   property bool compact: false
+  property bool adaptive: false
+  readonly property bool small: adaptive && width < theme.space(180)
   property bool showLeave: true
   property bool showInvite: true
   property bool showRemoteStreams: true
@@ -17,7 +19,7 @@ Column {
     id: controls; width: parent.width; spacing: root.theme.spacing.sm
     Repeater {
       id: controlRepeater
-      model: (root.theme.friendly ? [
+      model: (root.theme.friendly || root.small ? [
         {label:root.bridge.selfState.muted ? "Unmute" : "Mute",action:"mute",icon:root.bridge.selfState.muted ? "microphone-off" : "microphone"},
         {label:root.bridge.selfState.deafened ? "Undeafen" : "Deafen",action:"deafen",icon:root.bridge.selfState.deafened ? "headphones-off" : "headphones"}
       ] : []).concat([
@@ -29,7 +31,7 @@ Column {
       ChatButton {
         id: action; required property var modelData
         objectName: "mediaAction-" + modelData.action
-        theme: root.theme; text: modelData.label; iconName: modelData.icon
+        theme: root.theme; text: modelData.label; iconName: modelData.icon; forceIcon: root.small
         readonly property bool publishing: modelData.action==="share" && root.bridge.sharing || modelData.action==="camera" && root.bridge.cameraActive
         readonly property bool controlEnabled: publishing || (modelData.action!=="share" || !root.bridge.shareStarting) && (modelData.action!=="camera" || !root.bridge.cameraStarting && root.bridge.cameraState.devices.length>0)
         Binding {target:action.background;property:"border.width";value:1;when:action.publishing}
@@ -37,8 +39,8 @@ Column {
         enabled: controlEnabled
         destructive: publishing || modelData.action==="leave"
         primary: root.theme.friendly && (modelData.action==="mute" && root.bridge.selfState.muted || modelData.action==="deafen" && root.bridge.selfState.deafened)
-        width: root.theme.friendly ? (root.compact ? root.theme.space(32) : (controls.width-controls.spacing*3)/4) : Math.min(root.width,actionLabel.implicitWidth+root.theme.space(20))
-        height: root.theme.space(root.theme.friendly ? (root.compact ? 32 : 40) : root.theme.tui ? 28 : 34)
+        width: root.small ? Math.min(root.width,root.theme.space(32)) : root.theme.friendly ? (root.compact ? root.theme.space(32) : (controls.width-controls.spacing*3)/4) : Math.min(root.width,actionLabel.implicitWidth+root.theme.space(20))
+        height: root.theme.space(root.theme.friendly || root.small ? (root.compact ? 32 : 40) : root.theme.tui ? 28 : 34)
         Accessible.name: modelData.action==="share" ? (publishing ? "Stop sharing screen" : "Share screen") : modelData.action==="camera" ? (publishing ? "Stop camera" : "Start camera") : modelData.action==="leave" ? "Disconnect from voice" : modelData.label
         ToolTip.visible: hovered || visualFocus; ToolTip.text: Accessible.name
         onClicked: {
@@ -50,9 +52,9 @@ Column {
           else {root.bridge.leave();root.leaveRequested()}
         }
         contentItem: Item {
-          WispIcon {theme:root.theme;name:action.iconName;ink:action.labelColor;visible:root.theme.friendly;anchors.centerIn:parent;width:root.theme.space(root.compact ? 18 : 20);height:width}
+          WispIcon {theme:root.theme;name:action.iconName;ink:action.labelColor;visible:root.theme.friendly || root.small;anchors.centerIn:parent;width:Math.min(parent.width,root.theme.space(root.compact ? 18 : 20));height:width}
           Text {
-            id: actionLabel; visible:!root.theme.friendly; width:parent.width; anchors.bottom:parent.bottom
+            id: actionLabel; visible:!root.theme.friendly && !root.small; width:parent.width; anchors.bottom:parent.bottom
             height:root.theme.friendly ? root.theme.space(20) : parent.height
             text:root.theme.tui ? "["+action.modelData.label.toLowerCase()+"]" : action.modelData.action==="leave" ? "Disconnect" : action.modelData.label
             color:action.labelColor;opacity:action.enabled ? 1 : 0.45
