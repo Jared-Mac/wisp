@@ -6,6 +6,9 @@ Column {
   id: root
   required property var bridge
   required property var theme
+  property bool adaptive: false
+  readonly property bool narrow: adaptive && width < theme.space(140)
+  readonly property bool tiny: adaptive && width < theme.space(56)
   signal selected()
   property bool collapsible: false
   property bool showHeader: true
@@ -15,7 +18,7 @@ Column {
 
   Button {
     id: collapseButton
-    visible: root.showHeader
+    visible: root.showHeader && !root.tiny
     objectName: "friends-collapse"
     width: parent.width
     height: root.collapsible ? root.theme.space(root.theme.tui ? 26 : 30) : root.theme.space(20)
@@ -30,8 +33,8 @@ Column {
     }
     contentItem: Item {
       Text {
-        anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
-        text: (root.theme.tui ? "┌─ 02: /friends" : "FRIENDS") + (root.collapsible ? " · " + root.bridge.friends.length : "")
+        anchors.left: parent.left; anchors.right: parent.right; anchors.rightMargin: root.collapsible ? 16 : 0; anchors.verticalCenter: parent.verticalCenter; elide: Text.ElideRight
+        text: (root.theme.tui ? "┌─ 02: /friends" : root.theme.friendly ? "Friends" : "FRIENDS") + (root.collapsible ? " · " + root.bridge.friends.length : "")
         color: root.theme.friendSectionColor
         font.family: root.theme.font.family
         font.pixelSize: root.theme.font.caption; font.weight: Font.Bold
@@ -48,7 +51,7 @@ Column {
   NowView {
     objectName: "friendCalls"
     width: parent.width; visible: !root.collapsed && visibleHangouts.length > 0
-    bridge: root.bridge; theme: root.theme
+    bridge: root.bridge; theme: root.theme; adaptive: root.adaptive
     onJoined: root.selected()
   }
   Repeater {
@@ -58,7 +61,7 @@ Column {
       width: root.width
       friend: modelData
       bridge: root.bridge
-      theme: root.theme
+      theme: root.theme; adaptive: root.adaptive
       onSelected: root.selected()
     }
   }

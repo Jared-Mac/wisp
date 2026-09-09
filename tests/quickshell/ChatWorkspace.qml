@@ -388,6 +388,7 @@ ShellRoot {
       var content = test.compactMode ? compactContent : test.findObject(window.contentItem,"wispContent",[])
       content.toggleSettings()
       test.findItem(surface,"settingsTab-notifications").clicked()
+      test.findObject(surface,"chatNavigationSection",[]).expanded = true
       var preference = test.findItem(surface,"channelsAsTilesSetting")
       test.check(preference && preference.checked, "saved tile preference is exposed in Notifications & Chat")
       if (preference) { preference.checked = false; preference.clicked() }
@@ -448,51 +449,34 @@ ShellRoot {
   Timer {
     interval: 600; running: test.mode === "themes"
     onTriggered: {
-      var classic = test.findItem(window.contentItem, "theme-legacy")
-      test.check(!!classic && classic.enabled, "Classic theme is available in Settings")
-      var before = bridge.sent.length
-      var draft = bridge.draftFor("test_room")
-      if (classic) classic.clicked()
-      test.check(theme.profile === "legacy", "Settings selects Classic live")
-      test.check(bridge.sent.length === before && bridge.draftFor("test_room") === draft, "theme switching does not send commands or alter drafts")
-    }
-  }
-  Timer {
-    interval: 900; running: test.mode === "themes"
-    onTriggered: {
-      var before = bridge.sent.length
-      var draft = bridge.draftFor("test_room")
-      var terminal = test.findItem(window.contentItem, "theme-terminal")
-      test.check(!!terminal && terminal.enabled, "Terminal remains available in Classic")
-      if (terminal) terminal.clicked()
-      test.check(theme.profile === "terminal", "Settings restores Terminal live")
-      test.check(bridge.draftFor("dm") === "", "chat state remains unchanged")
-      var clean = test.findItem(window.contentItem, "theme-clean_tui")
-      test.check(!!clean && clean.enabled, "Clean TUI is available beside Terminal and Classic")
-      if (clean) clean.clicked()
-      test.check(theme.profile === "clean_tui" && theme.cleanTui && theme.tui,
-        "Settings selects the independent Clean TUI interface live")
-      test.check(bridge.sent.length === before && bridge.draftFor("test_room") === draft,
-        "Clean TUI switching preserves drafts and sends no commands")
-      var performative = test.findItem(window.contentItem, "palette-ash_olive")
-      test.check(!!performative && performative.enabled, "Ash & Olive palette is available in Settings")
-      if (performative) performative.clicked()
-      test.check(theme.paletteName === "ash_olive" && theme.background == "#000000" && theme.cleanTui, "Ash & Olive preserves Clean TUI")
-      test.check(bridge.sent.length === before && bridge.draftFor("test_room") === draft, "palette switching preserves drafts and sends no commands")
-      var herdr = test.findItem(window.contentItem, "palette-herdr")
-      test.check(!!herdr && herdr.enabled, "Herdr palette is available in Settings")
-      if (herdr) herdr.clicked()
-      test.check(theme.paletteName === "herdr" && theme.background == "#001419"
-        && theme.accent == "#29a298" && theme.tui, "Settings selects Herdr live")
-      test.check(bridge.sent.length === before && bridge.draftFor("test_room") === draft, "Herdr switching preserves drafts and sends no commands")
-      test.findItem(window.contentItem, "theme-performative").clicked()
-      test.check(theme.performative && theme.paletteName === "herdr", "Performative appearance supports Solarized Japan")
-      test.findItem(window.contentItem, "theme-herdr").clicked()
-      test.check(theme.herdr, "Herdr appearance retained")
-      var colored = theme.colorEnabled("roomSections")
-      test.findItem(window.contentItem, "color-option-roomSections").clicked()
-      test.check(theme.colorEnabled("roomSections") !== colored, "Settings toggles room accents independently")
-      test.findItem(window.contentItem, "color-option-roomSections").clicked()
+      var before = bridge.sent.length, draft = bridge.draftFor("test_room")
+      var picker = test.findItem(window.contentItem, "otherAppearanceStyles")
+      test.check(!!picker && picker.enabled, "Traditional styles remain available in Settings")
+      if (!picker) return
+      picker.model.forEach(function(style, index) {
+        if (!style.profile) return
+        picker.currentIndex = index; picker.activated(index)
+        test.check(theme.profile === style.profile, "Settings selects " + style.profile)
+      })
+      var customize = test.findItem(window.contentItem, "appearanceCustomization")
+      test.check(!customize.expanded, "Customization starts collapsed")
+      customize.expanded = true
+      var palettes = test.findItem(window.contentItem, "appearancePalettePicker")
+      palettes.model.forEach(function(palette, index) {
+        palettes.currentIndex = index; palettes.activated(index)
+        test.check(theme.paletteName === palette.key && theme.profile === "legacy", "Palette remains independent: " + palette.key)
+      })
+      ;["soft_graphite","daylight","hearth"].forEach(function(style) {
+        var button = test.findItem(window.contentItem, "theme-" + style)
+        test.check(!!button && button.enabled, "Concept is available: " + style)
+        button.clicked()
+        test.check(theme.profile === style && theme.friendly && !theme.tui && theme.paletteName === (style === "soft_graphite" ? Quickshell.env("WISP_TEST_PALETTE") || style : style), "Concept applies its interface and remembered palette: " + style)
+      })
+      var toggle = test.findItem(window.contentItem, "color-option-roomSections"), colored = theme.colorEnabled("roomSections")
+      toggle.checked = !colored; toggle.toggled()
+      test.check(theme.colorEnabled("roomSections") !== colored, "Room accents remain independently customizable")
+      toggle.checked = colored; toggle.toggled()
+      test.check(bridge.sent.length === before && bridge.draftFor("test_room") === draft && bridge.draftFor("dm") === "", "Appearance changes preserve drafts and never issue network/media commands")
       themeAppearance.setPalette(Quickshell.env("WISP_TEST_PALETTE") || "wisp")
     }
   }
@@ -1308,7 +1292,7 @@ ShellRoot {
       var preservedRatio = bridge.workspaceLayout.activityRatio
       for (var dock of ["left", "right", "top", "bottom"]) {
         bridge.workspaceLayout.dock = dock
-        var openButton = test.findItem(target,"presence-open")
+        var openButton = test.findItem(target,theme.friendly ? "availabilityPicker" : "presence-open")
         test.check(toggle.parent===openButton.parent && toggle.x<openButton.x,"activity arrow is beside Open: " + dock)
         var beforeSize = workspace.stacked ? chat.height : chat.width
         toggle.clicked()
@@ -1536,6 +1520,8 @@ ShellRoot {
       if (test.mode === "serversettings" || test.mode === "panelserversettings") {
         var serverView = test.findItem(surface, "serverSettingsView")
         test.check(!!serverView && serverView.visible, "Server settings are visible to the owner")
+        test.findObject(surface,"serverCategoriesSection",[]).expanded=true
+        test.findObject(surface,"serverChannelsSection",[]).expanded=true
         test.check(!!test.findItem(surface, "newServerCategoryName") && !!test.findItem(surface, "createServerChannel"), "Server settings expose category and dedicated-channel creation")
         var serverNameField = test.findItem(surface, "serverNameField")
         var saveServerName = test.findItem(surface, "saveServerName")
@@ -1547,7 +1533,7 @@ ShellRoot {
         var serverIdentity = test.findItem(surface, "identityMenuButton")
         if (serverIdentity && pageMenu && !pageMenu.opened) serverIdentity.clicked()
         var pageHome = pageMenu ? pageMenu.itemAt(0) : null
-        test.check(!!pageHome && pageHome.objectName === "identityHome" && pageHome.text === "[home]", "[home] is the top identity-menu action away from home")
+        test.check(!!pageHome && pageHome.objectName === "identityHome" && pageHome.text === (theme.friendly ? "Home" : "[home]"), "[home] is the top identity-menu action away from home")
         test.check(!bridge.sent.some(function(command) { return ["join_spot","join_hangout","camera","share"].indexOf(command.name) >= 0 }), "opening server settings does not join or publish media")
       }
       test.check(window.width === theme.space(test.testWidth), "app width")

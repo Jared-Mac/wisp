@@ -95,12 +95,12 @@ ShellRoot {
         var invite = test.find(column, "mediaAction-invite")
         test.check(!!invite && invite.modelData.label === "Invite", "compact invite action exists")
         if (invite) {
-          var inviteLabel = invite.children.find(function(child) { return child.text === "[invite]" || child.text === "Invite" })
+          var inviteLabel = invite.contentItem.children.find(function(child) { return child.text === "[invite]" || child.text === "Invite" })
           test.check(!!inviteLabel && inviteLabel.width >= inviteLabel.implicitWidth && inviteLabel.lineCount === 1, "invite brackets never wrap")
           test.check(invite.parent.children.indexOf(invite) > invite.parent.children.indexOf(camera), "invite follows camera")
           test.check(invite.parent.children.indexOf(invite) < invite.parent.children.indexOf(test.find(column, "mediaAction-leave")), "invite precedes leave")
         }
-        test.check(share.publishing && camera.publishing && share.border.width === 1 && camera.border.width === 1, "both live controls highlighted")
+        test.check(share.publishing && camera.publishing && share.background.border.width === 1 && camera.background.border.width === 1, "both live controls highlighted")
         test.check(share.controlEnabled && camera.controlEnabled, "stop actions stay enabled")
         test.check(share.modelData.label === "Stop share" && camera.modelData.label === "Stop cam", "explicit stop labels")
         test.check(share.width <= column.width && camera.width <= column.width, "controls fit narrow rail")
@@ -123,7 +123,7 @@ ShellRoot {
         var share = test.find(column, "mediaAction-share")
         if (!share) continue
         var camera = test.find(column, "mediaAction-camera")
-        test.check(!share.publishing && !camera.publishing && share.border.width === 0 && camera.border.width === 0, "idle controls not highlighted")
+        test.check(!share.publishing && !camera.publishing && share.background.border.width === 0 && camera.background.border.width === 0, "idle controls not highlighted")
         test.check(camera.modelData.label === "Camera" && !camera.controlEnabled, "idle camera still needs device")
       }
       if (!test.failed) console.log("ROOM_MEDIA_OK")

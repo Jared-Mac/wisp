@@ -35,16 +35,6 @@ Column {
     color: root.status.error ? root.theme.danger : root.status.configured ? root.theme.accent : root.theme.warning
     font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
   }
-  Text {
-    width: parent.width; wrapMode: Text.Wrap
-    text: "Trust on first connection: Wisp remembers each friend's initial key across rooms. Unexpected key changes stop sending. Encrypted room membership requires a signed update from an authorized client. All participants need an updated, configured client."
-    color: root.theme.muted; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
-  }
-  Text {
-    width: parent.width; wrapMode: Text.Wrap
-    text: "Existing plaintext history and backups are not encrypted retroactively. Recovery files can unlock your history: keep them off the server and never send them to friends. Losing every device and the recovery file loses access. This archive design does not provide forward secrecy."
-    color: root.theme.muted; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
-  }
   Flow {
     width: parent.width; spacing: root.theme.spacing.sm
     ChatButton {
@@ -71,21 +61,35 @@ Column {
     color: root.theme.muted; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
   }
   Text {
-    width: parent.width; wrapMode: Text.WrapAnywhere
-    visible: !!root.status.fingerprint
-    text: "Your key fingerprint (optional verification):\n" + (root.status.fingerprint || "")
-    color: root.theme.muted; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
-  }
-  Text {
     width: parent.width; wrapMode: Text.Wrap
     visible: !!root.bridge.privacyFeedback || !!root.bridge.privacyBusy
     text: root.bridge.privacyBusy ? "Working…" : String(root.bridge.privacyFeedback || "")
     color: root.theme.foreground; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
   }
-  Text {
-    width: parent.width; wrapMode: Text.Wrap
-    text: "The server still sees membership, room names, voice-invite metadata, timestamps and traffic sizes. Encryption does not hide those."
-    color: root.theme.muted; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
+  SettingsSection {
+    theme: root.theme; title: "Encryption details"; summary: "Key verification and privacy limits"
+    objectName: "privacyDetailsSection"; expanded: false
+    Text {
+      width: parent.width; wrapMode: Text.Wrap
+      text: "Trust on first connection: Wisp remembers each friend's initial key across rooms. Unexpected key changes stop sending. Encrypted room membership requires a signed update from an authorized client. All participants need an updated, configured client."
+      color: root.theme.muted; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
+    }
+    Text {
+      width: parent.width; wrapMode: Text.Wrap
+      text: "Existing plaintext history and backups are not encrypted retroactively. Recovery files can unlock your history: keep them off the server and never send them to friends. Losing every device and the recovery file loses access. This archive design does not provide forward secrecy."
+      color: root.theme.muted; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
+    }
+    Text {
+      width: parent.width; wrapMode: Text.WrapAnywhere
+      visible: !!root.status.fingerprint
+      text: "Your key fingerprint (optional verification):\n" + (root.status.fingerprint || "")
+      color: root.theme.muted; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
+    }
+    Text {
+      width: parent.width; wrapMode: Text.Wrap
+      text: "The server still sees membership, room names, voice-invite metadata, timestamps and traffic sizes. Encryption does not hide those."
+      color: root.theme.muted; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
+    }
   }
   FileDialog {
     id: recoveryPicker; title: "Choose your private Wisp recovery file"

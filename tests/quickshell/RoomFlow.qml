@@ -32,7 +32,7 @@ ShellRoot {
     var path = Quickshell.env("WISP_ROOM_FLOW_SCREENSHOT")
     if (path) target.grabToImage(function(result) { result.saveToFile(path + "-" + label + ".png") })
   }
-  Wisp.WispAppearance { id: appearance; environment: Quickshell.env("WISP_TEST_ADAPTER") === "omarchy" ? "omarchy" : "desktop" }
+  Wisp.WispAppearance { id: appearance; Component.onCompleted: if(Quickshell.env("WISP_TEST_PALETTE")) setPalette(Quickshell.env("WISP_TEST_PALETTE")); environment: Quickshell.env("WISP_TEST_ADAPTER") === "omarchy" ? "omarchy" : "desktop" }
   Wisp.WispTheme {
     id: theme; appearanceController: appearance
     profile: Quickshell.env("WISP_TEST_ADAPTER") === "omarchy" ? "legacy" : Quickshell.env("WISP_TEST_THEME") || "performative"
@@ -63,17 +63,17 @@ ShellRoot {
   TestCase { id: input; parent: window.contentItem; when: false }
   function fixture() {
     var data = JSON.parse(JSON.stringify(bridge.snapshot))
-    var people = [{id:"self",display_name:"Tyler"},{id:"friend",display_name:"Jared"}]
-    data.self.server_admin=true;data.self.id="self"; data.self.display_name="Tyler"; data.self.hangout_id=null; data.self.connection="available"
+    var people = [{id:"self",display_name:"Ash"},{id:"friend",display_name:"Riley"}]
+    data.self.server_admin=true;data.self.id="self"; data.self.display_name="Ash"; data.self.hangout_id=null; data.self.connection="available"
     var first={id:"local",name:"Home",connected:true}, second={id:"second",name:"Other",connected:true}
     data.servers=[first,second]; data.selected_server_id="local"; data.voice_server_id="local"
     var rooms=[{id:"lounge",name:"Lounge",active_hangout_id:"active",members:people},{id:"quiet",name:"Quiet",members:[]}]
     var chats=[{id:"spot:lounge",kind:"hangout",label:"Lounge",spot_id:"lounge",self_role:"host",members:people},
       {id:"spot:quiet",kind:"hangout",label:"Quiet",spot_id:"quiet",pending_access:true,members:[]},
       {id:"hangout:private",kind:"hangout",label:"Hangout",members:people},
-      {id:"dm:friend",kind:"direct",label:"Jared",members:people}]
+      {id:"dm:friend",kind:"direct",label:"Riley",members:people}]
     var calls=[{id:"active",label:"Lounge",members:people},{id:"private",label:null,members:people}]
-    var state={server:first,self:data.self,spots:rooms,hangouts:calls,conversations:chats,friends:[{id:"friend",display_name:"Jared",online:true,presence:"open"}],messages:[],knocks:[],devices:[],room_invitations:[]}
+    var state={server:first,self:data.self,spots:rooms,hangouts:calls,conversations:chats,friends:[{id:"friend",display_name:"Riley",online:true,presence:"open"}],messages:[],knocks:[],devices:[],room_invitations:[]}
     var other=JSON.parse(JSON.stringify(state)); other.server=second; other.friends=[{id:"other",display_name:"Other friend",online:true,presence:"open"}]
     other.conversations[3].members=[{id:"other-self",display_name:"Other me"},{id:"other",display_name:"Other friend"}]
     other.conversations[3].label="Other friend"
@@ -106,7 +106,7 @@ ShellRoot {
       test.check(bridge.roomCount===2 && bridge.temporaryCalls.length===1,"temporary calls do not inflate room count")
       test.check(!test.find(page,"serverChannel-spot:lounge"),"rooms are not duplicated as text channels")
       test.check(test.find(page,"friendCalls").visible,"temporary calls appear beside friends")
-      test.check(test.find(lounge,"roomName").text==="#Lounge /2","room name leads the occupied row")
+      test.check(test.find(lounge,"roomName").text===(theme.friendly ? "Lounge  · 2" : "#Lounge /2"),"room name leads the occupied row")
       var rowHeight=lounge.height
       var before=bridge.sent.length
       var open=test.find(page,"openRoom-quiet")
@@ -139,7 +139,7 @@ ShellRoot {
       test.check(bridge.sent.length===beforePerson,"participant click does not open room chat or join voice")
       var volume=test.find(participantMenu.contentItem,"participantMenuVolume")
       volume.value=145;volume.moved();input.wait(30)
-      var person={id:"friend",server_id:"local",display_name:"Jared"}
+      var person={id:"friend",server_id:"local",display_name:"Riley"}
       test.check(bridge.participantVolumes.volumeFor(person)===145,"participant slider saves local volume")
       test.find(participantMenu.contentItem,"participantLocalMute").clicked();input.wait(30)
       test.check(bridge.participantVolumes.isMuted(person) && bridge.participantVolumes.effectiveVolumeFor(person)===0,"local mute silences only this participant")
@@ -172,7 +172,7 @@ ShellRoot {
         test.check(bridge.sent.length===beforeInvite,"opening inv does not join voice or send an invitation")
         if (roomPicker) roomPicker.close()
       }
-      test.check(lounge.y<quiet.y && test.find(lounge,"roomName").text==="#Lounge /2","joining preserves room order and name")
+      test.check(lounge.y<quiet.y && test.find(lounge,"roomName").text===(theme.friendly ? "Lounge  · 2" : "#Lounge /2"),"joining preserves room order and name")
       var bar=test.find(page,"currentCallBar")
       test.check(test.compact ? !!test.find(bar,"mediaAction-invite") : !test.find(bar,"mediaAction-invite"),"main room invite moves out of the media controls; tray retains it")
       var disconnect=test.find(bar,"currentCallDisconnect"), location=test.find(bar,"currentCallLocation"), connection=test.find(bar,"currentCallConnection")
@@ -259,7 +259,7 @@ ShellRoot {
       lounge=test.find(page,"savedRoom-lounge")
       test.check(!bar.visible && bar.height===0,"call controls release space after leaving")
       test.check(test.find(lounge,"joinRoom-lounge").visible && test.find(lounge,"joinRoom-lounge").text==="join","leaving restores the room's join action")
-      test.check(lounge && test.find(lounge,"roomName").text==="#Lounge /0" && lounge.height<=rowHeight,"empty room keeps its name with a zero count")
+      test.check(lounge && test.find(lounge,"roomName").text===(theme.friendly ? "Lounge  · 0" : "#Lounge /0") && lounge.height<=rowHeight,"empty room keeps its name with a zero count")
       before=bridge.sent.length
       var create=test.find(page,"createRoomButton");test.click(create);input.wait(60)
       var manager=test.object(page,"identityRoomManager",[])

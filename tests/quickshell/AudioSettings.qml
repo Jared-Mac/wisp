@@ -50,7 +50,10 @@ ShellRoot {
       id: canvas
       anchors.fill: parent
       color: theme.background
-      Views.AudioSettingsView { id: settings; x: 20; y: 20; width: parent.width-40; bridge: bridge; theme: theme }
+      Flickable {
+        id: scroll; anchors.fill: parent; anchors.margins: 20; contentHeight: settings.height; clip: true
+        Views.AudioSettingsView { id: settings; width: parent.width; bridge: bridge; theme: theme }
+      }
     }
   }
   TestCase {
@@ -68,10 +71,24 @@ ShellRoot {
     function choose(text) {
       var item=label(settings,text)
       verify(!!item,"choice exists: "+text)
-      mouseClick(item.parent,item.parent.width/2,item.parent.height/2)
+      var button = item
+      while (button && typeof button.clicked !== "function") button = button.parent
+      verify(!!button, "native keyboard-accessible choice: " + text)
+      var position = button.mapToItem(scroll,0,0)
+      scroll.contentY = Math.max(0, Math.min(scroll.contentHeight-scroll.height, scroll.contentY+position.y-scroll.height/2))
+      wait(30)
+      mouseClick(button,button.width/2,button.height/2)
       wait(20)
     }
+    function section(item, name) {
+      if (item.objectName === name) return item
+      for (var child of item.children || []) {var found=section(child,name);if(found)return found}
+      return null
+    }
     function test_microphone_sample() {
+      var samples=section(settings,"audioTestSection")
+      verify(!samples.expanded)
+      samples.expanded=true; wait(60)
       choose("Record sample")
       compare(bridge.audioTestState.phase, "recording")
       choose("Finish recording")
@@ -81,9 +98,9 @@ ShellRoot {
       choose("Play original")
       compare(bridge.audioTestState.playback, "original")
       choose("Stop playback")
-      settings.visible = false
+      samples.expanded=false
       compare(bridge.audioTestState.phase, "idle")
-      settings.visible = true
+      samples.expanded=true; wait(50)
       bridge.currentVoiceRoom = {id:"room"}
       choose("Record sample")
       compare(bridge.audioTestState.phase, "idle")

@@ -14,7 +14,12 @@ run_case() {
     timeout 10 qs --path "$test_dir" >"$test_dir/log" 2>&1
   if ! rg -q APPEARANCE_OK "$test_dir/log" || rg -q 'APPEARANCE_FAILED|Binding loop|TypeError|ReferenceError|Cannot assign|Failed to load' "$test_dir/log"; then cat "$test_dir/log"; exit 1; fi
 }
-run_case default '{}' performative ash_olive
+run_case default '{}' soft_graphite soft_graphite
+run_case graphite '{"profile":"soft_graphite"}' soft_graphite soft_graphite
+run_case daylight '{"profile":"daylight"}' daylight daylight
+run_case hearth '{"profile":"hearth"}' hearth hearth
+run_case style-only-performative '{"version":2,"profile":"performative"}' performative ash_olive
+run_case style-only-herdr '{"version":2,"profile":"herdr"}' herdr herdr
 run_case old-performative '{"profile":"terminal","palette":"performative"}' performative ash_olive
 run_case old-classic-performative '{"profile":"legacy","palette":"performative"}' performative ash_olive
 run_case old-herdr '{"profile":"terminal","palette":"herdr"}' herdr herdr

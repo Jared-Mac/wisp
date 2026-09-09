@@ -6,6 +6,9 @@ Column {
   required property var room
   required property var bridge
   required property var theme
+  property bool adaptive: false
+  readonly property bool narrow: adaptive && width < theme.space(140)
+  readonly property bool tiny: adaptive && width < theme.space(56)
   property bool mainApp: false
   objectName: "savedRoom-" + room.id
   readonly property var people: (room.members || []).map(function(person) { return root.bridge.scopedParticipant(Object.assign({},person,{server_id:String(root.room.server_id || root.bridge.activeServer.id)})) })
@@ -23,8 +26,9 @@ Column {
     id: openRoom; objectName: "openRoom-" + root.room.id
     width: parent.width
     implicitHeight: body.implicitHeight + topPadding + bottomPadding
-    padding: root.theme.spacing.sm; leftPadding: root.theme.spacing.md
+    padding: root.narrow ? 1 : root.theme.friendly ? root.theme.space(8) : root.theme.spacing.sm; leftPadding: root.narrow ? 1 : root.theme.spacing.md
     Accessible.name: "Open " + root.room.name + " chat; " + root.people.length + " in voice"
+    ToolTip.visible: hovered; ToolTip.text: Accessible.name
     onClicked: root.bridge.openRoomChat(root.room, true)
     TapHandler { acceptedButtons: Qt.RightButton; onTapped: menu.open() }
     background: Rectangle {
@@ -36,27 +40,34 @@ Column {
     contentItem: Column {
       id: body; spacing: root.theme.spacing.xs
       Item {
-        width: parent.width; height: root.theme.space(28)
+        id: roomHeader; width: parent.width; height: root.theme.space(root.theme.friendly ? 36 : 28) + (root.narrow ? actions.height : 0)
+        WispIcon { id: roomIcon; theme: root.theme; name: "volume"; visible: root.theme.friendly && !root.narrow; anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter }
         Text {
           objectName: "roomName"
-          anchors.left: parent.left; anchors.right: actions.left; anchors.rightMargin: root.theme.spacing.xs
-          anchors.verticalCenter: parent.verticalCenter; elide: Text.ElideRight
-          text: "#" + root.room.name + " /" + root.people.length
+          anchors.left: roomIcon.visible ? roomIcon.right : parent.left; anchors.leftMargin: roomIcon.visible ? root.theme.space(8) : 0; anchors.right: root.narrow ? parent.right : actions.left; anchors.rightMargin: root.theme.spacing.xs
+          y: root.theme.space(8); elide: Text.ElideRight
+          text: root.tiny ? String(root.room.name).slice(0,1).toUpperCase() : root.theme.friendly ? root.room.name + "  · " + root.people.length : "#" + root.room.name + " /" + root.people.length
           color: root.theme.foreground; font.family: root.theme.font.family
           font.pixelSize: root.theme.font.body; font.weight: Font.DemiBold
         }
-        Row {
-          id: actions; anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
+        Flow {
+          id: actions; anchors.right: parent.right; y: root.narrow ? root.theme.space(root.theme.friendly ? 36 : 28) : 0
+          width: root.narrow ? parent.width : implicitWidth
           ChatButton {
             objectName: "joinRoom-" + root.room.id
             visible: !root.current || root.mainApp; enabled: root.bridge.activeServer.connected !== false
             theme: root.theme; text: root.current ? "inv" : "join"
+            iconName: root.narrow ? (root.current ? "invite" : "phone") : ""; iconOnly: root.narrow; forceIcon: root.narrow
+            width: root.narrow ? Math.min(actions.width,root.theme.space(28)) : implicitWidth
+            height: root.narrow ? root.theme.space(28) : implicitHeight
+            primary: root.theme.friendly && !root.current
             Accessible.name: (root.current ? "Invite to " : "Join voice in ") + root.room.name
             ToolTip.visible: hovered; ToolTip.text: Accessible.name
             onClicked: if (root.current) invitePicker.open(); else root.bridge.joinConversationVoice(root.conversationId)
           }
           ChatButton {
-            objectName: "roomMoreButton"; theme: root.theme; text: "···"; implicitWidth: root.theme.space(30)
+            objectName: "roomMoreButton"; theme: root.theme; text: "···"; iconName: "more"; iconOnly: root.theme.friendly || root.narrow; forceIcon: root.narrow; implicitWidth: root.narrow ? Math.min(body.width,root.theme.space(28)) : root.theme.space(30)
+            height: root.narrow ? root.theme.space(28) : implicitHeight
             Accessible.name: "Room settings and participant volumes"; onClicked: menu.open()
           }
         }
@@ -84,28 +95,32 @@ Column {
                 Accessible.role: Accessible.Button
                 Accessible.name: modelData.display_name + " participant controls"
                 Accessible.description: voiceStatus.description
+                HoverHandler { id: personHover }
+                ToolTip.visible: personHover.hovered; ToolTip.text: modelData.display_name + (voiceStatus.description ? " · " + voiceStatus.description : "")
                 Keys.onReturnPressed: participantMenu.showPerson(person, participant)
                 Keys.onSpacePressed: participantMenu.showPerson(person, participant)
-                MouseArea {
-                  parent: name
-                  anchors.fill: parent; cursorShape: Qt.PointingHandCursor; acceptedButtons: Qt.LeftButton | Qt.RightButton
-                  onClicked: participantMenu.showPerson(participant.person, participant)
+                TapHandler {
+                  acceptedButtons: Qt.LeftButton | Qt.RightButton
+                  onTapped: participantMenu.showPerson(participant.person, participant)
                 }
                 readonly property bool speaking: root.current && (root.bridge.activeSpeakers || []).indexOf(modelData.display_name) >= 0
                 readonly property bool self: modelData.id === (root.bridge.participantServer(person).self || {}).id
-                readonly property real iconSpace: voiceStatus.visible ? voiceStatus.width + spacing : 0
+                readonly property real iconSpace: (voiceStatus.visible ? voiceStatus.width + spacing : 0) + (avatar.visible ? avatar.width + spacing : 0)
                 width: Math.min(members.width, name.implicitWidth + iconSpace)
-                height: Math.max(implicitHeight, streams.visible ? root.theme.space(22) : 0)
+                height: Math.max(root.theme.friendly ? root.theme.space(36) : 0, name.implicitHeight, voiceStatus.height, streams.visible ? root.theme.space(22) : 0)
+                WispAvatar { id: avatar; bridge: root.bridge; userId: String(modelData.id); serverId: String(root.room.server_id || root.bridge.activeServer.id); theme: root.theme; name: modelData.display_name; speaking: parent.speaking; visible: root.theme.friendly && root.theme.showAvatars; width: Math.min(members.width,root.theme.space(root.narrow ? 20 : 28)); height: width; anchors.verticalCenter: parent.verticalCenter
+                }
                 Text {
                   id: name
                   anchors.verticalCenter: parent.verticalCenter
-                  width: Math.max(1,parent.width-parent.iconSpace); wrapMode: Text.WrapAnywhere
-                  text: (!root.mainApp && index > 0 ? "· " : "") + (parent.speaking ? "● " : "") + modelData.display_name
-                  color: parent.speaking ? root.theme.accent : root.theme.muted
+                  visible: !root.tiny || !avatar.visible
+                  width: Math.max(1,parent.width-parent.iconSpace); wrapMode: root.narrow ? Text.NoWrap : Text.WrapAnywhere; elide: Text.ElideRight
+                  text: root.tiny ? String(modelData.display_name).slice(0,1).toUpperCase() : (!root.mainApp && index > 0 ? "· " : "") + (parent.speaking ? "● " : "") + modelData.display_name
+                  color: parent.speaking ? root.theme.accent : root.theme.friendly ? root.theme.foreground : root.theme.muted
                   font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
                 }
                 ParticipantVoiceStatus {
-                  id: voiceStatus; theme: root.theme
+                  id: voiceStatus; theme: root.theme; visible: !root.tiny && description !== ""
                   anchors.verticalCenter: parent.verticalCenter
                   moderation: participant.moderation
                   muted: root.current && (participant.self ? root.bridge.effectiveMuted : (root.bridge.remoteMutedParticipants || []).indexOf(modelData.display_name) >= 0)
@@ -114,7 +129,7 @@ Column {
                 }
               }
               ParticipantStreams {
-                id: streams; bridge: root.bridge; theme: root.theme
+                id: streams; bridge: root.bridge; theme: root.theme; adaptive: root.adaptive; availableWidth: members.width
                 person: participant.person; current: root.current && !participant.self
                 width: Math.min(members.width, implicitWidth)
               }

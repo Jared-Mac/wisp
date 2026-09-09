@@ -26,12 +26,13 @@ Column {
     color: root.theme.muted; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
   }
   component Field: TextField {
+    id: styledControl1
     width: root.width; color: root.theme.foreground
     font.family: root.theme.font.family; font.pixelSize: root.theme.font.body
     placeholderTextColor: root.theme.muted
     enabled: root.bridge.profileReady && !root.bridge.profileBusy
     selectByMouse: true
-    ThemeControlStyle { theme: root.theme; control: parent }
+    ThemeControlStyle { theme: root.theme; control: styledControl1 }
     background: Rectangle {
       color: root.theme.background; radius: root.theme.cornerRadius
       border.width: 1; border.color: parent.activeFocus ? root.theme.focusBorder : root.theme.separator
@@ -47,6 +48,7 @@ Column {
     onClicked: root.bridge.refreshProfile()
   }
   Label { text: root.bridge.profileFeedback; visible: text !== ""; color: root.theme.foreground }
+  ProfilePicture { width: parent.width; bridge: root.bridge; theme: root.theme; serverId: root.serverId }
   Label { text: "Display name"; color: root.theme.foreground; font.bold: true }
   Field {
     id: displayName; objectName: "profileDisplayName"
@@ -62,37 +64,50 @@ Column {
       && displayName.text.trim() !== String(root.bridge.accountProfile.display_name || "")
     onClicked: root.bridge.profileAction("update_account_profile", {display_name:displayName.text.trim(),revision:root.bridge.accountProfile.revision})
   }
-  Label { text: "Password"; color: root.theme.foreground; font.bold: true }
-  Label { text: "Use at least 12 characters. Your other devices stay signed in; you can revoke them in Devices." }
-  Field {
-    id: currentPassword; objectName: "profileCurrentPassword"
-    echoMode: TextInput.Password; maximumLength: 1024
-    placeholderText: "Current password"; Accessible.name: "Current password"
-    enabled: root.bridge.profileReady && !root.bridge.profileBusy && !!root.bridge.accountProfile.password_available
-  }
-  Field {
-    id: newPassword; objectName: "profileNewPassword"
-    echoMode: TextInput.Password; maximumLength: 1024
-    placeholderText: "New password"; Accessible.name: "New password"
-    enabled: currentPassword.enabled
-  }
-  Field {
-    id: confirmPassword; objectName: "profileConfirmPassword"
-    echoMode: TextInput.Password; maximumLength: 1024
-    placeholderText: "Confirm new password"; Accessible.name: "Confirm new password"
-    enabled: currentPassword.enabled
-    onAccepted: if (savePassword.enabled) savePassword.clicked()
-  }
-  Label { visible: confirmPassword.text !== "" && confirmPassword.text !== newPassword.text; text: "Passwords do not match."; color: root.theme.danger }
-  ChatButton {
-    id: savePassword; objectName: "profileSavePassword"; theme: root.theme; text: "change password"
-    enabled: currentPassword.enabled && currentPassword.text !== "" && Array.from(newPassword.text).length >= 12
-      && newPassword.text === confirmPassword.text
-    onClicked: {
-      if (root.bridge.profileAction("change_account_password", {current_password:currentPassword.text,new_password:newPassword.text})) root.clearPasswords()
+  SettingsSection {
+    theme: root.theme; title: "Change password"; summary: "Keep your account secure"
+    objectName: "profilePasswordSection"; expanded: false
+    Label { text: "Password"; color: root.theme.foreground; font.bold: true }
+    Label { text: "At least 12 characters. Other devices stay signed in." }
+    Field {
+      id: currentPassword; objectName: "profileCurrentPassword"
+      echoMode: TextInput.Password; maximumLength: 1024
+      placeholderText: "Current password"; Accessible.name: "Current password"
+      enabled: root.bridge.profileReady && !root.bridge.profileBusy && !!root.bridge.accountProfile.password_available
+    }
+    Field {
+      id: newPassword; objectName: "profileNewPassword"
+      echoMode: TextInput.Password; maximumLength: 1024
+      placeholderText: "New password"; Accessible.name: "New password"
+      enabled: currentPassword.enabled
+    }
+    Field {
+      id: confirmPassword; objectName: "profileConfirmPassword"
+      echoMode: TextInput.Password; maximumLength: 1024
+      placeholderText: "Confirm new password"; Accessible.name: "Confirm new password"
+      enabled: currentPassword.enabled
+      onAccepted: if (savePassword.enabled) savePassword.clicked()
+    }
+    Label { visible: confirmPassword.text !== "" && confirmPassword.text !== newPassword.text; text: "Passwords do not match."; color: root.theme.danger }
+    ChatButton {
+      id: savePassword; objectName: "profileSavePassword"; theme: root.theme; text: "change password"
+      enabled: currentPassword.enabled && currentPassword.text !== "" && Array.from(newPassword.text).length >= 12
+        && newPassword.text === confirmPassword.text
+      onClicked: {
+        if (root.bridge.profileAction("change_account_password", {current_password:currentPassword.text,new_password:newPassword.text})) root.clearPasswords()
+      }
     }
   }
-  Label { text: "Two-factor authentication"; color: root.theme.foreground; font.bold: true }
-  Label { objectName: "profileTwoFactorStatus"; text: "Planned for a future update. 2FA is not available yet." }
-  EmojiLibrary {objectName:"accountEmojiLibrary";width:parent.width;bridge:root.bridge;theme:root.theme;serverId:root.serverId;scope:"account"}
+  SettingsSection {
+    theme: root.theme; title: "Two-factor authentication"; summary: "Planned for a future update"
+    objectName: "profileSecuritySection"; expanded: false
+    Label { text: "Two-factor authentication"; color: root.theme.foreground; font.bold: true }
+    Label { objectName: "profileTwoFactorStatus"; text: "Planned for a future update. 2FA is not available yet." }
+  }
+  SettingsSection {
+    theme: root.theme; title: "My emojis"; summary: "Upload and manage your custom emojis"
+    objectName: "profileEmojiSection"; expanded: false
+    EmojiLibrary {objectName:"accountEmojiLibrary";width:parent.width;bridge:root.bridge;theme:root.theme;serverId:root.serverId;scope:"account"}
+  }
+
 }

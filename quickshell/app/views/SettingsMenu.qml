@@ -31,7 +31,12 @@ Column {
     // Wait for the section's layout before moving the outer settings scroll view.
     Qt.callLater(function() {
       var target = root.findSetting(root, result.target)
-      if (target) { root.revealedTarget = result.target; target.forceActiveFocus(Qt.TabFocusReason); root.revealSetting(target) }
+      if (target) {
+        for (var ancestor=target; ancestor && ancestor!==root; ancestor=ancestor.parent)
+          if (typeof ancestor.expandForSearch === "function") ancestor.expandForSearch()
+        root.revealedTarget = result.target
+        Qt.callLater(function() { target.forceActiveFocus(Qt.TabFocusReason); root.revealSetting(target) })
+      }
     })
   }
 
@@ -59,7 +64,7 @@ Column {
 
     Text {
       width: parent.width
-      text: "Manage your profile, devices, privacy, and Wisp preferences."
+      text: "Changes save automatically unless a Save button is shown."
       color: root.theme.muted
       wrapMode: Text.WordWrap
       font.family: root.theme.font.family
@@ -117,13 +122,14 @@ Column {
     spacing: root.theme.spacing.sm
     Repeater {
       model: {
-        var tabs = [{id:"profile",label:"Profile"},{id:"media",label:"Audio / Video"},{id:"appearance",label:"Appearance"},{id:"notifications",label:"Notifications & Chat"},{id:"privacy",label:"Privacy"},{id:"devices",label:"Devices"}]
+        var tabs = [{id:"profile",label:"Profile"},{id:"media",label:"Audio"},{id:"video",label:"Video"},{id:"appearance",label:"Appearance"},{id:"notifications",label:"Notifications"},{id:"privacy",label:"Privacy"},{id:"devices",label:"Devices"}]
         if (root.bridge.canManageServer) tabs.push({id:"server",label:"Server"})
         return tabs
       }
       SettingsTab {
         required property var modelData
         theme: root.theme; text: modelData.label
+        iconName: ({profile:"profile",media:"microphone",video:"camera",appearance:"palette",notifications:"bell",privacy:"lock",devices:"screen",server:"settings"})[modelData.id]
         objectName: "settingsTab-" + modelData.id
         primary: root.section === modelData.id
         onClicked: root.section = modelData.id
@@ -233,7 +239,7 @@ Column {
   }
 
   Rectangle {
-    visible: !root.searching && root.section === "media"
+    visible: !root.searching && root.section === "video"
     width: parent.width
     height: videoSettings.implicitHeight + root.theme.spacing.xxl * 2
     radius: root.theme.cornerRadius
@@ -289,69 +295,20 @@ Column {
       anchors.margins: root.theme.spacing.xxl
       spacing: root.theme.spacing.lg
 
-      Text {
-        objectName: "settingsDesktopPosition"; text: "Desktop position"
-        color: root.theme.foreground
-        font.family: root.theme.font.family
-        font.pixelSize: root.theme.font.body
-        font.weight: Font.DemiBold
-      }
-
-      Text {
-        width: parent.width
-        text: "Auto follows the tray icon's display and edge when the desktop provides its position. Otherwise Wisp uses the current system display and the bottom-right corner."
-        color: root.theme.muted
-        wrapMode: Text.WordWrap
-        font.family: root.theme.font.family
-        font.pixelSize: root.theme.font.caption
-      }
-
-      Flow {
-        width: parent.width
-        height: childrenRect.height
-        spacing: root.theme.spacing.sm
-
-        Repeater {
-          model: [
-            { "value": "auto", "label": "Auto" },
-            { "value": "bottom-right", "label": "Bottom right" },
-            { "value": "bottom-left", "label": "Bottom left" },
-            { "value": "top-right", "label": "Top right" },
-            { "value": "top-left", "label": "Top left" }
-          ]
-
-          delegate: Rectangle {
-            required property var modelData
-            readonly property bool selected: root.anchorController
-              && root.anchorController.anchor === modelData.value
-            width: anchorLabel.implicitWidth + root.theme.spacing.xl * 2
-            height: root.theme.space(30)
-            radius: root.theme.cornerRadius
-            color: selected
-              ? root.theme.alpha(root.theme.accent, 0.24)
-              : anchorMouse.containsMouse
-                ? root.theme.alpha(root.theme.foreground, 0.11)
-                : root.theme.alpha(root.theme.foreground, 0.055)
-            border.width: selected ? 1 : 0
-            border.color: root.theme.alpha(root.theme.accent, 0.75)
-
-            Text {
-              id: anchorLabel
-              anchors.centerIn: parent
-              text: modelData.label
-              color: selected ? root.theme.foreground : root.theme.muted
-              font.family: root.theme.font.family
-              font.pixelSize: root.theme.font.caption
-            }
-
-            MouseArea {
-              id: anchorMouse
-              anchors.fill: parent
-              hoverEnabled: true
-              cursorShape: Qt.PointingHandCursor
-              onClicked: root.anchorController.setAnchor(modelData.value)
-            }
-          }
+      SettingsSection {
+        theme: root.theme; title: "Tray position"; summary: "Choose where the tray panel opens"; sectionIcon: "layout"
+        objectName: "settingsDesktopPosition"
+        WispComboBox {
+          id: desktopPosition; theme: root.theme; width: parent.width; textRole: "label"
+          Accessible.name: "Tray panel position"
+          model: [{value:"auto",label:"Automatic"},{value:"bottom-right",label:"Bottom right"},{value:"bottom-left",label:"Bottom left"},{value:"top-right",label:"Top right"},{value:"top-left",label:"Top left"}]
+          currentIndex: {for(var i=0;i<model.length;i++) if(root.anchorController && root.anchorController.anchor===model[i].value)return i;return 0}
+          onActivated: root.anchorController.setAnchor(model[currentIndex].value)
+        }
+        Text {
+          width: parent.width; wrapMode: Text.WordWrap
+          text: "Automatic follows the tray icon, or uses the bottom-right corner if its position is unavailable."
+          color: root.theme.muted; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
         }
       }
 

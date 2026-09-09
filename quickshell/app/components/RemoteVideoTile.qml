@@ -41,6 +41,7 @@ Rectangle {
     ChatButton {
       id: dock; objectName: "streamPlacementButton"; theme: root.theme
       text: root.detached ? "tile" : "window"
+      iconOnly: root.theme.friendly
       Accessible.name: root.detached ? "Move stream into a tile" : "Pop out stream"
       ToolTip.visible: hovered; ToolTip.text: Accessible.name
       onClicked: root.detached ? root.dockRequested() : root.popOutRequested()
@@ -48,6 +49,7 @@ Rectangle {
     ChatButton {
       id: close; objectName: "leaveStreamButton"; theme: root.theme; text: "leave"
       Accessible.name: "Stop watching"
+      iconOnly: root.theme.friendly; iconName: "close"
       onClicked: root.closeRequested()
     }
   }

@@ -5,6 +5,7 @@ import QtQuick
 // private modules from that shell.
 QtObject {
   id: root
+  readonly property bool showAvatars: !appearanceController || appearanceController.showAvatars !== false
 
   // Hosts select the default through WispAppearance; adapters keep their styling.
   property string profile: "legacy"
@@ -13,6 +14,9 @@ QtObject {
   // supply their own palette, typography, scale, and corner treatment.
   property bool tuiTreatment: false
   readonly property bool hostManaged: !!appearanceController && appearanceController.managed
+  readonly property bool friendly: !hostManaged && ["soft_graphite", "daylight", "hearth"].indexOf(profile) >= 0
+  readonly property bool hearth: friendly && profile === "hearth"
+  readonly property bool light: paletteName === "daylight"
   readonly property bool cleanTui: profile === "clean_tui" || profile === "clean-tui"
   readonly property bool terminal: tui || profile === "terminal" || profile === "terminal-experimental"
   readonly property string monospaceFamily: {
@@ -38,7 +42,7 @@ QtObject {
   readonly property bool herdrPalette: paletteName === "herdr"
   function colorEnabled(key) {
     return appearanceController && "colorOptions" in appearanceController
-      ? appearanceController.colorOptions[key] : key === "senderNames" || !cleanTui
+      ? appearanceController.colorOptions[key] : key === "senderNames" || (!cleanTui && !friendly)
   }
   readonly property bool chatBordersColored: colorEnabled("chatBorders")
   readonly property bool chatHeadingsColored: colorEnabled("chatHeadings")
@@ -47,6 +51,9 @@ QtObject {
   readonly property bool tui: cleanTui || performative || herdr || tuiTreatment
   readonly property var colors: {
     switch (paletteName) {
+    case "soft_graphite": return {background:"#181e25", surface:"#222b34", accent:"#8ec5ee", muted:"#a8b6c6"}
+    case "daylight": return {background:"#f7f6f1", surface:"#fffdf8", accent:"#3e6b5a", muted:"#59665f"}
+    case "hearth": return {background:"#24212d", surface:"#302b3c", accent:"#f0b898", muted:"#b8adc8"}
     // Black terminal canvas, restrained olive accents, and ash inverse selections.
     case "performative":
     case "ash_olive": return {background:"#000000", surface:"#000000", accent:"#a2b586", muted:"#92988f"}
@@ -58,26 +65,30 @@ QtObject {
     default: return {background:"#151821", surface:"#1c202b", accent:"#2f8cff", muted:"#8d96a8"}
     }
   }
-  property color foreground: herdrPalette ? "#adb7b7" : olivePalette ? "#d3d5cf" : "#e8ecf3"
+  property color foreground: light ? "#24372f" : paletteName === "hearth" ? "#f4edf6" : herdrPalette ? "#adb7b7" : olivePalette ? "#d3d5cf" : "#e8ecf3"
   property color background: colors.background
   property color surface: colors.surface
   property color accent: colors.accent
   property color muted: colors.muted
-  readonly property color accentText: customPalette ? background : "white"
+  readonly property color accentText: light ? "#ffffff" : customPalette ? background : "white"
   readonly property color selectionBackground: cleanTui ? alpha(accent, 0.18) : herdrPalette ? "#002c38" : olivePalette ? "#b7baad" : accent
   readonly property color selectionText: cleanTui ? foreground : herdrPalette ? "#fdf5e2" : olivePalette ? background : accentText
   readonly property color statusBackground: cleanTui ? surface : herdrPalette ? "#002c38" : olivePalette ? "#171914" : accent
   readonly property color statusText: cleanTui || herdrPalette || olivePalette ? foreground : background
-  readonly property color onlineIndicator: herdrPalette ? "#849900" : olivePalette ? "#79b88a" : "#4bd38a"
-  property color danger: herdrPalette ? "#db302d" : olivePalette ? "#d56b75" : "#ff7777"
-  property color warning: herdrPalette ? "#b28500" : olivePalette ? "#c9b458" : "#f5b94c"
+  readonly property color onlineIndicator: light ? "#25804a" : herdrPalette ? "#849900" : olivePalette ? "#79b88a" : "#4bd38a"
+  property color danger: light ? "#bc303c" : herdrPalette ? "#db302d" : olivePalette ? "#d56b75" : "#ff7777"
+  property color warning: light ? "#88611a" : herdrPalette ? "#b28500" : olivePalette ? "#c9b458" : "#f5b94c"
+  readonly property color sidebar: friendly ? (light ? "#eaede5" : surface) : background
+  readonly property color panel: friendly ? (paletteName === "hearth" ? "#353041" : light ? surface : paletteName === "soft_graphite" ? "#1d252e" : surface) : surface
+  readonly property color controlBackground: alpha(foreground, light ? 0.045 : 0.065)
+  readonly property color bubble: alpha(accent, light ? 0.09 : 0.10)
   readonly property color secondaryAccent: herdrPalette ? "#d23681" : olivePalette ? "#a291d4" : foreground
   readonly property color roomBorder: !colorEnabled("roomSections") ? separator : herdrPalette ? "#b28500" : olivePalette ? "#68613b" : separator
   readonly property color conversationBorder: !chatBordersColored ? separator : herdrPalette ? "#d23681" : olivePalette ? "#70464c" : separator
 
-  property int cornerRadius: cleanTui ? 2 : tui ? 0 : terminal ? 2 : 9
+  property int cornerRadius: friendly ? (hearth ? 12 : profile === "daylight" ? 6 : 8) : cleanTui ? 2 : tui ? 0 : terminal ? 2 : 9
   property real spacingScale: 1.0
-  property string fontFamily: terminal ? (herdr ? herdrMonospaceFamily : monospaceFamily) : "sans-serif"
+  property string fontFamily: terminal ? (herdr ? herdrMonospaceFamily : monospaceFamily) : friendly ? "Noto Sans" : "sans-serif"
   property int captionSize: 12
   property int bodySize: terminal ? 13 : 14
   property int titleSize: tui ? 14 : terminal ? 16 : 18

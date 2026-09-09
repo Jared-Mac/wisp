@@ -7,7 +7,7 @@ cp -a "$repo_dir/quickshell/app" "$test_dir/app"
 cp "$repo_dir/tests/quickshell/Performative.qml" "$test_dir/shell.qml"
 XDG_CONFIG_HOME="$test_dir/config" WISP_SOCKET="$test_dir/offline.sock" \
   QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software \
-  timeout 10 qs --path "$test_dir" >"$test_dir/log" 2>&1
+  timeout 10 qs --path "$test_dir" >"$test_dir/log" 2>&1 || { cat "$test_dir/log"; exit 1; }
 if ! rg -q PERFORMATIVE_OK "$test_dir/log" || rg -q 'PERFORMATIVE_FAILED|TypeError|ReferenceError|Binding loop|Cannot assign|Failed to load' "$test_dir/log"; then
   cat "$test_dir/log"
   exit 1

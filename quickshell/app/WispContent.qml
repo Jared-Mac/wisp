@@ -202,13 +202,17 @@ FocusScope {
         Repeater {
           model: [{key:"auto",label:"Automatic layout"},{key:"left",label:"Activity on left"},{key:"right",label:"Activity on right"},{key:"top",label:"Activity above chat"},{key:"bottom",label:"Activity below chat"}]
           MenuItem {
+    id: styledControl1
+      ThemeControlStyle { theme: root.theme; control: styledControl1 }
             required property var modelData
             text: modelData.label; checkable: true; checked: root.bridge.workspaceLayout.dock === modelData.key
             onTriggered: root.bridge.workspaceLayout.dock = modelData.key
           }
         }
         MenuSeparator {}
-        MenuItem { text: "Reset layout"; onTriggered: root.bridge.workspaceLayout.reset() }
+        MenuItem {
+    id: styledControl2
+      ThemeControlStyle { theme: root.theme; control: styledControl2 } text: "Reset layout"; onTriggered: root.bridge.workspaceLayout.reset() }
       }
 
       Row {
@@ -234,59 +238,16 @@ FocusScope {
           onClicked: root.goHome()
         }
 
-        Rectangle {
-          objectName: "headerOpenAppButton"
-          visible: root.showAppButton
-          width: visible ? appButtonText.implicitWidth + root.theme.spacing.lg * 2 : 0
-          height: root.theme.space(30)
-          radius: root.theme.cornerRadius
-          color: appButtonMouse.containsMouse
-            ? root.theme.alpha(root.theme.accent, 0.24)
-            : root.theme.alpha(root.theme.foreground, 0.055)
-
-          Text {
-            id: appButtonText
-            anchors.centerIn: parent
-            text: root.theme.tui ? "open app" : "Open app"
-            color: root.theme.foreground
-            font.family: root.theme.font.family
-            font.pixelSize: root.theme.font.caption
-          }
-
-          MouseArea {
-            id: appButtonMouse
-            anchors.fill: parent
-            hoverEnabled: true
-            cursorShape: Qt.PointingHandCursor
-            onClicked: root.appRequested()
-          }
+        ChatButton {
+          objectName: "headerOpenAppButton"; visible: root.showAppButton
+          theme: root.theme; text: "Open app"; iconName: "window"
+          height: root.theme.space(32); onClicked: root.appRequested()
         }
-
-        Rectangle {
-          id: closeButton
-          visible: root.showCloseButton
-          width: visible ? root.theme.space(30) : 0
-          height: root.theme.space(30)
-          radius: root.theme.cornerRadius
-          color: closeMouse.containsMouse
-            ? root.theme.alpha(root.theme.foreground, 0.12)
-            : root.theme.alpha(root.theme.foreground, 0.055)
-
-          Text {
-            anchors.centerIn: parent
-            text: "×"
-            color: root.theme.foreground
-            font.family: root.theme.font.family
-            font.pixelSize: root.theme.font.title
-          }
-
-          MouseArea {
-            id: closeMouse
-            anchors.fill: parent
-            hoverEnabled: true
-            cursorShape: Qt.PointingHandCursor
-            onClicked: root.requestClose()
-          }
+        ChatButton {
+          objectName: "headerCloseButton"; visible: root.showCloseButton
+          theme: root.theme; text: "×"; iconName: "close"; iconOnly: true
+          width: root.theme.space(32); height: width
+          Accessible.name: "Close window"; onClicked: root.requestClose()
         }
       }
     }
@@ -375,7 +336,8 @@ FocusScope {
         id: settingsMenu
         // Incoming invites remain reachable even when Activity is collapsed.
         visible: root.settingsOpen
-        width: parent.width
+        width: Math.min(parent.width, root.theme.space(820))
+        x: (parent.width-width)/2
         bridge: root.bridge
         theme: root.theme
         anchorController: root.anchorController
@@ -488,6 +450,7 @@ FocusScope {
         onCreateRoomRequested: identityRoomManager.createRoom()
       }
       CurrentCallBar {
+        compact: true
         width: parent.width; height: visible ? implicitHeight : 0
         bridge: root.bridge; theme: root.theme
         onCameraRequested: root.requestCamera()

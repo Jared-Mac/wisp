@@ -31,26 +31,8 @@ Column {
   }
 
   width: parent ? parent.width : 0
-  spacing: root.theme.spacing.sm
+  spacing: root.theme.space(12)
   focus: root.capturingShortcut
-
-  CheckBox {
-    id: voiceReconnect; objectName: "voiceReconnectSetting"
-    width: parent.width; text: "Automatically reconnect voice"
-    checked: root.bridge.voiceRecovery.enabledSetting
-    onToggled: root.bridge.voiceRecovery.enabledSetting = checked
-    ThemeControlStyle { theme: root.theme; control: voiceReconnect }
-    contentItem: Text {
-      text: voiceReconnect.text; wrapMode: Text.Wrap
-      leftPadding: voiceReconnect.indicator.width + voiceReconnect.spacing
-      color: root.theme.foreground; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
-    }
-  }
-  Text {
-    width: parent.width; wrapMode: Text.Wrap
-    text: "Up to 6 attempts within 2 minutes. Disconnecting, joining another room, or exiting Wisp cancels retries. Camera and sharing stay off."
-    color: root.theme.muted; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
-  }
 
   function shortcutKeyName(event) {
     if (event.key >= Qt.Key_A && event.key <= Qt.Key_Z)
@@ -113,38 +95,18 @@ Column {
       id: audioHeading
       anchors.left: parent.left
       anchors.verticalCenter: parent.verticalCenter
-      text: "AUDIO"
+      text: "Audio"
       color: root.theme.muted
       font.family: root.theme.font.family
       font.pixelSize: root.theme.font.caption
       font.weight: Font.Bold
     }
 
-    Rectangle {
+    ChatButton {
       id: refreshButton
-      anchors.right: parent.right
-      anchors.verticalCenter: parent.verticalCenter
-      width: refreshText.implicitWidth + root.theme.spacing.lg * 2
-      height: root.theme.space(25)
-      radius: root.theme.cornerRadius
-      color: root.theme.alpha(root.theme.foreground, refreshMouse.containsMouse ? 0.12 : 0.055)
-
-      Text {
-        id: refreshText
-        anchors.centerIn: parent
-        text: "Refresh"
-        color: root.theme.foreground
-        font.family: root.theme.font.family
-        font.pixelSize: root.theme.font.caption
-      }
-
-      MouseArea {
-        id: refreshMouse
-        anchors.fill: parent
-        hoverEnabled: true
-        cursorShape: Qt.PointingHandCursor
-        onClicked: root.bridge.refreshAudioDevices()
-      }
+      theme: root.theme; text: "Refresh"; iconName: "refresh"
+      anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
+      onClicked: root.bridge.refreshAudioDevices()
     }
   }
 
@@ -156,39 +118,14 @@ Column {
     font.weight: Font.DemiBold
   }
 
-  Repeater {
-    model: root.inputDevices
-    delegate: Rectangle {
-      required property var modelData
-      readonly property bool selected: String(root.audio.selected_input_id || "") === String(modelData.id)
-      width: root.width
-      height: root.theme.space(32)
-      radius: root.theme.cornerRadius
-      color: selected
-        ? root.theme.alpha(root.theme.accent, 0.34)
-        : root.theme.alpha(root.theme.foreground, inputMouse.containsMouse ? 0.12 : 0.055)
-
-      Text {
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.leftMargin: root.theme.spacing.lg
-        anchors.rightMargin: root.theme.spacing.lg
-        anchors.verticalCenter: parent.verticalCenter
-        text: String(modelData.name || modelData.id)
-        elide: Text.ElideMiddle
-        color: root.theme.foreground
-        font.family: root.theme.font.family
-        font.pixelSize: root.theme.font.caption
-      }
-
-      MouseArea {
-        id: inputMouse
-        anchors.fill: parent
-        hoverEnabled: true
-        cursorShape: Qt.PointingHandCursor
-        onClicked: if (!parent.selected) root.bridge.setInputDevice(String(modelData.id))
-      }
-    }
+  WispComboBox {
+    theme: root.theme
+    id: inputDevicePicker; objectName: "inputDevicePicker"
+    width: parent.width; model: root.inputDevices; textRole: "name"; enabled: count > 0
+    Accessible.name: "Input device"
+    currentIndex: {for(var i=0;i<count;i++) if(String(model[i].id)===String(root.audio.selected_input_id || ""))return i;return -1}
+    onActivated: root.bridge.setInputDevice(String(model[currentIndex].id))
+    ThemeControlStyle {theme:root.theme;control:inputDevicePicker}
   }
 
   Text {
@@ -240,39 +177,14 @@ Column {
     font.weight: Font.DemiBold
   }
 
-  Repeater {
-    model: root.outputDevices
-    delegate: Rectangle {
-      required property var modelData
-      readonly property bool selected: String(root.audio.selected_output_id || "") === String(modelData.id)
-      width: root.width
-      height: root.theme.space(32)
-      radius: root.theme.cornerRadius
-      color: selected
-        ? root.theme.alpha(root.theme.accent, 0.34)
-        : root.theme.alpha(root.theme.foreground, outputMouse.containsMouse ? 0.12 : 0.055)
-
-      Text {
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.leftMargin: root.theme.spacing.lg
-        anchors.rightMargin: root.theme.spacing.lg
-        anchors.verticalCenter: parent.verticalCenter
-        text: String(modelData.name || modelData.id)
-        elide: Text.ElideMiddle
-        color: root.theme.foreground
-        font.family: root.theme.font.family
-        font.pixelSize: root.theme.font.caption
-      }
-
-      MouseArea {
-        id: outputMouse
-        anchors.fill: parent
-        hoverEnabled: true
-        cursorShape: Qt.PointingHandCursor
-        onClicked: if (!parent.selected) root.bridge.setOutputDevice(String(modelData.id))
-      }
-    }
+  WispComboBox {
+    theme: root.theme
+    id: outputDevicePicker; objectName: "outputDevicePicker"
+    width: parent.width; model: root.outputDevices; textRole: "name"; enabled: count > 0
+    Accessible.name: "Output device"
+    currentIndex: {for(var i=0;i<count;i++) if(String(model[i].id)===String(root.audio.selected_output_id || ""))return i;return -1}
+    onActivated: root.bridge.setOutputDevice(String(model[currentIndex].id))
+    ThemeControlStyle {theme:root.theme;control:outputDevicePicker}
   }
 
   Text {
@@ -292,37 +204,14 @@ Column {
     font.weight: Font.DemiBold
   }
 
-  Row {
-    spacing: root.theme.spacing.sm
-
+  Flow {
+    width: parent.width; spacing: root.theme.spacing.sm
     Repeater {
-      model: ["clear", "natural", "studio"]
-      delegate: Rectangle {
-        required property string modelData
-        readonly property bool selected: String(root.audio.preset || "clear") === modelData
-        width: presetText.implicitWidth + root.theme.spacing.lg * 2
-        height: root.theme.space(29)
-        radius: root.theme.cornerRadius
-        color: selected
-          ? root.theme.alpha(root.theme.accent, 0.34)
-          : root.theme.alpha(root.theme.foreground, presetMouse.containsMouse ? 0.12 : 0.055)
-
-        Text {
-          id: presetText
-          anchors.centerIn: parent
-          text: modelData === "clear" ? "Clear voice" : modelData === "natural" ? "Light cleanup" : "Unprocessed"
-          color: root.theme.foreground
-          font.family: root.theme.font.family
-          font.pixelSize: root.theme.font.caption
-        }
-
-        MouseArea {
-          id: presetMouse
-          anchors.fill: parent
-          hoverEnabled: true
-          cursorShape: Qt.PointingHandCursor
-          onClicked: if (!parent.selected) root.bridge.setAudioPreset(modelData)
-        }
+      model: [{key:"clear",label:"Clear voice"},{key:"natural",label:"Light cleanup"},{key:"studio",label:"Unprocessed"}]
+      ChatButton {
+        required property var modelData; theme:root.theme; text:modelData.label; iconName:""
+        primary:String(root.audio.preset || "clear")===modelData.key
+        onClicked:root.bridge.setAudioPreset(modelData.key)
       }
     }
   }
@@ -340,6 +229,143 @@ Column {
     font.pixelSize: root.theme.font.caption
   }
 
+  SettingsSection {
+    theme: root.theme; title: "Microphone test"; summary: "Record and compare your voice privately"
+    objectName: "audioTestSection"; expanded: false; sectionIcon: "microphone"
+    onExpandedChanged: if (!expanded) root.discardTest()
+    Rectangle {
+      width: parent.width
+      height: testContent.implicitHeight + root.theme.spacing.lg * 2
+      radius: root.theme.cornerRadius
+      color: root.theme.alpha(root.theme.foreground, 0.045)
+
+      Column {
+        id: testContent
+        x: root.theme.spacing.lg
+        y: root.theme.spacing.lg
+        width: parent.width - root.theme.spacing.lg * 2
+        spacing: root.theme.spacing.sm
+
+        Text {
+          text: "Hear yourself"
+          color: root.theme.foreground
+          font.family: root.theme.font.family
+          font.pixelSize: root.theme.font.caption
+          font.weight: Font.DemiBold
+        }
+        Text {
+          width: parent.width
+          text: root.inRoom ? "Leave your voice room to test privately."
+            : "Record up to 8 seconds, then compare your original and cleaned-up voice. Uses your selected microphone and speaker."
+          wrapMode: Text.WordWrap
+          color: root.theme.muted
+          font.family: root.theme.font.family
+          font.pixelSize: root.theme.font.caption
+        }
+        Text {
+          width: parent.width
+          text: root.testState.phase === "recording"
+            ? "Recording · " + (Number(root.testState.duration_ms || 0) / 1000).toFixed(1) + " / 8 seconds"
+            : root.testState.phase === "playing"
+              ? (root.testState.playback === "original" ? "Playing original microphone" : "Playing processed voice")
+              : Number(root.testState.duration_ms || 0) > 0 ? "Sample ready · " + (Number(root.testState.duration_ms) / 1000).toFixed(1) + " seconds" : "Your sample stays in memory and is discarded when you close Audio settings."
+          wrapMode: Text.WordWrap
+          color: root.testState.phase === "recording" ? root.theme.accent : root.theme.muted
+          font.family: root.theme.font.family
+          font.pixelSize: root.theme.font.caption
+        }
+        Rectangle {
+          visible: root.testState.phase === "recording"
+          width: parent.width
+          height: root.theme.space(6)
+          radius: height / 2
+          color: root.theme.alpha(root.theme.foreground, 0.08)
+          Rectangle {
+            width: parent.width * Math.min(100, Number(root.testState.input_level || 0)) / 100
+            height: parent.height
+            radius: parent.radius
+            color: root.theme.accent
+            Behavior on width { NumberAnimation { duration: 80 } }
+          }
+        }
+        Flow {
+          width: parent.width
+          spacing: root.theme.spacing.sm
+          Repeater {
+            model: [
+              {label: root.testState.phase === "recording" ? "Finish recording" : root.testState.phase === "playing" ? "Stop playback" : "Record sample", action: root.testState.phase === "recording" || root.testState.phase === "playing" ? "stop" : "record"},
+              {label:"Play processed", action:"play_processed"},
+              {label:"Play original", action:"play_original"},
+              {label:"Discard", action:"clear"}
+            ]
+            delegate: ChatButton {
+              required property var modelData
+              theme: root.theme; text: modelData.label
+              iconName: modelData.action === "record" ? "microphone" : modelData.action === "stop" ? "stop" : modelData.action === "clear" ? "trash" : "play"
+              enabled: !root.inRoom && !root.bridge.audioTestBusy && (modelData.action === "record" || modelData.action === "stop" || (root.testState.phase === "ready" && Number(root.testState.duration_ms || 0) > 0))
+              onClicked: {
+                root.ownsTest = true
+                root.bridge.audioTest(modelData.action)
+              }
+            }
+          }
+        }
+        Text {
+          visible: text.length > 0
+          width: parent.width
+          text: String(root.bridge.audioTestError || root.testState.error || "")
+          wrapMode: Text.WordWrap
+          color: root.theme.danger
+          font.family: root.theme.font.family
+          font.pixelSize: root.theme.font.caption
+        }
+      }
+    }
+  }
+  SettingsSection {
+    theme: root.theme; title: "Push to talk"; summary: "Hold a key to speak"; objectName:"pushToTalkSection"; sectionIcon:"keyboard"
+    CheckBox {
+      id: pttEnabled; objectName:"settingsPushToTalk"; text:"Enable push to talk"; checked:root.bridge.pushToTalkState.enabled
+      onToggled:root.bridge.setPushToTalk(checked)
+      ThemeControlStyle {theme:root.theme;control:pttEnabled}
+    }
+    Text {objectName:"settingsShortcut";text:"Global shortcut";color:root.theme.foreground;font.family:root.theme.font.family;font.pixelSize:root.theme.font.body}
+    Text {
+      width:parent.width;wrapMode:Text.Wrap
+      text:root.capturingShortcut ? "Press a key combination. Esc cancels." : root.shortcutSupported ? "Works globally through Omarchy/Hyprland." : "Global shortcuts require Omarchy/Hyprland."
+      color:root.theme.muted;font.family:root.theme.font.family;font.pixelSize:root.theme.font.caption
+    }
+    Flow {
+      width:parent.width;spacing:root.theme.spacing.sm
+      ChatButton {
+        theme:root.theme;iconName:"keyboard";text:root.capturingShortcut ? "Press keys…" : root.pttShortcut || "Set shortcut";enabled:root.shortcutSupported
+        onClicked:{root.capturingShortcut=true;root.forceActiveFocus()}
+      }
+      ChatButton {theme:root.theme;text:"Clear";visible:root.pttShortcut.length>0 && !root.capturingShortcut;onClicked:{root.capturingShortcut=false;root.bridge.setPushToTalkShortcut(null)}}
+    }
+    Text {visible:root.replacedShortcuts.length>0;width:parent.width;wrapMode:Text.Wrap;text:"Replaced on "+root.pttShortcut+": "+root.replacedShortcuts.join(" · ");color:root.theme.warning;font.family:root.theme.font.family;font.pixelSize:root.theme.font.caption}
+  }
+  SettingsSection {theme:root.theme;title:"Connection recovery";summary:"Retry limits and automatic reconnection";objectName:"voiceRecoverySection"; sectionIcon:"refresh"
+  CheckBox {
+    id: voiceReconnect; objectName: "voiceReconnectSetting"
+    width: parent.width; text: "Automatically reconnect voice"
+    checked: root.bridge.voiceRecovery.enabledSetting
+    onToggled: root.bridge.voiceRecovery.enabledSetting = checked
+    ThemeControlStyle { theme: root.theme; control: voiceReconnect }
+    contentItem: Text {
+      text: voiceReconnect.text; wrapMode: Text.Wrap
+      leftPadding: voiceReconnect.indicator.width + voiceReconnect.spacing
+      color: root.theme.foreground; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
+    }
+  }
+  Text {
+    width: parent.width; wrapMode: Text.Wrap
+    text: "Up to 6 attempts within 2 minutes. Disconnecting, joining another room, or exiting Wisp cancels retries. Camera and sharing stay off."
+    color: root.theme.muted; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
+  }
+
+  }
+  SettingsSection {theme:root.theme;title:"Processing status";summary:"Voice cleanup quality and performance";objectName:"audioDiagnosticsSection"
   Rectangle {
     visible: !!root.audio.denoiser_active
     width: parent.width
@@ -383,284 +409,5 @@ Column {
     }
   }
 
-  Rectangle {
-    width: parent.width
-    height: testContent.implicitHeight + root.theme.spacing.lg * 2
-    radius: root.theme.cornerRadius
-    color: root.theme.alpha(root.theme.foreground, 0.045)
-
-    Column {
-      id: testContent
-      x: root.theme.spacing.lg
-      y: root.theme.spacing.lg
-      width: parent.width - root.theme.spacing.lg * 2
-      spacing: root.theme.spacing.sm
-
-      Text {
-        text: "Hear yourself"
-        color: root.theme.foreground
-        font.family: root.theme.font.family
-        font.pixelSize: root.theme.font.caption
-        font.weight: Font.DemiBold
-      }
-      Text {
-        width: parent.width
-        text: root.inRoom ? "Leave your voice room to test privately."
-          : "Record up to 8 seconds, then compare your original and cleaned-up voice. Uses your selected microphone and speaker."
-        wrapMode: Text.WordWrap
-        color: root.theme.muted
-        font.family: root.theme.font.family
-        font.pixelSize: root.theme.font.caption
-      }
-      Text {
-        width: parent.width
-        text: root.testState.phase === "recording"
-          ? "Recording · " + (Number(root.testState.duration_ms || 0) / 1000).toFixed(1) + " / 8 seconds"
-          : root.testState.phase === "playing"
-            ? (root.testState.playback === "original" ? "Playing original microphone" : "Playing processed voice")
-            : Number(root.testState.duration_ms || 0) > 0 ? "Sample ready · " + (Number(root.testState.duration_ms) / 1000).toFixed(1) + " seconds" : "Your sample stays in memory and is discarded when you close Audio settings."
-        wrapMode: Text.WordWrap
-        color: root.testState.phase === "recording" ? root.theme.accent : root.theme.muted
-        font.family: root.theme.font.family
-        font.pixelSize: root.theme.font.caption
-      }
-      Rectangle {
-        visible: root.testState.phase === "recording"
-        width: parent.width
-        height: root.theme.space(6)
-        radius: height / 2
-        color: root.theme.alpha(root.theme.foreground, 0.08)
-        Rectangle {
-          width: parent.width * Math.min(100, Number(root.testState.input_level || 0)) / 100
-          height: parent.height
-          radius: parent.radius
-          color: root.theme.accent
-          Behavior on width { NumberAnimation { duration: 80 } }
-        }
-      }
-      Flow {
-        width: parent.width
-        spacing: root.theme.spacing.sm
-        Repeater {
-          model: [
-            {label: root.testState.phase === "recording" ? "Finish recording" : root.testState.phase === "playing" ? "Stop playback" : "Record sample", action: root.testState.phase === "recording" || root.testState.phase === "playing" ? "stop" : "record"},
-            {label:"Play processed", action:"play_processed"},
-            {label:"Play original", action:"play_original"},
-            {label:"Discard", action:"clear"}
-          ]
-          delegate: Rectangle {
-            required property var modelData
-            readonly property bool usable: !root.inRoom && !root.bridge.audioTestBusy && (modelData.action === "record" || modelData.action === "stop" || (root.testState.phase === "ready" && Number(root.testState.duration_ms || 0) > 0))
-            width: testButtonLabel.implicitWidth + root.theme.spacing.lg * 2
-            height: root.theme.space(29)
-            radius: root.theme.cornerRadius
-            opacity: usable ? 1 : 0.4
-            color: root.theme.alpha(root.theme.accent, testMouse.containsMouse ? 0.4 : 0.22)
-            Text {
-              id: testButtonLabel
-              anchors.centerIn: parent
-              text: modelData.label
-              color: root.theme.foreground
-              font.family: root.theme.font.family
-              font.pixelSize: root.theme.font.caption
-            }
-            MouseArea {
-              id: testMouse
-              anchors.fill: parent
-              enabled: parent.usable
-              hoverEnabled: true
-              cursorShape: Qt.PointingHandCursor
-              onClicked: {
-                root.ownsTest = true
-                root.bridge.audioTest(modelData.action)
-              }
-            }
-          }
-        }
-      }
-      Text {
-        visible: text.length > 0
-        width: parent.width
-        text: String(root.bridge.audioTestError || root.testState.error || "")
-        wrapMode: Text.WordWrap
-        color: root.theme.danger
-        font.family: root.theme.font.family
-        font.pixelSize: root.theme.font.caption
-      }
-    }
-  }
-
-  Rectangle {
-    width: parent.width
-    height: root.theme.space(48)
-    radius: root.theme.cornerRadius
-    color: root.theme.alpha(root.theme.foreground, 0.045)
-
-    Column {
-      anchors.left: parent.left
-      anchors.leftMargin: root.theme.spacing.lg
-      anchors.verticalCenter: parent.verticalCenter
-      spacing: root.theme.spacing.xs
-
-      Text {
-        objectName: "settingsPushToTalk"; text: "Push to talk"
-        color: root.theme.foreground
-        font.family: root.theme.font.family
-        font.pixelSize: root.theme.font.caption
-        font.weight: Font.DemiBold
-      }
-
-      Text {
-        text: "Keep the microphone closed until you hold Talk"
-        color: root.theme.muted
-        font.family: root.theme.font.family
-        font.pixelSize: root.theme.font.caption
-      }
-    }
-
-    Rectangle {
-      anchors.right: parent.right
-      anchors.rightMargin: root.theme.spacing.lg
-      anchors.verticalCenter: parent.verticalCenter
-      width: pttText.implicitWidth + root.theme.spacing.lg * 2
-      height: root.theme.space(28)
-      radius: root.theme.cornerRadius
-      color: root.bridge.pushToTalkState.enabled
-        ? root.theme.alpha(root.theme.accent, 0.42)
-        : root.theme.alpha(root.theme.foreground, pttToggleMouse.containsMouse ? 0.12 : 0.07)
-
-      Text {
-        id: pttText
-        anchors.centerIn: parent
-        text: root.bridge.pushToTalkState.enabled ? "On" : "Off"
-        color: root.theme.foreground
-        font.family: root.theme.font.family
-        font.pixelSize: root.theme.font.caption
-        font.weight: Font.DemiBold
-      }
-
-      MouseArea {
-        id: pttToggleMouse
-        anchors.fill: parent
-        hoverEnabled: true
-        cursorShape: Qt.PointingHandCursor
-        onClicked: root.bridge.setPushToTalk(!root.bridge.pushToTalkState.enabled)
-      }
-    }
-  }
-
-  Rectangle {
-    width: parent.width
-    height: root.theme.space(58)
-    radius: root.theme.cornerRadius
-    color: root.theme.alpha(root.theme.foreground, 0.045)
-
-    Column {
-      anchors.left: parent.left
-      anchors.leftMargin: root.theme.spacing.lg
-      anchors.right: shortcutActions.left
-      anchors.rightMargin: root.theme.spacing.lg
-      anchors.verticalCenter: parent.verticalCenter
-      spacing: root.theme.spacing.xs
-
-      Text {
-        objectName: "settingsShortcut"; text: "Global shortcut"
-        color: root.theme.foreground
-        font.family: root.theme.font.family
-        font.pixelSize: root.theme.font.caption
-        font.weight: Font.DemiBold
-      }
-
-      Text {
-        width: parent.width
-        text: root.capturingShortcut
-          ? "Press a letter, number, function key, or combination · Esc cancels"
-          : root.shortcutSupported
-            ? "Works globally through Omarchy/Hyprland"
-            : "Shortcut setup currently requires Omarchy/Hyprland"
-        elide: Text.ElideRight
-        color: root.capturingShortcut ? root.theme.accent : root.theme.muted
-        font.family: root.theme.font.family
-        font.pixelSize: root.theme.font.caption
-      }
-    }
-
-    Row {
-      id: shortcutActions
-      anchors.right: parent.right
-      anchors.rightMargin: root.theme.spacing.lg
-      anchors.verticalCenter: parent.verticalCenter
-      spacing: root.theme.spacing.sm
-
-      Rectangle {
-        visible: root.pttShortcut.length > 0 && !root.capturingShortcut
-        width: visible ? clearShortcutText.implicitWidth + root.theme.spacing.lg * 2 : 0
-        height: root.theme.space(28)
-        radius: root.theme.cornerRadius
-        color: root.theme.alpha(root.theme.foreground, clearShortcutMouse.containsMouse ? 0.13 : 0.07)
-
-        Text {
-          id: clearShortcutText
-          anchors.centerIn: parent
-          text: "Clear"
-          color: root.theme.muted
-          font.family: root.theme.font.family
-          font.pixelSize: root.theme.font.caption
-        }
-
-        MouseArea {
-          id: clearShortcutMouse
-          anchors.fill: parent
-          hoverEnabled: true
-          cursorShape: Qt.PointingHandCursor
-          onClicked: {
-            root.capturingShortcut = false
-            root.bridge.setPushToTalkShortcut(null)
-          }
-        }
-      }
-
-      Rectangle {
-        width: shortcutText.implicitWidth + root.theme.spacing.lg * 2
-        height: root.theme.space(28)
-        radius: root.theme.cornerRadius
-        color: root.capturingShortcut
-          ? root.theme.alpha(root.theme.accent, 0.42)
-          : root.theme.alpha(root.theme.foreground, shortcutMouse.containsMouse ? 0.13 : 0.07)
-        opacity: root.shortcutSupported ? 1 : 0.5
-
-        Text {
-          id: shortcutText
-          anchors.centerIn: parent
-          text: root.capturingShortcut ? "Press keys…" : (root.pttShortcut || "Set shortcut")
-          color: root.theme.foreground
-          font.family: root.theme.font.family
-          font.pixelSize: root.theme.font.caption
-          font.weight: Font.DemiBold
-        }
-
-        MouseArea {
-          id: shortcutMouse
-          anchors.fill: parent
-          enabled: root.shortcutSupported
-          hoverEnabled: enabled
-          cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
-          onClicked: {
-            root.capturingShortcut = true
-            root.forceActiveFocus()
-          }
-        }
-      }
-    }
-  }
-
-  Text {
-    visible: root.replacedShortcuts.length > 0
-    width: parent.width
-    text: "Replaced on " + root.pttShortcut + ": " + root.replacedShortcuts.join(" · ")
-    wrapMode: Text.WordWrap
-    color: root.theme.warning
-    font.family: root.theme.font.family
-    font.pixelSize: root.theme.font.caption
   }
 }

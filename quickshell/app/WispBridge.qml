@@ -1,4 +1,5 @@
 import QtQuick
+import "AudioControlSounds.js" as AudioControlSounds
 import Quickshell
 import Quickshell.Io
 import "ChatLogic.js" as ChatLogic
@@ -10,6 +11,8 @@ Item {
   property string clientName: "quickshell"
   readonly property alias voiceRecovery: voiceRecovery
   WispVoiceRecovery { id: voiceRecovery; bridge: root }
+  readonly property alias avatars: avatars
+  WispAvatars { id: avatars; bridge: root }
   readonly property alias chatExtras: chatExtras
   WispChatExtras { id: chatExtras; bridge: root }
   readonly property alias workspaceLayout: workspaceLayout
@@ -33,6 +36,7 @@ Item {
   property string lastAppliedVolumes: ""
   onDaemonConnectedChanged: {
     chatExtras.invalidate()
+    avatars.reconnect()
     lastAppliedVolumes = ""
     if (daemonConnected) applyParticipantVolumes()
     else { voiceRecovery.daemonLost(); privacySnapshotReady = false; privacyRequestId = ""; privacyBusy = false; profileBusy = false; profileReady = false; profileRequestId = "" }
@@ -101,6 +105,7 @@ Item {
   property alias notificationSoundPath: notificationSettings.soundPath
   property alias notificationPolicy: notificationSettings.policy
   property alias roomNotificationSounds: notificationSettings.roomSounds
+  property alias audioControlSounds: notificationSettings.audioControlSounds
   property alias selfRoomNotificationSounds: notificationSettings.selfRoomSounds
   readonly property var eventSoundPaths: notificationSettings.eventSounds
   property var soundQueue: []
@@ -733,6 +738,7 @@ Item {
       property var mutedChats: []
       property bool roomSounds: true
       property bool selfRoomSounds: true
+      property bool audioControlSounds: true
       property var eventSounds: ({})
     }
   }
@@ -761,6 +767,7 @@ Item {
 
   function notificationSoundCommand(kind) {
     if (notificationMuted || notificationVolume <= 0) return []
+    if (kind.indexOf("audio_") === 0 && !audioControlSounds) return []
     if (kind.indexOf("self_") === 0 && !selfRoomNotificationSounds) return []
     if (kind.indexOf("member_") === 0 && !roomNotificationSounds) return []
     var soundDirectory = Quickshell.env("WISP_SOUND_DIR") || configHome + "/quickshell/wisp/assets"
@@ -880,6 +887,7 @@ Item {
 
   function applySnapshot(next, eventName) {
     if (!next) return
+    var audioCue = AudioControlSounds.event(receivedSnapshot ? snapshot.self : null, next.self, eventName)
     var previousFlat=receivedSnapshot ? flattenedSnapshot(snapshot) : null
     var nextFlat=flattenedSnapshot(next)
     var incoming = ChatLogic.incomingConversationIds(previousFlat, nextFlat, eventName)
@@ -902,8 +910,10 @@ Item {
       if (!activeStillVisible) activeConversationId = ""
     }
     receivedSnapshot = true
+    if (notificationSoundsEnabled && audioCue) playNotificationSound(audioCue)
     if (notificationSoundsEnabled && newInvite) playNotificationSound("room_invite")
-    if (notificationSoundsEnabled) roomEvents.forEach(function(kind) { if (kind.indexOf("self_") !== 0) root.playNotificationSound(kind) })
+    if (notificationSoundsEnabled) roomEvents.forEach(function(kind) { if (kind.indexOf("audio_") === 0 && !audioControlSounds) return []
+    if (kind.indexOf("self_") !== 0) root.playNotificationSound(kind) })
     voiceRecovery.observe(next, eventName)
     if (notificationSoundsEnabled && incoming.some(function(id) {
       return ChatLogic.shouldNotifyChat(id, root.focusedConversationId, root.appFocused,
@@ -989,12 +999,14 @@ Item {
     }
     if (message.type === "event" && message.payload && message.payload.snapshot) {
       if (message.name === "emojis_changed") chatExtras.invalidate()
+      if (message.name === "account_avatar_changed") avatars.invalidate()
       applySnapshot(message.payload.snapshot, message.name)
       return
     }
+    var avatarImageReply = message.type === "result" && (requests[message.id] || {}).kind === "avatar" && (requests[message.id] || {}).action === "image"
     var recoveryReply = message.type === "result" && (requests[message.id] || {}).kind === "voiceRecovery"
     if (message.type === "result") finishRequest(message)
-    if (message.type === "result" && !recoveryReply && message.ok !== true && message.error) {
+    if (message.type === "result" && !recoveryReply && !avatarImageReply && message.ok !== true && message.error) {
       lastError = String(message.error.message || "Wisp command failed")
       commandFailed(lastError)
     }
@@ -1143,7 +1155,9 @@ Item {
     delete requests[message.id]
     var value = message.value || ({})
     var conversationId = action.conversationId
-    if (action.kind === "chatExtras") {
+    if (action.kind === "avatar") {
+      avatars.reply(message, action)
+    } else if (action.kind === "chatExtras") {
       chatExtras.reply(message, action)
     } else if (action.kind === "voiceRecovery") {
       voiceRecovery.reply(message)

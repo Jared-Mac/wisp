@@ -10,7 +10,14 @@ use wisp_protocol::{REACTION_CONTENT_TYPE, ReactionRequest};
 pub(super) fn handles(name: &str) -> bool {
     matches!(
         name,
-        "list_emojis" | "upload_emoji" | "remove_emoji" | "emoji_image" | "toggle_reaction"
+        "avatar_image"
+            | "upload_avatar"
+            | "remove_avatar"
+            | "list_emojis"
+            | "upload_emoji"
+            | "remove_emoji"
+            | "emoji_image"
+            | "toggle_reaction"
     )
 }
 
@@ -21,6 +28,9 @@ pub(super) async fn command(
 ) -> anyhow::Result<Value> {
     let args = &command.args;
     match command.name.as_str() {
+        "avatar_image" | "upload_avatar" | "remove_avatar" => {
+            super::avatars::command(api, &command.name, args).await
+        }
         "list_emojis" => {
             decode(
                 api.request(reqwest::Method::GET, "/v1/emojis")

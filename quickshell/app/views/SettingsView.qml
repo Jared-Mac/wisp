@@ -22,8 +22,29 @@ Column {
       visible: root.showActivityToggle
       bridge: root.bridge; theme: root.theme; stacked: root.activityStacked
     }
+    ChatButton {
+      id: presenceChoice; objectName: "availabilityPicker"; visible: root.theme.friendly
+      theme: root.theme; text: ({open:"Open to join",knock:"Ask to join",closed:"Invite only",away:"Away"})[root.bridge.selfState.presence] || "Away"
+      iconName: ({open:"room",knock:"bell",closed:"lock",away:"moon"})[root.bridge.selfState.presence] || "moon"
+      onClicked: availabilityMenu.open()
+      Menu {
+        id: availabilityMenu
+        ThemeControlStyle { theme: root.theme; control: availabilityMenu; outline: true }
+        Repeater {
+          model: [{key:"open",label:"Open to join"},{key:"knock",label:"Ask to join"},{key:"closed",label:"Invite only"},{key:"away",label:"Away"}]
+          MenuItem {
+            id: choice; required property var modelData
+            text: modelData.label; checkable: true; checked: root.bridge.selfState.presence === modelData.key
+            Accessible.description: PresenceText.description(modelData.key,true)
+            ToolTip.visible: hovered; ToolTip.text: Accessible.description
+            onTriggered: root.bridge.setPresence(modelData.key)
+            ThemeControlStyle {theme: root.theme; control: choice}
+          }
+        }
+      }
+    }
     Repeater {
-      model: ["open", "knock", "closed", "away"]
+      model: root.theme.friendly ? [] : ["open", "knock", "closed", "away"]
       delegate: Rectangle {
         objectName: "presence-" + modelData
         required property string modelData
@@ -84,6 +105,7 @@ Column {
       }
       AudioStateIndicator {
         objectName: "globalAudioControls"
+        visible: !root.theme.friendly || !root.bridge.currentVoiceRoom
         bridge: root.bridge; theme: root.theme
         muted: !!root.bridge.selfState.muted || !!root.bridge.selfState.deafened
         deafened: !!root.bridge.selfState.deafened

@@ -17,14 +17,16 @@ Item {
   readonly property var colorOptions: {
     var result = {}, saved = preferences.colorOptions || {}
     ;["chatBorders","chatHeadings","roomSections","friendSections","friendNames","senderNames"].forEach(function(key) {
-      result[key] = !managed && typeof saved[key] === "boolean" ? saved[key] : key === "senderNames" || profile !== "clean_tui"
+      result[key] = !managed && typeof saved[key] === "boolean" ? saved[key] : key === "senderNames" || (profile !== "clean_tui" && !AppearanceLogic.isFriendly(profile))
     })
     return result
   }
+  readonly property bool showAvatars: preferences.showAvatars
+  function setShowAvatars(value) { preferences.showAvatars = !!value; settings.writeAdapter() }
   property string error: ""
   signal settingsSaved()
   signal settingsSaveFailed()
-  function validPalette(value) { return ["wisp", "graphite", "violet", "ember", "ash_olive", "herdr"].indexOf(value) >= 0 }
+  function validPalette(value) { return ["wisp", "graphite", "violet", "ember", "ash_olive", "herdr", "soft_graphite", "daylight", "hearth"].indexOf(value) >= 0 }
   function materialize() {
     // Snapshot the old effective look before changing either independent axis.
     var style = profile, color = palette, options = Object.assign({}, colorOptions)
@@ -40,10 +42,18 @@ Item {
     settings.writeAdapter()
   }
   function setProfile(value) {
-    if (managed || ["terminal", "legacy", "clean_tui", "performative", "herdr"].indexOf(value) < 0 || value === profile) return
+    if (managed || ["terminal", "legacy", "clean_tui", "performative", "herdr", "soft_graphite", "daylight", "hearth"].indexOf(value) < 0 || value === profile) return
     error = ""
+    var previous = profile, previousPalette = palette
     materialize()
+    // Each concept remembers its palette; returning to a terminal style restores
+    // its previous colors instead of inheriting the light concept's palette.
+    var saved = Object.assign({}, preferences.stylePalettes)
+    saved[AppearanceLogic.isFriendly(previous) ? previous : "traditional"] = previousPalette
+    preferences.stylePalettes = saved
     preferences.profile = value
+    if (AppearanceLogic.isFriendly(value)) preferences.palette = saved[value] || AppearanceLogic.presetPalette(value)
+    else if (AppearanceLogic.isFriendly(previous)) preferences.palette = saved.traditional || "wisp"
     settings.writeAdapter()
   }
   function setColorOption(key, enabled) {
@@ -74,6 +84,8 @@ Item {
       property string palette: ""
       property int version: 0
       property var colorOptions: ({})
+      property var stylePalettes: ({})
+      property bool showAvatars: true
     }
   }
 }
