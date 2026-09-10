@@ -124,7 +124,9 @@ jobs:
         run: ./scripts/scan-secrets.sh
 
       - name: Test prebuilt release updater
-        run: bash ./scripts/test-wisp-update.sh
+        run: |
+          bash ./scripts/test-wisp-update.sh
+          python3 tests/client-updater.py
 
       - name: Build release binaries
         run: cargo build --workspace --release --locked
@@ -246,16 +248,19 @@ jobs:
           release_title="Wisp main build (${WISP_RELEASE_SHA:0:12})"
           release_notes="Automated pre-release built from main. Use wisp-update to install this verified Linux x86_64 build."
           if gh release view "$WISP_RELEASE_TAG" >/dev/null 2>&1; then
-            gh release upload "$WISP_RELEASE_TAG" dist/* --clobber
+            gh release upload "$WISP_RELEASE_TAG" dist/*.tar.gz dist/*.sha256 --clobber
             gh release edit "$WISP_RELEASE_TAG" \
               --target "$WISP_RELEASE_SHA" \
               --title "$release_title" \
               --notes "$release_notes" \
               --prerelease
           else
-            gh release create "$WISP_RELEASE_TAG" dist/* \
+            gh release create "$WISP_RELEASE_TAG" dist/*.tar.gz dist/*.sha256 \
               --target "$WISP_RELEASE_SHA" \
               --title "$release_title" \
               --notes "$release_notes" \
               --prerelease
           fi
+
+          # Publish the small version pointer only after its archive is complete.
+          gh release upload "$WISP_RELEASE_TAG" dist/*.update.json --clobber

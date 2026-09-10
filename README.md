@@ -679,7 +679,13 @@ pre-release, so enrolled Linux x86_64 clients can update without compiling Rust:
 wisp-update
 ```
 
-The updater works for every enrolled Linux x86_64 client; it contains no
+The app checks at launch and every five minutes by default. **Settings → Updates**
+lets users disable automatic installation or checks, choose a check interval, and
+use **Check for updates** or **Update now**. Automatic installs wait for idle
+surfaces with no voice, streams, drafts, or transfers. Existing clients need this
+updater-enabled build once. See [Client updates](docs/client-updates.md).
+
+The command-line updater works for every enrolled Linux x86_64 client; it contains no
 profile-specific host, token, or media-key settings. It verifies the published
 SHA-256 checksum, saves the prior binaries under
 `~/.local/state/wisp/backups/`, and restarts an already-running client only when

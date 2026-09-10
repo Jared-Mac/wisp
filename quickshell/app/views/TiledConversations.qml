@@ -344,6 +344,7 @@ Item {
         visible: detached || !root.tabbed || root.visibleKey === nodeKey
         x: rect.x; y: rect.y; width: rect.width; height: rect.height
         FloatingWindow {
+          contentItem.enabled: !root.bridge.updates.preparing
           id: popout
           objectName: "chatPopout-" + tileHost.nodeKey
           visible: tileHost.detached

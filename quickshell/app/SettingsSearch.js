@@ -1,5 +1,10 @@
 // Index labels and aliases only; never search account fields or private content.
 var entries = [
+  {section:"updates",target:"checkForUpdates",label:"Check for updates",keywords:"release version download manual update"},
+  {section:"updates",target:"update-automatic",label:"Automatic updates",keywords:"install disable enable update"},
+  {section:"updates",target:"update-check_on_launch",label:"Check for updates at launch",keywords:"startup restart update"},
+  {section:"updates",target:"update-background_checks",label:"Background update checks",keywords:"disable enable running periodic"},
+  {section:"updates",target:"updateInterval",label:"Update check interval",keywords:"minutes frequency customize automatic"},
   {section:"soundboard",target:"settingsSoundboard",label:"Server soundboard",keywords:"audio sounds upload clips effects preview play voice starter default"},
   {section:"media",target:"audioTestSection",label:"Microphone test",keywords:"audio hear yourself record sample original processed voice playback"},
   {section:"media",target:"audioDiagnosticsSection",label:"Processing status",keywords:"audio noise cleanup quality performance latency diagnostics"},
@@ -52,5 +57,5 @@ function search(query, canManageServer, hasPanel) {
 }
 
 function sectionLabel(section) {
-  return {soundboard:"Soundboard",profile:"Profile",media:"Audio",video:"Video",appearance:"Appearance",notifications:"Notifications",privacy:"Privacy",devices:"Devices",server:"Server"}[section] || section
+  return {soundboard:"Soundboard",updates:"Updates",profile:"Profile",media:"Audio",video:"Video",appearance:"Appearance",notifications:"Notifications",privacy:"Privacy",devices:"Devices",server:"Server"}[section] || section
 }

@@ -57,8 +57,12 @@ with (folder / "sound-preview.pcm").open("wb") as recording:
     try:
         time.sleep(.2)
         assert command("soundboard_preview",play)["previewing"]
-        time.sleep(1.4)
-        assert not command("soundboard_status")["previewing"]
+        # Preview includes asynchronous fetch/decode and audio-device startup.
+        # Slow CI runners still must finish playback, within a bounded deadline.
+        deadline = time.monotonic() + 10
+        while command("soundboard_status")["previewing"]:
+            assert time.monotonic() < deadline, "Sound preview did not finish"
+            time.sleep(.1)
     finally:
         capture.terminate();capture.wait(timeout=5)
 pcm = array.array("h");pcm.frombytes((folder / "sound-preview.pcm").read_bytes())

@@ -46,6 +46,7 @@ Panel {
   WispBridge {
     id: bridge
     clientName: "omarchy-plugin"
+    appFocused: root.opened
     delegateMediaToDesktop: true
     delegateConversationsToDesktop: true
     onDesktopConversationTileRequested: function(id, reuseChannel) {

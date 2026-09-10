@@ -8,6 +8,8 @@ import "FriendLogic.js" as FriendLogic
 Item {
   id: root
 
+  readonly property alias updates: updates
+  WispUpdates { id: updates; bridge: root }
   property string clientName: "quickshell"
   readonly property alias messageActions: messageActions
   WispMessageActions { id: messageActions; bridge: root }
@@ -431,6 +433,10 @@ Item {
     var selected = activeServerState.self || snapshot.self || ({})
     var mediaOwner = snapshot.self || selected
     return Object.assign({}, selected, {
+      // Voice state comes from the live media owner. A cached server view can
+      // still contain Joining after the media-connected event has arrived.
+      connection:mediaOwner.hangout_id || String(activeServer.id) === voiceServerId
+        ? mediaOwner.connection || selected.connection : selected.connection,
       muted:!!mediaOwner.muted,
       deafened:!!mediaOwner.deafened,
       sharing:!!mediaOwner.sharing,
@@ -1040,6 +1046,8 @@ Item {
   }
 
   function send(name, args) {
+    if (updates.preparing && ["status","leave","stop_share","set_camera_enabled","soundboard_stop"].indexOf(name) < 0) return
+
     voiceRecovery.manualCommand(name, args || {})
     var socket = activeSocket
     if (!socket || !socket.connected) {

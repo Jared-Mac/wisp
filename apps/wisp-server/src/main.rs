@@ -109,12 +109,14 @@ async fn main() -> anyhow::Result<()> {
     };
     let state = AppState::new(config).await?;
     let maintenance = tokio::spawn(state.clone().maintain_attachments());
+    let storage_notifications = tokio::spawn(state.clone().maintain_storage_cleanup());
     let listener = tokio::net::TcpListener::bind(args.addr).await?;
     info!(address = %args.addr, "wisp-server listening");
     axum::serve(listener, wisp_server::router(state))
         .with_graceful_shutdown(shutdown_signal())
         .await?;
     maintenance.abort();
+    storage_notifications.abort();
     Ok(())
 }
 

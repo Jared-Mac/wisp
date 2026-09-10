@@ -51,6 +51,10 @@ ShellRoot {
     }
     return null
   }
+  function menuItem(menu, name) {
+    for (var i=0;i<menu.count;i++) if (menu.itemAt(i).objectName === name) return menu.itemAt(i)
+    return null
+  }
   function findObject(item, name, visited) {
     if (!item || visited.indexOf(item) >= 0) return null
     visited.push(item)
@@ -1086,9 +1090,9 @@ ShellRoot {
       incoming.clicked()
       keyDriver.wait(30)
       var menu = test.findObject(surface, "messageMenu-1", [])
-      var copy = menu.itemAt(0)
+      var copy = test.menuItem(menu, "copyMessage-1")
       test.check(copy.text === "Copy" && copy.enabled, "incoming menu offers Copy")
-      test.check(!menu.itemAt(1).visible && !menu.itemAt(2).visible, "incoming menu cannot edit/delete others' messages")
+      test.check(!test.menuItem(menu, "editMessage-1").visible && !test.menuItem(menu, "deleteMessage-1").visible, "incoming menu cannot edit/delete others' messages")
       copy.triggered()
       test.check(bridge.sent[bridge.sent.length-1].name === "copy_chat_text"
         && bridge.sent[bridge.sent.length-1].args.text === String(bridge.snapshot.messages[0].payload), "Copy sends plain message content only to local clipboard")

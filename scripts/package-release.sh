@@ -69,6 +69,8 @@ for script in \
   restore-database.sh \
   plugin-sync.sh \
   wisp-update.sh \
+  wisp-updater.py \
+  client-release-metadata.py \
   wisp-launch.sh \
   wisp-onboarding.sh \
   wisp-client.sh \
@@ -101,11 +103,14 @@ install -m 0644 "$repo_dir/third_party/livekit-net/NOTICE.md" "$package_dir/lice
 
 mkdir -p "$dist_dir"
 archive="$dist_dir/$package_name.tar.gz"
+python3 "$repo_dir/scripts/client-release-metadata.py" "$repo_dir" "$package_dir/release.json"
 tar -czf "$archive" -C "$staging_dir" "$package_name"
 (
   cd "$dist_dir"
   sha256sum "$(basename -- "$archive")" >"$(basename -- "$archive").sha256"
 )
+
+python3 "$repo_dir/scripts/client-release-metadata.py" "$package_dir" "$dist_dir/$package_name.update.json" "$archive" "$architecture"
 
 echo "Created $archive"
 echo "Created $archive.sha256"

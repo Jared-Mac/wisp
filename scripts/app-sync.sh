@@ -54,6 +54,8 @@ fi
 install -m 0644 "$repo_dir/scripts/server-endpoint.sh" "$bin_root/wisp-server-endpoint"
 install -m 0755 "$repo_dir/scripts/wisp-client.sh" "$bin_root/wisp-client"
 install -m 0755 "$repo_dir/scripts/wisp-update.sh" "$bin_root/wisp-update"
+install -m 0755 "$repo_dir/scripts/wisp-updater.py" "$bin_root/wisp-updater"
+python3 "$repo_dir/scripts/client-release-metadata.py" "$repo_dir" "${XDG_CONFIG_HOME:-$HOME/.config}/wisp/installed-release.json"
 install -m 0755 "$repo_dir/scripts/wisp-launch.sh" "$bin_root/wisp-launch"
 install -m 0755 "$repo_dir/scripts/wisp-onboarding.sh" "$bin_root/wisp-onboarding"
 install -m 0755 "$repo_dir/scripts/wisp.sh" "$bin_root/wisp"

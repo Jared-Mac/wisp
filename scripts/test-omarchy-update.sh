@@ -18,7 +18,7 @@ done
 for name in omarchy omarchy-shell; do
   install -m 0755 "$mock" "$test_root/mock-bin/$name"
 done
-for mode in absent existing; do
+for mode in absent existing client_only; do
   config="$test_root/$mode/config"
   state="$test_root/$mode/state"
   plugin="$config/omarchy/plugins/dev.wisp"
@@ -27,11 +27,21 @@ for mode in absent existing; do
     mkdir -p "$plugin"
     touch "$plugin/previous-version"
   fi
-  PATH="$test_root/mock-bin:$PATH" XDG_CONFIG_HOME="$config" \
+  client_only=0
+  if [[ $mode == client_only ]]; then
+    client_only=1
+    mkdir -p "$test_root/$mode/bin"
+    printf 'existing server\n' >"$test_root/$mode/bin/wisp-server"
+  fi
+  WISP_CLIENT_ONLY="$client_only" PATH="$test_root/mock-bin:$PATH" XDG_CONFIG_HOME="$config" \
     XDG_STATE_HOME="$state" XDG_BIN_HOME="$test_root/$mode/bin" \
     WISP_TEST_STATE="$state" bash "$test_root/release/install.sh" >/dev/null
   [[ -f "$state/app-synced" ]]
-  if [[ $mode == absent ]]; then
+  if [[ $mode == client_only ]]; then
+    [[ $(cat "$test_root/$mode/bin/wisp-server") == 'existing server' ]]
+    [[ ! -e "$test_root/$mode/bin/wisp-backup" && ! -e "$test_root/$mode/bin/wisp-restore" ]]
+  fi
+  if [[ $mode != existing ]]; then
     [[ ! -e "$plugin" && ! -e "$state/rescanned" ]]
   else
     cmp "$repo_dir/quickshell/Panel.qml" "$plugin/Panel.qml"

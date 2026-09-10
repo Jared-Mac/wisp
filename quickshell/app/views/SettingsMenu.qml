@@ -122,18 +122,31 @@ Column {
     spacing: root.theme.spacing.sm
     Repeater {
       model: {
-        var tabs = [{id:"profile",label:"Profile"},{id:"media",label:"Audio"},{id:"video",label:"Video"},{id:"soundboard",label:"Soundboard"},{id:"appearance",label:"Appearance"},{id:"notifications",label:"Notifications"},{id:"privacy",label:"Privacy"},{id:"devices",label:"Devices"}]
+        var tabs = [{id:"profile",label:"Profile"},{id:"media",label:"Audio"},{id:"video",label:"Video"},{id:"soundboard",label:"Soundboard"},{id:"appearance",label:"Appearance"},{id:"notifications",label:"Notifications"},{id:"privacy",label:"Privacy"},{id:"devices",label:"Devices"},{id:"updates",label:"Updates"}]
         if (root.bridge.canManageServer) tabs.push({id:"server",label:"Server"})
         return tabs
       }
       SettingsTab {
         required property var modelData
         theme: root.theme; text: modelData.label
-        iconName: ({soundboard:"volume",profile:"profile",media:"microphone",video:"camera",appearance:"palette",notifications:"bell",privacy:"lock",devices:"screen",server:"settings"})[modelData.id]
+        iconName: ({updates:"download",soundboard:"volume",profile:"profile",media:"microphone",video:"camera",appearance:"palette",notifications:"bell",privacy:"lock",devices:"screen",server:"settings"})[modelData.id]
         objectName: "settingsTab-" + modelData.id
         primary: root.section === modelData.id
         onClicked: root.section = modelData.id
       }
+    }
+  }
+
+  Rectangle {
+    visible: !root.searching && root.section === "updates"
+    width: parent.width
+    height: visible ? updateSettings.implicitHeight + root.theme.spacing.xxl * 2 : 0
+    radius: root.theme.cornerRadius; color: root.theme.background
+    border.width: 1; border.color: root.theme.separator
+    Loader {
+      id: updateSettings; active: parent.visible
+      anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top; anchors.margins: root.theme.spacing.xxl
+      sourceComponent: UpdatesSettingsView { bridge: root.bridge; theme: root.theme; width: updateSettings.width }
     }
   }
 

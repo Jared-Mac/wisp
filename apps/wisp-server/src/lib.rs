@@ -24,6 +24,7 @@ mod server_management;
 mod soundboard;
 #[cfg(test)]
 mod soundboard_tests;
+mod storage_cleanup;
 #[cfg(test)]
 mod text_tests;
 mod voice_moderation;

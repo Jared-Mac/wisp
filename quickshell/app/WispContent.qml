@@ -6,6 +6,7 @@ import "views"
 FocusScope {
   id: root
   objectName: "wispContent"
+  enabled: !bridge.updates.preparing
 
   required property var bridge
   required property var theme
@@ -276,6 +277,26 @@ FocusScope {
       width: root.inlineHeader ? Math.max(1, headerActions.x - x - root.theme.spacing.lg) : parent.width
       bridge: root.bridge
       theme: root.theme
+    }
+    Flow {
+      width: parent.width; spacing: root.theme.spacing.sm
+      visible: root.bridge.updates.available || root.bridge.updates.busy
+      Text {
+        width: Math.min(implicitWidth, parent.width); wrapMode: Text.Wrap
+        text: root.bridge.updates.statusText; color: root.theme.accent
+        font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
+        height: Math.max(implicitHeight, updateBannerButton.height)
+        verticalAlignment: Text.AlignVCenter
+      }
+      ChatButton {
+        id: updateBannerButton; theme: root.theme; text: "Update"; iconName: "download"
+        visible: !root.bridge.updates.busy
+        onClicked: {
+          root.settingsSection = "updates"
+          if (settingsLoader.item) settingsLoader.item.section = "updates"
+          if (!root.settingsOpen) root.toggleSettings()
+        }
+      }
     }
     Rectangle {
       width: parent.width; height: root.theme.terminal ? 1 : 0
