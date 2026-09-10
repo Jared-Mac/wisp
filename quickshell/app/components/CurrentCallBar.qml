@@ -20,7 +20,7 @@ Rectangle {
   Item {
     id: header
     anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
-    anchors.margins: root.theme.spacing.md; height: disconnect.height
+    anchors.margins: root.theme.spacing.md; height: root.theme.comfortable ? root.theme.space(52) : disconnect.height
     Item {
       anchors.left: parent.left; anchors.leftMargin: root.theme.space(8)
       anchors.right: disconnect.left; anchors.rightMargin: root.theme.spacing.sm
@@ -28,18 +28,23 @@ Rectangle {
       Text {
         id: location
         objectName: "currentCallLocation"
-        anchors.verticalCenter: parent.verticalCenter
-        width: Math.max(1, Math.min(implicitWidth, parent.width - connection.implicitWidth - root.theme.spacing.sm))
+        anchors.verticalCenter: root.theme.comfortable ? undefined : parent.verticalCenter
+        anchors.top: root.theme.comfortable ? parent.top : undefined
+        width: Math.max(1, Math.min(implicitWidth, parent.width - (root.theme.comfortable ? 0 : connectionMetrics.advanceWidth + root.theme.spacing.sm)))
         elide: Text.ElideRight
         text: root.bridge.currentVoiceRoom ? (root.bridge.voiceServerId === String(root.bridge.activeServer.id) ? "" : (root.bridge.currentVoiceRoom.server_name || "Wisp") + " / ") + root.bridge.currentVoiceLabel : ""
         color: root.theme.accent; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
         HoverHandler { id: locationHover }
         ToolTip.visible: locationHover.hovered && truncated; ToolTip.text: text
       }
+      TextMetrics { id: connectionMetrics; text: connection.text; font: connection.font }
       Text {
         id: connection; objectName: "currentCallConnection"
-        anchors.left: location.right; anchors.leftMargin: root.theme.spacing.sm
-        anchors.verticalCenter: parent.verticalCenter
+        anchors.left: root.theme.comfortable ? parent.left : location.right; anchors.leftMargin: root.theme.comfortable ? 0 : root.theme.spacing.sm
+        anchors.verticalCenter: root.theme.comfortable ? undefined : parent.verticalCenter
+        anchors.top: root.theme.comfortable ? location.bottom : undefined
+        width: root.theme.comfortable ? parent.width : connectionMetrics.advanceWidth
+        elide: Text.ElideRight
         text: root.bridge.mediaState.livekit_connected ? "· connected" : "· connecting…"
         color: root.theme.muted; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
       }
@@ -47,7 +52,7 @@ Rectangle {
     ChatButton {
       id: disconnect; objectName: "currentCallDisconnect"
       anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
-      theme: root.theme; text: "d/c"; destructive: true
+      theme: root.theme; text: root.theme.comfortable ? "Leave" : "d/c"; destructive: true
       Accessible.name: "Disconnect from voice"
       ToolTip.visible: hovered; ToolTip.text: Accessible.name
       onClicked: root.bridge.leave()

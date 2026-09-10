@@ -36,12 +36,12 @@ Column {
     contentItem: Column {
       id: body; spacing: root.theme.spacing.xs
       Item {
-        width: parent.width; height: root.theme.space(28)
+        width: parent.width; height: root.theme.space(root.theme.comfortable ? 38 : 28)
         Text {
           objectName: "roomName"
           anchors.left: parent.left; anchors.right: actions.left; anchors.rightMargin: root.theme.spacing.xs
           anchors.verticalCenter: parent.verticalCenter; elide: Text.ElideRight
-          text: "#" + root.room.name + " /" + root.people.length
+          text: "#" + root.room.name + (root.theme.comfortable ? " · " + root.people.length + " in voice" : " /" + root.people.length)
           color: root.theme.foreground; font.family: root.theme.font.family
           font.pixelSize: root.theme.font.body; font.weight: Font.DemiBold
         }
@@ -50,7 +50,7 @@ Column {
           ChatButton {
             objectName: "joinRoom-" + root.room.id
             visible: !root.current || root.mainApp; enabled: root.bridge.activeServer.connected !== false
-            theme: root.theme; text: root.current ? "inv" : "join"
+            theme: root.theme; text: root.theme.comfortable ? (root.current ? "Invite" : "Join") : root.current ? "inv" : "join"
             Accessible.name: (root.current ? "Invite to " : "Join voice in ") + root.room.name
             ToolTip.visible: hovered; ToolTip.text: Accessible.name
             onClicked: if (root.current) invitePicker.open(); else root.bridge.joinConversationVoice(root.conversationId)

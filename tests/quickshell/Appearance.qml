@@ -20,7 +20,7 @@ ShellRoot {
           && !appearance.colorOptions.friendNames && !appearance.colorOptions.senderNames, "color preferences persisted")
       } else {
         var profiles = ["performative","clean_tui","herdr","terminal","legacy"]
-        var palettes = ["ash_olive","herdr","wisp","graphite","violet","ember"]
+        var palettes = ["ash_olive","herdr","wisp","graphite","violet","ember","astra"]
         profiles.forEach(function(style) {
           appearance.setProfile(style)
           var geometry = [theme.cornerRadius,theme.fontFamily,theme.bodySize,theme.titleSize,theme.tui,theme.cleanTui,theme.performative].join("|")

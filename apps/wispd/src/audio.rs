@@ -423,6 +423,7 @@ pub(crate) struct ProcessedFrame {
 }
 enum Request {
     Start(oneshot::Sender<()>),
+    Stop(oneshot::Sender<()>),
     Process {
         input: Box<PcmFrame>,
         preset: u8,
@@ -440,19 +441,32 @@ impl DenoiserService {
         let worker = std::thread::Builder::new()
             .name("wisp-speech".into())
             .spawn(move || {
-                let mut processor = SpeechProcessor::new();
-                backend.store(processor.neural.backend() as u8, Ordering::Release);
+                // The worker itself is cheap. Keep the model, its pristine reset
+                // template, and AEC state out of RAM until voice is requested.
+                let mut processor: Option<SpeechProcessor> = None;
                 while let Some(request) = rx.blocking_recv() {
                     match request {
                         Request::Start(response) => {
-                            processor.fallback = false;
-                            processor.preset = None;
-                            processor.apm = None;
-                            processor.neural =
-                                NeuralDenoiser::from_template(processor.template.as_ref(), false);
-                            processor.warmup_frames = 0;
-                            processor.slow_frames = 0;
-                            backend.store(processor.neural.backend() as u8, Ordering::Release);
+                            if response.is_closed() {
+                                continue;
+                            }
+                            let active = processor.get_or_insert_with(SpeechProcessor::new);
+                            active.fallback = false;
+                            active.preset = None;
+                            active.apm = None;
+                            active.neural =
+                                NeuralDenoiser::from_template(active.template.as_ref(), false);
+                            active.warmup_frames = 0;
+                            active.slow_frames = 0;
+                            backend.store(active.neural.backend() as u8, Ordering::Release);
+                            if response.send(()).is_err() {
+                                processor = None;
+                            }
+                        }
+                        Request::Stop(response) => {
+                            // Release ownership for allocator reuse. RSS may
+                            // retain free arena pages until memory pressure.
+                            processor = None;
                             let _ = response.send(());
                         }
                         Request::Process {
@@ -464,8 +478,15 @@ impl DenoiserService {
                             if response.is_closed() {
                                 continue;
                             }
-                            let result = processor.process(*input, preset_from_code(preset), reset);
-                            backend.store(processor.neural.backend() as u8, Ordering::Release);
+                            let result = processor
+                                .as_mut()
+                                .context("speech session is not active")
+                                .and_then(|active| {
+                                    let result =
+                                        active.process(*input, preset_from_code(preset), reset);
+                                    backend.store(active.neural.backend() as u8, Ordering::Release);
+                                    result
+                                });
                             let _ = response.send(result);
                         }
                     }
@@ -483,6 +504,17 @@ impl DenoiserService {
             .as_ref()
             .context("speech worker unavailable")?
             .send(Request::Start(tx))
+            .await?;
+        rx.await.context("speech worker stopped")
+    }
+    /// Call only after capture has stopped and its task has been joined, so no
+    /// stale frame can revive the model or contaminate the next conversation.
+    pub async fn stop_session(&self) -> anyhow::Result<()> {
+        let (tx, rx) = oneshot::channel();
+        self.requests
+            .as_ref()
+            .context("speech worker unavailable")?
+            .send(Request::Stop(tx))
             .await?;
         rx.await.context("speech worker stopped")
     }
@@ -525,6 +557,85 @@ impl Drop for DenoiserService {
 )]
 mod tests {
     use super::*;
+
+    // Run alone with --ignored --nocapture to compare fresh worker allocations.
+    // Synthetic frames only: this never opens devices or joins a room.
+    #[tokio::test]
+    #[ignore = "manual process-memory measurement"]
+    async fn speech_worker_memory_probe() {
+        fn memory(phase: &str) {
+            let status = std::fs::read_to_string("/proc/self/smaps_rollup").unwrap();
+            let fields: Vec<_> = status
+                .lines()
+                .filter(|line| {
+                    line.starts_with("Rss:")
+                        || line.starts_with("Pss:")
+                        || line.starts_with("Private_Dirty:")
+                        || line.starts_with("Swap:")
+                })
+                .collect();
+            eprintln!("MEMORY {phase}: {}", fields.join("; "));
+        }
+        memory("before worker");
+        let backend = Arc::new(AtomicU8::new(DenoiserBackend::DeepFilterNet as u8));
+        let service = DenoiserService::spawn(backend.clone()).unwrap();
+        tokio::time::sleep(Duration::from_secs(3)).await;
+        memory("idle worker");
+        let started = Instant::now();
+        service.start_session().await.unwrap();
+        eprintln!("SESSION_START_MS {}", started.elapsed().as_millis());
+        assert_eq!(
+            DenoiserBackend::from_atomic(backend.load(Ordering::Acquire)),
+            DenoiserBackend::DeepFilterNet
+        );
+        for _ in 0..30 {
+            service
+                .process(
+                    &[0; AUDIO_FRAME_SAMPLES],
+                    preset_code(AudioPreset::Clear),
+                    false,
+                )
+                .await
+                .unwrap();
+        }
+        memory("processing");
+        service.stop_session().await.unwrap();
+        memory("released session");
+        drop(service);
+        memory("released worker");
+    }
+
+    #[tokio::test]
+    async fn speech_session_release_rejects_stale_frames_and_restarts_cleanly() {
+        let backend = Arc::new(AtomicU8::new(DenoiserBackend::DeepFilterNet as u8));
+        let service = DenoiserService::spawn(backend.clone()).unwrap();
+        let silent = [0; AUDIO_FRAME_SAMPLES];
+        let preset = preset_code(AudioPreset::Clear);
+        assert!(service.process(&silent, preset, false).await.is_err());
+        service.start_session().await.unwrap();
+        assert_eq!(
+            DenoiserBackend::from_atomic(backend.load(Ordering::Acquire)),
+            DenoiserBackend::DeepFilterNet
+        );
+        for _ in 0..10 {
+            service
+                .process(&[12_000; AUDIO_FRAME_SAMPLES], preset, false)
+                .await
+                .unwrap();
+        }
+        service.stop_session().await.unwrap();
+        service.stop_session().await.unwrap(); // Cleanup is safe after completion or cancellation.
+        assert!(service.process(&silent, preset, false).await.is_err());
+        service.start_session().await.unwrap();
+        for _ in 0..8 {
+            let frame = service.process(&silent, preset, false).await.unwrap();
+            assert!(
+                frame.samples.iter().all(|v| v.abs() <= 1),
+                "previous speech leaked into a new session"
+            );
+        }
+        service.stop_session().await.unwrap();
+    }
 
     fn queue() -> (CaptureQueue, u64) {
         let queue = CaptureQueue::default();

@@ -12,7 +12,7 @@ FocusScope {
   required property url logoSource
   property string presentation: "panel"
   property var anchorController: null
-  property int contentPadding: theme.cleanTui ? theme.space(14) : theme.tui ? theme.space(10) : theme.spacing.huge
+  property int contentPadding: theme.comfortable ? theme.space(18) : theme.cleanTui ? theme.space(14) : theme.tui ? theme.space(10) : theme.spacing.huge
   property bool dismissOnNavigate: false
   property bool showAppButton: false
   property bool showCloseButton: false
@@ -20,6 +20,7 @@ FocusScope {
   // header and the identity menu without duplicating navigation state.
   property string currentPage: "chats"
   readonly property bool settingsOpen: currentPage === "settings"
+  property string settingsSection: "media"
   readonly property bool showingChats: currentPage === "chats"
   onCurrentPageChanged: if (savedStatus) savedStatus.clear()
   property bool localPreviewsPoppedOut: false
@@ -27,7 +28,7 @@ FocusScope {
     && width - contentPadding * 2 >= theme.space(600)
     && ["top", "bottom"].indexOf(bridge.workspaceLayout.dock) < 0
   readonly property int contentWidthLimit: 0
-  readonly property bool inlineHeader: presentation === "app" && width - contentPadding * 2 >= theme.space(740)
+  readonly property bool inlineHeader: presentation === "app" && width - contentPadding * 2 >= theme.space(theme.comfortable ? 1100 : 740)
 
   signal closeRequested()
   signal appRequested()
@@ -52,6 +53,8 @@ FocusScope {
   function resetNavigation() {
     cameraConfirmation.close()
     accountMenu.closeMenu()
+    accessControls.closeMenus()
+    layoutMenu.close()
     currentPage = "chats"
     scrollView.contentY = 0
   }
@@ -74,7 +77,8 @@ FocusScope {
 
   function openServerSettings() {
     if (!bridge.canManageServer) return
-    settingsMenu.section = "server"
+    root.settingsSection = "server"
+    if (settingsLoader.item) settingsLoader.item.section = "server"
     if (!settingsOpen) toggleSettings()
     else bridge.refreshServerSettings()
   }
@@ -180,15 +184,17 @@ FocusScope {
     Item {
       id: topBar
       width: parent.width
-      height: root.theme.space(42)
+      height: Math.max(root.theme.space(root.theme.comfortable ? 60 : 42), root.inlineHeader ? accessControls.implicitHeight : 0)
 
       IdentityMenu {
         id: accountMenu
         anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
-        maximumWidth: root.inlineHeader ? Math.min(root.theme.space(220), Math.max(0, headerActions.x - root.theme.space(520) - root.theme.spacing.lg * 2)) : Math.max(0, headerActions.x - root.theme.spacing.lg)
+        maximumWidth: root.inlineHeader ? Math.min(root.theme.space(root.theme.comfortable ? 320 : 220), Math.max(0, headerActions.x - root.theme.space(root.theme.comfortable ? 540 : 520) - root.theme.spacing.lg * 2)) : Math.max(0, headerActions.x - root.theme.spacing.lg)
         bridge: root.bridge; theme: root.theme; logoSource: root.logoSource
         showWordmark: root.presentation === "app"
         homeAvailable: !root.showingChats
+        showLayout: root.presentation === "app" && root.showingChats && root.theme.comfortable && root.width < root.theme.space(600)
+        onLayoutRequested: layoutMenu.open()
         onHomeRequested: root.goHome()
         onSettingsRequested: if (!root.settingsOpen) root.toggleSettings()
         onNewRoomRequested: identityRoomManager.createRoom()
@@ -219,8 +225,8 @@ FocusScope {
 
         ChatButton {
           objectName: "workspaceLayoutButton"
-          visible: root.presentation === "app" && root.showingChats
-          theme: root.theme; text: root.theme.tui ? "layout" : "Layout"; height: root.theme.space(30)
+          visible: root.presentation === "app" && root.showingChats && (!root.theme.comfortable || root.width >= root.theme.space(600))
+          theme: root.theme; text: root.theme.comfortable ? "Layout ▾" : root.theme.tui ? "layout" : "Layout"; height: root.theme.space(30)
           onClicked: layoutMenu.open()
         }
 
@@ -262,31 +268,15 @@ FocusScope {
           }
         }
 
-        Rectangle {
+        ChatButton {
           id: closeButton
           visible: root.showCloseButton
-          width: visible ? root.theme.space(30) : 0
-          height: root.theme.space(30)
-          radius: root.theme.cornerRadius
-          color: closeMouse.containsMouse
-            ? root.theme.alpha(root.theme.foreground, 0.12)
-            : root.theme.alpha(root.theme.foreground, 0.055)
-
-          Text {
-            anchors.centerIn: parent
-            text: "×"
-            color: root.theme.foreground
-            font.family: root.theme.font.family
-            font.pixelSize: root.theme.font.title
-          }
-
-          MouseArea {
-            id: closeMouse
-            anchors.fill: parent
-            hoverEnabled: true
-            cursorShape: Qt.PointingHandCursor
-            onClicked: root.requestClose()
-          }
+          theme: root.theme; text: "×"
+          width: visible ? root.theme.space(root.theme.comfortable ? 36 : 30) : 0
+          height: width
+          Accessible.name: "Hide Wisp"
+          ToolTip.visible: hovered; ToolTip.text: Accessible.name
+          onClicked: root.requestClose()
         }
       }
     }
@@ -297,6 +287,9 @@ FocusScope {
       objectName: "alwaysVisibleControls"
       showActivityToggle: root.presentation === "app" && root.showingChats
       activityStacked: !root.wideLayout
+      navigationDrawer: !!dashboardLoader.item && !!dashboardLoader.item.drawerMode
+      navigationOpen: !!dashboardLoader.item && !!dashboardLoader.item.drawerOpen
+      onNavigationRequested: if (dashboardLoader.item) dashboardLoader.item.toggleDrawer()
       showAddChat: root.presentation === "app" && root.showingChats
       canAddChat: root.presentation === "app" && !!dashboardLoader.item && dashboardLoader.item.canAddChat
       onAddChatRequested: function(id) { if (dashboardLoader.item) dashboardLoader.item.addChat(id) }
@@ -371,18 +364,27 @@ FocusScope {
         }
       }
 
-      SettingsMenu {
-        id: settingsMenu
-        // Incoming invites remain reachable even when Activity is collapsed.
+      Loader {
+        id: settingsLoader
+        objectName: "settingsLoader"
+        // Keep visited forms alive so switching pages retains local edits, but
+        // don't construct settings in every hidden app/panel surface at startup.
+        property bool visited: false
+        active: root.settingsOpen || visited
+        onLoaded: visited = true
         visible: root.settingsOpen
         width: parent.width
-        bridge: root.bridge
-        theme: root.theme
-        anchorController: root.anchorController
-        onRevealSetting: function(item) {
-          var position = item.mapToItem(scrollView.contentItem, 0, 0)
-          scrollView.contentY = Math.max(0, Math.min(position.y - root.theme.spacing.lg,
-            scrollView.contentHeight - scrollView.height))
+        sourceComponent: SettingsMenu {
+          section: root.settingsSection
+          onSectionChanged: root.settingsSection = section
+          width: settingsLoader.width
+          bridge: root.bridge; theme: root.theme
+          anchorController: root.anchorController
+          onRevealSetting: function(item) {
+            var position = item.mapToItem(scrollView.contentItem, 0, 0)
+            scrollView.contentY = Math.max(0, Math.min(position.y - root.theme.spacing.lg,
+              scrollView.contentHeight - scrollView.height))
+          }
         }
       }
 
@@ -423,7 +425,7 @@ FocusScope {
   Rectangle {
     id: terminalStatus
     objectName: "terminalStatusLine"
-    visible: root.theme.tui
+    visible: root.theme.tui && !root.theme.comfortable
     anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
     height: root.theme.space(root.theme.cleanTui ? 22 : 24)
     color: root.theme.statusBackground
@@ -432,12 +434,29 @@ FocusScope {
       height: 1; color: root.theme.surfaceBorder
     }
     Text {
-      anchors.fill: parent; anchors.leftMargin: root.theme.space(8); anchors.rightMargin: root.theme.space(8)
-      verticalAlignment: Text.AlignVCenter; elide: Text.ElideRight
+      id: terminalState
+      objectName: "terminalStateText"
+      anchors.left: parent.left; anchors.leftMargin: root.theme.space(8)
+      anchors.verticalCenter: parent.verticalCenter
+      width: Math.max(0, parent.width - root.theme.space(16) - (terminalHelp.visible ? terminalHelp.width + root.theme.space(24) : 0))
+      elide: Text.ElideRight
       text: "wisp | " + (root.bridge.daemonConnected ? "connected" : "disconnected")
-        + " | mic:" + (root.bridge.selfState.muted || root.bridge.selfState.deafened ? "muted" : "unmuted")
-        + (root.presentation === "app" ? " | cam:" + (root.bridge.cameraStarting ? "starting" : root.bridge.cameraActive ? "on" : "off") + " share:" + (root.bridge.shareStarting ? "starting" : root.bridge.sharing ? "on" : "off") + "    Shift+M mute · Shift+D deafen · Esc back" : " | Esc back")
+        + " | " + (root.bridge.selfState.deafened ? "deafened" : "mic:" + (root.bridge.selfState.muted ? "muted" : "unmuted"))
+        + (root.presentation === "app" ? " | cam:" + (root.bridge.cameraStarting ? "starting" : root.bridge.cameraActive ? "on" : "off") + " share:" + (root.bridge.shareStarting ? "starting" : root.bridge.sharing ? "on" : "off") : "")
       color: root.theme.statusText
+      font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
+      HoverHandler { id: statusHover }
+      ToolTip.visible: statusHover.hovered && terminalState.truncated
+      ToolTip.text: text
+    }
+    Text {
+      id: terminalHelp
+      objectName: "terminalHelpText"
+      anchors.right: parent.right; anchors.rightMargin: root.theme.space(8)
+      anchors.verticalCenter: parent.verticalCenter
+      visible: parent.width > root.theme.space(820)
+      text: "Tab focus · Shift+M mute · Shift+D deafen · Esc back"
+      color: root.theme.refinedTui ? root.theme.muted : root.theme.statusText
       font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
     }
   }

@@ -2,8 +2,8 @@
 
 function defaultPalette(requestedProfile, environment, managed) {
   if (managed) return "wisp"
-  // Preserve older saved style-only choices and host/unknown appearances.
-  if (["legacy", "classic", "terminal", "terminal-experimental", "clean_tui", "clean-tui"].indexOf(requestedProfile) >= 0) return "wisp"
+  // Fresh installations use Classic with Wisp blue. Keep older explicit styles.
+  if (["performative", "herdr"].indexOf(requestedProfile) < 0) return "wisp"
   return environment === "cachyos" || environment === "desktop" || environment === "omarchy"
     ? "performative" : "wisp"
 }
@@ -15,14 +15,13 @@ function selectProfile(requested, environment, managed) {
   if (requested === "legacy" || requested === "classic") return "legacy"
   if (requested === "terminal" || requested === "terminal-experimental") return "terminal"
   if (requested === "clean_tui" || requested === "clean-tui") return "clean_tui"
-  return environment === "cachyos" || environment === "desktop" || environment === "omarchy"
-    ? "terminal" : "legacy"
+  return "legacy"
 }
 
 function resolve(profile, palette, version, environment, managed) {
   if (managed) return {profile:"legacy", palette:"wisp"}
   var style = selectProfile(profile, environment, false)
-  var color = ["wisp","graphite","violet","ember","performative","ash_olive","herdr"].indexOf(palette) >= 0
+  var color = ["wisp","graphite","violet","ember","performative","ash_olive","herdr","astra"].indexOf(palette) >= 0
     ? palette : defaultPalette(profile, environment, false)
   // Old palettes also selected a layout, except that Clean TUI took precedence.
   if (version < 2 && style !== "clean_tui" && (color === "performative" || color === "herdr")) style = color

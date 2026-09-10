@@ -17,6 +17,9 @@ mod room_access;
 mod room_access_tests;
 mod rooms;
 mod server_management;
+mod soundboard;
+#[cfg(test)]
+mod soundboard_tests;
 #[cfg(test)]
 mod text_tests;
 mod voice_moderation;
@@ -551,6 +554,15 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/v1/livekit/token", post(livekit_token))
         .route("/v1/e2ee/messages", text_body(post(privacy::send), &state))
+        .route(
+            "/v1/soundboard",
+            get(soundboard::list)
+                .merge(post(soundboard::upload).layer(DefaultBodyLimit::max(1_300_000))),
+        )
+        .route(
+            "/v1/soundboard/{id}",
+            get(soundboard::audio).delete(soundboard::remove),
+        )
         .route(
             "/v1/emojis",
             get(chat_extras::emojis)

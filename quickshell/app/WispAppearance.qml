@@ -24,7 +24,7 @@ Item {
   property string error: ""
   signal settingsSaved()
   signal settingsSaveFailed()
-  function validPalette(value) { return ["wisp", "graphite", "violet", "ember", "ash_olive", "herdr"].indexOf(value) >= 0 }
+  function validPalette(value) { return ["wisp", "graphite", "violet", "ember", "ash_olive", "herdr", "astra"].indexOf(value) >= 0 }
   function materialize() {
     // Snapshot the old effective look before changing either independent axis.
     var style = profile, color = palette, options = Object.assign({}, colorOptions)

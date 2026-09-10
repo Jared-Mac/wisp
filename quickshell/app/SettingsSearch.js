@@ -1,15 +1,17 @@
 // Index labels and aliases only; never search account fields or private content.
 var entries = [
+  {section:"soundboard",target:"settingsSoundboard",label:"Server soundboard",keywords:"audio sounds upload clips effects preview play voice starter default"},
+  {section:"media",target:"settingsVoiceTest",label:"Test my voice",keywords:"microphone audio record playback hear processed original noise"},
   {section:"profile",target:"accountEmojiLibrary",label:"My custom emojis",keywords:"account emoji library upload reactions"},
   {section:"server",target:"serverEmojiLibrary",label:"Server custom emojis",keywords:"admin emoji library upload reactions"},
   {section:"media", target:"voiceReconnectSetting", label:"Automatically reconnect voice", keywords:"audio connection disconnect server restart network retry recovery"},
   {section:"profile", target:"profileDisplayName", label:"Display name", keywords:"account profile username nickname"},
   {section:"profile", target:"profileCurrentPassword", label:"Change password", keywords:"account profile login security"},
   {section:"profile", target:"profileTwoFactorStatus", label:"Two-factor authentication (planned)", keywords:"account profile security 2fa mfa"},
-  {section:"media", target:"streamsAsTilesSetting", label:"Open streams in windows or tiles", keywords:"audio video screen share watch popout pop-out default dock anchor"},
-  {section:"media", target:"settingsCamera", label:"Camera", keywords:"audio video webcam device input"},
-  {section:"media", target:"settingsVideoQuality", label:"Publishing quality", keywords:"audio video stream screen share resolution 720p 1080p 1440p fps"},
-  {section:"media", target:"settingsVideoCodec", label:"Video codec", keywords:"audio stream encoding h264 vp8 av1 hardware"},
+  {section:"video", target:"streamsAsTilesSetting", label:"Open streams in windows or tiles", keywords:"audio video screen share watch popout pop-out default dock anchor"},
+  {section:"video", target:"settingsCamera", label:"Camera", keywords:"audio video webcam device input"},
+  {section:"video", target:"settingsVideoQuality", label:"Publishing quality", keywords:"audio video stream screen share resolution 720p 1080p 1440p fps"},
+  {section:"video", target:"settingsVideoCodec", label:"Video codec", keywords:"audio stream encoding h264 vp8 av1 hardware"},
   {section:"media", target:"settingsMicrophone", label:"Microphone", keywords:"audio input device volume level mic"},
   {section:"media", target:"settingsSpeaker", label:"Speaker", keywords:"audio output device headphones sound"},
   {section:"media", target:"settingsProcessing", label:"Audio processing and echo cancellation", keywords:"microphone noise suppression denoiser filter natural clear studio deepfilter deepnet aec echo cancellation"},
@@ -45,5 +47,5 @@ function search(query, canManageServer, hasPanel) {
 }
 
 function sectionLabel(section) {
-  return {profile:"Profile",media:"Audio / Video",appearance:"Appearance",notifications:"Notifications & Chat",privacy:"Privacy",devices:"Devices",server:"Server"}[section] || section
+  return {soundboard:"Soundboard",profile:"Profile",media:"Audio",video:"Video",appearance:"Appearance",notifications:"Notifications & Chat",privacy:"Privacy",devices:"Devices",server:"Server"}[section] || section
 }

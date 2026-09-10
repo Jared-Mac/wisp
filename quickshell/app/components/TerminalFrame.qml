@@ -9,12 +9,12 @@ Item {
   property color ink: theme.surfaceBorder
   property color titleInk: ink
   property bool emphasized: false
-  readonly property bool quiet: theme.cleanTui
-  visible: theme.tui
+  readonly property bool quiet: theme.cleanTui || theme.comfortable
+  visible: theme.tui || theme.comfortable
   Rectangle {
     anchors.fill: parent; anchors.topMargin: root.theme.space(7)
     visible: !root.quiet
-    color: "transparent"; border.width: root.emphasized ? 2 : 1; border.color: root.ink
+    color: "transparent"; border.width: root.emphasized && !root.theme.refinedTui ? 2 : 1; border.color: root.theme.refinedTui && !root.emphasized ? root.theme.alpha(root.ink, 0.4) : root.ink
   }
   Rectangle {
     visible: root.quiet
@@ -34,7 +34,7 @@ Item {
     x: root.quiet ? root.theme.space(4) : root.theme.space(9); y: 0
     width: Math.min(parent.width - x * 2, caption.implicitWidth + root.theme.space(12))
     height: caption.implicitHeight
-    color: root.theme.background
+    color: root.theme.comfortable ? "transparent" : root.theme.background
     Text {
       id: caption
       anchors.fill: parent

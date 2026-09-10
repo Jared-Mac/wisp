@@ -6,6 +6,10 @@ events, persistent desktop state, LiveKit voice/screen/camera media, a
 CLI/simulator, detachable native video surfaces, a standalone desktop window,
 and an optional Omarchy bar integration. Milestones M0–M4 are implemented.
 
+Server members can upload and play short clips from **Settings → Soundboard**
+or the call controls. Each server has its own library. Importing requires
+`ffmpeg`; see [soundboards](docs/soundboard.md) for formats and controls.
+
 ## Run it
 
 ```bash

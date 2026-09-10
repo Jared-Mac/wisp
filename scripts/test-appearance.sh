@@ -14,7 +14,10 @@ run_case() {
     timeout 10 qs --path "$test_dir" >"$test_dir/log" 2>&1
   if ! rg -q APPEARANCE_OK "$test_dir/log" || rg -q 'APPEARANCE_FAILED|Binding loop|TypeError|ReferenceError|Cannot assign|Failed to load' "$test_dir/log"; then cat "$test_dir/log"; exit 1; fi
 }
-run_case default '{}' performative ash_olive
+run_case default '{}' legacy wisp
+run_case cachyos-default '{}' legacy wisp cachyos
+run_case omarchy-default '{}' legacy wisp omarchy
+run_case invalid-profile '{"version":2,"profile":"missing","palette":"graphite"}' legacy graphite
 run_case old-performative '{"profile":"terminal","palette":"performative"}' performative ash_olive
 run_case old-classic-performative '{"profile":"legacy","palette":"performative"}' performative ash_olive
 run_case old-herdr '{"profile":"terminal","palette":"herdr"}' herdr herdr
@@ -25,6 +28,7 @@ run_case old-classic '{"profile":"classic"}' legacy wisp
 run_case unknown '{}' legacy wisp unknown
 run_case managed '{"profile":"performative","palette":"performative","colorOptions":{"roomSections":false}}' legacy wisp omarchy 1
 run_case omarchy-standalone '{"profile":"clean_tui","palette":"herdr"}' clean_tui herdr omarchy
+run_case astra '{"version":2,"profile":"performative","palette":"astra"}' performative astra
 run_case new-classic '{"version":2,"profile":"legacy","palette":"ash_olive"}' legacy ash_olive
 run_case new-performative '{"version":2,"profile":"performative","palette":"violet"}' performative violet
 XDG_CONFIG_HOME="$test_dir/default" WISP_APPEARANCE_ENVIRONMENT=desktop WISP_EXPECT_APPEARANCE=clean_tui WISP_EXPECT_PALETTE=ash_olive \

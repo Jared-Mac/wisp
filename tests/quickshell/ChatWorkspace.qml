@@ -8,6 +8,7 @@ import "app/ChatTiles.js" as Tiles
 ShellRoot {
   id: test
   property bool failed: false
+  property bool responsiveFinished: false
   readonly property string mode: Quickshell.env("WISP_CHAT_FIXTURE_MODE")
   readonly property real testWidth: Number(Quickshell.env("WISP_TEST_WIDTH")) || (Quickshell.env("WISP_TEST_CONSTRAINED") === "1" ? 840 : 1180)
   readonly property real testHeight: Number(Quickshell.env("WISP_TEST_HEIGHT")) || (Quickshell.env("WISP_TEST_CONSTRAINED") === "1" ? 700 : 900)
@@ -70,7 +71,8 @@ ShellRoot {
     id: theme
     appearanceController: themeAppearance
     Component.onCompleted: {
-      if ("profile" in theme) theme.profile = Quickshell.env("WISP_TEST_ADAPTER") === "omarchy" ? "legacy" : Quickshell.env("WISP_TEST_THEME") || "legacy"
+      if ("profile" in theme && test.mode !== "themes") theme.profile = Quickshell.env("WISP_TEST_ADAPTER") === "omarchy" ? "legacy" : Quickshell.env("WISP_TEST_THEME") || "legacy"
+      if (test.mode === "tuirefinement") theme.profile = "performative"
       if (test.mode === "cleantui" && "profile" in theme) theme.profile = "clean_tui"
       if (Quickshell.env("WISP_TEST_ADAPTER") === "omarchy") {
         // Representative host overrides, not Owner's settings or machine.
@@ -304,7 +306,7 @@ ShellRoot {
       var surface = test.compactMode ? compactSurface : window.contentItem
       var frame = test.findObject(surface, "conversationColorFrame", [])
       if (frame) {
-        if (!theme.chatHeadingsColored) test.check(frame.titleInk === theme.muted, "neutral chat caption is wired to color setting")
+        if (!theme.chatHeadingsColored) test.check(frame.titleInk === frame.theme.muted, "neutral chat caption is wired to color setting")
         else test.check(frame.titleInk === frame.parent.chatHeadingColor, "chat caption uses its assigned color")
         if (theme.chatBordersColored) test.check(frame.ink === frame.parent.chatBorderColor, "chat rule uses its assigned color even in Clean TUI")
       }
@@ -434,6 +436,161 @@ ShellRoot {
     }
   }
   Timer {
+    interval: 450; running: test.mode === "memory"
+    onTriggered: {
+      var surface = window.contentItem
+      var page = test.findItem(surface, "wispContent")
+      var loader = test.findObject(surface, "settingsLoader", [])
+      test.check(loader && !loader.active && !loader.item, "chat startup does not allocate hidden settings")
+      page.toggleSettings(); keyDriver.wait(60)
+      var menu = loader.item
+      test.check(menu && !!menu.findSetting(menu, "settingsMicrophone"), "Audio loads when settings opens")
+      test.check(!menu.findSetting(menu, "settingsCamera") && !menu.findSetting(menu, "profileDisplayName"), "unvisited settings sections remain unallocated")
+      menu.section = "profile"; keyDriver.wait(60)
+      var name = menu.findSetting(menu, "profileDisplayName")
+      test.check(!!name, "Profile loads on demand")
+      name.text = "Unsubmitted local draft"
+      menu.section = "media"; keyDriver.wait(30)
+      menu.section = "profile"; keyDriver.wait(30)
+      test.check(menu.findSetting(menu, "profileDisplayName") === name && name.text === "Unsubmitted local draft", "visited forms retain drafts when switching tabs")
+      page.goHome(); keyDriver.wait(30)
+      test.check(loader.item === menu, "returning home preserves visited settings forms")
+      test.check(!bridge.sent.some(function(c) { return ["join_spot", "join_hangout", "camera", "share"].indexOf(c.name) >= 0 }), "lazy settings never join rooms or publish media")
+    }
+  }
+  Timer {
+    interval: 600; running: test.mode === "responsive"
+    onTriggered: {
+      var surface = window.contentItem
+      var workspace = test.findItem(surface, "mainWorkspace")
+      var chats = test.findItem(surface, "conversationPane")
+      var savedTree = Tiles.copy(chats.tree)
+      var savedId = bridge.activeConversationId
+      var savedWidth = window.width
+      var commandStart = bridge.sent.length
+      var editor = test.findItem(surface, "mainComposerEditor")
+      var draft = editor.text
+      window.contentItem.Window.window.width = 420; keyDriver.wait(80)
+      test.check(workspace.drawerMode && !workspace.drawerOpen, "narrow navigation starts closed")
+      test.check(chats.width === workspace.width && chats.y === 0, "narrow chat uses full workspace")
+      var toggle = test.findItem(surface, "navigationDrawerButton")
+      keyDriver.mouseClick(toggle, toggle.width / 2, toggle.height / 2); keyDriver.wait(40)
+      var activity = test.findItem(surface, "activityPane")
+      test.check(workspace.drawerOpen && activity.height === workspace.height && activity.width >= 300, "drawer gives navigation usable width and height")
+      var path = Quickshell.env("WISP_CHAT_SCREENSHOT")
+      if (path) surface.children[0].grabToImage(function(result) { result.saveToFile(path.replace(".png", "-drawer.png")) })
+      keyDriver.wait(100)
+      keyDriver.keyClick(Qt.Key_Escape); keyDriver.wait(40)
+      test.check(!workspace.drawerOpen, "Escape dismisses navigation")
+      chats.split(chats.activeKey, "right"); keyDriver.wait(80)
+      if (path) surface.children[0].grabToImage(function(result) { result.saveToFile(path.replace(".png", "-tabs.png")) })
+      keyDriver.wait(100)
+      var splitTree = JSON.stringify(chats.tree)
+      test.check(chats.tabbed && chats.dockLeaves.length === 2, "narrow split chats become tabs")
+      var canvas = test.findItem(surface, "chatTileCanvas")
+      test.check(canvas.contentWidth === canvas.width, "tabbed chat has no horizontal overflow")
+      var first = chats.dockLeaves[0].key
+      var tab = test.findItem(surface, "responsiveChatTab-" + first)
+      tab.forceActiveFocus(); keyDriver.keyClick(Qt.Key_Space); keyDriver.wait(50)
+      test.check(chats.visibleKey === first, "keyboard selects a chat tab")
+      test.check(test.findItem(surface, "mainComposerEditor").text === draft, "switching tabs keeps the original draft")
+      window.contentItem.Window.window.width = 1600; keyDriver.wait(80)
+      test.check(!chats.tabbed, "widening restores tiles: width " + chats.width + ", minimum " + chats.minimum.width)
+      test.check(JSON.stringify(chats.tree) === splitTree, "resize preserves saved tile arrangement")
+      chats.commit(savedTree); bridge.selectConversation(savedId)
+      window.contentItem.Window.window.width = 420; keyDriver.wait(60)
+      var savedSnapshot = JSON.parse(JSON.stringify(bridge.snapshot))
+      var callSnapshot = JSON.parse(JSON.stringify(savedSnapshot))
+      callSnapshot.self.hangout_id = "responsive-call"
+      callSnapshot.hangouts = [{id:"responsive-call",label:"Test voice",members:[]}]
+      callSnapshot.self.media.livekit_connected = true
+      for (var server of callSnapshot.server_states || []) {
+        if (String(server.server.id) === bridge.voiceServerId) server.hangouts = callSnapshot.hangouts
+      }
+      bridge.snapshot = callSnapshot; keyDriver.wait(80)
+      var callBar = test.findItem(surface, "currentCallBar")
+      test.check(callBar && callBar.inCall && !callBar.roomInvitesInHeader, "narrow call retains invites outside the hidden drawer")
+      var leave = test.findItem(surface, "currentCallDisconnect")
+      var leavePosition = leave.mapToItem(surface, 0, 0)
+      test.check(leavePosition.y + leave.height <= surface.height, "narrow call leave button stays in the window")
+      keyDriver.mouseClick(leave, leave.width / 2, leave.height / 2); keyDriver.wait(40)
+      test.check(bridge.sent[bridge.sent.length - 1].name === "leave", "narrow call leave button works by mouse")
+      bridge.snapshot = savedSnapshot
+      window.contentItem.Window.window.width = savedWidth; keyDriver.wait(80)
+      test.check(!bridge.sent.slice(commandStart).some(function(c) { return ["join_spot", "join_hangout", "camera", "share"].indexOf(c.name) >= 0 }), "responsive navigation never joins or publishes media")
+      test.responsiveFinished = true
+    }
+  }
+  Timer {
+    interval: 600; running: test.mode === "makeover" || test.mode === "tuirefinement"
+    onTriggered: {
+      var surface = window.contentItem
+      var page = test.findItem(surface, "wispContent")
+      var editor = test.findItem(surface, "mainComposerEditor")
+      if (test.mode === "tuirefinement") {
+        test.check(page.theme.refinedTui && !page.theme.comfortable && page.theme.cornerRadius === 0,
+          "terminal refinement keeps the compact square aesthetic")
+        var frame = test.findItem(surface, "conversationColorFrame")
+        test.check(frame && !frame.quiet && frame.emphasized, "active chat retains its terminal frame")
+        var prompt = test.findItem(surface, "terminalChatPrompt")
+        test.check(prompt && prompt.text.indexOf("message /") === 0, "chat prompt names its real destination")
+        test.check(page.theme.statusBackground == page.theme.background, "terminal status stays neutral")
+        var action = test.findItem(surface, "messageOptions-1")
+        var reaction = test.findItem(surface, "addReaction-1")
+        test.check(action && reaction && action.parent === reaction.parent,
+          "message actions share the header instead of taking another transcript row")
+      } else {
+        test.check(page.theme.comfortable && editor.font.pixelSize >= 16, "main app uses readable text")
+        test.check(page.theme.profile === "legacy" && !page.theme.terminal, "Classic owns the readable non-terminal layout")
+        var frame = test.findItem(surface, "conversationColorFrame")
+        test.check(frame && frame.quiet, "Classic retains the redesigned conversation heading and rule")
+        test.check(test.findText(surface, "Send"), "Classic keeps the labeled Send control")
+      }
+      test.check(!theme.comfortable, "main reading treatment does not mutate the compact host theme")
+      var draft = editor.text
+      var start = bridge.sent.length
+      var presence = test.findItem(surface, "presenceMenuButton")
+      for (var mode of ["open", "knock", "closed", "away"]) {
+        keyDriver.mouseClick(presence, presence.width / 2, presence.height / 2); keyDriver.wait(30)
+        var menu = test.findObject(surface, "presenceMenu", [])
+        var choice = menu ? test.findItem(menu.contentItem, "presenceChoice-" + mode) : null
+        test.check(!!choice, "presence menu exposes " + mode)
+        if (choice) keyDriver.mouseClick(choice, choice.width / 2, choice.height / 2)
+        keyDriver.wait(30)
+        var command = bridge.sent[bridge.sent.length - 1]
+        test.check(command && command.name === "set_presence" && command.args.presence === mode
+          && command.args.server_id === "local", "presence menu preserves server-scoped action")
+      }
+      var mute = test.findItem(surface, "muteControl")
+      keyDriver.mouseClick(mute, mute.width / 2, mute.height / 2)
+      test.check(bridge.sent[bridge.sent.length - 1].name === "toggle_muted", "labeled mute retains its action")
+      var deafen = test.findItem(surface, "deafenControl")
+      deafen.forceActiveFocus(); keyDriver.keyClick(Qt.Key_Space)
+      test.check(bridge.sent[bridge.sent.length - 1].name === "toggle_deafened", "labeled deafen supports keyboard input")
+      test.check(editor.text === draft, "header actions preserve the chat draft")
+      test.check(bridge.sent.slice(start).every(function(c) { return ["set_presence", "toggle_muted", "toggle_deafened"].indexOf(c.name) >= 0 }), "presentation changes do not join rooms or publish media")
+      keyDriver.mouseClick(presence, presence.width / 2, presence.height / 2); keyDriver.wait(30)
+      page.resetNavigation()
+      var closed = test.findObject(surface, "presenceMenu", [])
+      test.check(closed && !closed.opened, "navigation closes the presence menu")
+      var actions = test.findItem(surface, "messageOptions-1")
+      actions.forceActiveFocus(); keyDriver.wait(20)
+      test.check(actions.opacity === 1, "keyboard focus reveals message actions")
+      keyDriver.mouseClick(actions, actions.width / 2, actions.height / 2); keyDriver.wait(20)
+      var messageMenu = test.findObject(surface, "messageMenu-1", [])
+      test.check(messageMenu && messageMenu.opened, "message actions remain usable")
+      if (messageMenu) messageMenu.close()
+      var react = test.findItem(surface, "addReaction-1")
+      react.forceActiveFocus(); keyDriver.wait(20)
+      test.check(react.opacity === 1, "keyboard focus reveals the reaction action")
+      keyDriver.mouseClick(react, react.width / 2, react.height / 2); keyDriver.wait(20)
+      var picker = test.findObject(surface, "reactionPicker-1", [])
+      test.check(picker && picker.opened, "relocated reaction picker opens")
+      if (picker) picker.close()
+
+    }
+  }
+  Timer {
     interval: 300; running: test.mode === "workspace"
     onTriggered: bridge.workspaceLayout.reset()
   }
@@ -453,7 +610,13 @@ ShellRoot {
       var before = bridge.sent.length
       var draft = bridge.draftFor("test_room")
       if (classic) classic.clicked()
+      keyDriver.wait(60)
       test.check(theme.profile === "legacy", "Settings selects Classic live")
+      var page = test.findItem(window.contentItem, "wispContent")
+      test.check(page.theme.comfortable && !page.theme.terminal && page.theme.font.body === 16,
+        "Classic window restores the reading layout when selected live")
+      test.check(classic.text === "Classic · default" && classic.contentItem.text === classic.text,
+        "Classic is labeled as default and uses plain controls")
       test.check(bridge.sent.length === before && bridge.draftFor("test_room") === draft, "theme switching does not send commands or alter drafts")
     }
   }
@@ -486,7 +649,17 @@ ShellRoot {
         && theme.accent == "#29a298" && theme.tui, "Settings selects Herdr live")
       test.check(bridge.sent.length === before && bridge.draftFor("test_room") === draft, "Herdr switching preserves drafts and sends no commands")
       test.findItem(window.contentItem, "theme-performative").clicked()
-      test.check(theme.performative && theme.paletteName === "herdr", "Performative appearance supports Solarized Japan")
+      keyDriver.wait(60)
+      test.check(theme.performative && theme.paletteName === "herdr", "TUI appearance supports Solarized Japan")
+      var page = test.findItem(window.contentItem, "wispContent")
+      var tuiButton = test.findItem(window.contentItem, "theme-performative")
+      test.check(!page.theme.comfortable && page.theme.terminal && page.theme.cornerRadius === 0
+        && page.theme.font.body === 13 && page.theme.font.family === theme.herdrMonospaceFamily,
+        "TUI window restores compact monospace and square corners live")
+      test.check(tuiButton.text === "TUI" && tuiButton.contentItem.text === "[TUI]",
+        "TUI setting restores bracketed controls")
+      test.check(tuiButton.contentItem.color == page.theme.selectionText,
+        "selected controls remain legible with an independent palette")
       test.findItem(window.contentItem, "theme-herdr").clicked()
       test.check(theme.herdr, "Herdr appearance retained")
       var colored = theme.colorEnabled("roomSections")
@@ -600,7 +773,7 @@ ShellRoot {
       var content = test.findItem(target, "wispContent")
       test.check(!!content && content.settingsOpen, "Settings action opens settings")
       var home = test.findItem(target, "headerHomeButton")
-      test.check(!!home && home.contentItem.text === "[home]", "Settings exposes the [home] header action")
+      test.check(!!home && home.contentItem.text === (home.theme.comfortable && home.theme.tui ? "home" : "[home]"), "Settings exposes the Home header action")
       var identityButton = test.findItem(target, "identityMenuButton")
       if (identityButton) identityButton.clicked()
       var menuHome = menu ? menu.itemAt(0) : null
@@ -713,6 +886,9 @@ ShellRoot {
       var surface=test.compactMode?compactSurface:window.contentItem
       var preview=test.findItem(surface,"chatImagePreview-geometry"),list=test.findItem(surface,"messageList")
       test.check(preview.height<=list.height+1 && Math.abs(preview.width/preview.height-0.05)<0.001,"tall preview shrinks uniformly to fit chat height")
+      var texture = test.findItem(preview, "chatImageTexture-geometry")
+      test.check(texture.sourceSize.width <= Math.ceil(preview.width * preview.pixelRatio / 128) * 128,
+        "tall preview only decodes the display-sized texture")
       test.setImageFixture(2400,600)
     }
   }
@@ -722,6 +898,9 @@ ShellRoot {
       var surface=test.compactMode?compactSurface:window.contentItem
       var preview=test.findItem(surface,"chatImagePreview-geometry"),list=test.findItem(surface,"messageList")
       test.check(preview.width<=list.width+1 && Math.abs(preview.width/preview.height-4)<0.001,"ultrawide preview fits chat width without distortion")
+      var texture = test.findItem(preview, "chatImageTexture-geometry")
+      test.check(texture.sourceSize.width < 2400 && texture.sourceSize.width >= preview.width * preview.pixelRatio,
+        "wide preview saves decoded memory without undersampling display pixels")
       test.findItem(preview,"openChatImage-geometry").clicked(null)
     }
   }
@@ -962,7 +1141,7 @@ ShellRoot {
       keyDriver.wait(50)
       test.check(!feed.editOpen, "successful keyboard edit closes dialog")
       var add = test.findItem(surface, "headerAddChatButton")
-      if (add) test.check(add.text === "+ add chat", "header add chat is lowercase")
+      if (add) test.check(add.text === (add.theme.comfortable ? "+ Chat" : "+ add chat"), "header add chat remains labeled")
     }
   }
   Timer {
@@ -1308,7 +1487,7 @@ ShellRoot {
       var preservedRatio = bridge.workspaceLayout.activityRatio
       for (var dock of ["left", "right", "top", "bottom"]) {
         bridge.workspaceLayout.dock = dock
-        var openButton = test.findItem(target,"presence-open")
+        var openButton = test.findItem(target,"presenceMenuButton") || test.findItem(target,"presence-open")
         test.check(toggle.parent===openButton.parent && toggle.x<openButton.x,"activity arrow is beside Open: " + dock)
         var beforeSize = workspace.stacked ? chat.height : chat.width
         toggle.clicked()
@@ -1432,7 +1611,7 @@ ShellRoot {
     }
   }
   Timer {
-    interval: test.mode === "saved" ? 3800 : test.mode === "interactions" || test.mode === "panelinteractions" ? 2500 : 1200; running: true
+    interval: test.mode === "saved" ? 3800 : test.mode === "interactions" || test.mode === "panelinteractions" ? 2500 : 1200; running: test.mode !== "responsive" || test.responsiveFinished
     onTriggered: {
       var surface = test.compactMode ? compactSurface : window.contentItem
       if (test.mode === "presence" || test.mode === "panelpresence") {

@@ -12,7 +12,7 @@ Item {
   readonly property bool canRequest: root.friend.online &&
     (root.friend.presence === "open" || root.friend.presence === "knock")
 
-  implicitHeight: root.theme.space(root.theme.tui ? 28 : 32)
+  implicitHeight: root.theme.space(root.theme.comfortable ? 38 : root.theme.tui ? 28 : 32)
 
   // Observe the entire row, including child buttons, without intercepting clicks.
   HoverHandler { id: rowHover }
@@ -105,33 +105,26 @@ Item {
     }
   }
 
-  Rectangle {
+  ChatButton {
     id: messageButton
+    objectName: "messageFriend-" + String(root.friend.id || root.friend.display_name)
+    theme: root.theme
+    Accessible.name: "Message " + root.friend.display_name
+    ToolTip.visible: hovered; ToolTip.text: Accessible.name
+    onClicked: root.bridge.openDirect(root.friend.display_name)
     width: root.theme.terminal ? messageLabel.implicitWidth + root.theme.space(18) : root.theme.space(66)
-    height: root.theme.space(28)
+    height: root.theme.space(root.theme.comfortable ? 36 : 28)
     anchors.right: parent.right
     anchors.rightMargin: root.theme.spacing.sm
     anchors.verticalCenter: parent.verticalCenter
-    radius: root.theme.cornerRadius
-    color: root.theme.tui && !messageMouse.containsMouse ? "transparent" : messageMouse.containsMouse
-      ? root.theme.alpha(root.theme.accent, 0.25)
-      : root.theme.alpha(root.theme.foreground, 0.07)
-
-    Text {
+    text: root.theme.tui && !root.theme.comfortable ? "[msg]" : "Message"
+    contentItem: Text {
       id: messageLabel
-      anchors.centerIn: parent
-      text: root.theme.tui ? "[msg]" : "Message"
+      text: messageButton.text
       color: root.theme.foreground
       font.family: root.theme.font.family
       font.pixelSize: root.theme.font.caption
-    }
-
-    MouseArea {
-      id: messageMouse
-      anchors.fill: parent
-      hoverEnabled: true
-      cursorShape: Qt.PointingHandCursor
-      onClicked: root.bridge.openDirect(root.friend.display_name)
+      horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
     }
   }
 }

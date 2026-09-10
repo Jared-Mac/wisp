@@ -8,7 +8,7 @@ ChatButton {
   readonly property bool collapsed: bridge.workspaceLayout.activityCollapsed
   readonly property bool reversed: ["right", "bottom"].indexOf(bridge.workspaceLayout.dock) >= 0
   readonly property string direction: stacked ? (reversed !== collapsed ? "down" : "up") : (reversed !== collapsed ? "right" : "left")
-  width: theme.space(30); height: width
+  width: theme.space(theme.comfortable ? 36 : 30); height: width
   Accessible.name: collapsed ? "Expand activity" : "Collapse activity"
   onClicked: bridge.workspaceLayout.activityCollapsed = !collapsed
   contentItem: Item {

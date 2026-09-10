@@ -30,6 +30,7 @@ Column {
     searchField.text = ""
     // Wait for the section's layout before moving the outer settings scroll view.
     Qt.callLater(function() {
+      if (result.target === "settingsVideoCodec" && videoSettings.item) videoSettings.item.advancedOpen = true
       var target = root.findSetting(root, result.target)
       if (target) { root.revealedTarget = result.target; target.forceActiveFocus(Qt.TabFocusReason); root.revealSetting(target) }
     })
@@ -117,7 +118,7 @@ Column {
     spacing: root.theme.spacing.sm
     Repeater {
       model: {
-        var tabs = [{id:"profile",label:"Profile"},{id:"media",label:"Audio / Video"},{id:"appearance",label:"Appearance"},{id:"notifications",label:"Notifications & Chat"},{id:"privacy",label:"Privacy"},{id:"devices",label:"Devices"}]
+        var tabs = [{id:"profile",label:"Profile"},{id:"media",label:"Audio"},{id:"video",label:"Video"},{id:"soundboard",label:"Soundboard"},{id:"appearance",label:"Appearance"},{id:"notifications",label:"Notifications & Chat"},{id:"privacy",label:"Privacy"},{id:"devices",label:"Devices"}]
         if (root.bridge.canManageServer) tabs.push({id:"server",label:"Server"})
         return tabs
       }
@@ -132,17 +133,44 @@ Column {
   }
 
   Rectangle {
+    visible: !root.searching && root.section === "soundboard"
+    width: parent.width
+    height: visible ? soundboardSettings.implicitHeight + root.theme.spacing.xxl * 2 : 0
+    radius: root.theme.cornerRadius
+    color: root.theme.tui ? root.theme.background : root.theme.alpha(root.theme.foreground, 0.035)
+    border.width: 1; border.color: root.theme.separator
+    Loader {
+      id: soundboardSettings
+      property bool visited: false
+      active: parent.visible || visited
+      onLoaded: visited = true
+      anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
+      anchors.margins: root.theme.spacing.xxl
+      sourceComponent: SoundboardView {
+        width: soundboardSettings.width
+        bridge: root.bridge; theme: root.theme; serverId: root.bridge.activeServer.id
+      }
+    }
+  }
+
+  Rectangle {
     visible: !root.searching && root.section === "profile"
     width: parent.width
     height: visible ? profileSettings.implicitHeight + root.theme.spacing.xxl * 2 : 0
     radius: root.theme.cornerRadius
     color: root.theme.tui ? root.theme.background : root.theme.alpha(root.theme.foreground, 0.035)
     border.width: 1; border.color: root.theme.separator
-    ProfileSettingsView {
+    Loader {
       id: profileSettings
+      property bool visited: false
+      active: parent.visible || visited
+      onLoaded: visited = true
       anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
       anchors.margins: root.theme.spacing.xxl
-      bridge: root.bridge; theme: root.theme
+      sourceComponent: ProfileSettingsView {
+        width: profileSettings.width
+        bridge: root.bridge; theme: root.theme
+      }
     }
   }
 
@@ -153,11 +181,17 @@ Column {
     radius: root.theme.cornerRadius
     color: root.theme.tui ? root.theme.background : root.theme.alpha(root.theme.foreground, 0.035)
     border.width: 1; border.color: root.theme.separator
-    ServerSettingsView {
+    Loader {
       id: serverSettings
+      property bool visited: false
+      active: parent.visible || visited
+      onLoaded: visited = true
       anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
       anchors.margins: root.theme.spacing.xxl
-      bridge: root.bridge; theme: root.theme
+      sourceComponent: ServerSettingsView {
+        width: serverSettings.width
+        bridge: root.bridge; theme: root.theme
+      }
     }
   }
 
@@ -168,13 +202,19 @@ Column {
     height: appearanceSettings.implicitHeight + root.theme.spacing.xxl * 2
     radius: root.theme.cornerRadius
     color: root.theme.tui ? root.theme.background : root.theme.alpha(root.theme.foreground, 0.035)
-    border.width: root.theme.tui ? 1 : 0
+    border.width: root.theme.tui && !root.theme.comfortable ? 1 : 0
     border.color: root.theme.separator
-    AppearanceSettingsView {
+    Loader {
       id: appearanceSettings
+      property bool visited: false
+      active: parent.visible || visited
+      onLoaded: visited = true
       anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
       anchors.margins: root.theme.spacing.xxl
-      theme: root.theme
+      sourceComponent: AppearanceSettingsView {
+        width: appearanceSettings.width
+        theme: root.theme
+      }
     }
   }
 
@@ -185,11 +225,17 @@ Column {
     radius: root.theme.cornerRadius
     color: root.theme.tui ? root.theme.background : root.theme.alpha(root.theme.foreground, 0.035)
     border.width: 1; border.color: root.theme.separator
-    PrivacySettingsView {
+    Loader {
       id: privacySettings
+      property bool visited: false
+      active: parent.visible || visited
+      onLoaded: visited = true
       anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
       anchors.margins: root.theme.spacing.xxl
-      bridge: root.bridge; theme: root.theme
+      sourceComponent: PrivacySettingsView {
+        width: privacySettings.width
+        bridge: root.bridge; theme: root.theme
+      }
     }
   }
 
@@ -199,16 +245,22 @@ Column {
     height: notificationSettings.implicitHeight + root.theme.spacing.xxl * 2
     radius: root.theme.cornerRadius
     color: root.theme.tui ? root.theme.background : root.theme.alpha(root.theme.foreground, 0.035)
-    border.width: root.theme.tui ? 1 : 0
+    border.width: root.theme.tui && !root.theme.comfortable ? 1 : 0
     border.color: root.theme.separator
-    NotificationSettingsView {
+    Loader {
       id: notificationSettings
+      property bool visited: false
+      active: parent.visible || visited
+      onLoaded: visited = true
       anchors.left: parent.left
       anchors.right: parent.right
       anchors.top: parent.top
       anchors.margins: root.theme.spacing.xxl
-      bridge: root.bridge
-      theme: root.theme
+      sourceComponent: NotificationSettingsView {
+        width: notificationSettings.width
+        bridge: root.bridge
+        theme: root.theme
+      }
     }
   }
 
@@ -218,37 +270,49 @@ Column {
     height: deviceSettings.implicitHeight + root.theme.spacing.xxl * 2
     radius: root.theme.cornerRadius
     color: root.theme.tui ? root.theme.background : root.theme.alpha(root.theme.foreground, 0.035)
-    border.width: root.theme.tui ? 1 : 0
+    border.width: root.theme.tui && !root.theme.comfortable ? 1 : 0
     border.color: root.theme.separator
 
-    DeviceSettingsView {
+    Loader {
       id: deviceSettings
+      property bool visited: false
+      active: parent.visible || visited
+      onLoaded: visited = true
       anchors.left: parent.left
       anchors.right: parent.right
       anchors.top: parent.top
       anchors.margins: root.theme.spacing.xxl
-      bridge: root.bridge
-      theme: root.theme
+      sourceComponent: DeviceSettingsView {
+        width: deviceSettings.width
+        bridge: root.bridge
+        theme: root.theme
+      }
     }
   }
 
   Rectangle {
-    visible: !root.searching && root.section === "media"
+    visible: !root.searching && root.section === "video"
     width: parent.width
     height: videoSettings.implicitHeight + root.theme.spacing.xxl * 2
     radius: root.theme.cornerRadius
     color: root.theme.tui ? root.theme.background : root.theme.alpha(root.theme.foreground, 0.035)
-    border.width: root.theme.tui ? 1 : 0
+    border.width: root.theme.tui && !root.theme.comfortable ? 1 : 0
     border.color: root.theme.separator
 
-    VideoSettingsView {
+    Loader {
       id: videoSettings
+      property bool visited: false
+      active: parent.visible || visited
+      onLoaded: visited = true
       anchors.left: parent.left
       anchors.right: parent.right
       anchors.top: parent.top
       anchors.margins: root.theme.spacing.xxl
-      bridge: root.bridge
-      theme: root.theme
+      sourceComponent: VideoSettingsView {
+        width: videoSettings.width
+        bridge: root.bridge
+        theme: root.theme
+      }
     }
   }
 
@@ -258,17 +322,23 @@ Column {
     height: audioSettings.implicitHeight + root.theme.spacing.xxl * 2
     radius: root.theme.cornerRadius
     color: root.theme.tui ? root.theme.background : root.theme.alpha(root.theme.foreground, 0.035)
-    border.width: root.theme.tui ? 1 : 0
+    border.width: root.theme.tui && !root.theme.comfortable ? 1 : 0
     border.color: root.theme.separator
 
-    AudioSettingsView {
+    Loader {
       id: audioSettings
+      property bool visited: false
+      active: parent.visible || visited
+      onLoaded: visited = true
       anchors.left: parent.left
       anchors.right: parent.right
       anchors.top: parent.top
       anchors.margins: root.theme.spacing.xxl
-      bridge: root.bridge
-      theme: root.theme
+      sourceComponent: AudioSettingsView {
+        width: audioSettings.width
+        bridge: root.bridge
+        theme: root.theme
+      }
     }
   }
 
@@ -278,7 +348,7 @@ Column {
     height: visible ? desktopSettings.implicitHeight + root.theme.spacing.xxl * 2 : 0
     radius: root.theme.cornerRadius
     color: root.theme.tui ? root.theme.background : root.theme.alpha(root.theme.foreground, 0.035)
-    border.width: root.theme.tui ? 1 : 0
+    border.width: root.theme.tui && !root.theme.comfortable ? 1 : 0
     border.color: root.theme.separator
 
     Column {

@@ -11,7 +11,7 @@ ChatButton {
   objectName: direct ? "callConversation" : "joinConversationVoice"
   visible: !!target && (!target.current || direct)
   enabled: !!target && target.connected && !target.current && (!direct || target.available)
-  text: direct ? "call" : "join voice"
+  text: root.theme.comfortable ? (direct ? "Call" : "Join voice") : direct ? "call" : "join voice"
   Accessible.name: direct ? "Call " + (target ? target.name : "friend") : "Join voice in this conversation"
   ToolTip.visible: hovered
   ToolTip.text: direct && target ? target.current ? "Already in voice with " + target.name

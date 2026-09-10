@@ -10,6 +10,8 @@ Item {
   property string clientName: "quickshell"
   readonly property alias voiceRecovery: voiceRecovery
   WispVoiceRecovery { id: voiceRecovery; bridge: root }
+  readonly property alias soundboard: soundboard
+  WispSoundboard { id: soundboard; bridge: root }
   readonly property alias chatExtras: chatExtras
   WispChatExtras { id: chatExtras; bridge: root }
   readonly property alias workspaceLayout: workspaceLayout
@@ -33,6 +35,7 @@ Item {
   property string lastAppliedVolumes: ""
   onDaemonConnectedChanged: {
     chatExtras.invalidate()
+    soundboard.reset()
     lastAppliedVolumes = ""
     if (daemonConnected) applyParticipantVolumes()
     else { voiceRecovery.daemonLost(); privacySnapshotReady = false; privacyRequestId = ""; privacyBusy = false; profileBusy = false; profileReady = false; profileRequestId = "" }
@@ -989,12 +992,13 @@ Item {
     }
     if (message.type === "event" && message.payload && message.payload.snapshot) {
       if (message.name === "emojis_changed") chatExtras.invalidate()
+      if (message.name === "soundboard_changed") soundboard.invalidate()
       applySnapshot(message.payload.snapshot, message.name)
       return
     }
-    var recoveryReply = message.type === "result" && (requests[message.id] || {}).kind === "voiceRecovery"
+    var handledReply = message.type === "result" && ["voiceRecovery", "soundboard"].indexOf((requests[message.id] || {}).kind) >= 0
     if (message.type === "result") finishRequest(message)
-    if (message.type === "result" && !recoveryReply && message.ok !== true && message.error) {
+    if (message.type === "result" && !handledReply && message.ok !== true && message.error) {
       lastError = String(message.error.message || "Wisp command failed")
       commandFailed(lastError)
     }
@@ -1143,7 +1147,9 @@ Item {
     delete requests[message.id]
     var value = message.value || ({})
     var conversationId = action.conversationId
-    if (action.kind === "chatExtras") {
+    if (action.kind === "soundboard") {
+      soundboard.reply(message, action)
+    } else if (action.kind === "chatExtras") {
       chatExtras.reply(message, action)
     } else if (action.kind === "voiceRecovery") {
       voiceRecovery.reply(message)

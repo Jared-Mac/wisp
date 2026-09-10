@@ -22,7 +22,7 @@ Item {
     }
     contentItem: Text {
       objectName: "roomsSectionHeader"; verticalAlignment: Text.AlignVCenter; elide: Text.ElideRight
-      text: (root.collapsible ? (root.collapsed ? "▸ " : "▾ ") : "") + (root.theme.tui ? "/rooms · " : "ROOMS · ") + root.bridge.roomCount
+      text: (root.collapsible ? (root.collapsed ? "▸ " : "▾ ") : "") + (root.theme.comfortable ? "Rooms · " : root.theme.tui ? "/rooms · " : "ROOMS · ") + root.bridge.roomCount
       color: root.theme.roomSectionColor; font.family: root.theme.font.family
       font.pixelSize: root.theme.font.caption; font.bold: true
     }

@@ -84,8 +84,8 @@ Item {
       }
     }
     background: Rectangle {
-      color: selector.hovered ? root.theme.alpha(root.theme.foreground,0.07) : root.theme.surface
-      border.width: 1
+      color: selector.hovered ? root.theme.alpha(root.theme.foreground,0.07) : root.theme.refinedTui ? "transparent" : root.theme.surface
+      border.width: root.theme.refinedTui && !selector.activeFocus ? 0 : 1
       border.color: selector.activeFocus ? root.theme.focusBorder : root.theme.separator
       radius: root.theme.cornerRadius
     }
@@ -114,7 +114,8 @@ Item {
     anchors.left: parent.left
     anchors.right: parent.right
     height: root.theme.space(28)
-    text: "Invite friend"
+    text: root.theme.refinedTui ? "[Invite friend]" : "Invite friend"
+    flat: root.theme.refinedTui
     visible: root.showInvite
     enabled: root.bridge.activeServer.connected !== false
     font.family: root.theme.font.family

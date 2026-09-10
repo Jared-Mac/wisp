@@ -24,7 +24,7 @@ Column {
   Flow {
     width: parent.width; spacing: root.theme.spacing.lg
     Repeater {
-      model: [{profile:"performative",label:"Performative · default"},{profile:"clean_tui",label:"Clean TUI"},{profile:"herdr",label:"Herdr"},{profile:"terminal",label:"Terminal Grid"},{profile:"legacy",label:"Classic"}]
+      model: [{profile:"legacy",label:"Classic · default"},{profile:"performative",label:"TUI"},{profile:"clean_tui",label:"Clean TUI"},{profile:"herdr",label:"Herdr"},{profile:"terminal",label:"Terminal Grid"}]
       ChatButton {
         required property var modelData
         objectName: "theme-" + modelData.profile
@@ -37,8 +37,12 @@ Column {
   }
   Text {
     width: parent.width; wrapMode: Text.WordWrap
-    visible: !!root.appearance && root.appearance.profile === "clean_tui"
-    text: "Clean TUI uses a narrow activity rail, quiet rules, restrained selections, and a calmer transcript. Palettes and color accents are independent of the interface style."
+    visible: !!root.appearance && ["legacy", "performative", "clean_tui"].indexOf(root.appearance.profile) >= 0
+    text: root.appearance && root.appearance.profile === "legacy"
+      ? "Classic uses larger text, clear controls, and a roomy chat layout. Narrow windows tuck Rooms & friends into a drawer."
+      : root.appearance && root.appearance.profile === "performative"
+      ? "TUI uses compact monospace text, square frames, bracketed controls, and a terminal-style chat prompt. All app features remain available."
+      : "Clean TUI uses a narrow activity rail, quiet rules, restrained selections, and a calmer transcript. Palettes and color accents are independent of the interface style."
     color: root.theme.muted
     font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
   }
@@ -50,7 +54,7 @@ Column {
   Flow {
     width: parent.width; spacing: root.theme.spacing.lg
     Repeater {
-      model: [{key:"wisp",label:"Wisp blue"},{key:"graphite",label:"Graphite"},{key:"violet",label:"Violet"},{key:"ember",label:"Ember"},{key:"ash_olive",label:"Ash & Olive"},{key:"herdr",label:"Solarized Japan"}]
+      model: [{key:"wisp",label:"Wisp blue"},{key:"graphite",label:"Graphite"},{key:"violet",label:"Violet"},{key:"ember",label:"Ember"},{key:"ash_olive",label:"Ash & Olive"},{key:"herdr",label:"Solarized Japan"},{key:"astra",label:"Astra"}]
       ChatButton {
         required property var modelData
         objectName: "palette-" + modelData.key
@@ -63,7 +67,7 @@ Column {
   }
   Text {
     width: parent.width; wrapMode: Text.WordWrap
-    text: "Ash & Olive contains the original Performative colors. Solarized Japan contains the original Herdr colors. Changing colors never changes your interface style."
+    text: "Ash & Olive contains the original Performative colors. Solarized Japan contains the original Herdr colors. Astra matches Omarchy’s ink blue and periwinkle palette. Changing colors never changes your interface style."
     color: root.theme.muted
     font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
   }

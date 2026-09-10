@@ -290,6 +290,11 @@ pub(crate) struct MediaManager {
     pub(crate) video_bridge: crate::video_bridge::VideoBridge,
     operation: AsyncMutex<()>,
     audio_test: crate::audio_test::AudioTest,
+    soundboard: Arc<crate::soundboard::Mixer>,
+    soundboard_preview: crate::audio_test::AudioTest,
+    soundboard_last_play: Mutex<Option<Instant>>,
+    soundboard_play_epoch: AtomicU64,
+    soundboard_preview_epoch: AtomicU64,
     session: AsyncMutex<Option<MediaSession>>,
     generation: AtomicU64,
     connected: Arc<AtomicBool>,
@@ -356,6 +361,11 @@ impl MediaManager {
                 video_bridge: crate::video_bridge::VideoBridge::default(),
                 operation: AsyncMutex::new(()),
                 audio_test: crate::audio_test::AudioTest::default(),
+                soundboard: Arc::new(crate::soundboard::Mixer::default()),
+                soundboard_preview: crate::audio_test::AudioTest::default(),
+                soundboard_last_play: Mutex::new(None),
+                soundboard_play_epoch: AtomicU64::new(0),
+                soundboard_preview_epoch: AtomicU64::new(0),
                 session: AsyncMutex::new(None),
                 generation: AtomicU64::new(0),
                 connected: Arc::new(AtomicBool::new(false)),
@@ -401,6 +411,92 @@ impl MediaManager {
             .as_ref()
             .expect("platform audio was initialized")
             .clone())
+    }
+
+    pub(crate) fn soundboard_status(&self) -> serde_json::Value {
+        let preview = self.soundboard_preview.status();
+        serde_json::json!({"playing":self.soundboard.active(),"previewing":preview.phase == "playing","error":preview.error})
+    }
+
+    pub(crate) fn begin_soundboard(&self, preview: bool) -> u64 {
+        let play = self.soundboard_play_epoch.fetch_add(1, Ordering::AcqRel) + 1;
+        let local = self.soundboard_preview_epoch.fetch_add(1, Ordering::AcqRel) + 1;
+        if preview { local } else { play }
+    }
+
+    pub(crate) async fn stop_soundboard(&self) {
+        self.begin_soundboard(false);
+        let _operation = self.operation.lock().await;
+        self.soundboard.stop();
+        self.soundboard_preview.stop(true).await;
+    }
+
+    pub(crate) async fn play_soundboard(
+        &self,
+        samples: Vec<i16>,
+        volume: u8,
+        expected_generation: u64,
+        ticket: u64,
+    ) -> anyhow::Result<()> {
+        let _operation = self.operation.lock().await;
+        let session = self.session.lock().await;
+        let session = session
+            .as_ref()
+            .context("Join a voice room on this server first")?;
+        anyhow::ensure!(
+            self.generation() == expected_generation && self.connected.load(Ordering::Acquire),
+            "Voice room changed; play the sound again"
+        );
+        anyhow::ensure!(
+            !session.microphone.is_muted() && !self.deafened.load(Ordering::Acquire),
+            "Unmute and undeafen before playing a sound into voice"
+        );
+        anyhow::ensure!(
+            self.soundboard_play_epoch.load(Ordering::Acquire) == ticket,
+            "Sound playback cancelled"
+        );
+        let mut last = self
+            .soundboard_last_play
+            .lock()
+            .expect("soundboard cooldown lock");
+        anyhow::ensure!(
+            last.is_none_or(|last| last.elapsed() >= std::time::Duration::from_secs(1)),
+            "Wait a moment before playing another sound"
+        );
+        *last = Some(Instant::now());
+        self.soundboard.play(samples, volume);
+        Ok(())
+    }
+
+    pub(crate) async fn preview_soundboard(
+        &self,
+        mut samples: Vec<i16>,
+        volume: u8,
+        ticket: u64,
+    ) -> anyhow::Result<()> {
+        let _operation = self.operation.lock().await;
+        if let Some(session) = self.session.lock().await.as_ref() {
+            anyhow::ensure!(
+                session.microphone.is_muted(),
+                "Mute your microphone to preview privately during a call"
+            );
+        }
+        anyhow::ensure!(
+            !self.deafened.load(Ordering::Acquire),
+            "Undeafen to preview a sound"
+        );
+        let platform = self.platform_audio()?;
+        let inventory = self.reconcile_audio_devices(&platform, false, false);
+        let speaker = inventory.speaker.context("No speaker is available")?;
+        for sample in &mut samples {
+            *sample = i16::try_from(i32::from(*sample) * i32::from(volume.min(100)) / 100)?;
+        }
+        anyhow::ensure!(
+            self.soundboard_preview_epoch.load(Ordering::Acquire) == ticket,
+            "Sound preview cancelled"
+        );
+        self.soundboard.stop();
+        self.soundboard_preview.play_clip(&speaker, samples).await
     }
 
     pub(crate) async fn audio_test_command(
@@ -836,6 +932,25 @@ impl MediaManager {
         if self.is_connected_to(hangout_id).await {
             bail!("already connected to this room");
         }
+        let result = self
+            .connect_session(hangout_id, credentials, muted, deafened)
+            .await;
+        if result.is_err()
+            && let Err(error) = self.denoiser.stop_session().await
+        {
+            warn!(%error, "release speech state after failed join");
+        }
+        result
+    }
+
+    #[allow(clippy::too_many_lines)]
+    async fn connect_session(
+        &self,
+        hangout_id: HangoutId,
+        credentials: LiveKitTokenResponse,
+        muted: bool,
+        deafened: bool,
+    ) -> anyhow::Result<ConnectedMedia> {
         self.audio_test.stop(true).await;
         self.disconnect_session().await;
 
@@ -950,6 +1065,7 @@ impl MediaManager {
             microphone_track.clone(),
             self.audio_preset.clone(),
             self.denoiser.clone(),
+            self.soundboard.clone(),
             self.input_level.clone(),
             self.event_tx.clone(),
             generation,
@@ -1080,11 +1196,19 @@ impl MediaManager {
     }
 
     async fn disconnect_session(&self) {
+        self.begin_soundboard(false);
+        self.soundboard.stop();
+        self.soundboard_preview.stop(true).await;
         self.video_bridge.clear();
         self.connected.store(false, Ordering::Release);
         self.input_level.store(0, Ordering::Release);
         self.generation.fetch_add(1, Ordering::AcqRel);
         let Some(session) = self.session.lock().await.take() else {
+            // A cancelled join can leave a warmed processor without an RTC
+            // session. Don't disturb an explicitly running microphone test.
+            if self.audio_test.status().phase != "recording" {
+                let _ = self.denoiser.stop_session().await;
+            }
             return;
         };
         if let Some(surface) = &self.surface {
@@ -1102,7 +1226,7 @@ impl MediaManager {
         let _ = session.microphone_capture.set_state(gst::State::Null);
         session.microphone_task.abort();
         let _ = session.microphone_task.await;
-        if let Err(error) = self.denoiser.start_session().await {
+        if let Err(error) = self.denoiser.stop_session().await {
             warn!(%error, "release speech processing state");
         }
         if let Some(screen_share) = session.screen_share {
@@ -1157,6 +1281,19 @@ impl MediaManager {
     }
 
     pub(crate) async fn set_muted(&self, muted: bool) {
+        if muted {
+            self.soundboard_play_epoch.fetch_add(1, Ordering::AcqRel);
+            self.soundboard.stop();
+        }
+        if !muted {
+            self.soundboard_preview_epoch.fetch_add(1, Ordering::AcqRel);
+        }
+        // Serialize preview setup with unmuting: a delayed preview must never
+        // start after the microphone has been opened.
+        let _operation = self.operation.lock().await;
+        if !muted {
+            self.soundboard_preview.stop(true).await;
+        }
         if let Some(session) = self.session.lock().await.as_ref() {
             let muted = muted
                 || session
@@ -1186,6 +1323,14 @@ impl MediaManager {
     }
 
     pub(crate) async fn set_deafened(&self, deafened: bool) {
+        if deafened {
+            self.begin_soundboard(false);
+            self.soundboard.stop();
+        }
+        let _operation = self.operation.lock().await;
+        if deafened {
+            self.soundboard_preview.stop(true).await;
+        }
         let deafened = deafened
             || self.session.lock().await.as_ref().is_some_and(|session| {
                 session
@@ -2453,13 +2598,14 @@ fn capture_microphone_sample(sink: &gst_app::AppSink) -> anyhow::Result<Vec<i16>
         .collect())
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 async fn run_microphone_pipeline(
     captured_frames: Arc<CaptureQueue>,
     publish_source: NativeAudioSource,
     publish_track: LocalAudioTrack,
     preset: Arc<AtomicU8>,
     denoiser: Arc<DenoiserService>,
+    soundboard: Arc<crate::soundboard::Mixer>,
     input_level: Arc<AtomicU8>,
     event_tx: mpsc::UnboundedSender<MediaEvent>,
     generation: u64,
@@ -2521,11 +2667,15 @@ async fn run_microphone_pipeline(
             previous = None;
             continue;
         }
-        let output = if muted || publish_track.is_muted() {
+        let mut output = if muted || publish_track.is_muted() {
+            soundboard.stop();
             [0; AUDIO_FRAME_SAMPLES]
         } else {
             output
         };
+        if !muted && !publish_track.is_muted() {
+            soundboard.mix(&mut output);
+        }
         meter_peak = meter_peak.max(pcm_level_percent(&output));
         meter_frames += 1;
         let frame = AudioFrame {

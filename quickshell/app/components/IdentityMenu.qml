@@ -10,13 +10,15 @@ Button {
   property bool showWordmark: false
   property real maximumWidth: 300
   property bool homeAvailable: false
+  property bool showLayout: false
+  signal layoutRequested()
   readonly property bool useWordmark: showWordmark
   signal settingsRequested()
   signal newRoomRequested()
   signal homeRequested()
   function closeMenu() { menu.close() }
-  implicitHeight: theme.space(42)
-  implicitWidth: Math.min(maximumWidth,
+  implicitHeight: theme.space(theme.comfortable ? 54 : 42)
+  implicitWidth: root.theme.comfortable ? Math.min(maximumWidth, root.theme.space(300)) : Math.min(maximumWidth,
     Math.max(useWordmark ? wordmark.implicitWidth : titleText.implicitWidth,
              statusText.implicitWidth + theme.space(12))
       + (logo.visible ? theme.space(66) : theme.space(34)))
@@ -47,14 +49,22 @@ Button {
       Item {
         width: parent.width
         height: root.useWordmark ? wordmark.implicitHeight : titleText.implicitHeight
-        WispLogo {
+        Item {
           id: wordmark
+          objectName: "wispWordmark"
+          implicitHeight: root.theme.space(root.theme.comfortable ? 32 : 26)
+          implicitWidth: Math.round(implicitHeight * 4.687150837988827)
           visible: root.useWordmark
           anchors.left: parent.left
           anchors.verticalCenter: parent.verticalCenter
           width: Math.min(implicitWidth, parent.width)
           height: implicitHeight
-          theme: root.theme
+          Image {
+            anchors.fill: parent
+            source: Qt.resolvedUrl("../assets/wisp-wordmark.svg")
+            fillMode: Image.PreserveAspectFit
+            sourceSize: Qt.size(Math.ceil(width * 2), Math.ceil(height * 2))
+          }
         }
         Text {
           id: titleText
@@ -118,5 +128,10 @@ Button {
       objectName: "identityNewRoom"
       text: "New Room"; onTriggered: root.newRoomRequested()
     }
+    MenuItem {
+      visible: root.showLayout; height: visible ? implicitHeight : 0
+      text: "Workspace layout…"; onTriggered: root.layoutRequested()
+    }
+
   }
 }

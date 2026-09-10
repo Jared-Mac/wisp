@@ -23,7 +23,7 @@ Rectangle {
   signal tileDragged(real px, real py)
   signal tileDropped()
   signal tileDragCanceled()
-  readonly property real panelMargin: theme.space(theme.cleanTui ? 12 : 8)
+  readonly property real panelMargin: theme.space(theme.comfortable ? 16 : theme.cleanTui ? 12 : 8)
   property var tabIds: []
   property string confirmationId: ""
   readonly property string currentId: tiled ? selectedId : String(bridge.activeConversationId || "")
@@ -36,19 +36,19 @@ Rectangle {
   Component.onDestruction: bridge.setChatFocus(focusKey, "")
   readonly property color chatBorderColor: theme.chatBordersColored ? bridge.chatColors.colorFor(currentId, theme.conversationBorder) : theme.surfaceBorder
   readonly property color chatHeadingColor: theme.chatHeadingsColored ? bridge.chatColors.colorFor(currentId, theme.muted) : theme.muted
-  color: theme.cleanTui ? theme.background : theme.surface
+  color: theme.cleanTui || theme.comfortable || theme.refinedTui ? theme.background : theme.surface
   radius: theme.cornerRadius
-  border.width: theme.tui ? 0 : theme.terminal || tiled ? 1 : 0
+  border.width: theme.tui || theme.comfortable ? 0 : theme.terminal || tiled ? 1 : 0
   border.color: theme.chatBordersColored ? chatBorderColor : tiled && paneActive && canClosePane ? theme.alpha(theme.accent,0.65) : theme.conversationBorder
   TerminalFrame {
     objectName: "conversationColorFrame"
     anchors.fill: parent; theme: root.theme
-    title: root.theme.cleanTui
+    title: root.theme.comfortable ? (root.current ? root.current.server_name : "Conversations") : root.theme.refinedTui ? "03 /chat · " + (root.current ? root.current.server_name : "Wisp") : root.theme.cleanTui
       ? "03 /" + (root.current ? root.current.server_name + "/chat" : "chat")
       : "03: /" + (root.current ? root.current.server_name + "/chat/" + root.label(root.current) : "chat")
     ink: root.theme.chatBordersColored ? root.chatBorderColor : root.paneActive ? root.theme.accent : root.theme.surfaceBorder
     titleInk: root.chatHeadingColor
-    emphasized: root.paneActive && root.tiled && root.canClosePane
+    emphasized: root.paneActive && root.tiled && (root.canClosePane || root.theme.refinedTui)
   }
 
   function choose(id) { if (tiled) conversationChosen(id); else bridge.selectConversation(id) }
@@ -70,8 +70,8 @@ Rectangle {
     id: heading
     anchors.top: parent.top; anchors.left: parent.left; anchors.right: parent.right
     anchors.margins: root.panelMargin
-    anchors.topMargin: root.theme.tui ? root.theme.space(22) : root.panelMargin
-    height: root.theme.space(34)
+    anchors.topMargin: root.theme.tui || root.theme.comfortable ? root.theme.space(22) : root.panelMargin
+    height: root.theme.space(root.theme.comfortable ? 42 : 34)
     Row {
       id: leadingActions
       anchors.left: parent.left
@@ -124,7 +124,7 @@ Rectangle {
     TextMetrics {
       id: selectorTextMetrics
       font.family: root.theme.font.family
-      font.pixelSize: root.theme.font.caption
+      font.pixelSize: root.theme.comfortable ? root.theme.font.title : root.theme.font.caption
       text: chatSelector.text
     }
     ChatButton {
@@ -137,7 +137,7 @@ Rectangle {
         ? Math.min(availableHeaderWidth, Math.max(root.theme.space(88), Math.min(root.theme.space(260), selectorTextMetrics.advanceWidth + root.theme.space(32))))
         : availableHeaderWidth
       theme: root.theme; primary: !root.theme.tui && !root.theme.chatHeadingsColored
-      readonly property color selectorInk: !root.theme.tui && root.theme.chatHeadingsColored ? root.chatHeadingColor : root.theme.cleanTui ? root.theme.foreground : root.theme.tui ? (visualFocus ? root.chatBorderColor : root.theme.foreground) : root.theme.terminal ? root.theme.accent : root.theme.accentText
+      readonly property color selectorInk: !root.theme.tui && root.theme.chatHeadingsColored ? root.chatHeadingColor : root.theme.comfortable ? root.theme.selectionText : root.theme.cleanTui ? root.theme.foreground : root.theme.tui ? (visualFocus ? root.chatBorderColor : root.theme.foreground) : root.theme.terminal ? root.theme.accent : root.theme.accentText
       Binding { target: chatSelector; property: "leftPadding"; value: root.theme.space(8); when: root.theme.tui; restoreMode: Binding.RestoreBindingOrValue }
       Binding { target: chatSelector; property: "rightPadding"; value: root.theme.space(8); when: root.theme.tui; restoreMode: Binding.RestoreBindingOrValue }
       Binding { target: chatSelector.background; property: "color"; value: root.theme.alpha(root.theme.foreground, chatSelector.down ? 0.10 : chatSelector.hovered ? 0.06 : root.theme.cleanTui ? 0 : 0.025); when: root.theme.tui; restoreMode: Binding.RestoreBindingOrValue }
@@ -154,7 +154,8 @@ Rectangle {
           anchors.left: parent.left; anchors.right: selectorArrow.left
           anchors.rightMargin: root.theme.spacing.xs; anchors.verticalCenter: parent.verticalCenter
           text: chatSelector.text; elide: Text.ElideRight
-          color: chatSelector.selectorInk; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
+          color: chatSelector.selectorInk; font.family: root.theme.font.family; font.pixelSize: root.theme.comfortable ? root.theme.font.title : root.theme.font.caption
+          font.weight: root.theme.comfortable ? Font.DemiBold : Font.Normal
         }
         Text { id: selectorArrow; anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; text: "▾"; color: root.theme.tui ? root.theme.muted : chatSelector.selectorInk; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption }
       }

@@ -6,6 +6,7 @@ Column {
   id: root
   required property var bridge
   required property var theme
+  property bool advancedOpen: false
   width: parent ? parent.width : 0
   spacing: root.theme.spacing.sm
 
@@ -181,6 +182,14 @@ Column {
     }
   }
 
+  ChatButton {
+    objectName: "advancedVideoButton"
+    theme: root.theme; text: root.advancedOpen ? "Advanced video ▴" : "Advanced video ▾"
+    onClicked: root.advancedOpen = !root.advancedOpen
+  }
+  Column {
+    width: parent.width; spacing: root.theme.spacing.sm
+    visible: root.advancedOpen
   Text {
     topPadding: root.theme.spacing.sm
     objectName: "settingsVideoCodec"; text: "Codec"
@@ -238,6 +247,8 @@ Column {
     wrapMode: Text.WordWrap
     font.family: root.theme.font.family
     font.pixelSize: root.theme.font.caption
+  }
+
   }
 
   Text {

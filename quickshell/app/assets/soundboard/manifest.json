@@ -1,0 +1,42 @@
+[
+  {
+    "name": "Ping",
+    "file": "ping.wav",
+    "duration_ms": 850
+  },
+  {
+    "name": "Level Up",
+    "file": "level-up.wav",
+    "duration_ms": 1150
+  },
+  {
+    "name": "Boing",
+    "file": "boing.wav",
+    "duration_ms": 900
+  },
+  {
+    "name": "Air Horn",
+    "file": "air-horn.wav",
+    "duration_ms": 1250
+  },
+  {
+    "name": "Rimshot",
+    "file": "rimshot.wav",
+    "duration_ms": 1350
+  },
+  {
+    "name": "Drum Roll",
+    "file": "drum-roll.wav",
+    "duration_ms": 2100
+  },
+  {
+    "name": "Applause",
+    "file": "applause.wav",
+    "duration_ms": 2200
+  },
+  {
+    "name": "Sad Trombone",
+    "file": "sad-trombone.wav",
+    "duration_ms": 2050
+  }
+]

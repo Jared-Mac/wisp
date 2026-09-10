@@ -6,6 +6,8 @@ use serde_json::Value;
 use std::{fmt, str::FromStr};
 use uuid::Uuid;
 
+pub mod soundboard;
+
 pub const PROTOCOL_VERSION: u8 = 1;
 
 pub type UserId = Uuid;

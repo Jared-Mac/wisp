@@ -36,6 +36,27 @@ FloatingWindow {
   }
   onClosed: hideRequested()
 
+  WispTheme {
+    id: readingTheme
+    comfortable: root.theme.profile === "legacy" && !root.theme.hostManaged && !root.theme.tuiTreatment
+    profile: root.theme.profile
+    appearanceController: root.theme.appearanceController
+    tuiTreatment: root.theme.tuiTreatment
+    fontFamily: root.theme.font.family
+    spacingScale: root.theme.spacingScale
+    captionSize: comfortable ? 14 : root.theme.font.caption
+    bodySize: comfortable ? 16 : root.theme.font.body
+    titleSize: comfortable ? 18 : root.theme.font.title
+    foreground: root.theme.foreground
+    background: root.theme.background
+    surface: root.theme.astraPalette ? root.theme.surface : comfortable ? Qt.tint(root.theme.background, root.theme.alpha(root.theme.foreground, 0.035)) : root.theme.surface
+    muted: comfortable && root.theme.herdrPalette ? "#8a9da3" : root.theme.muted
+    accent: root.theme.accent
+    danger: comfortable && root.theme.herdrPalette ? "#ff7974" : root.theme.danger
+    warning: comfortable && root.theme.herdrPalette ? "#d3b556" : root.theme.warning
+    cornerRadius: comfortable ? 5 : root.theme.cornerRadius
+  }
+
   Rectangle {
     anchors.fill: parent
     color: root.theme.background
@@ -45,7 +66,7 @@ FloatingWindow {
       id: content
       anchors.fill: parent
       bridge: root.bridge
-      theme: root.theme
+      theme: readingTheme
       logoSource: Qt.resolvedUrl("assets/waveform.svg")
       presentation: "app"
       showCloseButton: true

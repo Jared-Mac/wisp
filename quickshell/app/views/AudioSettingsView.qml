@@ -34,24 +34,6 @@ Column {
   spacing: root.theme.spacing.sm
   focus: root.capturingShortcut
 
-  CheckBox {
-    id: voiceReconnect; objectName: "voiceReconnectSetting"
-    width: parent.width; text: "Automatically reconnect voice"
-    checked: root.bridge.voiceRecovery.enabledSetting
-    onToggled: root.bridge.voiceRecovery.enabledSetting = checked
-    ThemeControlStyle { theme: root.theme; control: voiceReconnect }
-    contentItem: Text {
-      text: voiceReconnect.text; wrapMode: Text.Wrap
-      leftPadding: voiceReconnect.indicator.width + voiceReconnect.spacing
-      color: root.theme.foreground; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
-    }
-  }
-  Text {
-    width: parent.width; wrapMode: Text.Wrap
-    text: "Up to 6 attempts within 2 minutes. Disconnecting, joining another room, or exiting Wisp cancels retries. Camera and sharing stay off."
-    color: root.theme.muted; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
-  }
-
   function shortcutKeyName(event) {
     if (event.key >= Qt.Key_A && event.key <= Qt.Key_Z)
       return String.fromCharCode(event.key)
@@ -292,7 +274,8 @@ Column {
     font.weight: Font.DemiBold
   }
 
-  Row {
+  Flow {
+    width: parent.width
     spacing: root.theme.spacing.sm
 
     Repeater {
@@ -397,7 +380,7 @@ Column {
       spacing: root.theme.spacing.sm
 
       Text {
-        text: "Hear yourself"
+        objectName: "settingsVoiceTest"; text: "Test my voice"
         color: root.theme.foreground
         font.family: root.theme.font.family
         font.pixelSize: root.theme.font.caption
@@ -663,4 +646,23 @@ Column {
     font.family: root.theme.font.family
     font.pixelSize: root.theme.font.caption
   }
+
+  CheckBox {
+    id: voiceReconnect; objectName: "voiceReconnectSetting"
+    width: parent.width; text: "Automatically reconnect voice"
+    checked: root.bridge.voiceRecovery.enabledSetting
+    onToggled: root.bridge.voiceRecovery.enabledSetting = checked
+    ThemeControlStyle { theme: root.theme; control: voiceReconnect }
+    contentItem: Text {
+      text: voiceReconnect.text; wrapMode: Text.Wrap
+      leftPadding: voiceReconnect.indicator.width + voiceReconnect.spacing
+      color: root.theme.foreground; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
+    }
+  }
+  Text {
+    width: parent.width; wrapMode: Text.Wrap
+    text: "Up to 6 attempts within 2 minutes. Disconnecting, joining another room, or exiting Wisp cancels retries. Camera and sharing stay off."
+    color: root.theme.muted; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
+  }
+
 }

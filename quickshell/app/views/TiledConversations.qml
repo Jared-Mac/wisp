@@ -27,10 +27,24 @@ Item {
     return result
   }
   readonly property real gap: theme.space(theme.cleanTui ? 6 : 10)
-  readonly property real minWidth: theme.space(theme.cleanTui ? 360 : 280)
+  readonly property real minWidth: theme.comfortable ? Math.min(theme.space(360), Math.max(theme.space(280), width)) : theme.space(theme.cleanTui ? 360 : 280)
   readonly property real minHeight: theme.space(230)
   readonly property var minimum: dockTree ? Tiles.minimum(dockTree,gap,minWidth,minHeight) : ({width:0,height:0})
-  readonly property var rectangles: dockTree ? Tiles.geometry(dockTree,canvas.contentWidth,canvas.contentHeight,gap,minWidth,minHeight) : ({})
+  readonly property var dockLeaves: dockTree ? Tiles.leaves(dockTree) : []
+  readonly property bool tabbed: (theme.comfortable || theme.refinedTui) && dockLeaves.length > 1 && minimum.width > width
+  readonly property string visibleKey: dockLeaves.some(function(n) { return n.key === root.activeKey }) ? activeKey : dockLeaves.length ? dockLeaves[0].key : ""
+  function tabLabel(node) {
+    var video = videoFor(node.id)
+    if (video) return video.participant + " · " + video.source
+    var conversation = bridge.conversationById(node.id)
+    return conversation ? String(conversation.label || conversation.title || conversation.name || conversation.display_name || "Chat") : "New chat"
+  }
+  readonly property var rectangles: tabbed ? tabRectangles() : dockTree ? Tiles.geometry(dockTree,canvas.contentWidth,canvas.contentHeight,gap,minWidth,minHeight) : ({})
+  function tabRectangles() {
+    var result = {}
+    dockLeaves.forEach(function(n) { result[n.key] = {x:0,y:0,width:root.width,height:canvas.height} })
+    return result
+  }
   readonly property int paneCount: panes.count
   Binding { target: root.bridge; property: "mediaTileHost"; value: root }
   function videoFor(id) {
@@ -233,6 +247,7 @@ Item {
   }
   function move(source,target,edge) { commit(Tiles.move(tree,source,target,edge,key())) }
   function dragAt(source,x,y) {
+    if (tabbed) return
     dragKey=source; dropKey=""; dropEdge=""
     var point=root.mapToItem(canvas.contentItem,x,y)
     dropPlan=Tiles.planDrop(dockTree,source,point.x,point.y,canvas.contentWidth,canvas.contentHeight,gap,minWidth,minHeight,theme.space(26))
@@ -268,10 +283,44 @@ Item {
   ListModel { id: panes }
   ListModel { id: dividers }
   Flickable {
+    id: tabStrip
+    objectName: "responsiveChatTabs"
+    visible: root.tabbed
+    width: parent.width; height: visible ? root.theme.space(42) : 0
+    contentWidth: tabRow.width; contentHeight: height
+    clip: true; boundsBehavior: Flickable.StopAtBounds
+    function revealActive() {
+      for (var i = 0; i < tabs.count; i++) {
+        var tab = tabs.itemAt(i)
+        if (tab && tab.primary) contentX = Math.max(0, Math.min(tab.x, contentWidth - width))
+      }
+    }
+    Connections { target: root; function onVisibleKeyChanged() { Qt.callLater(tabStrip.revealActive) } }
+    onVisibleChanged: if (visible) Qt.callLater(revealActive)
+    Row {
+      id: tabRow; spacing: root.theme.spacing.xs
+      Repeater {
+        id: tabs
+        model: root.dockLeaves
+        ChatButton {
+          required property var modelData
+          objectName: "responsiveChatTab-" + modelData.key
+          theme: root.theme; text: root.tabLabel(modelData)
+          width: Math.min(implicitWidth, root.theme.space(220))
+          primary: root.visibleKey === modelData.key
+          Accessible.name: text; Accessible.description: primary ? "Selected chat" : "Switch chat"
+          onClicked: root.activate(modelData.key)
+        }
+      }
+    }
+    ScrollBar.horizontal: ScrollBar { policy: ScrollBar.AsNeeded }
+  }
+  Flickable {
     id: canvas
-    anchors.fill: parent
-    contentWidth: Math.max(width,root.minimum.width)
-    contentHeight: Math.max(height,root.minimum.height)
+    objectName: "chatTileCanvas"
+    y: tabStrip.height; width: parent.width; height: parent.height - y
+    contentWidth: root.tabbed ? width : Math.max(width,root.minimum.width)
+    contentHeight: root.tabbed ? height : Math.max(height,root.minimum.height)
     clip: true; boundsBehavior: Flickable.StopAtBounds
     ScrollBar.horizontal: ScrollBar {}
     ScrollBar.vertical: ScrollBar {}
@@ -292,6 +341,7 @@ Item {
         onPopoutActiveChanged: root.recordFocus(nodeKey,popoutActive)
         Component.onDestruction: root.recordFocus(nodeKey,false)
         objectName: "chatTileHost-" + nodeKey
+        visible: detached || !root.tabbed || root.visibleKey === nodeKey
         x: rect.x; y: rect.y; width: rect.width; height: rect.height
         FloatingWindow {
           id: popout
@@ -353,7 +403,7 @@ Item {
         required property string nodeKey
         readonly property var rect: root.rectangles[nodeKey] || ({x:0,y:0,width:0,height:0})
         objectName: "chatDivider-" + nodeKey
-        visible: !!root.rectangles[nodeKey]
+        visible: !root.tabbed && !!root.rectangles[nodeKey]
         theme: root.theme
         verticalLine: { var n=Tiles.find(root.tree,nodeKey); return n ? n.axis==="x" : true }
         x:rect.x; y:rect.y; width:rect.width; height:rect.height

@@ -26,9 +26,15 @@ export WISP_ACCOUNTS_FILE="$test_dir/accounts.json"
 export WISP_E2EE_KEY="wisp-integration-e2ee-key-32-bytes"
 port=$(shuf -i 30000-38000 -n 1)
 export WISP_SERVER_URL="http://127.0.0.1:$port"
-cargo build -p wispd -p wispctl -p wisp-server
+build_profile=${WISP_TEST_BUILD_PROFILE:-dev}
+case "$build_profile" in
+  dev) build_dir=debug ;;
+  release) build_dir=release ;;
+  *) echo 'WISP_TEST_BUILD_PROFILE must be dev or release' >&2; exit 2 ;;
+esac
+cargo build --profile "$build_profile" -p wispd -p wispctl -p wisp-server
 WISP_SERVER_ADDR="127.0.0.1:$port" WISP_DATABASE_URL="sqlite://$test_dir/wisp.sqlite3" \
-  target/debug/wisp-server >"$test_dir/server.log" 2>&1 &
+  "target/$build_dir/wisp-server" >"$test_dir/server.log" 2>&1 &
 server_pid=$!
 for _ in $(seq 1 100); do
   if curl --silent --fail "$WISP_SERVER_URL/healthz" >/dev/null; then break; fi
@@ -36,9 +42,9 @@ for _ in $(seq 1 100); do
 done
 curl --silent --fail "$WISP_SERVER_URL/healthz" >/dev/null
 WISP_TEST_MICROPHONE_TONE=1 WISP_DISABLE_TRAY=1 \
-  target/debug/wispd --profile Owner --disable-surfaces --socket "$test_dir/wispd.sock" >"$test_dir/daemon.log" 2>&1 &
+  "target/$build_dir/wispd" --profile Owner --disable-surfaces --socket "$test_dir/wispd.sock" >"$test_dir/daemon.log" 2>&1 &
 daemon_pid=$!
-ctl() { target/debug/wispctl --socket "$test_dir/wispd.sock" "$@"; }
+ctl() { "target/$build_dir/wispctl" --socket "$test_dir/wispd.sock" "$@"; }
 for _ in $(seq 1 200); do [[ -S "$test_dir/wispd.sock" ]] && break; sleep .1; done
 [[ -S "$test_dir/wispd.sock" ]]
 for _ in $(seq 1 100); do
@@ -118,4 +124,5 @@ ctl audio test clear >/dev/null
 sleep .2
 ctl audio test status | jq -e '.phase == "idle" and .duration_ms == 0' >/dev/null
 assert_idle_room
+python3 "$repo_dir/tests/soundboard-audio.py" "$test_dir" "wisp_mic_test_$$.monitor"
 echo 'Local microphone recording, duration cap, audible output from both playback paths, cancellation, preset reset and room/mute isolation passed.'

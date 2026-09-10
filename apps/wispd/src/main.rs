@@ -20,6 +20,7 @@ mod privacy_transfers;
 #[cfg(test)]
 mod session_tests;
 mod shortcut;
+mod soundboard;
 mod surface;
 mod tray;
 mod video_bridge;
@@ -1423,8 +1424,61 @@ impl Daemon {
         }
     }
 
+    async fn soundboard_command(&self, command: &CommandEnvelope) -> anyhow::Result<Value> {
+        let args = &command.args;
+        if command.name == "soundboard_status" {
+            return Ok(self.media.soundboard_status());
+        }
+        if command.name == "soundboard_stop" {
+            self.media.stop_soundboard().await;
+            return Ok(self.media.soundboard_status());
+        }
+        let server_id = string_arg(args, "server_id")?;
+        let api = if server_id == self.primary_server.id {
+            self.api.clone()
+        } else {
+            self.linked_servers
+                .read()
+                .await
+                .get(&server_id)
+                .context("Server is not connected")?
+                .api
+                .clone()
+        };
+        if command.name == "soundboard_play" || command.name == "soundboard_preview" {
+            let generation = self.media.generation();
+            if command.name == "soundboard_play" {
+                ensure!(
+                    *self.voice_server_id.read().await == server_id,
+                    "Join a voice room on this server first"
+                );
+            }
+            let volume = u8::try_from(args["volume"].as_u64().unwrap_or(70))
+                .context("Volume must be 0–100")?;
+            ensure!(volume <= 100, "Volume must be 0–100");
+            let ticket = args["playback_ticket"]
+                .as_u64()
+                .context("Missing playback request ticket")?;
+            let samples = soundboard::download(&api, args).await?;
+            if command.name == "soundboard_play" {
+                self.media
+                    .play_soundboard(samples, volume, generation, ticket)
+                    .await?;
+            } else {
+                self.media
+                    .preview_soundboard(samples, volume, ticket)
+                    .await?;
+            }
+            return Ok(self.media.soundboard_status());
+        }
+        soundboard::catalog_command(&api, &command.name, args).await
+    }
+
     #[allow(clippy::too_many_lines)]
     async fn run_command(&self, command: &CommandEnvelope) -> anyhow::Result<Option<Value>> {
+        if soundboard::handles(&command.name) {
+            return self.soundboard_command(command).await.map(Some);
+        }
         if chat_extras::handles(&command.name) {
             let server_id = command.args["server_id"]
                 .as_str()
@@ -3417,17 +3471,23 @@ async fn serve_client(stream: UnixStream, daemon: Arc<Daemon>) -> anyhow::Result
             },
             line = lines.next_line() => match line? {
                 Some(line) => {
-                    let command = match serde_json::from_str::<CommandEnvelope>(&line) {
+                    let mut command = match serde_json::from_str::<CommandEnvelope>(&line) {
                         Ok(command) => command,
                         Err(error) => {
                             write_envelope(&mut writer, &DaemonEnvelope::failure("", "invalid_json", error.to_string())).await?;
                             continue;
                         }
                     };
-                    if matches!(command.name.as_str(), "send_attachment_message" | "send_image_message" | "save_chat_file" | "import_chat_files" | "paste_clipboard") {
+                    if matches!(command.name.as_str(), "send_attachment_message" | "send_image_message" | "save_chat_file" | "import_chat_files" | "paste_clipboard" | "soundboard_upload" | "soundboard_play" | "soundboard_preview") {
                         if transfers.len() >= 8 {
                             write_envelope(&mut writer, &DaemonEnvelope::failure(command.id, "transfers_busy", "Too many active transfers")).await?;
                         } else {
+                            if matches!(command.name.as_str(), "soundboard_play" | "soundboard_preview") {
+                                // Reserve before spawning so an immediately following Stop
+                                // always cancels the request, even before its task is polled.
+                                if !command.args.is_object() { command.args = json!({}); }
+                                command.args["playback_ticket"] = json!(daemon.media.begin_soundboard(command.name == "soundboard_preview"));
+                            }
                             let daemon = daemon.clone();
                             transfers.spawn(async move { daemon.handle_command(command).await });
                         }

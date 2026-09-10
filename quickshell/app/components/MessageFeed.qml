@@ -88,20 +88,22 @@ Rectangle {
       readonly property string copyText: isImage ? String(modelData.payload.caption || "") : isFile ? String(modelData.payload.caption || modelData.payload.file_name || "") : isInvitation ? "" : String(modelData.payload || "")
       readonly property string imageUrl: root.bridge.chatImageUrls[String(modelData.id)] || ""
       readonly property string serverId: String(modelData.server_id || root.bridge.activeServer.id)
-      width: messages.width
-      spacing: root.theme.tui ? root.theme.space(2) : root.theme.spacing.md
+      width: Math.min(messages.width, root.theme.comfortable ? root.theme.space(860) : messages.width)
+      spacing: root.theme.comfortable ? root.theme.space(6) : root.theme.tui ? root.theme.space(2) : root.theme.spacing.md
       Component.onCompleted: { if (isImage) root.bridge.loadChatImage(String(modelData.id));root.bridge.chatExtras.loadText(serverId,copyText) }
       onCopyTextChanged:root.bridge.chatExtras.loadText(serverId,copyText)
+      HoverHandler { id: messageHover }
       Row {
+        id: messageHeading
         spacing: root.theme.spacing.lg
         Text {
-          text: root.theme.cleanTui ? String(message.modelData.sender.display_name || "") : root.theme.tui ? "<" + String(message.modelData.sender.display_name || "") + ">" : String(message.modelData.sender.display_name || "")
+          text: (root.theme.cleanTui || root.theme.refinedTui) ? String(message.modelData.sender.display_name || "") : root.theme.tui ? "<" + String(message.modelData.sender.display_name || "") + ">" : String(message.modelData.sender.display_name || "")
           color: !root.theme.colorEnabled("senderNames") ? root.theme.foreground : message.modelData.sender.id === root.bridge.selfState.id ? root.theme.accent : root.theme.secondaryAccent
           font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption; font.bold: true
         }
         Text {
           Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
-          text: root.theme.cleanTui ? Qt.formatDateTime(new Date(message.modelData.created_at), "HH:mm") : root.theme.tui ? "[" + Qt.formatDateTime(new Date(message.modelData.created_at), "HH:mm:ss") + "]" : Qt.formatDateTime(new Date(message.modelData.created_at), "MMM d · h:mm AP")
+          text: (root.theme.cleanTui || root.theme.refinedTui) ? Qt.formatDateTime(new Date(message.modelData.created_at), "HH:mm") : root.theme.tui ? "[" + Qt.formatDateTime(new Date(message.modelData.created_at), "HH:mm:ss") + "]" : Qt.formatDateTime(new Date(message.modelData.created_at), "MMM d · h:mm AP")
           color: root.theme.muted; font.pixelSize: root.theme.font.caption
         }
         Text {
@@ -109,11 +111,13 @@ Rectangle {
           visible: !!message.modelData.edited_at
           text: "edited"
           color: root.theme.alpha(root.theme.muted, 0.8)
-          font.pixelSize: root.theme.space(10)
+          font.pixelSize: root.theme.space(root.theme.comfortable ? 12 : 10)
         }
         ChatButton {
           objectName: "messageOptions-" + String(message.modelData.id)
-          theme: root.theme; text: "···"
+          theme: root.theme; text: "···"; quiet: root.theme.comfortable || root.theme.refinedTui
+          opacity: !(root.theme.comfortable || root.theme.refinedTui) || messageHover.hovered || activeFocus || messageMenu.opened ? 1 : 0
+          Accessible.name: "Message actions"
           implicitWidth: root.theme.space(26); implicitHeight: root.theme.space(20)
           onClicked: messageMenu.open()
           Menu {
@@ -156,11 +160,12 @@ Rectangle {
         }
       }
       Rectangle {
+        id: imagePreview
         objectName: "chatImagePreview-" + String(message.modelData.id)
         visible: message.isImage
         readonly property real pixelRatio: Math.max(1, photo.Screen.devicePixelRatio)
-        readonly property real nativeWidth: (photo.status===Image.Ready ? photo.sourceSize.width : Math.max(1,Number(message.modelData.payload.width || 320))) / pixelRatio
-        readonly property real nativeHeight: (photo.status===Image.Ready ? photo.sourceSize.height : Math.max(1,Number(message.modelData.payload.height || 180))) / pixelRatio
+        readonly property real nativeWidth: Math.max(1,Number(message.modelData.payload.width || 320)) / pixelRatio
+        readonly property real nativeHeight: Math.max(1,Number(message.modelData.payload.height || 180)) / pixelRatio
         readonly property real previewScale: Math.min(1, parent.width/nativeWidth, Math.max(1,messages.height)/nativeHeight)
         width: message.isImage ? nativeWidth*previewScale : 0
         height: message.isImage ? nativeHeight*previewScale : 0
@@ -168,7 +173,13 @@ Rectangle {
         color: root.theme.surface
         Image {
           id: photo
+          objectName: "chatImageTexture-" + String(message.modelData.id)
           anchors.fill: parent
+          // Decode at the display's pixel density, using buckets to avoid a
+          // reload on every resize pixel. Layout uses original metadata so a
+          // smaller decoded texture cannot feed back into the preview geometry.
+          sourceSize.width: Math.min(imagePreview.nativeWidth * imagePreview.pixelRatio,
+            Math.max(1, Math.ceil(width * imagePreview.pixelRatio / 128) * 128))
           source: message.imageUrl
           asynchronous: true
           fillMode: Image.PreserveAspectFit
@@ -235,7 +246,7 @@ Rectangle {
               Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
               anchors.verticalCenter: parent.verticalCenter
               text: message.modelData.payload.expired ? "Removed from server" : message.modelData.payload.keep ? "Kept on server" : message.modelData.payload.expires_at ? "Expires " + Qt.formatDateTime(new Date(message.modelData.payload.expires_at), "MMM d, h:mm AP") : "No automatic expiry"
-              color: root.theme.muted; font.pixelSize: root.theme.space(10)
+              color: root.theme.muted; font.pixelSize: root.theme.space(root.theme.comfortable ? 12 : 10)
             }
           }
         }
@@ -253,7 +264,7 @@ Rectangle {
         wrapMode: TextEdit.Wrap
         font.family: root.theme.font.family; font.pixelSize: root.theme.font.body
       }
-      ReactionBar {width:parent.width;bridge:root.bridge;theme:root.theme;serverId:message.serverId;messageId:String(message.modelData.id)}
+      ReactionBar {actionHost: root.theme.comfortable || root.theme.refinedTui ? messageHeading : null; revealActions: messageHover.hovered; width:parent.width;bridge:root.bridge;theme:root.theme;serverId:message.serverId;messageId:String(message.modelData.id)}
       Repeater {
         model:Markup.youtube(message.copyText)
         VideoEmbed {required property string modelData;theme:root.theme;videoId:modelData}

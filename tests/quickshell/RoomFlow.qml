@@ -35,6 +35,9 @@ ShellRoot {
   Wisp.WispAppearance { id: appearance; environment: Quickshell.env("WISP_TEST_ADAPTER") === "omarchy" ? "omarchy" : "desktop" }
   Wisp.WispTheme {
     id: theme; appearanceController: appearance
+    comfortable: Quickshell.env("WISP_TEST_READING") === "1"
+    captionSize: comfortable ? 14 : 12
+    bodySize: comfortable ? 16 : 13
     profile: Quickshell.env("WISP_TEST_ADAPTER") === "omarchy" ? "legacy" : Quickshell.env("WISP_TEST_THEME") || "performative"
     Component.onCompleted: if (Quickshell.env("WISP_TEST_ADAPTER") === "omarchy") {
       tuiTreatment = true; foreground = "#d8dee9"; background = "#242933"; surface = "#242933"
@@ -106,7 +109,7 @@ ShellRoot {
       test.check(bridge.roomCount===2 && bridge.temporaryCalls.length===1,"temporary calls do not inflate room count")
       test.check(!test.find(page,"serverChannel-spot:lounge"),"rooms are not duplicated as text channels")
       test.check(test.find(page,"friendCalls").visible,"temporary calls appear beside friends")
-      test.check(test.find(lounge,"roomName").text==="#Lounge /2","room name leads the occupied row")
+      test.check(test.find(lounge,"roomName").text===(theme.comfortable ? "#Lounge · 2 in voice" : "#Lounge /2"),"room name leads the occupied row")
       var rowHeight=lounge.height
       var before=bridge.sent.length
       var open=test.find(page,"openRoom-quiet")
@@ -163,7 +166,7 @@ ShellRoot {
       lounge=test.find(page,"savedRoom-lounge");quiet=test.find(page,"savedRoom-quiet")
       test.check(test.find(lounge,"roomParticipant-friend").visible,"participants stay visible after snapshots")
       var roomAction=test.find(lounge,"joinRoom-lounge")
-      test.check(test.compact ? !roomAction.visible : roomAction.visible && roomAction.text==="inv","main app replaces join with inv; tray hides redundant join")
+      test.check(test.compact ? !roomAction.visible : roomAction.visible && roomAction.text===(theme.comfortable ? "Invite" : "inv"),"main app replaces join with inv; tray hides redundant join")
       if (!test.compact) {
         var beforeInvite=bridge.sent.length
         test.click(roomAction); input.wait(50)
@@ -172,13 +175,13 @@ ShellRoot {
         test.check(bridge.sent.length===beforeInvite,"opening inv does not join voice or send an invitation")
         if (roomPicker) roomPicker.close()
       }
-      test.check(lounge.y<quiet.y && test.find(lounge,"roomName").text==="#Lounge /2","joining preserves room order and name")
+      test.check(lounge.y<quiet.y && test.find(lounge,"roomName").text===(theme.comfortable ? "#Lounge · 2 in voice" : "#Lounge /2"),"joining preserves room order and name")
       var bar=test.find(page,"currentCallBar")
       test.check(test.compact ? !!test.find(bar,"mediaAction-invite") : !test.find(bar,"mediaAction-invite"),"main room invite moves out of the media controls; tray retains it")
       var disconnect=test.find(bar,"currentCallDisconnect"), location=test.find(bar,"currentCallLocation"), connection=test.find(bar,"currentCallConnection")
-      test.check(disconnect && Math.abs(disconnect.mapToItem(bar,0,disconnect.height/2).y-location.mapToItem(bar,0,location.height/2).y)<1,"disconnect aligns vertically with the room status")
-      test.check(location.y===connection.y && connection.text==="· connected","room and connection status share one line")
-      test.check(disconnect.text==="d/c" && !test.find(bar,"mediaAction-leave"),"disconnect appears once in the status row")
+      if (!theme.comfortable) test.check(disconnect && Math.abs(disconnect.mapToItem(bar,0,disconnect.height/2).y-location.mapToItem(bar,0,location.height/2).y)<1,"disconnect aligns vertically with the room status")
+      test.check((theme.comfortable ? connection.y >= location.y + location.height : location.y===connection.y) && connection.text==="· connected","room and connection status remain legible")
+      test.check(disconnect.text===(theme.comfortable ? "Leave" : "d/c") && !test.find(bar,"mediaAction-leave"),"disconnect appears once in the status row")
       test.check(bar.visible && test.find(bar,"currentCallLocation").text==="Lounge","call area identifies current room")
       test.check(test.visibleItems(page,"mediaAction-share",[]).length===1,"only one set of call controls")
       test.check(bar.mapToItem(page,0,0).y>=quiet.mapToItem(page,0,quiet.height).y,"call controls follow the saved room list")
@@ -218,7 +221,7 @@ ShellRoot {
       bridge.selectServer("second");input.wait(100)
       lounge=test.find(page,"savedRoom-lounge")
       test.check(!lounge.current,"matching room IDs on another server do not show current voice")
-      test.check(test.find(lounge,"joinRoom-lounge").text==="join","another server's room keeps its join action")
+      test.check(test.find(lounge,"joinRoom-lounge").text===(theme.comfortable ? "Join" : "join"),"another server's room keeps its join action")
 
       test.check(test.find(bar,"currentCallLocation").text==="Home / Lounge","browsing another server keeps original call location")
       open=test.find(page,"openRoom-lounge");test.click(open);input.wait(100)
@@ -228,7 +231,7 @@ ShellRoot {
       test.check(test.last().name==="join_spot" && test.last().args.server_id==="second","chat voice join uses conversation server")
       bridge.selectConversation("second::dm:friend"); bridge.selectServer("local"); input.wait(100)
       var call=test.visibleItems(page,"callConversation",[]).filter(function(button) { return button.conversationId==="second::dm:friend" })[0]
-      test.check(call && call.visible && call.enabled && call.text==="call","DM header offers a call action")
+      test.check(call && call.visible && call.enabled && call.text===(theme.comfortable ? "Call" : "call"),"DM header offers a call action")
       if(call)test.click(call)
       test.check(test.last().name==="join_friend" && test.last().args.server_id==="second" && test.last().args.friend==="other","DM call targets its server and peer despite navigation selection")
       data=JSON.parse(JSON.stringify(data));data.server_states[1].friends[0].presence="closed"
@@ -258,8 +261,8 @@ ShellRoot {
       bridge.applySnapshot(data);bridge.selectServer("local");input.wait(100)
       lounge=test.find(page,"savedRoom-lounge")
       test.check(!bar.visible && bar.height===0,"call controls release space after leaving")
-      test.check(test.find(lounge,"joinRoom-lounge").visible && test.find(lounge,"joinRoom-lounge").text==="join","leaving restores the room's join action")
-      test.check(lounge && test.find(lounge,"roomName").text==="#Lounge /0" && lounge.height<=rowHeight,"empty room keeps its name with a zero count")
+      test.check(test.find(lounge,"joinRoom-lounge").visible && test.find(lounge,"joinRoom-lounge").text===(theme.comfortable ? "Join" : "join"),"leaving restores the room's join action")
+      test.check(lounge && test.find(lounge,"roomName").text===(theme.comfortable ? "#Lounge · 0 in voice" : "#Lounge /0") && lounge.height<=rowHeight,"empty room keeps its name with a zero count")
       before=bridge.sent.length
       var create=test.find(page,"createRoomButton");test.click(create);input.wait(60)
       var manager=test.object(page,"identityRoomManager",[])

@@ -102,6 +102,7 @@ FloatingWindow {
       Image {
         id:picture;objectName:"nativeChatImage"
         source:root.imageSource;asynchronous:true
+        cache: false // Full-resolution pixels belong to the open viewer only.
         // Decode the original file, never a thumbnail. At 100%, one source pixel
         // maps to one display pixel; oversized images are panned, not resampled.
         width:root.nativeWidth*root.imageScale;height:root.nativeHeight*root.imageScale

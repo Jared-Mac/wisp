@@ -31,9 +31,10 @@ Column {
 
   Text {
     objectName: "terminalChatPrompt"
-    visible: root.theme.tui
+    visible: root.theme.tui && !root.theme.comfortable
     width: parent.width; elide: Text.ElideRight
-    text: String(root.bridge.selfState.display_name || "user").toLowerCase() + "@wisp:~/chat/" + root.destination + " $"
+    text: root.theme.refinedTui ? "message /" + root.destination
+      : String(root.bridge.selfState.display_name || "user").toLowerCase() + "@wisp:~/chat/" + root.destination + " $"
     color: root.theme.accent
     font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
   }
@@ -100,11 +101,11 @@ Column {
     width: parent.width
     height: root.autoGrow ? Math.min(root.maximumEditorHeight, root.naturalEditorHeight) : root.editorHeight
     radius: root.theme.cornerRadius
-    color: root.theme.tui ? root.theme.background : root.theme.alpha(root.theme.foreground, 0.06)
+    color: root.theme.comfortable ? root.theme.surface : root.theme.tui ? root.theme.background : root.theme.alpha(root.theme.foreground, 0.06)
     border.width: editor.activeFocus || root.theme.tui ? 1 : 0
     border.color: editor.activeFocus ? root.theme.accent : root.theme.separator
     Text {
-      visible: root.theme.tui
+      visible: root.theme.tui && !root.theme.comfortable
       x: root.theme.space(8); y: root.theme.space(11)
       text: ">"; color: root.theme.accent
       font.family: root.theme.font.family; font.pixelSize: root.theme.font.body
@@ -113,7 +114,7 @@ Column {
       objectName: "composerTextViewport"
       anchors.fill: parent
       anchors.margins: root.theme.tui ? root.theme.spacing.sm : root.theme.spacing.lg
-      anchors.leftMargin: root.theme.tui ? root.theme.space(24) : root.theme.spacing.lg
+      anchors.leftMargin: root.theme.tui && !root.theme.comfortable ? root.theme.space(24) : root.theme.spacing.lg
       anchors.rightMargin: sendButton.width + emojiButton.width + root.theme.spacing.lg * 3
       TextArea {
         ThemeControlStyle { theme: root.theme; control: editor }
@@ -173,7 +174,7 @@ Column {
       objectName: "composerSendButton"
       anchors.right: parent.right; anchors.bottom: parent.bottom
       anchors.margins: root.theme.space(4)
-      width: root.theme.space(root.theme.tui ? 60 : 32); height: root.theme.space(32)
+      width: root.theme.space(root.theme.tui || root.theme.comfortable ? 60 : 32); height: root.theme.space(32)
       theme: root.theme; primary: true
       readonly property string statusText: root.bridge.sendingConversations[root.conversationId] ? "Sending" + root.bridge.transferLabel("upload", root.attachments.length ? root.attachments[0].token : "") : root.bridge.importingConversations[root.conversationId] ? "Preparing…" : "Send message"
       Accessible.name: statusText
@@ -185,7 +186,7 @@ Column {
       contentItem: Item {
         Canvas {
           anchors.centerIn: parent; width: root.theme.space(14); height: width
-          visible: !root.busy && !root.theme.tui
+          visible: !root.busy && !root.theme.tui && !root.theme.comfortable
           opacity: sendButton.enabled ? 1 : 0.4
           property color strokeColor: root.theme.terminal ? root.theme.accent : root.theme.accentText
           onStrokeColorChanged: requestPaint()
@@ -199,8 +200,8 @@ Column {
         }
         Text {
           anchors.centerIn: parent
-          visible: root.theme.tui && !root.busy
-          text: "[send]"
+          visible: (root.theme.tui || root.theme.comfortable) && !root.busy
+          text: root.theme.comfortable ? "Send" : "[send]"
           color: root.theme.selectionText; opacity: sendButton.enabled ? 1 : 0.4
           font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
         }

@@ -9,9 +9,13 @@ Column {
   required property var theme
   property bool showActivityToggle: false
   property bool activityStacked: false
+  property bool navigationDrawer: false
+  property bool navigationOpen: false
+  signal navigationRequested()
   property bool showAddChat: false
   property bool canAddChat: false
   signal addChatRequested(string conversationId)
+  function closeMenus() { presenceMenu.close(); addChatPicker.close(); soundboardMenu.close() }
   width: parent ? parent.width : 0
   spacing: root.theme.spacing.sm
 
@@ -19,11 +23,47 @@ Column {
     width: parent.width
     spacing: root.theme.spacing.sm
     ActivityToggle {
-      visible: root.showActivityToggle
+      visible: root.showActivityToggle && !root.navigationDrawer
       bridge: root.bridge; theme: root.theme; stacked: root.activityStacked
     }
+    ChatButton {
+      objectName: "navigationDrawerButton"
+      visible: root.showActivityToggle && root.navigationDrawer
+      theme: root.theme; text: root.navigationOpen ? "Back to chat" : "Rooms & friends"
+      Accessible.name: text
+      onClicked: root.navigationRequested()
+    }
+    ChatButton {
+      id: presenceButton
+      objectName: "presenceMenuButton"
+      visible: root.theme.comfortable || root.theme.refinedTui
+      theme: root.theme
+      text: "Presence: " + String(root.bridge.selfState.presence || "away") + " ▾"
+      Accessible.name: "Who may join: " + String(root.bridge.selfState.presence || "away")
+      ToolTip.visible: hovered; ToolTip.text: PresenceText.description(root.bridge.selfState.presence || "away", true)
+      onClicked: presenceMenu.open()
+      Menu {
+        id: presenceMenu; objectName: "presenceMenu"
+        y: presenceButton.height
+        width: root.theme.space(290)
+        ThemeControlStyle { theme: root.theme; control: presenceMenu; outline: true; menuOutline: true }
+        Repeater {
+          model: [{key:"open",label:"Open · friends can join"}, {key:"knock",label:"Knock · ask before joining"}, {key:"closed",label:"Closed · no joins or knocks"}, {key:"away",label:"Away"}]
+          MenuItem {
+            id: presenceChoice
+            required property var modelData
+            objectName: "presenceChoice-" + modelData.key
+            text: modelData.label
+            font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
+            checkable: true; checked: root.bridge.selfState.presence === modelData.key
+            onTriggered: root.bridge.setPresence(modelData.key)
+            ThemeControlStyle { theme: root.theme; control: presenceChoice }
+          }
+        }
+      }
+    }
     Repeater {
-      model: ["open", "knock", "closed", "away"]
+      model: root.theme.comfortable || root.theme.refinedTui ? [] : ["open", "knock", "closed", "away"]
       delegate: Rectangle {
         objectName: "presence-" + modelData
         required property string modelData
@@ -61,6 +101,14 @@ Column {
         }
       }
     }
+    ChatButton {
+      objectName: "headerSoundboardButton"
+      theme: root.theme; text: "Soundboard ▾"
+      height: root.theme.space(root.theme.comfortable ? 36 : 30)
+      Accessible.name: "Open soundboard"
+      ToolTip.visible: hovered; ToolTip.text: "Play sounds or manage this server's library"
+      onClicked: soundboardMenu.open()
+    }
     Item { width: root.theme.spacing.sm; height: root.theme.space(30) }
     Row {
       spacing: root.theme.spacing.sm
@@ -68,7 +116,7 @@ Column {
         id: addChatButton
         objectName: "headerAddChatButton"
         visible: root.showAddChat; enabled: root.canAddChat
-        theme: root.theme; text: "+ add chat"; height: root.theme.space(32)
+        theme: root.theme; text: root.theme.comfortable ? "+ Chat" : "+ add chat"; height: root.theme.space(root.theme.comfortable ? 36 : 32)
         Accessible.name: "Add chat tile"
         ToolTip.visible: hovered; ToolTip.text: enabled ? "Add a chat tile" : "Up to eight chat tiles"
         onClicked: addChatPicker.open()
@@ -90,6 +138,7 @@ Column {
       }
     }
   }
+  SoundboardPopup { id: soundboardMenu; bridge: root.bridge; theme: root.theme }
   NewChatDialog {
     id: newChatDialog; objectName: "headerNewChatDialog"
     bridge: root.bridge; theme: root.theme

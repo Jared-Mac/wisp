@@ -10,6 +10,7 @@ Column {
   property bool showLeave: true
   property bool showInvite: true
   spacing: root.theme.spacing.sm
+  SoundboardPopup { id: soundboardPopup; bridge: root.bridge; theme: root.theme }
   RoomInvitePicker { id: invitePicker; bridge: root.bridge; theme: root.theme }
 
   Flow {
@@ -22,14 +23,27 @@ Column {
     Repeater {
       id: controlRepeater
       model: [
-        { "label": root.bridge.sharing ? "Stop share" : root.bridge.shareStarting ? "Choosing…" : "Share", "action": "share" },
+        { "label": root.bridge.sharing ? "Stop share" : root.bridge.shareStarting ? "Choosing…" : root.theme.comfortable ? "Share screen" : "Share", "action": "share" },
         { "label": root.bridge.cameraActive ? "Stop cam" : root.bridge.cameraStarting ? "Starting…" : "Camera", "action": "camera" },
+        { "label": "Soundboard", "action": "soundboard" },
         { "label": "Invite", "action": "invite" },
-        { "label": "d/c", "action": "leave" }
+        { "label": root.theme.comfortable ? "Leave call" : "d/c", "action": "leave" }
       ].filter(function(action) { return (root.showLeave || action.action !== "leave") && (root.showInvite || action.action !== "invite") })
       delegate: Rectangle {
         required property var modelData
         objectName: "mediaAction-" + modelData.action
+        activeFocusOnTab: controlEnabled
+        Accessible.role: Accessible.Button
+        Keys.onSpacePressed: activate()
+        Keys.onReturnPressed: activate()
+        function activate() {
+          if (!controlEnabled) return
+          if (modelData.action === "share") root.bridge.toggleShare()
+          else if (modelData.action === "camera") root.cameraRequested()
+          else if (modelData.action === "soundboard") soundboardPopup.open()
+          else if (modelData.action === "invite") invitePicker.open()
+          else { root.bridge.leave(); root.leaveRequested() }
+        }
         Accessible.name: modelData.action === "share" ? (publishing ? "Stop sharing screen" : "Share screen")
           : modelData.action === "camera" ? (publishing ? "Stop camera" : "Start camera") : modelData.action === "leave" ? "Disconnect from voice" : modelData.label
         ToolTip {
@@ -45,12 +59,12 @@ Column {
         width: Math.min(root.width, root.theme.tui ? controlLabel.implicitWidth + root.theme.space(16) : Math.max(controlLabel.implicitWidth + root.theme.space(20), (root.width
           - controls.spacing * (controlRepeater.count - 1))
           / Math.max(1, controlRepeater.count)))
-        height: Math.max(root.theme.space(root.theme.tui ? 28 : 34), controlLabel.implicitHeight + root.theme.space(10))
+        height: Math.max(root.theme.space(root.theme.comfortable ? 36 : root.theme.tui ? 28 : 34), controlLabel.implicitHeight + root.theme.space(10))
         radius: root.theme.cornerRadius
-        border.width: publishing ? 1 : 0
-        border.color: root.theme.danger
+        border.width: publishing || activeFocus ? 1 : 0
+        border.color: activeFocus ? root.theme.focusBorder : root.theme.danger
         color: publishing ? root.theme.alpha(root.theme.danger, controlMouse.pressed ? 0.42 : controlMouse.containsMouse ? 0.32 : 0.2)
-          : root.theme.tui && !controlMouse.containsMouse ? "transparent" : controlMouse.containsMouse
+          : root.theme.tui && !root.theme.comfortable && !controlMouse.containsMouse ? "transparent" : controlMouse.containsMouse
           ? (modelData.action === "leave" ? root.theme.alpha(root.theme.danger, 0.28) : root.theme.alpha(root.theme.foreground, 0.12))
           : root.theme.alpha(root.theme.foreground, 0.065)
         opacity: controlEnabled ? 1 : 0.55
@@ -61,7 +75,7 @@ Column {
           width: Math.min(implicitWidth, parent.width - root.theme.space(16))
           wrapMode: modelData.action === "invite" ? Text.NoWrap : Text.Wrap
           horizontalAlignment: Text.AlignHCenter
-          text: root.theme.tui ? "[" + modelData.label.toLowerCase() + "]" : modelData.action === "leave" ? "Disconnect from voice" : modelData.label
+          text: root.theme.tui && !root.theme.comfortable ? "[" + modelData.label.toLowerCase() + "]" : modelData.action === "leave" ? "Disconnect from voice" : modelData.label
           color: parent.publishing || modelData.action === "leave" ? root.theme.danger : root.theme.foreground
           font.weight: parent.publishing ? Font.Bold : Font.Normal
           font.family: root.theme.font.family
@@ -73,12 +87,7 @@ Column {
           enabled: parent.controlEnabled
           hoverEnabled: true
           cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
-          onClicked: {
-            if (modelData.action === "share") root.bridge.toggleShare()
-            else if (modelData.action === "camera") root.cameraRequested()
-            else if (modelData.action === "invite") invitePicker.open()
-            else { root.bridge.leave(); root.leaveRequested() }
-          }
+          onClicked: parent.activate()
         }
       }
     }

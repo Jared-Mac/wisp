@@ -46,6 +46,7 @@ impl Default for Sample {
 pub(crate) struct AudioTest {
     sample: Arc<Mutex<Sample>>,
     task: AsyncMutex<Option<JoinHandle<()>>>,
+    denoiser: AsyncMutex<Option<Arc<DenoiserService>>>,
 }
 
 impl Drop for AudioTest {
@@ -78,6 +79,9 @@ impl AudioTest {
             task.abort();
             let _ = task.await;
         }
+        if let Some(denoiser) = self.denoiser.lock().await.take() {
+            let _ = denoiser.stop_session().await;
+        }
         let mut sample = self.sample.lock().expect("audio test lock poisoned");
         if discard {
             *sample = Sample::default();
@@ -99,16 +103,17 @@ impl AudioTest {
         denoiser: Arc<DenoiserService>,
     ) -> anyhow::Result<()> {
         self.stop(true).await;
-        denoiser.start_session().await?;
         let frames = Arc::new(CaptureQueue::default());
         let (pipeline, source) =
             crate::media::create_microphone_capture_pipeline(microphone, frames.clone())?;
         let pipeline = Pipeline(pipeline);
         frames.activate(source);
-        pipeline
-            .0
-            .set_state(gst::State::Playing)
-            .context("start microphone test")?;
+        denoiser.start_session().await?;
+        *self.denoiser.lock().await = Some(denoiser.clone());
+        if let Err(error) = pipeline.0.set_state(gst::State::Playing) {
+            self.stop(true).await;
+            return Err(error).context("start microphone test");
+        }
         {
             let mut sample = self.sample.lock().expect("audio test lock poisoned");
             sample.status.phase = "recording";
@@ -122,6 +127,7 @@ impl AudioTest {
             )
             .await;
             drop(pipeline); // Close the microphone before allowing any playback.
+            let _ = denoiser.stop_session().await;
             let mut sample = sample.lock().expect("audio test lock poisoned");
             let error = match result {
                 Ok(Ok(())) => None,
@@ -151,6 +157,20 @@ impl AudioTest {
                 sample.processed.clone()
             }
         };
+        self.play_samples(speaker, samples, original).await
+    }
+
+    pub(crate) async fn play_clip(&self, speaker: &str, samples: Vec<i16>) -> anyhow::Result<()> {
+        self.play_samples(speaker, samples, true).await
+    }
+
+    async fn play_samples(
+        &self,
+        speaker: &str,
+        samples: Vec<i16>,
+        original: bool,
+    ) -> anyhow::Result<()> {
+        self.stop(false).await;
         let (pipeline, source) = playback_pipeline(speaker)?;
         let pipeline = Pipeline(pipeline);
         // PipeWire cannot render a multi-second buffer as one quantum: it may

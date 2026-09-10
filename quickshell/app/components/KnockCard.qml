@@ -7,7 +7,8 @@ Rectangle {
   required property var theme
   signal accepted()
 
-  implicitHeight: root.theme.space(76)
+  readonly property bool stacked: root.theme.comfortable && width < root.theme.space(360)
+  implicitHeight: stacked ? knockInfo.implicitHeight + knockActions.height + root.theme.space(24) : root.theme.space(76)
   radius: root.theme.cornerRadius
   color: root.theme.alpha(root.theme.warning, 0.10)
   border.width: 1
@@ -17,13 +18,16 @@ Rectangle {
     id: knockInfo
     anchors.left: parent.left
     anchors.leftMargin: root.theme.spacing.lg
-    anchors.verticalCenter: parent.verticalCenter
+    anchors.verticalCenter: root.stacked ? undefined : parent.verticalCenter
+    anchors.top: root.stacked ? parent.top : undefined
+    anchors.topMargin: root.theme.spacing.lg
     spacing: root.theme.spacing.xs
-    Binding on width { when: root.theme.terminal; value: Math.max(0, knockActions.x - knockInfo.x - root.theme.spacing.lg); restoreMode: Binding.RestoreBindingOrValue }
+    Binding on width { when: root.theme.terminal; value: Math.max(0, root.stacked ? root.width - root.theme.spacing.lg * 2 : knockActions.x - knockInfo.x - root.theme.spacing.lg); restoreMode: Binding.RestoreBindingOrValue }
 
     Text {
       Binding on width { when: root.theme.terminal; value: knockInfo.width; restoreMode: Binding.RestoreBindingOrValue }
       elide: root.theme.terminal ? Text.ElideRight : Text.ElideNone
+      wrapMode: root.stacked ? Text.Wrap : Text.NoWrap
       text: String(root.knock.from.display_name || "A friend") + " wants to hang out"
       color: root.theme.foreground
       font.family: root.theme.font.family
@@ -42,7 +46,9 @@ Rectangle {
     id: knockActions
     anchors.right: parent.right
     anchors.rightMargin: root.theme.spacing.md
-    anchors.verticalCenter: parent.verticalCenter
+    anchors.verticalCenter: root.stacked ? undefined : parent.verticalCenter
+    anchors.bottom: root.stacked ? parent.bottom : undefined
+    anchors.bottomMargin: root.theme.spacing.lg
     spacing: root.theme.spacing.sm
 
     Repeater {

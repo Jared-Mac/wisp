@@ -10,7 +10,7 @@ Row {
   property bool deafened: false
 
   spacing: root.theme.spacing.sm
-  height: root.theme.space(32)
+  height: root.theme.space(root.theme.comfortable ? 36 : 32)
 
   Rectangle {
     id: mutedIcon
@@ -20,17 +20,17 @@ Row {
     Accessible.name: root.muted ? "Unmute microphone" : "Mute microphone"
     Keys.onSpacePressed: root.bridge.toggleMuted()
     Keys.onReturnPressed: root.bridge.toggleMuted()
-    width: root.theme.space(32)
-    height: width
+    width: root.theme.space(root.theme.comfortable ? 92 : 32)
+    height: root.theme.space(root.theme.comfortable ? 36 : 32)
     radius: root.theme.cornerRadius
-    color: root.theme.tui ? "transparent" : root.muted
+    color: root.theme.tui && !root.theme.comfortable ? "transparent" : root.muted
       ? root.theme.alpha(root.theme.warning, mutedMouse.containsMouse ? 0.3 : 0.18)
       : root.theme.alpha(root.theme.foreground, mutedMouse.containsMouse ? 0.12 : 0.055)
     border.color: activeFocus ? root.theme.focusBorder : root.muted ? root.theme.alpha(root.theme.warning, 0.72) : "transparent"
-    border.width: root.theme.tui && !activeFocus ? 0 : 1
+    border.width: root.theme.tui && !root.theme.comfortable && !activeFocus ? 0 : 1
 
     Image {
-      visible: !root.theme.tui
+      visible: !root.theme.tui && !root.theme.comfortable
       anchors.centerIn: parent
       width: root.theme.space(20)
       height: width
@@ -40,8 +40,8 @@ Row {
       fillMode: Image.PreserveAspectFit
     }
     Text {
-      anchors.centerIn: parent; visible: root.theme.tui
-      text: "[M]"; color: root.muted ? root.theme.warning : root.theme.foreground
+      anchors.centerIn: parent; visible: root.theme.tui || root.theme.comfortable
+      text: root.theme.comfortable ? (root.muted ? "Unmute" : "Mute") : "[M]"; color: root.muted ? root.theme.warning : root.theme.foreground
       font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
     }
 
@@ -89,17 +89,17 @@ Row {
     Accessible.name: root.deafened ? "Undeafen" : "Deafen"
     Keys.onSpacePressed: root.bridge.toggleDeafened()
     Keys.onReturnPressed: root.bridge.toggleDeafened()
-    width: root.theme.space(32)
-    height: width
+    width: root.theme.space(root.theme.comfortable ? 102 : 32)
+    height: root.theme.space(root.theme.comfortable ? 36 : 32)
     radius: root.theme.cornerRadius
-    color: root.theme.tui ? "transparent" : root.deafened
+    color: root.theme.tui && !root.theme.comfortable ? "transparent" : root.deafened
       ? root.theme.alpha(root.theme.danger, deafenedMouse.containsMouse ? 0.32 : 0.2)
       : root.theme.alpha(root.theme.foreground, deafenedMouse.containsMouse ? 0.12 : 0.055)
     border.color: activeFocus ? root.theme.focusBorder : root.deafened ? root.theme.alpha(root.theme.danger, 0.72) : "transparent"
-    border.width: root.theme.tui && !activeFocus ? 0 : 1
+    border.width: root.theme.tui && !root.theme.comfortable && !activeFocus ? 0 : 1
 
     Image {
-      visible: !root.theme.tui
+      visible: !root.theme.tui && !root.theme.comfortable
       anchors.centerIn: parent
       width: root.theme.space(20)
       height: width
@@ -109,8 +109,8 @@ Row {
       fillMode: Image.PreserveAspectFit
     }
     Text {
-      anchors.centerIn: parent; visible: root.theme.tui
-      text: "[D]"; color: root.deafened ? root.theme.danger : root.theme.foreground
+      anchors.centerIn: parent; visible: root.theme.tui || root.theme.comfortable
+      text: root.theme.comfortable ? (root.deafened ? "Undeafen" : "Deafen") : "[D]"; color: root.deafened ? root.theme.danger : root.theme.foreground
       font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
     }
 

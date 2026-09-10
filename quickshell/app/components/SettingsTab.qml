@@ -21,7 +21,7 @@ ChatButton {
   }
   contentItem: Text {
     id: tabLabel
-    text: root.theme.tui ? "[" + root.text + "]" : root.text
+    text: root.theme.tui && !root.theme.comfortable ? "[" + root.text + "]" : root.text
     color: root.primary ? root.theme.accent : root.theme.foreground
     font.family: root.theme.font.family
     font.pixelSize: root.theme.font.caption
