@@ -6,6 +6,7 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+wisp-protocol = { path = "../wisp-protocol" }
 age = { version = "0.11.3", default-features = false }
 anyhow.workspace = true
 base64.workspace = true

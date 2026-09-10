@@ -6,7 +6,9 @@ use serde_json::Value;
 use std::{fmt, str::FromStr};
 use uuid::Uuid;
 
+pub mod message_context;
 pub mod soundboard;
+pub use message_context::{ForwardedFrom, MessageContext, ReplyReference};
 
 pub const PROTOCOL_VERSION: u8 = 1;
 
@@ -999,6 +1001,8 @@ pub struct LiveKitTokenResponse {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Message {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context: Option<MessageContext>,
     pub id: MessageId,
     pub conversation_id: String,
     pub sender: UserSummary,
@@ -1055,6 +1059,8 @@ pub struct BeginEncryptedUpload {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SendMessageRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context: Option<MessageContext>,
     pub conversation_id: String,
     #[serde(default = "default_content_type")]
     pub content_type: String,
@@ -1083,6 +1089,8 @@ pub fn file_retention_hours(size: u64) -> Option<i64> {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BeginFileUpload {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context: Option<MessageContext>,
     pub id: Uuid,
     pub conversation_id: String,
     pub file_name: String,
@@ -1190,6 +1198,8 @@ pub fn valid_chat_file_name(name: &str) -> bool {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SendFileMessageRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context: Option<MessageContext>,
     pub conversation_id: String,
     pub file_name: String,
     pub data_base64: String,
@@ -1199,6 +1209,8 @@ pub struct SendFileMessageRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SendImageMessageRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context: Option<MessageContext>,
     pub conversation_id: String,
     pub png_base64: String,
     #[serde(default)]

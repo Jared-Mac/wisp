@@ -9,6 +9,9 @@ var paths = {
   chevron: '<path d="m6 9 6 6 6-6"/>',
   back: '<path d="m14 6-6 6 6 6"/>',
   returnChat: '<path d="m9 4-5 5 5 5M4 9h9a7 7 0 0 1 0 14"/>',
+  reply: '<path d="m9 4-6 6 6 6M3 10h10a8 8 0 0 1 8 8v2"/>',
+  forwardMessage: '<path d="m15 4 6 6-6 6M21 10H11a8 8 0 0 0-8 8v2"/>',
+  pin: '<path d="m15 3 6 6-3 1-4 4v4l-8-8h4l4-4zM9 15l-6 6"/>',
   forward: '<path d="m10 6 6 6-6 6"/>',
   check: '<path d="m5 12 4 4L19 6"/>',
   settings: '<path d="m10 3-.7 2.4-2 .9L5 5.5 3 9l1.8 1.6v2.8L3 15l2 3.5 2.3-.8 2 .9L10 21h4l.7-2.4 2-.9 2.3.8 2-3.5-1.8-1.6v-2.8L21 9l-2-3.5-2.3.8-2-.9L14 3z"/><circle cx="12" cy="12" r="3"/>',
@@ -75,6 +78,9 @@ function icon(text) {
   if (/^[›>]$/.test(s)) return "forward"
   if (s === "⠿") return "grip"
   if (s === "☺") return "emoji"
+  if (/^(unpin|pin|pinned)\b/.test(s)) return "pin"
+  if (/^reply\b/.test(s)) return "reply"
+  if (/^forward\b/.test(s)) return "forwardMessage"
   if (/server (mute|unmute)|server (deafen|undeafen)|role|admin|permission/.test(s)) return "shield"
   if (/disconnect/.test(s)) return "disconnect"
   if (/stop|leave/.test(s)) return "stop"

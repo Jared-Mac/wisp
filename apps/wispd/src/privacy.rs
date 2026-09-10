@@ -150,7 +150,7 @@ impl Privacy {
         Self::at(root, server, account)
     }
 
-    fn at(root: PathBuf, server: &str, account: Uuid) -> Self {
+    pub(super) fn at(root: PathBuf, server: &str, account: Uuid) -> Self {
         let binding = root.join(format!("{:x}.json", Sha256::digest(server.as_bytes())));
         let active = (|| -> anyhow::Result<Option<Arc<Vault>>> {
             let Some(setup) = read_setup(&binding)? else {
@@ -805,6 +805,9 @@ impl Privacy {
         let block_plaintext =
             snapshot.chat_encryption_required || !matches!(self.active(), Ok(None));
         let decode_message = |message: &mut Message| {
+            if message.encryption_version != 0 || block_plaintext {
+                message.context = None;
+            }
             if message.encryption_version == 0 {
                 // A later malicious server must not bypass sender authentication
                 // by replaying the legacy wire type. Invite cards are explicitly
@@ -865,6 +868,7 @@ impl Privacy {
                     .lock()
                     .expect("decrypted cache")
                     .insert(message.id, content.clone());
+                message.context = content.context;
                 let mut payload = content.payload;
                 if payload.is_object() {
                     for key in ["keep", "expires_at", "expired"] {

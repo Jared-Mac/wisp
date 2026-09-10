@@ -8,6 +8,16 @@ Rectangle {
   required property var bridge
   required property var theme
   required property string conversationId
+  signal replyRequested()
+  property string highlightedId: ""
+  function revealMessage(id) {
+    for (var i=0;i<stableMessages.count;i++) if (String(stableMessages.get(i).modelData.id)===String(id)) {
+      messages.followBottom=false; messages.positionViewAtIndex(i,ListView.Center); highlightedId=String(id); highlightTimer.restart(); return
+    }
+  }
+  Timer { id: highlightTimer; interval: 2500; onTriggered: root.highlightedId="" }
+  Connections { target: root.bridge.messageActions; function onMessageLocated(conversationId,messageId) { if (root.bridge.messageActions.canonical(root.conversationId)===conversationId) Qt.callLater(function(){root.revealMessage(messageId)}) } }
+  ForwardMessageDialog { id: forwardDialog; bridge: root.bridge; theme: root.theme }
   property string editingId: ""
   property string deletingId: ""
   property bool editingImage: false
@@ -90,6 +100,7 @@ Rectangle {
       readonly property string imageUrl: root.bridge.chatImageUrls[String(modelData.id)] || ""
       readonly property string serverId: String(modelData.server_id || root.bridge.activeServer.id)
       width: Math.min(messages.width, root.theme.comfortable ? root.theme.space(860) : messages.width)
+      Rectangle { anchors.fill: parent; visible: root.highlightedId===String(message.modelData.id); color: root.theme.alpha(root.theme.accent,0.12); radius: root.theme.cornerRadius }
       HoverHandler { id: messageHover }
       Component.onCompleted: { if (isImage) root.bridge.loadChatImage(String(modelData.id));root.bridge.chatExtras.loadText(serverId,copyText) }
       onCopyTextChanged:root.bridge.chatExtras.loadText(serverId,copyText)
@@ -131,9 +142,30 @@ Rectangle {
             Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
             Binding on font.pixelSize { when: root.theme.terminal; value: root.theme.font.caption; restoreMode: Binding.RestoreBindingOrValue }
             id: messageMenu
+            onAboutToShow: root.bridge.messageActions.loadPins(root.conversationId)
             objectName: "messageMenu-" + String(message.modelData.id)
             palette.window: root.theme.surface
             palette.text: root.theme.foreground
+            MenuItem {
+              id: replyControl; objectName: "replyMessage-" + String(message.modelData.id)
+              text: "Reply"; enabled: !message.isInvitation && !(root.bridge.conversationById(root.conversationId) || {}).pending_access
+              ThemeControlStyle { theme: root.theme; control: replyControl }
+              onTriggered: { root.bridge.messageActions.beginReply(root.conversationId,message.modelData); root.replyRequested() }
+            }
+            MenuItem {
+              id: forwardControl; objectName: "forwardMessage-" + String(message.modelData.id)
+              text: "Forward…"; enabled: !message.isInvitation && !(message.isFile && message.modelData.payload.expired)
+              ThemeControlStyle { theme: root.theme; control: forwardControl }
+              onTriggered: forwardDialog.showMessage(message.modelData)
+            }
+            MenuItem {
+              id: pinControl; objectName: "pinMessage-" + String(message.modelData.id)
+              visible: root.bridge.messageActions.canPin(root.conversationId); height: visible ? implicitHeight : 0
+              enabled: root.bridge.messageActions.pinsFor(root.conversationId).ready
+              text: root.bridge.messageActions.isPinned(root.conversationId,message.modelData.id) ? "Unpin message" : "Pin message"
+              ThemeControlStyle { theme: root.theme; control: pinControl }
+              onTriggered: root.bridge.messageActions.setPin(root.conversationId,message.modelData.id,!root.bridge.messageActions.isPinned(root.conversationId,message.modelData.id))
+            }
             MenuItem {
               id: copyControl
               objectName: "copyMessage-" + String(message.modelData.id)
@@ -164,6 +196,25 @@ Rectangle {
                text: "Delete message…"; onTriggered: { root.deletingId = String(message.modelData.id); deleteDialog.open() } }
           }
         }
+      }
+      Button {
+        id: replyPreview; objectName: "messageReplyPreview-" + String(message.modelData.id)
+        readonly property var reference: (message.modelData.context || {}).reply_to || null
+        visible: !!reference; width: parent.width; height: visible ? root.theme.space(42) : 0; padding: root.theme.spacing.sm
+        Accessible.name: "View message from " + (reference ? reference.sender_name : "")
+        onClicked: root.bridge.messageActions.locate(root.conversationId,reference.message_id)
+        background: Rectangle { color: root.theme.alpha(root.theme.accent,replyPreview.hovered ? 0.12 : 0.06); radius: root.theme.cornerRadius; Rectangle { width: 2; height: parent.height; color: root.theme.accent } }
+        contentItem: Column {
+          Text { width: parent.width; textFormat: Text.PlainText; text: "↪ " + String((replyPreview.reference || {}).sender_name || ""); elide: Text.ElideRight; color: root.theme.accent; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption }
+          Text { width: parent.width; textFormat: Text.PlainText; text: String((replyPreview.reference || {}).preview || "").replace(/\s+/g," "); elide: Text.ElideRight; color: root.theme.muted; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption }
+        }
+      }
+      Text {
+        objectName: "messageForwarded-" + String(message.modelData.id)
+        visible: !!(message.modelData.context || {}).forwarded_from
+        width: parent.width; textFormat: Text.PlainText; elide: Text.ElideRight
+        text: "Forwarded · " + String(((message.modelData.context || {}).forwarded_from || {}).sender_name || "")
+        color: root.theme.muted; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption; font.italic: true
       }
       Rectangle {
         id: imagePreview

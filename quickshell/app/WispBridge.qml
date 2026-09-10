@@ -9,6 +9,8 @@ Item {
   id: root
 
   property string clientName: "quickshell"
+  readonly property alias messageActions: messageActions
+  WispMessageActions { id: messageActions; bridge: root }
   readonly property alias voiceRecovery: voiceRecovery
   WispVoiceRecovery { id: voiceRecovery; bridge: root }
   readonly property alias soundboard: soundboard
@@ -37,6 +39,7 @@ Item {
   }
   property string lastAppliedVolumes: ""
   onDaemonConnectedChanged: {
+    if (!daemonConnected) messageActions.disconnected()
     chatExtras.invalidate()
     soundboard.reset()
     avatars.reconnect()
@@ -549,6 +552,11 @@ Item {
   readonly property var messages: {
     var result=[]
     serverStates.forEach(function(state) { (state.messages || []).forEach(function(message) { result.push(root.scopedMessage(state.server,message)) }) })
+    Object.keys(messageActions.loadedMessages).forEach(function(id) {
+      var loaded=messageActions.loadedMessages[id]
+      if (!result.some(function(m){return String(m.id)===String(loaded.id) && String(m.server_id)===String(loaded.server_id)})) result.push(loaded)
+    })
+    result.sort(function(a,b){return String(a.created_at).localeCompare(String(b.created_at)) || String(a.id).localeCompare(String(b.id))})
     return result
   }
   readonly property var spots: (activeServerState.spots || []).map(function(spot) { return Object.assign({},spot,{server_id:String(root.activeServer.id),server_name:String(root.activeServer.name),conversation_id:root.scopedConversationId(root.activeServer.id,"spot:"+spot.id)}) })
@@ -1001,6 +1009,7 @@ Item {
       return
     }
     if (message.type === "event" && message.payload && message.payload.snapshot) {
+      if (["pins_changed","message_deleted","message_updated","conversation_changed","group_members_changed","server_settings_changed","server_reconnected"].indexOf(message.name)>=0) messageActions.invalidate()
       if (message.name === "emojis_changed") chatExtras.invalidate()
       if (message.name === "soundboard_changed") soundboard.invalidate()
       if (message.name === "account_avatar_changed") avatars.invalidate()
@@ -1105,9 +1114,10 @@ Item {
   function sendAttachmentQueue(conversationId, tokens, caption, originalText) {
     var attachment = attachmentsFor(conversationId).filter(function(a) { return a.token === tokens[0] })[0]
     sendingConversations = replaceConversationEntry(sendingConversations, conversationId, true)
-    var id = send("send_attachment_message", withConversationScope(conversationId, {token: tokens[0], caption: caption, keep:!!(attachment && attachment.keep)}))
+    var reply=messageActions.replyFor(conversationId)
+    var id = send(reply ? "send_reply" : "send_attachment_message", withConversationScope(conversationId, {token: tokens[0], caption: caption, text:caption, reply_to:reply ? reply.message_id : undefined, keep:!!(attachment && attachment.keep)}))
     if (id) {
-      requests[id] = {kind: "send", conversationId: conversationId, text: originalText, token: tokens[0], remaining: tokens.slice(1)}
+      requests[id] = {kind: "send", conversationId: conversationId, text: originalText, token: tokens[0], remaining: tokens.slice(1),replyId:reply ? reply.message_id : ""}
     } else sendingConversations = replaceConversationEntry(sendingConversations, conversationId, undefined)
   }
   function sendComposedMessage(conversationId) {
@@ -1121,9 +1131,10 @@ Item {
     }
     if (!text) return
     sendingConversations = replaceConversationEntry(sendingConversations, conversationId, true)
-    var id = send("send_message", withConversationScope(conversationId, {text: text}))
+    var reply=messageActions.replyFor(conversationId)
+    var id = send(reply ? "send_reply" : "send_message", withConversationScope(conversationId, {text: text,reply_to:reply ? reply.message_id : undefined}))
     if (id) {
-      requests[id] = {kind: "send", conversationId: conversationId, text: draftFor(conversationId), token: ""}
+      requests[id] = {kind: "send", conversationId: conversationId, text: draftFor(conversationId), token: "",replyId:reply ? reply.message_id : ""}
     } else sendingConversations = replaceConversationEntry(sendingConversations, conversationId, undefined)
   }
   function saveChatFile(messageId) {
@@ -1159,6 +1170,7 @@ Item {
     delete requests[message.id]
     var value = message.value || ({})
     var conversationId = action.conversationId
+    if (action.kind === "messageAction") { messageActions.finish(message,action); return }
     if (action.kind === "soundboard") {
       soundboard.reply(message, action)
       return
@@ -1265,6 +1277,7 @@ Item {
           sendAttachmentQueue(conversationId, action.remaining, "", undefined)
           return
         }
+        if (action.replyId && (messageActions.replyFor(conversationId) || {}).message_id===action.replyId) messageActions.cancelReply(conversationId)
       }
       // Clear acknowledged content before re-enabling Enter and Send.
       sendingConversations = replaceConversationEntry(sendingConversations, conversationId, undefined)

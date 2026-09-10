@@ -199,6 +199,7 @@ async fn toggle_reaction(
             &roster,
             id,
             Content {
+                context: None,
                 content_type: REACTION_CONTENT_TYPE.into(),
                 payload: json!({"target":target,"emoji":emoji}),
                 attachment: None,

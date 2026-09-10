@@ -9,6 +9,9 @@ mod groups;
 mod invitation_privacy;
 mod invitations;
 #[cfg(test)]
+mod message_actions_tests;
+mod message_pins;
+#[cfg(test)]
 mod presence_tests;
 mod privacy;
 #[cfg(test)]
@@ -626,8 +629,12 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/messages/{id}/retention", patch(attachments::retention))
         .route(
             "/v1/messages/{id}",
-            text_body(patch(edit_message), &state).delete(delete_message),
+            text_body(patch(edit_message), &state)
+                .delete(delete_message)
+                .get(message_pins::get_message),
         )
+        .route("/v1/pins", get(message_pins::list))
+        .route("/v1/messages/{id}/pin", put(message_pins::set))
         .route("/v1/conversations/direct", post(create_direct_conversation))
         .route("/v1/conversations/group", post(groups::create))
         .route(
@@ -1744,7 +1751,7 @@ async fn list_messages(
         .await
         .map_err(ApiError::internal)?;
     let rows = sqlx::query(
-        "SELECT m.id, m.conversation_id, m.created_at, m.content_type, m.payload, m.encryption_version, m.edited_at, u.id AS sender_id, u.display_name FROM messages m JOIN users u ON u.id = m.sender_id JOIN conversation_members cm ON cm.conversation_id = m.conversation_id AND cm.user_id = ? WHERE m.conversation_id = ? AND m.created_at > COALESCE(cm.history_cleared_at, '') AND (? IS NULL OR m.created_at > ?) ORDER BY m.created_at, m.id LIMIT 200",
+        "SELECT m.id, m.conversation_id, m.created_at, m.content_type, m.payload, m.context, m.encryption_version, m.edited_at, u.id AS sender_id, u.display_name FROM messages m JOIN users u ON u.id = m.sender_id JOIN conversation_members cm ON cm.conversation_id = m.conversation_id AND cm.user_id = ? WHERE m.conversation_id = ? AND m.created_at > COALESCE(cm.history_cleared_at, '') AND (? IS NULL OR m.created_at > ?) ORDER BY m.created_at, m.id LIMIT 200",
     )
     .bind(user_id.to_string())
     .bind(&query.conversation_id)
@@ -1787,8 +1794,10 @@ async fn persist_message(
     request: SendMessageRequest,
     attachment: Option<StoredAttachment>,
 ) -> Result<Message, ApiError> {
+    validate_message_context(state, sender_id, &request).await?;
     let sender = find_user(&state.pool, &sender_id.to_string()).await?;
     let message = Message {
+        context: request.context,
         id: if request.encryption_version == 1 {
             request.payload["id"]
                 .as_str()
@@ -1808,11 +1817,11 @@ async fn persist_message(
         edited_at: None,
     };
     let mut tx = state.pool.begin().await.map_err(ApiError::internal)?;
-    let inserted = sqlx::query("INSERT INTO messages(id, conversation_id, sender_id, created_at, content_type, payload, encryption_version) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING")
+    let inserted = sqlx::query("INSERT INTO messages(id, conversation_id, sender_id, created_at, content_type, payload, encryption_version, context) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING")
         .bind(message.id.to_string()).bind(&message.conversation_id).bind(sender_id.to_string())
         .bind(message.created_at.to_rfc3339()).bind(&message.content_type)
         .bind(serde_json::to_string(&message.payload).map_err(ApiError::internal)?)
-        .bind(message.encryption_version).execute(&mut *tx).await.map_err(ApiError::internal)?;
+        .bind(message.encryption_version).bind(serde_json::to_string(&message.context).map_err(ApiError::internal)?).execute(&mut *tx).await.map_err(ApiError::internal)?;
     if inserted.rows_affected() == 0 {
         let existing = sqlx::query("SELECT m.*, u.display_name FROM messages m JOIN users u ON u.id=m.sender_id WHERE m.id=?")
             .bind(message.id.to_string()).fetch_one(&mut *tx).await.map_err(ApiError::internal)?;
@@ -1823,6 +1832,7 @@ async fn persist_message(
             && existing.content_type == message.content_type
             && existing.encryption_version == message.encryption_version
             && existing.payload == message.payload
+            && existing.context == message.context
         {
             return Ok(existing);
         }
@@ -1958,6 +1968,7 @@ async fn send_image_message(
         &state,
         sender_id,
         SendMessageRequest {
+            context: request.context,
             conversation_id: request.conversation_id,
             content_type: "image/png".into(),
             payload: json!({"width": width, "height": height, "caption": request.caption}),
@@ -1999,6 +2010,7 @@ async fn send_file_message(
         ));
     }
     let message = persist_message(&state, sender_id, SendMessageRequest {
+context: request.context,
         conversation_id: request.conversation_id,
         content_type: "application/octet-stream".into(),
         payload: json!({"file_name": request.file_name, "size": bytes.len(), "caption": request.caption}),
@@ -2602,6 +2614,11 @@ async fn load_devices(pool: &SqlitePool, user_id: UserId) -> Result<Vec<DeviceVi
 
 fn message_from_row(row: &SqliteRow) -> Result<Message, ApiError> {
     Ok(Message {
+        context: row
+            .get::<Option<String>, _>("context")
+            .map(|value| serde_json::from_str(&value).map_err(ApiError::internal))
+            .transpose()?
+            .flatten(),
         id: parse_uuid(&row.get::<String, _>("id"))?,
         conversation_id: row.get("conversation_id"),
         sender: UserSummary {
@@ -2621,6 +2638,37 @@ fn message_from_row(row: &SqliteRow) -> Result<Message, ApiError> {
             .map(|value| value.parse().map_err(ApiError::internal))
             .transpose()?,
     })
+}
+
+async fn validate_message_context(
+    state: &AppState,
+    sender: UserId,
+    request: &SendMessageRequest,
+) -> Result<(), ApiError> {
+    let Some(context) = &request.context else {
+        return Ok(());
+    };
+    if request.encryption_version != 0 {
+        return Err(ApiError::bad_request(
+            "invalid_context",
+            "Encrypted message context must stay inside ciphertext",
+        ));
+    }
+    context
+        .validate()
+        .map_err(|error| ApiError::bad_request("invalid_context", error))?;
+    if let Some(reply) = &context.reply_to {
+        let visible: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM messages m JOIN conversation_members cm ON cm.conversation_id=m.conversation_id WHERE m.id=? AND m.conversation_id=? AND cm.user_id=? AND m.created_at>COALESCE(cm.history_cleared_at, '')")
+            .bind(reply.message_id.to_string()).bind(&request.conversation_id).bind(sender.to_string())
+            .fetch_one(&state.pool).await.map_err(ApiError::internal)?;
+        if visible == 0 {
+            return Err(ApiError::bad_request(
+                "invalid_reply",
+                "The replied-to message is no longer available in this chat",
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn validate_message(request: &SendMessageRequest) -> Result<(), ApiError> {
@@ -2756,7 +2804,7 @@ async fn load_recent_messages(
         .await
         .map_err(ApiError::internal)?;
     let rows = sqlx::query(
-        "SELECT recent.id, recent.conversation_id, recent.created_at, recent.content_type, recent.payload, recent.encryption_version, recent.edited_at, u.id AS sender_id, u.display_name FROM (SELECT m.* FROM messages m JOIN conversation_members cm ON cm.conversation_id = m.conversation_id WHERE cm.user_id = ? AND m.created_at > COALESCE(cm.history_cleared_at, '') ORDER BY m.created_at DESC, m.id DESC LIMIT 500) recent JOIN users u ON u.id = recent.sender_id ORDER BY recent.created_at, recent.id",
+        "SELECT recent.id, recent.conversation_id, recent.created_at, recent.content_type, recent.payload, recent.context, recent.encryption_version, recent.edited_at, u.id AS sender_id, u.display_name FROM (SELECT m.* FROM messages m JOIN conversation_members cm ON cm.conversation_id = m.conversation_id WHERE cm.user_id = ? AND m.created_at > COALESCE(cm.history_cleared_at, '') ORDER BY m.created_at DESC, m.id DESC LIMIT 500) recent JOIN users u ON u.id = recent.sender_id ORDER BY recent.created_at, recent.id",
     )
     .bind(user_id.to_string())
     .fetch_all(pool)
@@ -2808,7 +2856,7 @@ async fn load_conversation(
         })
         .collect::<Result<Vec<_>, ApiError>>()?;
     let message_row = sqlx::query(
-        "SELECT m.id, m.conversation_id, m.created_at, m.content_type, m.payload, m.encryption_version, m.edited_at, u.id AS sender_id, u.display_name FROM messages m JOIN users u ON u.id = m.sender_id WHERE m.conversation_id = ? AND m.created_at > COALESCE(?, '') ORDER BY m.created_at DESC, m.id DESC LIMIT 1",
+        "SELECT m.id, m.conversation_id, m.created_at, m.content_type, m.payload, m.context, m.encryption_version, m.edited_at, u.id AS sender_id, u.display_name FROM messages m JOIN users u ON u.id = m.sender_id WHERE m.conversation_id = ? AND m.created_at > COALESCE(?, '') ORDER BY m.created_at DESC, m.id DESC LIMIT 1",
     )
     .bind(id)
     .bind(row.get::<Option<String>, _>("history_cleared_at"))
@@ -3562,6 +3610,7 @@ mod tests {
             .await
             .unwrap();
         let post = || SendMessageRequest {
+            context: None,
             conversation_id: id.clone(),
             content_type: "text/plain".into(),
             payload: json!("hello"),
@@ -3649,6 +3698,7 @@ mod tests {
             .write_to(&mut bytes, image::ImageFormat::Png)
             .unwrap();
         let request = wisp_protocol::SendImageMessageRequest {
+            context: None,
             conversation_id: id.clone(),
             png_base64: base64::engine::general_purpose::STANDARD.encode(bytes.into_inner()),
             caption: "Screenshot".into(),
@@ -3766,6 +3816,7 @@ mod tests {
             State(state.clone()),
             chat_headers(TEST_OWNER_ID),
             Json(SendMessageRequest {
+                context: None,
                 conversation_id: id,
                 content_type: "text/plain".into(),
                 payload: json!("new message"),
@@ -3795,6 +3846,7 @@ mod tests {
             &state,
             owner,
             SendMessageRequest {
+                context: None,
                 conversation_id: id,
                 content_type: "image/png".into(),
                 payload: json!({"caption":"image","width":1,"height":1}),
@@ -3853,6 +3905,7 @@ mod tests {
             .await
             .unwrap();
         let request = wisp_protocol::SendFileMessageRequest {
+            context: None,
             conversation_id: conversation_id.clone(),
             file_name: "notes.txt".into(),
             data_base64: base64::engine::general_purpose::STANDARD.encode(b"private notes"),
@@ -4014,6 +4067,7 @@ mod tests {
             State(state.clone()),
             chat_headers(TEST_OWNER_ID),
             Json(SendMessageRequest {
+                context: None,
                 conversation_id: id.clone(),
                 content_type: "text/plain".into(),
                 payload: json!("original"),

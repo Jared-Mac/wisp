@@ -47,6 +47,7 @@ impl Daemon {
             self.api
                 .request(reqwest::Method::POST, "/v1/file-uploads")
                 .json(&BeginFileUpload {
+                    context: None,
                     id: token,
                     conversation_id,
                     file_name: draft.file_name.clone(),

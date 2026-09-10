@@ -139,6 +139,7 @@ impl Daemon {
             &roster,
             Uuid::new_v4(),
             Content {
+                context: None,
                 content_type: "text/plain".into(),
                 payload: json!(text),
                 attachment: None,
@@ -182,6 +183,7 @@ impl Daemon {
                 "Old attachments require complete migration, not only an encrypted caption"
             );
             Content {
+                context: message.context.clone(),
                 content_type: "text/plain".into(),
                 payload: message.payload,
                 attachment: None,
@@ -272,6 +274,7 @@ impl Daemon {
             &roster,
             upload,
             Content {
+                context: None,
                 content_type: if draft.is_image {
                     "image/png"
                 } else {

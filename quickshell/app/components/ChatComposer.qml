@@ -19,6 +19,8 @@ Column {
   readonly property string destination: conversation && conversation.label ? (conversation.label === "Hangout" ? "Room" : String(conversation.label)) : ""
   readonly property bool pendingAccess: !!(conversation && conversation.pending_access)
   readonly property bool busy: !!bridge.sendingConversations[conversationId] || !!bridge.importingConversations[conversationId]
+  readonly property var replyingTo: bridge.messageActions.replyFor(conversationId)
+  function focusEditor() { editor.forceActiveFocus() }
   spacing: autoGrow ? theme.spacing.xs : theme.tui ? theme.spacing.sm : theme.spacing.lg
 
 
@@ -98,6 +100,25 @@ Column {
   }
 
   Rectangle {
+    objectName: "composerReplyBar"
+    visible: !!root.replyingTo
+    width: parent.width; height: root.theme.space(48)
+    color: root.theme.alpha(root.theme.accent,0.09); radius: root.theme.cornerRadius
+    Rectangle { width: root.theme.space(2); height: parent.height; color: root.theme.accent }
+    Column {
+      anchors.left: parent.left; anchors.right: cancelReply.left; anchors.verticalCenter: parent.verticalCenter; anchors.margins: root.theme.spacing.md
+      Text { width: parent.width; textFormat: Text.PlainText; elide: Text.ElideRight; text: "Replying to " + String((root.replyingTo || {}).sender_name || ""); color: root.theme.foreground; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption }
+      Text { width: parent.width; textFormat: Text.PlainText; elide: Text.ElideRight; text: String((root.replyingTo || {}).preview || "").replace(/\s+/g," "); color: root.theme.muted; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption }
+    }
+    ChatButton {
+      id: cancelReply; objectName: "cancelReply"; anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
+      width: root.theme.space(32); height: width; theme: root.theme; text: "×"; enabled: !root.busy
+      Accessible.name: "Cancel reply"; ToolTip.visible: hovered; ToolTip.text: Accessible.name
+      onClicked: { root.bridge.messageActions.cancelReply(root.conversationId); root.focusEditor() }
+    }
+  }
+
+  Rectangle {
     objectName: "composerMessageBox"
     width: parent.width
     height: root.autoGrow ? Math.min(root.maximumEditorHeight, root.naturalEditorHeight) : root.editorHeight
@@ -147,7 +168,9 @@ Column {
         Binding { target: editor; property: "cursorDelegate"; value: terminalCaret; when: root.theme.tui; restoreMode: Binding.RestoreBindingOrValue }
         Keys.onPressed: function(event) {
           if (root.pendingAccess) return
-          if (event.matches(StandardKey.Paste)) {
+          if (event.key === Qt.Key_Escape && root.replyingTo && !root.busy) {
+            root.bridge.messageActions.cancelReply(root.conversationId); event.accepted=true
+          } else if (event.matches(StandardKey.Paste)) {
             root.bridge.pasteClipboard(root.conversationId)
             event.accepted = true
           } else if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter)

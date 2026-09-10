@@ -88,6 +88,7 @@ pub(super) fn validate(request: &EncryptedMessageRequest) -> Result<(), ApiError
 
 pub(super) fn stored(request: EncryptedMessageRequest) -> SendMessageRequest {
     SendMessageRequest {
+        context: None,
         conversation_id: request.conversation_id,
         content_type: "application/vnd.wisp.encrypted+json".into(),
         encryption_version: 1,

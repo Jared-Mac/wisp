@@ -222,6 +222,7 @@ fn text_validation_has_no_character_cap_but_still_requires_nonempty_text() {
     for text in ["x".repeat(4_000), "x".repeat(4_001), "x".repeat(100_000)] {
         assert!(
             validate_message(&SendMessageRequest {
+                context: None,
                 conversation_id: "test".into(),
                 content_type: "text/plain".into(),
                 payload: json!(text),
@@ -232,6 +233,7 @@ fn text_validation_has_no_character_cap_but_still_requires_nonempty_text() {
     }
     assert!(
         validate_message(&SendMessageRequest {
+            context: None,
             conversation_id: "test".into(),
             content_type: "text/plain".into(),
             payload: json!(" \n\t"),

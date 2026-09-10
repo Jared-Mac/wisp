@@ -613,6 +613,7 @@ async fn two_clients_encrypt_restore_and_admit_a_friend_without_manual_verificat
         &roster,
         Uuid::new_v4(),
         Content {
+            context: None,
             content_type: "text/plain".into(),
             payload: json!("Private integration test"),
             attachment: None,
@@ -695,6 +696,7 @@ async fn two_clients_encrypt_restore_and_admit_a_friend_without_manual_verificat
         &initial,
         Uuid::new_v4(),
         Content {
+            context: None,
             content_type: "text/plain".into(),
             payload: json!("Before invitation"),
             attachment: None,
@@ -754,6 +756,7 @@ async fn two_clients_encrypt_restore_and_admit_a_friend_without_manual_verificat
         &signed,
         old.id,
         Content {
+            context: None,
             content_type: "text/plain".into(),
             payload: json!("Edited without exposing pre-invite history"),
             attachment: None,
@@ -924,6 +927,7 @@ async fn attachment_roundtrip(
                 .unwrap();
         let id = Uuid::new_v4();
         let message = Privacy::seal(&sender, &roster, id, Content {
+context: None,
             content_type: if image {"image/png"} else {"application/octet-stream"}.into(),
             payload: json!({"file_name":"private-test-file.png","size":plain.len(),"caption":"private test caption"}),
             attachment: Some(prepared.manifest.clone()),

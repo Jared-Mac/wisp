@@ -10,6 +10,7 @@ mod chat_extras;
 mod chat_images;
 mod chat_transfers;
 mod media;
+mod message_actions;
 mod network;
 // Run the patched transport's deterministic dialer regressions in the workspace
 // test suite without resolving a separate lockfile for the vendored package.
@@ -275,6 +276,7 @@ impl ServerApi {
         let _: wisp_protocol::Message = decode(
             self.request(reqwest::Method::POST, "/v1/messages")
                 .json(&SendMessageRequest {
+                    context: None,
                     conversation_id,
                     content_type: "text/plain".into(),
                     payload: Value::String(text),
@@ -1477,6 +1479,26 @@ impl Daemon {
 
     #[allow(clippy::too_many_lines)]
     async fn run_command(&self, command: &CommandEnvelope) -> anyhow::Result<Option<Value>> {
+        if matches!(
+            command.name.as_str(),
+            "send_reply" | "forward_message" | "list_pins" | "set_message_pin" | "load_message"
+        ) {
+            return self.message_action(command).await.map(Some);
+        }
+        if matches!(
+            command.name.as_str(),
+            "load_chat_image" | "copy_chat_image" | "save_chat_file"
+        ) {
+            let id: uuid::Uuid = string_arg(&command.args, "message_id")?.parse()?;
+            let server = command.args["server_id"]
+                .as_str()
+                .unwrap_or(&self.primary_server.id);
+            if server != self.primary_server.id
+                || !self.state.read().await.messages.iter().any(|m| m.id == id)
+            {
+                return self.message_attachment_action(command).await.map(Some);
+            }
+        }
         if soundboard::handles(&command.name) {
             return self.soundboard_command(command).await.map(Some);
         }
@@ -1967,6 +1989,7 @@ impl Daemon {
                         .request(reqwest::Method::POST, "/v1/messages/image")
                         .timeout(Duration::from_secs(120))
                         .json(&wisp_protocol::SendImageMessageRequest {
+                            context: None,
                             conversation_id,
                             caption,
                             png_base64: base64::engine::general_purpose::STANDARD
@@ -2314,6 +2337,7 @@ impl Daemon {
             &roster,
             uuid::Uuid::new_v4(),
             Content {
+                context: None,
                 content_type: "text/plain".into(),
                 payload: json!(text),
                 attachment: None,
@@ -3479,7 +3503,7 @@ async fn serve_client(stream: UnixStream, daemon: Arc<Daemon>) -> anyhow::Result
                             continue;
                         }
                     };
-                    if matches!(command.name.as_str(), "send_attachment_message" | "send_image_message" | "save_chat_file" | "import_chat_files" | "paste_clipboard" | "soundboard_upload" | "soundboard_play" | "soundboard_preview") {
+                    if matches!(command.name.as_str(), "send_reply" | "forward_message" | "send_attachment_message" | "send_image_message" | "save_chat_file" | "import_chat_files" | "paste_clipboard" | "soundboard_upload" | "soundboard_play" | "soundboard_preview") {
                         if transfers.len() >= 8 {
                             write_envelope(&mut writer, &DaemonEnvelope::failure(command.id, "transfers_busy", "Too many active transfers")).await?;
                         } else {

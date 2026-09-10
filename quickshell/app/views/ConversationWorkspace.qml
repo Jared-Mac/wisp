@@ -147,6 +147,7 @@ Rectangle {
       anchors.right: parent.right
       spacing: root.theme.spacing.xs
       ConversationVoiceAction { bridge: root.bridge; theme: root.theme; conversationId: root.currentId }
+      PinsButton { bridge: root.bridge; theme: root.theme; conversationId: root.currentId }
       ChatButton { id: optionsButton; objectName: "chatOptionsButton"; theme: root.theme; text: "⋯"; implicitWidth: root.theme.space(34); visible: !!root.current; Accessible.name: "Chat options"; onClicked: optionsMenu.open() }
     }
     TextMetrics {
@@ -268,6 +269,7 @@ Rectangle {
        text: "Clear Chat History…"; onTriggered: confirmClear.confirm(root.currentId) }
   }
   MessageFeed {
+    onReplyRequested: composer.focusEditor()
     anchors.left: parent.left; anchors.right: parent.right
     anchors.top: heading.bottom; anchors.bottom: composerPane.top
     anchors.margins: root.panelMargin

@@ -20,6 +20,8 @@ pub struct MessageContext {
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Content {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context: Option<wisp_protocol::MessageContext>,
     pub content_type: String,
     pub payload: Value,
     pub attachment: Option<crate::attachment::Manifest>,
@@ -97,6 +99,9 @@ impl MessageContext {
 
 impl Content {
     pub fn validate(&self) -> anyhow::Result<()> {
+        if let Some(context) = &self.context {
+            context.validate().map_err(anyhow::Error::msg)?;
+        }
         match self.content_type.as_str() {
             "application/vnd.wisp.reaction+json" => {
                 ensure!(
@@ -166,6 +171,68 @@ impl Content {
 mod tests {
     use super::*;
     #[test]
+    fn reply_metadata_is_encrypted_authenticated_and_ordinary_messages_stay_compatible() {
+        let alice = Identity::generate().unwrap();
+        let bob = Identity::generate().unwrap();
+        let a = Uuid::new_v4();
+        let b = Uuid::new_v4();
+        let binding = MessageContext {
+            network: Uuid::new_v4(),
+            conversation: "chat".into(),
+            sender: a,
+            message: Uuid::new_v4(),
+            roster: "roster".into(),
+        };
+        let recipients = BTreeMap::from([(a, alice.public()), (b, bob.public())]);
+        let plain = Content {
+            content_type: "text/plain".into(),
+            payload: serde_json::json!("Reply body"),
+            attachment: None,
+            context: None,
+        };
+        let encoded = serde_json::to_value(&plain).unwrap();
+        assert!(encoded.get("context").is_none());
+        let mut reply = plain.clone();
+        reply.context = Some(wisp_protocol::MessageContext {
+            reply_to: Some(wisp_protocol::ReplyReference {
+                message_id: Uuid::new_v4(),
+                sender_name: "Quoted person".into(),
+                preview: "Private quoted preview".into(),
+            }),
+            forwarded_from: None,
+        });
+        let mut ciphertext = binding.seal(&alice, &recipients, reply.clone()).unwrap();
+        assert!(!ciphertext.windows(6).any(|w| w == b"Quoted"));
+        assert_eq!(
+            binding
+                .open(&bob, b, &alice.public(), &ciphertext)
+                .unwrap()
+                .context,
+            reply.context
+        );
+        let index = ciphertext.len() / 2;
+        ciphertext[index] ^= 1;
+        assert!(binding.open(&bob, b, &alice.public(), &ciphertext).is_err());
+        reply.context.as_mut().unwrap().forwarded_from = Some(wisp_protocol::ForwardedFrom {
+            sender_name: "Person".into(),
+        });
+        assert!(
+            reply.validate().is_err(),
+            "Forward must drop original reply context"
+        );
+        reply.context.as_mut().unwrap().forwarded_from = None;
+        reply
+            .context
+            .as_mut()
+            .unwrap()
+            .reply_to
+            .as_mut()
+            .unwrap()
+            .preview = "x".repeat(1201);
+        assert!(reply.validate().is_err(), "Oversized preview rejected");
+    }
+
+    #[test]
     fn binds_network_conversation_sender_message_and_recipient_without_ambiguity() {
         let alice = Identity::generate().unwrap();
         let bob = Identity::generate().unwrap();
@@ -184,6 +251,7 @@ mod tests {
                 &alice,
                 &recipients,
                 Content {
+                    context: None,
                     content_type: "text/plain".into(),
                     payload: serde_json::json!("Private"),
                     attachment: None,
@@ -214,6 +282,7 @@ mod tests {
                     &alice,
                     &BTreeMap::from([(b, bob.public())]),
                     Content {
+                        context: None,
                         content_type: "text/plain".into(),
                         payload: serde_json::json!("Private"),
                         attachment: None

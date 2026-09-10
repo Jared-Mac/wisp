@@ -22,6 +22,22 @@ pub(crate) struct AttachmentDraft {
 }
 
 impl AttachmentDraft {
+    pub(crate) fn from_temporary(
+        file: &tempfile::NamedTempFile,
+        file_name: String,
+        is_image: bool,
+    ) -> anyhow::Result<Self> {
+        let source = file.reopen()?;
+        let metadata = source.metadata()?;
+        Ok(Self {
+            bytes: Vec::new(),
+            file_name,
+            is_image,
+            size: metadata.len(),
+            source: Some(Arc::new(source)),
+            modified: metadata.modified().ok(),
+        })
+    }
     pub(crate) fn reader(self) -> DraftReader {
         DraftReader {
             draft: self,

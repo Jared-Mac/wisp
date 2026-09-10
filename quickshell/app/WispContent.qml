@@ -527,4 +527,13 @@ FocusScope {
       onRevealMainRequested: { root.goHome(); root.appRequested() }
     }
   }
+  Rectangle {
+    z: 100
+    anchors.horizontalCenter: parent.horizontalCenter; anchors.bottom: parent.bottom; anchors.bottomMargin: root.theme.spacing.lg
+    visible: !!root.bridge.messageActions.feedback
+    width: Math.min(parent.width-root.theme.spacing.lg*2, root.theme.space(480))
+    height: actionFeedback.implicitHeight+root.theme.spacing.lg*2
+    color: root.theme.surface; radius: root.theme.cornerRadius; border.width: 1; border.color: root.theme.accent
+    Text {id:actionFeedback;anchors.fill:parent;anchors.margins:root.theme.spacing.lg;textFormat:Text.PlainText;wrapMode:Text.Wrap;text:root.bridge.messageActions.feedback;color:root.theme.foreground;font.family:root.theme.font.family;font.pixelSize:root.theme.font.caption}
+  }
 }

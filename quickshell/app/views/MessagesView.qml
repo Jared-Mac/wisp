@@ -26,7 +26,7 @@ Column {
     width: parent.width; height: Math.max(root.theme.space(30), chatOptions.implicitHeight)
     Text {
       anchors.left: parent.left
-      anchors.right: returnLastChat.visible ? returnLastChat.left : voiceAction.visible ? voiceAction.left : chatOptions.visible ? chatOptions.left : parent.right
+      anchors.right: returnLastChat.visible ? returnLastChat.left : voiceAction.visible ? voiceAction.left : pinsButton.visible ? pinsButton.left : parent.right
       anchors.rightMargin: root.theme.spacing.md; anchors.verticalCenter: parent.verticalCenter
       elide: Text.ElideRight
       objectName: "trayChatHeading"
@@ -37,9 +37,14 @@ Column {
     }
     ConversationVoiceAction {
       id: voiceAction
-      anchors.right: chatOptions.left; anchors.rightMargin: visible ? root.theme.spacing.sm : 0
+      anchors.right: pinsButton.left; anchors.rightMargin: visible ? root.theme.spacing.sm : 0
       anchors.verticalCenter: parent.verticalCenter
       bridge: root.bridge; theme: root.theme; conversationId: root.bridge.activeConversationId
+    }
+    PinsButton {
+      id: pinsButton; bridge: root.bridge; theme: root.theme; conversationId: root.bridge.activeConversationId
+      anchors.right: chatOptions.left; anchors.rightMargin: visible ? root.theme.spacing.sm : 0
+      anchors.verticalCenter: parent.verticalCenter
     }
     ChatButton {
       id: chatOptions; objectName: "trayChatOptions"
@@ -90,10 +95,10 @@ Column {
       id: returnLastChat
       objectName: "returnLastChat"
       visible: !!root.bridge.lastConversation
-      anchors.right: voiceAction.visible ? voiceAction.left : chatOptions.visible ? chatOptions.left : parent.right
+      anchors.right: voiceAction.visible ? voiceAction.left : pinsButton.visible ? pinsButton.left : parent.right
       anchors.rightMargin: chatOptions.visible ? root.theme.spacing.md : 0
       anchors.verticalCenter: parent.verticalCenter
-      width: Math.min(implicitWidth, root.theme.space(root.theme.friendly ? 180 : 120), Math.max(root.theme.space(34), messageHeader.width - (chatOptions.visible ? chatOptions.width + allConversations.width + (voiceAction.visible ? voiceAction.width + root.theme.spacing.sm : 0) + root.theme.spacing.md * 2 : 0) - root.theme.space(root.theme.friendly ? 90 : 120)))
+      width: Math.min(implicitWidth, root.theme.space(root.theme.friendly ? 180 : 120), Math.max(root.theme.space(34), messageHeader.width - (chatOptions.visible ? chatOptions.width + pinsButton.width + root.theme.spacing.sm + allConversations.width + (voiceAction.visible ? voiceAction.width + root.theme.spacing.sm : 0) + root.theme.spacing.md * 2 : 0) - root.theme.space(root.theme.friendly ? 90 : 120)))
       theme: root.theme
       iconName: "returnChat"; formatLabel: false
       text: (root.theme.friendly ? "" : "↶ ") + (root.bridge.lastConversation ? root.conversationLabel(root.bridge.lastConversation) : "")
@@ -185,6 +190,7 @@ Column {
       width: parent.width
       spacing: root.theme.spacing.sm
       MessageFeed {
+        onReplyRequested: composer.focusEditor()
         width: parent.width
         height: root.availableHeight > 0
           ? Math.max(root.theme.space(140), root.availableHeight - messageHeader.height - navigation.height - composer.implicitHeight - root.spacing * (navigation.visible ? 3 : 2))

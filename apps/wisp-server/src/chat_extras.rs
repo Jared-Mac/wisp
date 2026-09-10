@@ -284,6 +284,7 @@ pub(super) async fn load_reactions(
             Ok(MessageReaction {
                 target_id: super::parse_uuid(&row.get::<String, _>("target_id"))?,
                 message: Message {
+                    context: None,
                     id: super::parse_uuid(&row.get::<String, _>("id"))?,
                     conversation_id: row.get("conversation_id"),
                     sender: wisp_protocol::UserSummary {

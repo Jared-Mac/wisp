@@ -57,6 +57,11 @@ pub(super) async fn begin(
     if !wisp_protocol::valid_chat_file_name(&request.file_name) {
         return Err(ApiError::bad_request("invalid_file", "Invalid filename"));
     }
+    if let Some(context) = &request.context {
+        context
+            .validate()
+            .map_err(|error| ApiError::bad_request("invalid_context", error))?;
+    }
     let size = i64::try_from(request.size).map_err(|_| {
         ApiError::bad_request("invalid_size", "File size cannot be represented by storage")
     })?;
@@ -76,8 +81,8 @@ pub(super) async fn begin(
         ));
     }
     // A retry may update its caption/keep choice before committing, never after.
-    sqlx::query("UPDATE file_uploads SET caption = ?, keep = ?, last_activity_at = ? WHERE id = ? AND message_id IS NULL")
-        .bind(request.caption).bind(request.keep).bind(Utc::now().to_rfc3339()).bind(request.id.to_string())
+    sqlx::query("UPDATE file_uploads SET caption = ?, keep = ?, context = ?, last_activity_at = ? WHERE id = ? AND message_id IS NULL")
+        .bind(request.caption).bind(request.keep).bind(serde_json::to_string(&request.context).map_err(ApiError::internal)?).bind(Utc::now().to_rfc3339()).bind(request.id.to_string())
         .execute(&state.pool).await.map_err(ApiError::internal)?;
     Ok(Json(status(&row)?))
 }
@@ -203,6 +208,7 @@ pub(super) async fn complete(
             .map(Json);
     }
     persist_message(&state, user, SendMessageRequest {
+context: row.get::<Option<String>, _>("context").map(|value| serde_json::from_str(&value).map_err(ApiError::internal)).transpose()?.flatten(),
         conversation_id: row.get("conversation_id"), content_type: "application/octet-stream".into(), encryption_version: 0,
         payload: json!({"file_name":row.get::<String,_>("file_name"), "size":size, "caption":row.get::<String,_>("caption"), "keep":keep, "expires_at":expires, "expired":false}),
     }, Some(StoredAttachment::Upload(id))).await.map(Json)
@@ -376,6 +382,7 @@ mod tests {
             .await
             .unwrap();
         let request = BeginFileUpload {
+            context: None,
             id: Uuid::new_v4(),
             conversation_id,
             file_name: "large.bin".into(),
@@ -546,7 +553,8 @@ mod tests {
             .unwrap();
         let created = Utc::now() - ChronoDuration::hours(25);
         // Policy metadata is virtualized; tests need not allocate six gigabytes.
-        let message = persist_message(&state, user, SendMessageRequest {conversation_id:conversation_id.clone(),content_type:"application/octet-stream".into(),encryption_version:0,
+        let message = persist_message(&state, user, SendMessageRequest {
+context: None,conversation_id:conversation_id.clone(),content_type:"application/octet-stream".into(),encryption_version:0,
             payload:json!({"file_name":"large.bin","size":6_000_000_000_u64,"caption":"kept","keep":true,"expires_at":null,"expired":false})}, Some(StoredAttachment::File(vec![1]))).await.unwrap();
         sqlx::query("UPDATE messages SET created_at = ? WHERE id = ?")
             .bind(created.to_rfc3339())
@@ -597,6 +605,7 @@ mod tests {
             .is_err()
         );
         let pending = BeginFileUpload {
+            context: None,
             id: Uuid::new_v4(),
             conversation_id,
             file_name: "abandoned.bin".into(),

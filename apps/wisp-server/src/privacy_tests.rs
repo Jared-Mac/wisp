@@ -218,6 +218,7 @@ async fn plaintext_routes_and_fake_encryption_versions_fail_closed() {
     assert_eq!(request(&app, "POST", "/v1/e2ee/messages", TEST_OWNER_ID, json!({"id":Uuid::new_v4(),"conversation_id":conversation,"ciphertext":"not an envelope"})).await.status(), StatusCode::BAD_REQUEST);
     assert!(
         validate_message(&SendMessageRequest {
+            context: None,
             conversation_id: conversation.clone(),
             content_type: "text/plain".into(),
             payload: json!("plaintext"),
