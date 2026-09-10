@@ -36,7 +36,7 @@ Rectangle {
   Component.onDestruction: bridge.setChatFocus(focusKey, "")
   readonly property color chatBorderColor: theme.chatBordersColored ? bridge.chatColors.colorFor(currentId, theme.conversationBorder) : theme.surfaceBorder
   readonly property color chatHeadingColor: theme.chatHeadingsColored ? bridge.chatColors.colorFor(currentId, theme.muted) : theme.muted
-  color: theme.cleanTui || theme.comfortable || theme.refinedTui ? theme.background : theme.surface
+  color: theme.friendly ? theme.panel : theme.cleanTui || theme.comfortable || theme.refinedTui ? theme.background : theme.surface
   radius: theme.cornerRadius
   border.width: theme.tui || theme.comfortable ? 0 : theme.terminal || tiled ? 1 : 0
   border.color: theme.chatBordersColored ? chatBorderColor : tiled && paneActive && canClosePane ? theme.alpha(theme.accent,0.65) : theme.conversationBorder
@@ -71,7 +71,7 @@ Rectangle {
     anchors.top: parent.top; anchors.left: parent.left; anchors.right: parent.right
     anchors.margins: root.panelMargin
     anchors.topMargin: root.theme.tui || root.theme.comfortable ? root.theme.space(22) : root.panelMargin
-    height: root.theme.space(root.theme.comfortable ? 42 : 34)
+    height: root.theme.space(root.theme.friendly ? 44 : root.theme.comfortable ? 42 : 34)
     Row {
       id: leadingActions
       anchors.left: parent.left
@@ -136,8 +136,8 @@ Rectangle {
       width: root.theme.tui
         ? Math.min(availableHeaderWidth, Math.max(root.theme.space(88), Math.min(root.theme.space(260), selectorTextMetrics.advanceWidth + root.theme.space(32))))
         : availableHeaderWidth
-      theme: root.theme; primary: !root.theme.tui && !root.theme.chatHeadingsColored
-      readonly property color selectorInk: !root.theme.tui && root.theme.chatHeadingsColored ? root.chatHeadingColor : root.theme.comfortable ? root.theme.selectionText : root.theme.cleanTui ? root.theme.foreground : root.theme.tui ? (visualFocus ? root.chatBorderColor : root.theme.foreground) : root.theme.terminal ? root.theme.accent : root.theme.accentText
+      theme: root.theme; primary: !root.theme.friendly && !root.theme.tui && !root.theme.chatHeadingsColored
+      readonly property color selectorInk: root.theme.friendly ? root.theme.foreground : !root.theme.tui && root.theme.chatHeadingsColored ? root.chatHeadingColor : root.theme.comfortable ? root.theme.selectionText : root.theme.cleanTui ? root.theme.foreground : root.theme.tui ? (visualFocus ? root.chatBorderColor : root.theme.foreground) : root.theme.terminal ? root.theme.accent : root.theme.accentText
       Binding { target: chatSelector; property: "leftPadding"; value: root.theme.space(8); when: root.theme.tui; restoreMode: Binding.RestoreBindingOrValue }
       Binding { target: chatSelector; property: "rightPadding"; value: root.theme.space(8); when: root.theme.tui; restoreMode: Binding.RestoreBindingOrValue }
       Binding { target: chatSelector.background; property: "color"; value: root.theme.alpha(root.theme.foreground, chatSelector.down ? 0.10 : chatSelector.hovered ? 0.06 : root.theme.cleanTui ? 0 : 0.025); when: root.theme.tui; restoreMode: Binding.RestoreBindingOrValue }
@@ -154,10 +154,11 @@ Rectangle {
           anchors.left: parent.left; anchors.right: selectorArrow.left
           anchors.rightMargin: root.theme.spacing.xs; anchors.verticalCenter: parent.verticalCenter
           text: chatSelector.text; elide: Text.ElideRight
-          color: chatSelector.selectorInk; font.family: root.theme.font.family; font.pixelSize: root.theme.comfortable ? root.theme.font.title : root.theme.font.caption
-          font.weight: root.theme.comfortable ? Font.DemiBold : Font.Normal
+          color: chatSelector.selectorInk; font.family: root.theme.font.family; font.pixelSize: root.theme.friendly ? root.theme.font.body : root.theme.comfortable ? root.theme.font.title : root.theme.font.caption
+          font.weight: root.theme.comfortable || root.theme.friendly ? Font.DemiBold : Font.Normal
         }
-        Text { id: selectorArrow; anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; text: "▾"; color: root.theme.tui ? root.theme.muted : chatSelector.selectorInk; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption }
+        WispIcon { anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; theme: root.theme; name: "chevron"; visible: root.theme.friendly }
+        Text { id: selectorArrow; opacity: root.theme.friendly ? 0 : 1; anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; text: "▾"; color: root.theme.tui ? root.theme.muted : chatSelector.selectorInk; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption }
       }
     }
   }

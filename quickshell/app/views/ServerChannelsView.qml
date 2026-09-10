@@ -6,6 +6,9 @@ Column {
   id: root
   required property var bridge
   required property var theme
+  property bool adaptive: false
+  readonly property bool narrow: adaptive && width < theme.space(140)
+  readonly property bool tiny: adaptive && width < theme.space(56)
   property bool showHeader: true
   signal selected()
   width: parent ? parent.width : 0
@@ -21,9 +24,10 @@ Column {
 
   Text {
     objectName: "serverChannelsHeader"
-    visible: root.showHeader
+    visible: root.showHeader && !root.tiny
     width: parent.width
     height: root.theme.space(22)
+    elide: Text.ElideRight
     verticalAlignment: Text.AlignVCenter
     text: root.theme.tui ? "┌─ /channels · " + root.channels.length : "CHANNELS"
     color: root.theme.accent
@@ -34,33 +38,35 @@ Column {
 
   Repeater {
     model: root.channels
-    delegate: Row {
+    delegate: Flow {
       id: channelRow
       required property var modelData
       width: root.width
-      height: root.theme.space(28)
+      height: root.theme.space(root.tiny ? 56 : 28)
       spacing: root.theme.space(2)
       ChatButton {
         objectName: "serverChannel-" + String(channelRow.modelData.raw_id || channelRow.modelData.id)
-        width: Math.max(0, channelRow.width - tileButton.width - channelRow.spacing)
-        height: channelRow.height
+        width: root.tiny ? channelRow.width : Math.max(0, channelRow.width - tileButton.width - channelRow.spacing)
+        height: root.theme.space(28)
         theme: root.theme
+        iconName: root.tiny ? "" : "hash"; formatLabel: false
         textAlignment: Text.AlignLeft
         leftPadding: root.theme.space(6)
-        text: (root.theme.tui ? "# " : "") + String(channelRow.modelData.label)
+        text: root.tiny ? String(channelRow.modelData.label).slice(0,1).toUpperCase() : (root.theme.tui ? "# " : "") + String(channelRow.modelData.label)
           + (channelRow.modelData.unread_count ? " · " + channelRow.modelData.unread_count : "")
         primary: String(root.bridge.activeConversationId) === String(channelRow.modelData.id)
         Accessible.name: "Open " + String(channelRow.modelData.label)
           + (channelRow.modelData.spot_id ? " room chat" : " channel") + " on " + String(channelRow.modelData.server_name)
+        ToolTip.visible: hovered; ToolTip.text: Accessible.name
         onClicked: { root.bridge.openChannel(channelRow.modelData.id, false); root.selected() }
       }
       ChatButton {
         id: tileButton
         objectName: "serverChannelTile-" + String(channelRow.modelData.raw_id || channelRow.modelData.id)
-        width: root.theme.space(32)
-        height: channelRow.height
+        width: Math.min(root.width,root.theme.space(32))
+        height: root.theme.space(28)
         theme: root.theme
-        text: "+"
+        text: "+"; iconName: "add"; iconOnly: true; forceIcon: root.tiny
         Accessible.name: "Open " + String(channelRow.modelData.label) + " in a new tile"
         ToolTip.visible: hovered
         ToolTip.delay: 500

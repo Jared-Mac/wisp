@@ -23,7 +23,7 @@ for fixture_mode in ${WISP_TEST_MODES:-app makeover tuirefinement responsive mem
     cat "$test_dir/log"
     exit 1
   fi
-  rg -q 'CHAT_WORKSPACE_OK' "$test_dir/log"
+  rg -q 'CHAT_WORKSPACE_OK' "$test_dir/log" || { cat "$test_dir/log"; exit 1; }
 done
 jq -e '.muted == true and .volume == 35 and .soundPath == "file:///tmp/test-custom-sound.wav"' "$test_dir/config/wisp/notifications.json" >/dev/null || { cat "$test_dir/config/wisp/notifications.json"; exit 1; }
 echo 'App/tray attachments, room permissions, clear confirmation, drafts, and notification settings passed'

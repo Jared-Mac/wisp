@@ -1,10 +1,14 @@
 import QtQuick
+import QtQuick.Controls
 
 Rectangle {
   id: root
   required property var hangout
   required property var bridge
   required property var theme
+  property bool adaptive: false
+  readonly property bool narrow: adaptive && width < theme.space(140)
+  readonly property bool tiny: adaptive && width < theme.space(56)
   readonly property bool current: root.bridge.selfState.hangout_id === root.hangout.id
     && (!root.hangout.server_id || String(root.hangout.server_id) === root.bridge.voiceServerId)
   signal joined()
@@ -15,8 +19,26 @@ Rectangle {
     roomConversationId: root.bridge.roomSettingsConversationId(root.hangout, false)
   }
 
+  Column {
+    id: rail; visible: root.narrow; width: parent.width; y: 2; spacing: 2
+    Repeater {
+      model: root.hangout.members || []
+      ChatButton {
+        required property var modelData; width: rail.width; theme: root.theme; formatLabel: false; iconName: ""
+        text: root.tiny ? String(modelData.display_name).slice(0,1).toUpperCase() : modelData.display_name
+        Accessible.name: modelData.display_name + " participant controls"
+        ToolTip.visible: hovered; ToolTip.text: Accessible.name
+        onClicked: participantMenu.showPerson(root.bridge.scopedParticipant(Object.assign({},modelData,{server_id:String(root.hangout.server_id || root.bridge.activeServer.id)})),this)
+      }
+    }
+    Flow {
+      width: parent.width
+      ChatButton { theme: root.theme; text: root.current ? "In call" : "Join call"; iconName: "phone"; forceIcon: true; iconOnly: true; width: Math.min(rail.width,root.theme.space(28)); enabled: !root.current; onClicked: { root.bridge.joinHangout(root.hangout.id); root.joined() } }
+      ChatButton { theme: root.theme; text: "Open call chat"; iconName: "chat"; forceIcon: true; iconOnly: true; width: Math.min(rail.width,root.theme.space(28)); onClicked: root.bridge.openRoomChat(root.hangout,false) }
+    }
+  }
   objectName: "roomCard"
-  implicitHeight: Math.max(root.theme.space(root.theme.tui ? 42 : 48), hangoutInfo.implicitHeight + root.theme.spacing.sm * 2)
+  implicitHeight: root.narrow ? rail.implicitHeight + 4 : Math.max(root.theme.space(root.theme.tui ? 42 : 48), hangoutInfo.implicitHeight + root.theme.spacing.sm * 2)
   radius: root.theme.cornerRadius
   color: root.theme.tui ? root.theme.surface : root.theme.alpha(root.theme.foreground, 0.055)
   border.width: root.theme.tui ? 0 : 1
@@ -46,7 +68,7 @@ Rectangle {
   }
 
   Column {
-    id: hangoutInfo
+    id: hangoutInfo; visible: !root.narrow
     anchors.left: parent.left
     anchors.leftMargin: root.theme.spacing.lg
     anchors.verticalCenter: parent.verticalCenter
@@ -132,7 +154,7 @@ Rectangle {
   }
 
   Rectangle {
-    id: joinButton
+    id: joinButton; visible: !root.narrow
     anchors.right: parent.right
     anchors.rightMargin: root.theme.spacing.md
     anchors.bottom: hangoutInfo.bottom
@@ -163,7 +185,7 @@ Rectangle {
     }
   }
   ChatButton {
-    id: chatButton
+    id: chatButton; visible: !root.narrow
     objectName: "openRoomChat"
     theme: root.theme; text: "Chat"
     anchors.right: joinButton.left; anchors.rightMargin: root.theme.spacing.sm

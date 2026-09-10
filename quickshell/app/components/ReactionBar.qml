@@ -36,7 +36,7 @@ Flow {
     quiet: root.theme.comfortable || root.theme.refinedTui
     opacity: !(root.theme.comfortable || root.theme.refinedTui) || root.revealActions || activeFocus || picker.opened ? 1 : 0
     objectName:"addReaction-"+root.messageId
-    theme:root.theme;text:"+☺";implicitWidth:root.theme.space(42);implicitHeight:root.theme.space(28)
+    theme:root.theme;text:"+☺";iconName:"emoji";iconOnly:root.theme.friendly;implicitWidth:root.theme.space(42);implicitHeight:root.theme.space(28)
     Accessible.name:"Add reaction"
     onClicked:picker.open()
     EmojiPicker {id:picker;objectName:"reactionPicker-"+root.messageId;bridge:root.bridge;theme:root.theme;serverId:root.serverId;width:Math.min(root.width,root.theme.space(340));onPicked:emoji=>root.bridge.chatExtras.react(root.serverId,root.messageId,emoji)}

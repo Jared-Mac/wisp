@@ -1,5 +1,6 @@
 mod account_profile;
 mod attachments;
+mod avatars;
 mod chat_extras;
 #[cfg(test)]
 mod chat_extras_tests;
@@ -500,6 +501,13 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/dev/session", post(dev_session))
         .route("/v1/sessions", post(device_session))
         .route("/v1/accounts/login", post(login_account))
+        .route(
+            "/v1/accounts/avatar",
+            post(avatars::upload)
+                .delete(avatars::remove)
+                .layer(DefaultBodyLimit::max(3_000_000)),
+        )
+        .route("/v1/accounts/{id}/avatar", get(avatars::image))
         .route(
             "/v1/accounts/profile",
             get(account_profile::get).patch(account_profile::update),

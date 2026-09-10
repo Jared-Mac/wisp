@@ -19,8 +19,8 @@ ShellRoot {
           && !appearance.colorOptions.roomSections && !appearance.colorOptions.friendSections
           && !appearance.colorOptions.friendNames && !appearance.colorOptions.senderNames, "color preferences persisted")
       } else {
-        var profiles = ["performative","clean_tui","herdr","terminal","legacy"]
-        var palettes = ["ash_olive","herdr","wisp","graphite","violet","ember","astra"]
+        var profiles = ["soft_graphite","daylight","hearth","performative","clean_tui","herdr","terminal","legacy"]
+        var palettes = ["soft_graphite","daylight","hearth","ash_olive","herdr","wisp","graphite","violet","ember","astra"]
         profiles.forEach(function(style) {
           appearance.setProfile(style)
           var geometry = [theme.cornerRadius,theme.fontFamily,theme.bodySize,theme.titleSize,theme.tui,theme.cleanTui,theme.performative].join("|")
@@ -33,6 +33,16 @@ ShellRoot {
             if (!appearance.managed && palette === "ash_olive") test.check(theme.background == "#000000" && theme.foreground == "#d3d5cf" && theme.accent == "#a2b586", "original colors retained")
           })
         })
+        if (!appearance.managed) {
+          appearance.setProfile("terminal"); appearance.setPalette("herdr")
+          appearance.setProfile("soft_graphite"); appearance.setPalette("violet")
+          appearance.setProfile("daylight"); appearance.setPalette("daylight")
+          appearance.setProfile("hearth"); appearance.setPalette("hearth")
+          appearance.setProfile("soft_graphite")
+          test.check(appearance.palette === "violet", "concept remembers customized palette")
+          appearance.setProfile("terminal")
+          test.check(appearance.palette === "herdr", "returning to terminal restores previous palette")
+        }
         appearance.setProfile("clean_tui"); appearance.setPalette("ash_olive")
         var keys = ["chatBorders","chatHeadings","roomSections","friendSections","friendNames","senderNames"]
         if (!appearance.managed) {

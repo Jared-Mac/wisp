@@ -70,7 +70,8 @@ Dialog {
       ChatButton { theme: root.theme; text:"Direct message"; width:(parent.width-parent.spacing)/2; primary:!root.group; enabled:!root.busy; onClicked:{root.group=false;root.selectedIds=[]} }
       ChatButton { theme: root.theme; text:"Group chat"; width:(parent.width-parent.spacing)/2; primary:root.group; enabled:!root.busy; onClicked:{root.group=true;root.selectedIds=[]} }
     }
-    ComboBox {
+    WispComboBox {
+    theme: root.theme
       id:serverPicker
       anchors.top:modes.bottom; anchors.topMargin:root.theme.spacing.sm; width:parent.width
       height:root.theme.space(34); enabled:!root.busy
@@ -80,7 +81,8 @@ Dialog {
       Accessible.name:"Server for new chat"
       font.family:root.theme.font.family; font.pixelSize:root.theme.font.caption
       background:Rectangle { color:root.theme.background; border.width:1; border.color:serverPicker.activeFocus?root.theme.accent:root.theme.separator }
-      delegate:ItemDelegate { required property var modelData; width:serverPicker.width; text:String(modelData.name); font.family:root.theme.font.family; font.pixelSize:root.theme.font.caption; ThemeControlStyle { theme:root.theme; control:parent } }
+      delegate:ItemDelegate {
+    id: styledControl1; required property var modelData; width:serverPicker.width; text:String(modelData.name); font.family:root.theme.font.family; font.pixelSize:root.theme.font.caption; ThemeControlStyle { theme:root.theme; control:styledControl1 } }
       popup.background:Rectangle { color:root.theme.surface; border.width:1; border.color:root.theme.muted; radius:root.theme.cornerRadius }
     }
     TextField {

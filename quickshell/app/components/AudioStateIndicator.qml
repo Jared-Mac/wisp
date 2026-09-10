@@ -30,7 +30,7 @@ Row {
     border.width: root.theme.tui && !root.theme.comfortable && !activeFocus ? 0 : 1
 
     Image {
-      visible: !root.theme.tui && !root.theme.comfortable
+      visible: !root.theme.tui && !root.theme.comfortable && !root.theme.friendly
       anchors.centerIn: parent
       width: root.theme.space(20)
       height: width
@@ -39,6 +39,7 @@ Row {
         : "../assets/microphone.svg")
       fillMode: Image.PreserveAspectFit
     }
+    WispIcon { anchors.centerIn: parent; theme: root.theme; name: root.muted ? "microphone-off" : "microphone"; ink: root.muted ? root.theme.warning : root.theme.foreground; visible: root.theme.friendly }
     Text {
       anchors.centerIn: parent; visible: root.theme.tui || root.theme.comfortable
       text: root.theme.comfortable ? (root.muted ? "Unmute" : "Mute") : "[M]"; color: root.muted ? root.theme.warning : root.theme.foreground
@@ -99,7 +100,7 @@ Row {
     border.width: root.theme.tui && !root.theme.comfortable && !activeFocus ? 0 : 1
 
     Image {
-      visible: !root.theme.tui && !root.theme.comfortable
+      visible: !root.theme.tui && !root.theme.comfortable && !root.theme.friendly
       anchors.centerIn: parent
       width: root.theme.space(20)
       height: width
@@ -108,6 +109,7 @@ Row {
         : "../assets/headphones.svg")
       fillMode: Image.PreserveAspectFit
     }
+    WispIcon { anchors.centerIn: parent; theme: root.theme; name: root.deafened ? "headphones-off" : "headphones"; ink: root.deafened ? root.theme.danger : root.theme.foreground; visible: root.theme.friendly }
     Text {
       anchors.centerIn: parent; visible: root.theme.tui || root.theme.comfortable
       text: root.theme.comfortable ? (root.deafened ? "Undeafen" : "Deafen") : "[D]"; color: root.deafened ? root.theme.danger : root.theme.foreground

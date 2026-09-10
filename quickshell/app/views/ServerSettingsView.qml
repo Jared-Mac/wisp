@@ -83,7 +83,7 @@ Column {
     }
     Text {
       width: parent.width; wrapMode: Text.WordWrap
-      text: "This name appears in the server selector, chat picker, and chat tile paths. The connection address remains private configuration."
+      text: "The name everyone sees in Wisp."
       color: root.theme.muted
       font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
     }
@@ -113,15 +113,12 @@ Column {
     }
   }
 
-  Rectangle { width: parent.width; height: 1; color: root.theme.separator }
 
+  SettingsSection {
+    theme:root.theme;title:"People and roles";summary:"Manage members and administrators";objectName:"serverRolesSection"
   Column {
     width: parent.width; spacing: root.theme.spacing.sm
-    Text {
-      objectName: "settingsServerRoles"; text: "People and roles"
-      color: root.theme.foreground
-      font.family: root.theme.font.family; font.pixelSize: root.theme.font.body; font.bold: true
-    }
+    Item { objectName: "settingsServerRoles"; width: 0; height: 0 }
     Text {
       width: parent.width; wrapMode: Text.WordWrap
       text: root.owner ? "Only the owner can grant or revoke persistent server-admin access." : "Only the owner can change server-admin access."
@@ -158,16 +155,14 @@ Column {
       }
     }
   }
+  }
 
-  Rectangle { width: parent.width; height: 1; color: root.theme.separator }
 
+  SettingsSection {
+    theme:root.theme;title:"Chat categories";summary:"Organize rooms and text channels";objectName:"serverCategoriesSection"
   Column {
     width: parent.width; spacing: root.theme.spacing.sm
-    Text {
-      text: "Chat categories"
-      color: root.theme.foreground
-      font.family: root.theme.font.family; font.pixelSize: root.theme.font.body; font.bold: true
-    }
+
     Text {
       width: parent.width; wrapMode: Text.WordWrap
       text: "Categories organize voice rooms and dedicated text channels without changing their permissions."
@@ -223,16 +218,14 @@ Column {
       }
     }
   }
+  }
 
-  Rectangle { width: parent.width; height: 1; color: root.theme.separator }
 
+  SettingsSection {
+    theme:root.theme;title:"Dedicated text channels";summary:"Create and edit dedicated chats";objectName:"serverChannelsSection"
   Column {
     width: parent.width; spacing: root.theme.spacing.sm
-    Text {
-      text: "Dedicated text channels"
-      color: root.theme.foreground
-      font.family: root.theme.font.family; font.pixelSize: root.theme.font.body; font.bold: true
-    }
+
     Text {
       width: parent.width; wrapMode: Text.WordWrap
       text: "Choose friends who should receive the channel. Chat contents remain end-to-end encrypted."
@@ -250,7 +243,8 @@ Column {
         font.family: root.theme.font.family; font.pixelSize: root.theme.font.body
         background: Rectangle { color: root.theme.background; border.width: 1; border.color: newChannelName.activeFocus ? root.theme.accent : root.theme.separator; radius: root.theme.cornerRadius }
       }
-      ComboBox {
+      WispComboBox {
+    theme: root.theme
         id: newChannelCategory
         width: parent.width - newChannelName.width - parent.spacing; height: root.theme.space(34)
         model: root.categories; textRole: "name"
@@ -306,7 +300,8 @@ Column {
               font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
               background: Rectangle { color: root.theme.background; border.width: 1; border.color: channelName.activeFocus ? root.theme.accent : root.theme.separator; radius: root.theme.cornerRadius }
             }
-            ComboBox {
+            WispComboBox {
+    theme: root.theme
               id: channelCategory
               width: (parent.width-parent.spacing)/2; height: root.theme.space(34)
               model: root.categories; textRole: "name"
@@ -337,16 +332,14 @@ Column {
       }
     }
   }
+  }
 
-  Rectangle { width: parent.width; height: 1; color: root.theme.separator }
 
+  SettingsSection {
+    theme:root.theme;title:"Voice rooms";summary:"Names, categories, and invite-only access";objectName:"serverRoomsSection"
   Column {
     width: parent.width; spacing: root.theme.spacing.sm
-    Text {
-      objectName: "settingsServerRooms"; text: "Voice rooms"
-      color: root.theme.foreground
-      font.family: root.theme.font.family; font.pixelSize: root.theme.font.body; font.bold: true
-    }
+    Item { objectName: "settingsServerRooms"; width: 0; height: 0 }
     Text {
       width: parent.width; wrapMode: Text.WordWrap
       text: "Active rooms cannot be deleted. Deleting a room permanently removes its room chat after confirmation."
@@ -368,7 +361,8 @@ Column {
             color: root.theme.foreground; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
             background: Rectangle { color: root.theme.background; border.width: 1; border.color: roomName.activeFocus ? root.theme.accent : root.theme.separator; radius: root.theme.cornerRadius }
           }
-          ComboBox {
+          WispComboBox {
+    theme: root.theme
             id: roomCategory
             width: parent.width * 0.25; height: root.theme.space(34)
             model: root.categories; textRole: "name"
@@ -378,7 +372,7 @@ Column {
           }
           Text {
             id: roomState; width: root.theme.space(48); anchors.verticalCenter: parent.verticalCenter
-            text: modelData.active ? "active" : "empty"; color: modelData.active ? root.theme.open : root.theme.muted
+            text: modelData.active ? "active" : "empty"; color: modelData.active ? root.theme.onlineIndicator : root.theme.muted
             font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
           }
           ChatButton {
@@ -410,6 +404,7 @@ Column {
       }
     }
   }
+  }
 
   Dialog {
     id: deleteDialog
@@ -438,5 +433,7 @@ Column {
   }
 
   Component.onCompleted: bridge.refreshServerSettings()
+  SettingsSection {theme:root.theme;title:"Server emojis";summary:"Shared custom emojis for everyone";objectName:"serverEmojisSection"
   EmojiLibrary {objectName:"serverEmojiLibrary";width:parent.width;bridge:root.bridge;theme:root.theme;serverId:String(root.bridge.activeServer.id);scope:"server"}
+  }
 }

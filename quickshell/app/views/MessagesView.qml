@@ -76,11 +76,14 @@ Column {
     }
     ChatButton {
       id: allConversations
+      objectName: "trayAllConversations"
       anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
       visible: !!root.bridge.activeConversation
-      text: (root.theme.tui ? "chats" : "All conversations") + (root.bridge.unreadMessages > 0 ? " · " + root.bridge.unreadMessages : "")
+      text: (root.theme.friendly ? "Chats" : root.theme.tui ? "chats" : "All conversations") + (root.bridge.unreadMessages > 0 ? " · " + root.bridge.unreadMessages : "")
       theme: root.theme
       primary: root.bridge.unreadMessages > 0
+      Accessible.name: "All conversations"
+      ToolTip.visible: hovered || visualFocus; ToolTip.text: Accessible.name
       onClicked: root.bridge.closeConversation()
     }
     ChatButton {
@@ -90,11 +93,12 @@ Column {
       anchors.right: voiceAction.visible ? voiceAction.left : chatOptions.visible ? chatOptions.left : parent.right
       anchors.rightMargin: chatOptions.visible ? root.theme.spacing.md : 0
       anchors.verticalCenter: parent.verticalCenter
-      width: Math.min(implicitWidth, root.theme.space(120), Math.max(root.theme.space(34), messageHeader.width - (chatOptions.visible ? chatOptions.width + allConversations.width + (voiceAction.visible ? voiceAction.width + root.theme.spacing.sm : 0) + root.theme.spacing.md * 2 : 0) - root.theme.space(120)))
+      width: Math.min(implicitWidth, root.theme.space(root.theme.friendly ? 180 : 120), Math.max(root.theme.space(34), messageHeader.width - (chatOptions.visible ? chatOptions.width + allConversations.width + (voiceAction.visible ? voiceAction.width + root.theme.spacing.sm : 0) + root.theme.spacing.md * 2 : 0) - root.theme.space(root.theme.friendly ? 90 : 120)))
       theme: root.theme
-      text: "↶ " + (root.bridge.lastConversation ? root.conversationLabel(root.bridge.lastConversation) : "")
+      iconName: "returnChat"; formatLabel: false
+      text: (root.theme.friendly ? "" : "↶ ") + (root.bridge.lastConversation ? root.conversationLabel(root.bridge.lastConversation) : "")
       Accessible.name: "Return to " + (root.bridge.lastConversation ? root.conversationLabel(root.bridge.lastConversation) : "last chat")
-      ToolTip.visible: hovered
+      ToolTip.visible: hovered || visualFocus
       ToolTip.text: Accessible.name
       onClicked: root.bridge.selectConversation(root.bridge.lastConversationId)
     }

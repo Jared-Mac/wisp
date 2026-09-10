@@ -25,3 +25,7 @@
   deployment. The VPS queues releases while voice rooms are active. Check the
   workflow and deployment status after pushing; report queued or failed releases
   accurately. See `docs/automatic-server-deployment.md` for the deployment path.
+- Each merge or push to `main` should include succinct user-facing notes in a new
+  `docs/patch-notes/*.md` file. The Discord patch-notes workflow sends them through
+  the `WISP_DISCORD_PATCH_NOTES` repository secret. Never put the webhook URL in
+  source or logs. Verify the workflow's delivery result after pushing.

@@ -35,8 +35,8 @@ Column {
     }
     ChatButton {
       id: presenceButton
-      objectName: "presenceMenuButton"
-      visible: root.theme.comfortable || root.theme.refinedTui
+      objectName: root.theme.friendly ? "availabilityPicker" : "presenceMenuButton"
+      visible: root.theme.comfortable || root.theme.refinedTui || root.theme.friendly
       theme: root.theme
       text: "Presence: " + String(root.bridge.selfState.presence || "away") + " ▾"
       Accessible.name: "Who may join: " + String(root.bridge.selfState.presence || "away")
@@ -63,7 +63,7 @@ Column {
       }
     }
     Repeater {
-      model: root.theme.comfortable || root.theme.refinedTui ? [] : ["open", "knock", "closed", "away"]
+      model: root.theme.comfortable || root.theme.refinedTui || root.theme.friendly ? [] : ["open", "knock", "closed", "away"]
       delegate: Rectangle {
         objectName: "presence-" + modelData
         required property string modelData
@@ -132,6 +132,7 @@ Column {
       }
       AudioStateIndicator {
         objectName: "globalAudioControls"
+        visible: !root.theme.friendly || !root.bridge.currentVoiceRoom
         bridge: root.bridge; theme: root.theme
         muted: !!root.bridge.selfState.muted || !!root.bridge.selfState.deafened
         deafened: !!root.bridge.selfState.deafened

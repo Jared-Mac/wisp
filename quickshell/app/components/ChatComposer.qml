@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Dialogs
 
 Column {
   id: root
@@ -114,7 +115,7 @@ Column {
       objectName: "composerTextViewport"
       anchors.fill: parent
       anchors.margins: root.theme.tui ? root.theme.spacing.sm : root.theme.spacing.lg
-      anchors.leftMargin: root.theme.tui && !root.theme.comfortable ? root.theme.space(24) : root.theme.spacing.lg
+      anchors.leftMargin: root.theme.friendly ? root.theme.space(42) : root.theme.tui && !root.theme.comfortable ? root.theme.space(24) : root.theme.spacing.lg
       anchors.rightMargin: sendButton.width + emojiButton.width + root.theme.spacing.lg * 3
       TextArea {
         ThemeControlStyle { theme: root.theme; control: editor }
@@ -159,6 +160,13 @@ Column {
         }
       }
     }
+    ChatButton {
+      id: attachButton; theme: root.theme; objectName: "composerAttachButton"; visible: root.theme.friendly
+      text: "+"; iconName: "attach"; iconOnly: true
+      width: root.theme.space(32); height: width; anchors.left: parent.left; anchors.bottom: parent.bottom; anchors.margins: root.theme.space(4)
+      enabled: !root.busy && !root.pendingAccess; Accessible.name: "Attach files"; onClicked: attachmentPicker.open()
+      FileDialog { id: attachmentPicker; title: "Attach files"; fileMode: FileDialog.OpenFiles; onAccepted: root.bridge.importChatFiles(root.conversationId, selectedFiles.map(function(url){return String(url)})) }
+    }
   ChatButton {
     id:emojiButton;anchors.right:sendButton.left;anchors.bottom:parent.bottom;anchors.margins:root.theme.space(4);width:root.theme.space(36);height:root.theme.space(32)
     objectName:"composerEmojiButton";theme:root.theme;text:"☺";enabled:!root.busy && !root.pendingAccess
@@ -184,9 +192,10 @@ Column {
         && (root.attachments.length > 0 || root.bridge.draftFor(root.conversationId).trim().length > 0)
       onClicked: root.bridge.sendComposedMessage(root.conversationId)
       contentItem: Item {
+        WispIcon { anchors.centerIn: parent; theme: root.theme; name: "send"; ink: root.theme.accentText; visible: root.theme.friendly && !root.busy; opacity: sendButton.enabled ? 1 : 0.4 }
         Canvas {
           anchors.centerIn: parent; width: root.theme.space(14); height: width
-          visible: !root.busy && !root.theme.tui && !root.theme.comfortable
+          visible: !root.busy && !root.theme.tui && !root.theme.comfortable && !root.theme.friendly
           opacity: sendButton.enabled ? 1 : 0.4
           property color strokeColor: root.theme.terminal ? root.theme.accent : root.theme.accentText
           onStrokeColorChanged: requestPaint()

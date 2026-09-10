@@ -1,0 +1,1 @@
+- Profile pictures refresh when a server reconnects, so changes made while you were offline appear correctly.

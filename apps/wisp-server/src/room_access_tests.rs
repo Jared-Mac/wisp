@@ -36,7 +36,7 @@ async fn migration_opens_implicit_rooms_once_and_preserves_later_privacy_choices
         .fetch_one(&pool)
         .await
         .unwrap();
-    assert_eq!(schema, 24);
+    assert_eq!(schema, current.iter().map(|m| m.version).max().unwrap());
     let private: bool = sqlx::query_scalar("SELECT private FROM spots WHERE id=?")
         .bind(TEST_ROOM_ID)
         .fetch_one(&pool)

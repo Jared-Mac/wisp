@@ -3,7 +3,7 @@ import QtQuick
 ChatButton {
   id: root
   implicitHeight: theme.space(38)
-  implicitWidth: tabLabel.implicitWidth + theme.space(26)
+  implicitWidth: tabLabel.implicitWidth + theme.space(theme.friendly ? 48 : 26)
   Accessible.name: text
   Accessible.description: primary ? "Selected settings tab" : "Settings tab"
   background: Rectangle {
@@ -15,17 +15,22 @@ ChatButton {
       anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
       anchors.margins: 1
       height: root.theme.space(3)
-      visible: root.primary
+      visible: root.primary && !root.theme.friendly
       color: root.theme.accent
     }
   }
-  contentItem: Text {
+  contentItem: Item {
+    WispIcon {theme:root.theme;name:root.iconName;ink:root.primary ? root.theme.accent : root.theme.muted;visible:root.theme.friendly;anchors.left:parent.left;anchors.verticalCenter:parent.verticalCenter}
+    Text {
     id: tabLabel
-    text: root.theme.tui && !root.theme.comfortable ? "[" + root.text + "]" : root.text
+    x: root.theme.friendly ? root.theme.space(24) : 0
+    width: parent.width-x; height: parent.height
+    text: root.theme.tui ? "[" + root.text + "]" : root.text
     color: root.primary ? root.theme.accent : root.theme.foreground
     font.family: root.theme.font.family
     font.pixelSize: root.theme.font.caption
     font.bold: root.primary
     horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
+    }
   }
 }

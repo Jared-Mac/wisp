@@ -1,4 +1,6 @@
 import QtQuick
+import QtQuick.Controls
+import "../components"
 
 Column {
   id: root
@@ -6,177 +8,43 @@ Column {
   required property var theme
   property string pendingRevokeId: ""
   width: parent ? parent.width : 0
-  spacing: root.theme.spacing.lg
-
+  spacing: root.theme.space(12)
   Row {
-    width: parent.width
-
-    Column {
-      width: parent.width - refreshButton.width
-
-      Text {
-        objectName: "settingsDevices"; text: "Devices"
-        color: root.theme.foreground
-        font.family: root.theme.font.family
-        font.pixelSize: root.theme.font.body
-        font.weight: Font.DemiBold
-      }
-
-      Text {
-        text: root.bridge.inHangout
-          ? (root.bridge.mediaState.e2ee_enabled
-            ? "Media is end-to-end encrypted" : "Development call · media encryption off")
-          : "Each enrolled device can be revoked independently"
-        color: root.bridge.inHangout && root.bridge.mediaState.e2ee_enabled
-          ? root.theme.accent : root.theme.muted
-        font.family: root.theme.font.family
-        font.pixelSize: root.theme.font.caption
-      }
-    }
-
-    Rectangle {
-      id: refreshButton
-      width: refreshText.implicitWidth + root.theme.spacing.lg * 2
-      height: root.theme.space(30)
-      radius: root.theme.cornerRadius
-      color: refreshMouse.containsMouse
-        ? root.theme.alpha(root.theme.foreground, 0.12)
-        : root.theme.alpha(root.theme.foreground, 0.055)
-
-      Text {
-        id: refreshText
-        anchors.centerIn: parent
-        text: "Refresh"
-        color: root.theme.foreground
-        font.family: root.theme.font.family
-        font.pixelSize: root.theme.font.caption
-      }
-
-      MouseArea {
-        id: refreshMouse
-        anchors.fill: parent
-        hoverEnabled: true
-        cursorShape: Qt.PointingHandCursor
-        onClicked: root.bridge.refreshDevices()
-      }
-    }
+    width:parent.width;spacing:root.theme.spacing.md
+    Text {objectName:"settingsDevices";width:parent.width-refresh.width-parent.spacing;text:"Your devices";color:root.theme.foreground;font.family:root.theme.font.family;font.pixelSize:root.theme.font.title;font.weight:Font.DemiBold}
+    ChatButton {id:refresh;theme:root.theme;text:"Refresh";onClicked:root.bridge.refreshDevices()}
   }
-
+  Text {width:parent.width;wrapMode:Text.Wrap;text:"Revoke a device to remove its access.";color:root.theme.muted;font.family:root.theme.font.family;font.pixelSize:root.theme.font.caption}
   Repeater {
-    model: root.bridge.devices
-    delegate: Rectangle {
-      required property var modelData
-      width: root.width
-      height: root.theme.space(42)
-      radius: root.theme.cornerRadius
-      color: root.theme.alpha(root.theme.foreground, 0.05)
-
+    model:root.bridge.devices
+    Rectangle {
+      id:device;required property var modelData
+      width:root.width;height:root.theme.space(52);color:root.theme.alpha(root.theme.foreground,0.035);radius:root.theme.cornerRadius
+      WispIcon {id:deviceIcon;theme:root.theme;name:"screen";anchors.left:parent.left;anchors.leftMargin:root.theme.space(12);anchors.verticalCenter:parent.verticalCenter}
       Text {
-        anchors.left: parent.left
-        anchors.leftMargin: root.theme.spacing.lg
-        anchors.verticalCenter: parent.verticalCenter
-        text: String(modelData.name || "Device")
-        color: modelData.revoked ? root.theme.muted : root.theme.foreground
-        font.family: root.theme.font.family
-        font.pixelSize: root.theme.font.caption
+        anchors.left:deviceIcon.right;anchors.leftMargin:root.theme.space(10);anchors.right:actions.left;anchors.rightMargin:root.theme.space(8);anchors.verticalCenter:parent.verticalCenter
+        text:String(device.modelData.name || "Device");elide:Text.ElideRight;color:root.theme.foreground;font.family:root.theme.font.family;font.pixelSize:root.theme.font.body
       }
-
-      Text {
-        anchors.right: parent.right
-        anchors.rightMargin: root.theme.spacing.lg
-        anchors.verticalCenter: parent.verticalCenter
-        text: modelData.revoked ? "Revoked"
-          : root.pendingRevokeId === String(modelData.id) ? "Confirm" : "Revoke"
-        color: modelData.revoked ? root.theme.muted : root.theme.danger
-        font.family: root.theme.font.family
-        font.pixelSize: root.theme.font.caption
-
-        MouseArea {
-          anchors.fill: parent
-          enabled: !modelData.revoked
-          cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
-          onClicked: {
-            if (root.pendingRevokeId === String(modelData.id)) {
-              root.bridge.revokeDevice(modelData.id)
-              root.pendingRevokeId = ""
-            } else {
-              root.pendingRevokeId = String(modelData.id)
-            }
-          }
+      Row {
+        id:actions;anchors.right:parent.right;anchors.rightMargin:root.theme.space(8);anchors.verticalCenter:parent.verticalCenter;spacing:root.theme.spacing.sm
+        ChatButton {
+          theme:root.theme;destructive:true;text:device.modelData.revoked ? "Revoked" : root.pendingRevokeId===String(device.modelData.id) ? "Confirm" : "Revoke"
+          enabled:!device.modelData.revoked
+          onClicked:{if(root.pendingRevokeId===String(device.modelData.id)){root.bridge.revokeDevice(device.modelData.id);root.pendingRevokeId=""}else root.pendingRevokeId=String(device.modelData.id)}
         }
+        ChatButton {theme:root.theme;text:"Cancel";visible:root.pendingRevokeId===String(device.modelData.id);onClicked:root.pendingRevokeId=""}
       }
     }
   }
-
-  Column {
-    width: parent.width
-    spacing: root.theme.spacing.sm
-
-    Text {
-      objectName: "settingsAccountInvite"; text: "Invite a friend"
-      color: root.theme.foreground
-      font.family: root.theme.font.family
-      font.pixelSize: root.theme.font.caption
-      font.weight: Font.DemiBold
+  SettingsSection {
+    theme:root.theme;title:"Invite a friend";summary:"Create a one-use account invitation";objectName:"deviceInviteSection";sectionIcon:"invite"
+    ChatButton {objectName:"settingsAccountInvite";theme:root.theme;text:"Create invitation";onClicked:root.bridge.createAccountInvite("friend","",30)}
+    Text {visible:!!root.bridge.lastAccountInvite;text:"One-use invitation · expires in 30 minutes";color:root.theme.muted;font.family:root.theme.font.family;font.pixelSize:root.theme.font.caption}
+    TextField {
+      id:invite;visible:!!root.bridge.lastAccountInvite;width:parent.width;readOnly:true;selectByMouse:true
+      text:root.bridge.lastAccountInvite ? String(root.bridge.lastAccountInvite.uri || root.bridge.lastAccountInvite.code) : ""
+      ThemeControlStyle {theme:root.theme;control:invite}
     }
-
-    Rectangle {
-      width: inviteLabel.implicitWidth + root.theme.spacing.lg * 2
-      height: root.theme.space(30)
-      radius: root.theme.cornerRadius
-      color: inviteMouse.containsMouse
-        ? root.theme.alpha(root.theme.accent, 0.28)
-        : root.theme.alpha(root.theme.foreground, 0.06)
-
-      Text {
-        id: inviteLabel
-        anchors.centerIn: parent
-        text: "invite a friend"
-        color: root.theme.foreground
-        font.family: root.theme.font.family
-        font.pixelSize: root.theme.font.caption
-      }
-
-      MouseArea {
-        id: inviteMouse
-        anchors.fill: parent
-        hoverEnabled: true
-        cursorShape: Qt.PointingHandCursor
-        onClicked: root.bridge.createAccountInvite("friend", "", 30)
-      }
-    }
-
-    Rectangle {
-      visible: !!root.bridge.lastAccountInvite
-      width: parent.width
-      height: visible ? root.theme.space(62) : 0
-      radius: root.theme.cornerRadius
-      color: root.theme.alpha(root.theme.accent, 0.12)
-
-      Column {
-        anchors.fill: parent
-        anchors.margins: root.theme.spacing.md
-        spacing: root.theme.spacing.xs
-
-        Text {
-          text: root.bridge.lastAccountInvite ? "One-use account invite" : ""
-          color: root.theme.muted
-          font.family: root.theme.font.family
-          font.pixelSize: root.theme.font.caption
-        }
-
-        TextInput {
-          width: parent.width
-          readOnly: true
-          selectByMouse: true
-          text: root.bridge.lastAccountInvite
-            ? String(root.bridge.lastAccountInvite.uri || root.bridge.lastAccountInvite.code) : ""
-          color: root.theme.foreground
-          selectionColor: root.theme.accent
-          font.family: "monospace"
-          font.pixelSize: root.theme.font.caption
-        }
-      }
-    }
+    ChatButton {theme:root.theme;text:"Copy invitation";visible:!!root.bridge.lastAccountInvite;onClicked:{invite.selectAll();invite.copy();invite.deselect()}}
   }
 }
