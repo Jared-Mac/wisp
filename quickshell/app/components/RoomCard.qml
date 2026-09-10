@@ -7,8 +7,8 @@ Column {
   required property var bridge
   required property var theme
   property bool adaptive: false
-  readonly property bool narrow: adaptive && width < theme.space(140)
-  readonly property bool tiny: adaptive && width < theme.space(56)
+  readonly property bool narrow: adaptive && width < theme.space(200)
+  readonly property bool tiny: adaptive && width < theme.space(80)
   property bool mainApp: false
   objectName: "savedRoom-" + room.id
   readonly property var people: (room.members || []).map(function(person) { return root.bridge.scopedParticipant(Object.assign({},person,{server_id:String(root.room.server_id || root.bridge.activeServer.id)})) })
@@ -45,19 +45,22 @@ Column {
         WispIcon { id: roomIcon; theme: root.theme; name: "volume"; visible: root.theme.friendly && !root.narrow; anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter }
         Text {
           objectName: "roomName"
-          anchors.left: roomIcon.visible ? roomIcon.right : parent.left; anchors.leftMargin: roomIcon.visible ? root.theme.space(8) : 0; anchors.right: root.narrow ? parent.right : actions.left; anchors.rightMargin: root.theme.spacing.xs
+          anchors.left: roomIcon.visible ? roomIcon.right : parent.left; anchors.leftMargin: roomIcon.visible ? root.theme.space(8) : 0; anchors.right: root.narrow ? parent.right : actions.left; anchors.rightMargin: root.narrow ? 0 : root.theme.spacing.xs
           y: root.narrow ? root.theme.space(8) : (parent.height-height)/2; elide: Text.ElideRight
+          horizontalAlignment: root.narrow ? Text.AlignHCenter : Text.AlignLeft
           text: root.tiny ? String(root.room.name).slice(0,1).toUpperCase() : root.theme.friendly ? root.room.name + "  · " + root.people.length : "#" + root.room.name + " /" + root.people.length
           color: root.theme.foreground; font.family: root.theme.font.family
           font.pixelSize: root.theme.font.body; font.weight: Font.DemiBold
         }
         Item {
-          id: actions; anchors.right: parent.right
+          id: actions
+          x: root.narrow ? (parent.width-width)/2 : parent.width-width
           y: root.narrow ? root.theme.space(root.theme.friendly ? 36 : 28) : (parent.height-height)/2
           readonly property real spacing: root.theme.space(4)
-          readonly property bool wrapActions: root.narrow && joinAction.visible && joinAction.width + spacing + moreAction.width > width
+          readonly property real rowWidth: (joinAction.visible ? joinAction.width + spacing : 0) + moreAction.width
+          readonly property bool wrapActions: root.narrow && joinAction.visible && rowWidth > parent.width
           // Keep ordinary rows on one line; only the narrow rail stacks actions.
-          width: root.narrow ? parent.width : (joinAction.visible ? joinAction.width + spacing : 0) + moreAction.width
+          width: wrapActions ? Math.max(joinAction.width, moreAction.width) : rowWidth
           height: wrapActions ? joinAction.height + spacing + moreAction.height : Math.max(joinAction.visible ? joinAction.height : 0, moreAction.height)
           ChatButton {
             id: joinAction; objectName: "joinRoom-" + root.room.id
@@ -92,7 +95,7 @@ Column {
             width: root.mainApp ? members.width : Math.min(members.width, participant.width + (streams.visible ? streams.implicitWidth + line.spacing : 0))
             implicitHeight: line.implicitHeight
             Flow {
-              id: line; width: parent.width; spacing: root.theme.spacing.xs
+              id: line; width: root.tiny ? participant.width : parent.width; x: root.tiny ? (parent.width-width)/2 : 0; spacing: root.theme.spacing.xs
               Row {
                 objectName: "roomParticipant-" + modelData.id
                 id: participant
@@ -114,7 +117,7 @@ Column {
                 readonly property bool speaking: root.current && (root.bridge.activeSpeakers || []).indexOf(modelData.display_name) >= 0
                 readonly property bool self: modelData.id === (root.bridge.participantServer(person).self || {}).id
                 readonly property real iconSpace: (voiceStatus.visible ? voiceStatus.width + spacing : 0) + (avatar.visible ? avatar.width + spacing : 0)
-                width: Math.min(members.width, name.implicitWidth + iconSpace)
+                width: root.tiny && avatar.visible ? avatar.width : Math.min(members.width, name.implicitWidth + iconSpace)
                 height: Math.max(root.theme.friendly ? root.theme.space(36) : 0, name.implicitHeight, voiceStatus.height, streams.visible ? root.theme.space(22) : 0)
                 WispAvatar { id: avatar; bridge: root.bridge; userId: String(modelData.id); serverId: String(root.room.server_id || root.bridge.activeServer.id); theme: root.theme; name: modelData.display_name; speaking: parent.speaking; visible: root.theme.friendly && root.theme.showAvatars; width: Math.min(members.width,root.theme.space(root.narrow ? 20 : 28)); height: width; anchors.verticalCenter: parent.verticalCenter
                 }

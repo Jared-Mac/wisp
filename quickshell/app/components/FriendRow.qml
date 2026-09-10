@@ -8,7 +8,8 @@ Item {
   required property var theme
   property bool adaptive: false
   readonly property bool narrow: adaptive && width < theme.space(140)
-  readonly property bool tiny: adaptive && width < theme.space(56)
+  readonly property bool tiny: adaptive && width < theme.space(80)
+  readonly property bool compactActions: adaptive && width < theme.space(220)
   signal selected()
   readonly property bool favorite: root.bridge.friendPreferences.isFavorite(root.friend)
 
@@ -17,7 +18,7 @@ Item {
 
   implicitHeight: root.theme.space(root.theme.friendly ? 44 : root.theme.comfortable ? 38 : root.theme.tui ? 28 : 32)
 
-  activeFocusOnTab: root.narrow
+  activeFocusOnTab: root.compactActions
   Accessible.role: Accessible.Button
   Accessible.name: root.friend.display_name + " friend actions"
   Keys.onReturnPressed: friendMenu.popup()
@@ -25,7 +26,7 @@ Item {
   ToolTip.visible: rowHover.hovered && root.narrow
   ToolTip.text: root.friend.display_name + " · " + (root.friend.online ? root.friend.presence : "offline")
   Menu {
-    id: friendMenu; width: root.theme.space(220)
+    id: friendMenu; objectName: "friendActionsMenu"; width: root.theme.space(220)
     ThemeControlStyle { theme: root.theme; control: friendMenu; outline: true }
     MenuItem { id: dm; text: "Message " + root.friend.display_name; onTriggered: root.bridge.openDirect(root.friend.display_name); ThemeControlStyle { theme: root.theme; control: dm } }
     MenuItem { id: call; text: root.friend.presence === "knock" ? "Knock" : "Join voice"; enabled: root.canRequest; onTriggered: root.bridge.joinFriend(root.friend.display_name); ThemeControlStyle { theme: root.theme; control: call } }
@@ -34,7 +35,7 @@ Item {
   }
   // Observe the entire row, including child buttons, without intercepting clicks.
   HoverHandler { id: rowHover }
-  TapHandler { acceptedButtons: Qt.RightButton; onTapped: if(root.narrow) friendMenu.popup(); else volumeMenu.open() }
+  TapHandler { acceptedButtons: Qt.RightButton; onTapped: if(root.compactActions) friendMenu.popup(); else volumeMenu.open() }
   ParticipantVolumeMenu { id: volumeMenu; bridge: root.bridge; theme: root.theme; people: [root.friend] }
 
   Rectangle {
@@ -43,14 +44,17 @@ Item {
     color: rowHover.hovered ? root.theme.alpha(root.theme.foreground, 0.07) : "transparent"
   }
 
-  WispAvatar { id: avatar; bridge: root.bridge; userId: String(root.friend.id); serverId: String(root.friend.server_id || root.bridge.activeServer.id); theme: root.theme; name: root.friend.display_name; visible: root.theme.friendly && root.theme.showAvatars; width: Math.min(root.width,root.theme.space(root.narrow ? 20 : 28)); height: width; anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter }
+  WispAvatar { id: avatar; objectName: "friendAvatar"; bridge: root.bridge; userId: String(root.friend.id); serverId: String(root.friend.server_id || root.bridge.activeServer.id); theme: root.theme; name: root.friend.display_name; visible: root.theme.friendly && root.theme.showAvatars; width: Math.min(root.width,root.theme.space(28)); height: width; x: root.tiny ? (root.width-width)/2 : 0; anchors.verticalCenter: parent.verticalCenter }
+  Rectangle {
+    anchors.fill: dot; anchors.margins: -2; z: 1
+    visible: avatar.visible; color: root.theme.sidebar; radius: width/2
+  }
   PresenceDot {
     id: dot
     objectName: "friendConnectionDot"
     z: 1
-    anchors.left: parent.left
-    anchors.leftMargin: avatar.visible ? Math.max(0,avatar.width-root.theme.space(7)) : 0
-    anchors.verticalCenter: parent.verticalCenter
+    x: avatar.visible ? avatar.x + avatar.width - width : root.tiny ? Math.max(0,(root.width-width-friendName.implicitWidth-root.theme.space(4))/2) : 0
+    y: avatar.visible ? avatar.y + avatar.height - height : (root.height-height)/2
     // Connectivity is distinct from access: an online Closed friend isn't offline.
     presence: root.friend.online ? "open" : "closed"
     theme: root.theme
@@ -65,7 +69,7 @@ Item {
     id: friendName
     objectName: "friendName"
     anchors.left: avatar.visible ? avatar.right : dot.right
-    anchors.leftMargin: root.tiny ? 0 : root.theme.spacing.sm
+    anchors.leftMargin: root.tiny ? (avatar.visible ? 0 : root.theme.space(4)) : root.theme.spacing.sm
     anchors.verticalCenter: parent.verticalCenter
     visible: !root.tiny || !avatar.visible
     text: root.tiny ? String(root.friend.display_name || "?").slice(0,1).toUpperCase() : String(root.friend.display_name || "")
@@ -101,7 +105,7 @@ Item {
   }
 
   Button {
-    id: favoriteButton; visible: !root.narrow
+    id: favoriteButton; visible: !root.compactActions
     objectName: "favorite-" + String(root.friend.id || root.friend.display_name)
     anchors.left: friendName.right; anchors.leftMargin: root.theme.spacing.xs; anchors.verticalCenter: parent.verticalCenter
     width: root.theme.space(26); height: root.theme.tui ? root.height : root.theme.space(32)

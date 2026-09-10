@@ -29,6 +29,7 @@ Rectangle {
     width: root.horizontal ? Math.min(root.theme.space(270), (root.width - root.inset * 2) * 0.46) : root.width - root.inset * 2
     height: disconnect.height
     Item {
+      visible: !root.narrow
       anchors.left: parent.left; anchors.leftMargin: root.narrow ? 0 : root.theme.space(8)
       anchors.right: disconnect.left; anchors.rightMargin: root.theme.spacing.sm
       height: parent.height
@@ -44,7 +45,7 @@ Rectangle {
         ToolTip.visible: locationHover.hovered && truncated; ToolTip.text: text
       }
       Text {
-        id: connection; visible: !root.narrow && (!root.horizontal || header.width >= root.theme.space(240)); objectName: "currentCallConnection"
+        id: connection; visible: !root.narrow && header.width >= root.theme.space(root.horizontal ? 240 : 220); objectName: "currentCallConnection"
         anchors.left: location.right; anchors.leftMargin: root.theme.spacing.sm
         anchors.verticalCenter: parent.verticalCenter
         text: root.bridge.mediaState.livekit_connected ? "· connected" : "· connecting…"
@@ -53,13 +54,13 @@ Rectangle {
     }
     ChatButton {
       id: disconnect; objectName: "currentCallDisconnect"
-      anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
+      x: root.narrow ? (parent.width-width)/2 : parent.width-width; anchors.verticalCenter: parent.verticalCenter
       theme: root.theme; text: "d/c"; destructive: true
       iconName: "disconnect"; iconOnly: root.theme.friendly || root.narrow; forceIcon: root.narrow
       Binding on implicitWidth { when: root.theme.friendly || root.narrow; value: Math.min(root.width-root.inset*2,root.theme.space(root.compact ? 32 : 40)); restoreMode: Binding.RestoreBindingOrValue }
       Binding on implicitHeight {when:root.theme.friendly || root.narrow;value:root.theme.space(root.compact ? 32 : 40);restoreMode:Binding.RestoreBindingOrValue}
       Accessible.name: "Disconnect from voice"
-      ToolTip.visible: hovered; ToolTip.text: Accessible.name
+      ToolTip.visible: hovered; ToolTip.text: Accessible.name + (root.narrow ? " · " + root.bridge.currentVoiceLabel : "")
       onClicked: root.bridge.leave()
     }
   }

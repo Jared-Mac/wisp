@@ -115,7 +115,7 @@ Item {
           x: activity.frameInset; y: root.stacked ? parent.height - height - activity.frameInset : rooms.y + rooms.height + (visible ? root.theme.space(8) : 0)
           width: root.stacked ? parent.width - activity.frameInset * 2 : rooms.width; height: visible ? implicitHeight : 0
           bridge: root.bridge; theme: root.theme
-          maximumHeight: Math.min(root.theme.space(210), activity.height/2)
+          maximumHeight: Math.min(root.theme.space(roomCallBar.narrow ? 280 : 210), activity.height/2)
           compact: true; adaptive: true; horizontal: root.stacked
           roomInvitesInHeader: !root.drawerMode || root.drawerOpen
           onCameraRequested: root.cameraRequested()

@@ -149,6 +149,15 @@ ShellRoot {
       data.hangouts = [{id:"active-empty",label:null,members:[],sharing:[]}]
     }
     data.friends = [{id:"owner",display_name:"Owner",online:true,presence:"open"}, {id:"member_c",display_name:"MemberC",online:false,presence:"away"}]
+    if (test.mode === "sidebar") {
+      bridge.workspaceLayout.activityWidth = Number(Quickshell.env("WISP_TEST_SIDEBAR_WIDTH")) || 80
+      bridge.workspaceLayout.dock = "left"
+      data.self.server_owner = true
+      data.self.hangout_id = "sidebar-call"
+      data.self.media.livekit_connected = true
+      data.hangouts = [{id:"sidebar-call",label:"TestRoom",members:[{id:"self",display_name:"MemberA"}]}]
+      data.spots = [{id:"test_room",name:"TestRoom",active_hangout_id:"sidebar-call",members:[{id:"self",display_name:"MemberA"}]}, {id:"games",name:"Games",members:[]}]
+    }
     if (test.mode === "presence" || test.mode === "panelpresence") {
       data.friends = [
         {id:"owner",display_name:"Owner",online:true,presence:"open"},
@@ -813,7 +822,7 @@ ShellRoot {
       if (star) {
         var label = test.findItem(star.parent, "friendName")
         test.check(!!label && star.x >= label.x + label.width, "star is to the right of the name")
-        test.check(star.parent.height === theme.space(theme.tui ? 28 : 32), "friends use compact rows")
+        test.check(star.parent.height === theme.space(theme.friendly ? 44 : theme.comfortable ? 38 : theme.tui ? 28 : 32), "friends use compact rows")
         test.check(star.opacity === 0, "favorite star hidden without hover or focus")
         star.forceActiveFocus(Qt.TabFocusReason)
         test.check(star.opacity === 1, "keyboard focus reveals favorite action")
@@ -1601,6 +1610,40 @@ ShellRoot {
     interval: test.mode === "saved" ? 3800 : test.mode === "interactions" || test.mode === "panelinteractions" ? 2500 : 1200; running: test.mode !== "responsive" || test.responsiveFinished
     onTriggered: {
       var surface = test.compactMode ? compactSurface : window.contentItem
+      if (test.mode === "sidebar") {
+        var activity = test.findItem(surface,"activityPane")
+        var avatar = test.findItem(activity,"friendAvatar")
+        var dot = test.findItem(test.findItem(activity,"friendsPane"),"friendConnectionDot")
+        if (avatar) test.check(Math.abs(dot.x+dot.width-avatar.x-avatar.width)<1 && Math.abs(dot.y+dot.height-avatar.y-avatar.height)<1,
+                   "friend status badge stays attached to the avatar bottom-right")
+        if (avatar && avatar.parent.tiny) test.check(Math.abs(avatar.x+avatar.width/2-avatar.parent.width/2)<1,"rail friend avatar is centered")
+        if (dot.parent.compactActions) {
+          dot.parent.forceActiveFocus()
+          keyDriver.keyClick(Qt.Key_Space)
+          var friendActions=test.findObject(dot.parent,"friendActionsMenu",[])
+          test.check(friendActions && friendActions.opened,"compact friend actions remain accessible from the keyboard")
+          if (friendActions) friendActions.close()
+        }
+        var room=test.findItem(activity,"savedRoom-test_room")
+        var join=test.findItem(room,"joinRoom-test_room")
+        var more=test.findItem(room,"roomMoreButton")
+        if (room.narrow) {
+          test.check(Math.abs(join.parent.x+join.parent.width/2-join.parent.parent.width/2)<1,"narrow room actions are centered")
+          test.check(more.x+more.width<=more.parent.width+1,"room menu fits its action row")
+        }
+        var disconnect=test.findItem(activity,"currentCallDisconnect")
+        if (disconnect.parent.parent.narrow) test.check(Math.abs(disconnect.x+disconnect.width/2-disconnect.parent.width/2)<1,"narrow disconnect is centered")
+        var mic=test.findItem(activity,"mediaAction-mute")
+        if (mic) {
+          test.check(mic.width>0 && mic.x+mic.width<=mic.parent.width+1,"microphone control fits the rail")
+          test.check(Math.abs(mic.parent.x+mic.parent.width/2-mic.parent.parent.width/2)<1,"media grid is centered")
+        }
+        var sound=test.findItem(activity,"mediaAction-soundboard")
+        var bar=test.findItem(activity,"currentCallBar")
+        var soundPosition=sound.mapToItem(bar,0,0)
+        test.check(soundPosition.y+sound.height<=bar.height,"soundboard button remains fully visible in the call rail")
+        test.check(!bridge.sent.some(function(c){return ["join_spot","join_hangout","share","camera"].indexOf(c.name)>=0}),"resizing does not join or publish media")
+      }
       if (test.mode === "presence" || test.mode === "panelpresence") {
         for (var entry of [{id:"owner",label:"Open"},{id:"member_c",label:"Knock"},{id:"member_a",label:"Closed"},{id:"morgan",label:"Away"}]) {
           var icon = test.findItem(surface, "friendPresence-" + entry.id)
@@ -1652,7 +1695,8 @@ ShellRoot {
         }
         test.check(!!test.findItem(surface, "headerHomeButton") === !page.showingChats, "Home visibility follows current page")
         var audio = test.findItem(surface, "globalAudioControls")
-        test.check(!!audio && audio.width > 0, "mute/deafen available with or without a room and in settings")
+        var callAudio = test.findItem(surface, "mediaAction-mute")
+        test.check((!!audio && audio.width > 0) || (!!callAudio && callAudio.width > 0 && !!test.findItem(surface,"mediaAction-deafen")), "mute/deafen available with or without a room and in settings")
         if (audio) {
           var position = audio.mapToItem(surface, 0, 0)
           test.check(position.y >= 0 && position.y + audio.height < surface.height, "audio controls inside window")

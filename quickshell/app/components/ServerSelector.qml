@@ -8,7 +8,7 @@ Item {
   required property var theme
   property bool adaptive: false
   readonly property bool narrow: adaptive && width < theme.space(140)
-  readonly property bool tiny: adaptive && width < theme.space(56)
+  readonly property bool tiny: adaptive && width < theme.space(80)
   property bool compact: false
   property bool horizontal: false
   property bool showInvite: true

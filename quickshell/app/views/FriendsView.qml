@@ -8,7 +8,7 @@ Column {
   required property var theme
   property bool adaptive: false
   readonly property bool narrow: adaptive && width < theme.space(140)
-  readonly property bool tiny: adaptive && width < theme.space(56)
+  readonly property bool tiny: adaptive && width < theme.space(80)
   signal selected()
   property bool collapsible: false
   property bool showHeader: true

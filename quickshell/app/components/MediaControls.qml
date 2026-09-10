@@ -17,7 +17,11 @@ Column {
   SoundboardPopup { id: soundboardPopup; bridge: root.bridge; theme: root.theme }
   RoomInvitePicker { id: invitePicker; bridge: root.bridge; theme: root.theme }
   Flow {
-    id: controls; width: parent.width; spacing: root.theme.spacing.sm
+    id: controls
+    readonly property real cellWidth: Math.min(root.width,root.theme.space(32))
+    readonly property int columns: Math.max(1,Math.floor((root.width+spacing)/(cellWidth+spacing)))
+    width: root.small ? columns*cellWidth+(columns-1)*spacing : parent.width
+    x: (root.width-width)/2; spacing: root.theme.spacing.sm
     Repeater {
       id: controlRepeater
       model: (root.theme.friendly || root.small ? [

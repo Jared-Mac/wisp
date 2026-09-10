@@ -7,7 +7,7 @@ Item {
   required property var theme
   property bool adaptive: false
   readonly property bool narrow: adaptive && width < theme.space(140)
-  readonly property bool tiny: adaptive && width < theme.space(56)
+  readonly property bool tiny: adaptive && width < theme.space(80)
   property bool collapsible: false
   property bool collapsed: false
   signal toggled()
@@ -33,7 +33,7 @@ Item {
   }
   ChatButton {
     id: create; objectName: "createRoomButton"
-    anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
+    x: root.tiny ? (parent.width-width)/2 : parent.width-width; anchors.verticalCenter: parent.verticalCenter
     theme: root.theme; text: "+"; iconName: "add"; iconOnly: root.theme.friendly || root.tiny; forceIcon: root.tiny; implicitWidth: Math.min(root.width,root.theme.space(30))
     enabled: root.bridge.activeServer.connected !== false
     Accessible.name: "Create a room"; ToolTip.visible: hovered; ToolTip.text: "Create a room"
