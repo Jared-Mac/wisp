@@ -77,7 +77,7 @@ class UpdaterTests(unittest.TestCase):
         self.assertFalse((directory / "two.json").exists())
 
     def test_invalid_status_never_counts_as_idle(self):
-        for value in [{}, [], {"self":{"hangout_id":"room"}}, {"self":{"media":{"camera":{"active":True}}}}]:
+        for value in [{}, [], {"self":{"connection":"joining"}}, {"self":{"connection":"reconnecting"}}, {"self":{"media":{"livekit_connected":True}}}, {"self":{"hangout_id":"room"}}, {"self":{"media":{"camera":{"active":True}}}}]:
             self.assertFalse(u.idle_snapshot(value))
         self.assertTrue(u.idle_snapshot({"self":{}}))
 

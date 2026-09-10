@@ -19,6 +19,7 @@ Item {
   readonly property bool available: !!info.available
   readonly property bool foreground: bridge.appFocused
   readonly property bool safe: bridge.daemonConnected && !bridge.voiceRecovery.pending && !bridge.voiceRecovery.shuttingDown
+    && ["joining","reconnecting"].indexOf(bridge.selfState.connection) < 0
     && !bridge.selfState.hangout_id && !bridge.selfState.sharing
     && !(bridge.selfState.media || {}).livekit_connected
     && !Object.keys(bridge.watchedMedia).length && !Object.keys(bridge.mediaWatchRequests).length

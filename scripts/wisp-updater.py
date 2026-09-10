@@ -196,7 +196,7 @@ def idle_snapshot(snapshot):
         return False
     me = snapshot.get("self", {})
     media = me.get("media", {})
-    return not (me.get("hangout_id") or me.get("sharing") or media.get("livekit_connected") or media.get("screen_share", {}).get("active")
+    return not (me.get("connection") in {"joining", "reconnecting"} or me.get("hangout_id") or me.get("sharing") or media.get("livekit_connected") or media.get("screen_share", {}).get("active")
                 or media.get("camera", {}).get("active"))
 
 
@@ -328,8 +328,8 @@ def worker(automatic):
                     return state(phase="available", request="", attempted_commit="", waiting="Waiting until Wisp is idle")
                 state(phase="installing", backup=str(backup))
                 run([bins / "wisp-ui", "quit"])
-                run(["systemctl", "--user", "stop", "wisp.service"])
                 stopped = True
+                run(["systemctl", "--user", "stop", "wisp.service"])
                 environment = dict(os.environ, WISP_CLIENT_ONLY="1", WISP_SKIP_WEB_RUNTIME="1")
                 run([package / "install.sh"], timeout=180, environment=environment)
                 run(["systemctl", "--user", "start", "wisp.service"])

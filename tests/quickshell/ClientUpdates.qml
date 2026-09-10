@@ -54,6 +54,8 @@ ShellRoot {
       test.check(!updater.safe && !test.find(settings,"installUpdate").enabled,"draft blocks install")
       bridge.drafts={};bridge.selfState={hangout_id:"room",media:{livekit_connected:true}};input.wait(30)
       test.check(!updater.safe,"voice blocks install")
+      bridge.selfState={connection:"joining",media:{}};input.wait(30)
+      test.check(!updater.safe,"pending join blocks install before room membership arrives")
       bridge.selfState={media:{}};bridge.messageActions={replies:{chat:{message_id:"reply"}}};input.wait(30)
       test.check(!updater.safe,"reply-only draft blocks install")
       bridge.messageActions={replies:{}};input.wait(30)
