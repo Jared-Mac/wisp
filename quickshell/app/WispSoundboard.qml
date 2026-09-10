@@ -125,7 +125,7 @@ Item {
       if (action.serial !== playSerial) return
       if (action.action === "play") {
         pending=false
-        feedback=bridge.replaceEntry(feedback, server, message.ok ? (value.previewing ? "Playing privately on your device." : "Playing into your voice room.") : error)
+        feedback=bridge.replaceEntry(feedback, server, message.ok ? (value.previewing ? "Playing privately on your device." : "Playing for you and your voice room.") : error)
       }
       if (message.ok) {
         if (value.error && playServer) feedback=bridge.replaceEntry(feedback,playServer,String(value.error))

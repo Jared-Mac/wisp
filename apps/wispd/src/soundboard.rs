@@ -187,6 +187,11 @@ fn decode_file(path: &std::path::Path) -> anyhow::Result<Vec<i16>> {
 pub(crate) struct Mixer {
     state: Mutex<Option<Playing>>,
 }
+
+pub(crate) fn effect_sample(sample: i16, volume: u8) -> i16 {
+    i16::try_from(i32::from(sample) * i32::from(volume.min(100)) * 55 / 10_000)
+        .expect("soundboard effect stays in PCM range")
+}
 struct Playing {
     samples: Vec<i16>,
     offset: usize,
@@ -215,8 +220,8 @@ impl Mixer {
             };
             // Retain voice underneath the effect with enough headroom that even
             // full-scale voice + sound cannot clip. No speech denoiser touches it.
-            let mixed = i32::from(*mic) * 40 / 100
-                + i32::from(*sample) * i32::from(sound.volume) * 55 / 10_000;
+            let mixed =
+                i32::from(*mic) * 40 / 100 + i32::from(effect_sample(*sample, sound.volume));
             *mic = i16::try_from(mixed).expect("soundboard mix stays in PCM range");
             sound.offset += 1;
         }

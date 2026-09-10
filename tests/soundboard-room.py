@@ -49,16 +49,25 @@ def launch(name, argv, env):
     log.close(); processes.append(process)
     return process
 
-def record(name, monitor, action=None):
+def record(name, monitor, action=None, local_monitor=None):
     path = folder / f"{name}.pcm"
+    local_path = folder / f"{name}-local.pcm"
+    local_output = local_path.open("wb") if local_monitor else None
+    local_capture = subprocess.Popen(["parec",f"--device={local_monitor}","--format=s16le","--rate=48000","--channels=1","--latency-msec=20"],stdout=local_output,stderr=subprocess.DEVNULL) if local_monitor else None
     with path.open("wb") as output:
         capture = subprocess.Popen(["parec",f"--device={monitor}","--format=s16le","--rate=48000","--channels=1","--latency-msec=20"],stdout=output,stderr=subprocess.DEVNULL)
         try:
             time.sleep(.2)
             if action: action()
             time.sleep(2.4)
-        finally: capture.terminate();capture.wait(timeout=5)
+        finally:
+            capture.terminate();capture.wait(timeout=5)
+            if local_capture:
+                local_capture.terminate();local_capture.wait(timeout=5);local_output.close()
     samples = array.array("h"); samples.frombytes(path.read_bytes())
+    if local_monitor:
+        local = array.array("h");local.frombytes(local_path.read_bytes())
+        return samples,local
     return samples
 
 def tone_amplitude(samples):
@@ -112,19 +121,43 @@ try:
     def play_effect():
         assert owner.command("soundboard_play",play)["playing"]
         time.sleep(.4)
-    received=tone_amplitude(record("effect",monitor,play_effect))
+    local_monitor=f"wisp_soundboard_{os.getpid()}_0.monitor"
+    remote_samples,local_samples=record("effect",monitor,play_effect,local_monitor)
+    received=tone_amplitude(remote_samples)
+    heard=tone_amplitude(local_samples)
     assert received > max(1500,baseline*4),f"Remote effect missing: baseline={baseline:.1f}, played={received:.1f}"
+    assert heard > 6000,f"Sender cannot hear their own effect: {heard:.1f}"
+    assert not owner.command("soundboard_status")["previewing"], "Room monitoring is not private preview"
+    remote_zero,local_zero=record("zero-volume",monitor,lambda:owner.command("soundboard_play",dict(play,volume=0)),local_monitor)
+    assert tone_amplitude(local_zero) < 100, "Volume zero did not silence the sender's effect"
+    assert tone_amplitude(remote_zero) < max(300,baseline*2), "Volume zero did not silence the room effect"
+    def assert_stopped():
+        state=owner.command("soundboard_status")
+        assert not state["playing"] and not state["previewing"]
+        # Wait for the output device queue to drain, then verify actual silence.
+        time.sleep(.15)
+        assert tone_amplitude(record("stopped-local",local_monitor)) < 100, "Local effect continued after cancellation"
+    owner.command("soundboard_play",play);time.sleep(.2);owner.command("soundboard_stop")
+    assert_stopped()
     owner.command("soundboard_play",play);time.sleep(.2);owner.command("set_muted",{"muted":True})
-    assert not owner.command("soundboard_status")["playing"]
+    assert_stopped()
     owner.command("soundboard_play",play,success=False)
     owner.command("set_muted",{"muted":False});time.sleep(1)
+    owner.command("soundboard_play",play);time.sleep(.2);owner.command("set_deafened",{"deafened":True})
+    assert_stopped()
+    owner.command("set_deafened",{"deafened":False});owner.command("set_muted",{"muted":False})
+    owner.command("soundboard_play",play);time.sleep(.2)
+    devices=owner.command("refresh_audio_devices")
+    output=next(d["id"] for d in devices["output_devices"] if d["name"]==f"wisp_soundboard_{os.getpid()}_0")
+    owner.command("set_output_device",{"id":output})
+    assert_stopped()
     owner.command("soundboard_play",play);owner.command("leave")
-    assert not owner.command("soundboard_status")["playing"]
+    assert_stopped()
     for client in clients:
         client.command("leave")
         status=client.command("status")["self"]
         assert not status["media"]["microphone_published"] and not status["sharing"]
-    print(f"Remote soundboard playback verified over LiveKit (880 Hz amplitude {received:.0f}; baseline {baseline:.0f}). Mute and leave stop playback.")
+    print(f"Soundboard audible at sender ({heard:.0f}) and LiveKit receiver ({received:.0f}; baseline {baseline:.0f}). Stop, mute, deafen, output changes and leave silence local playback.")
     passed=True
 finally:
     for client in clients:

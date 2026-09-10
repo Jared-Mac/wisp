@@ -54,6 +54,34 @@ Rectangle {
   function choose(id) { if (tiled) conversationChosen(id); else bridge.selectConversation(id) }
   TapHandler { onPressedChanged: if (pressed) root.activated() }
 
+  MouseArea {
+    objectName: "chatPaneCtrlDrag"
+    anchors.fill: parent
+    z: 100
+    enabled: root.tiled && !root.detached
+    acceptedButtons: Qt.LeftButton
+    preventStealing: true
+    cursorShape: pressed ? Qt.ClosedHandCursor : Qt.ArrowCursor
+    property point origin
+    property bool moving: false
+    onPressed: function(event) {
+      if (!(event.modifiers & Qt.ControlModifier)) { event.accepted = false; return }
+      origin = Qt.point(event.x, event.y)
+      moving = false
+      root.activated()
+    }
+    onPositionChanged: function(event) {
+      if (!pressed) return
+      if (Math.abs(event.x-origin.x)+Math.abs(event.y-origin.y)>8) moving = true
+      if (moving) root.tileDragged(event.x, event.y)
+    }
+    onReleased: {
+      if (moving) root.tileDropped()
+      moving = false
+    }
+    onCanceled: { root.tileDragCanceled(); moving = false }
+  }
+
   function label(c) { return c && c.label === "Hangout" ? "Room" : String(c ? c.label : "Messages") }
   function syncTabs() {
     tabIds = ChatLogic.reconcileTabs(tabIds, bridge.conversations)
@@ -99,7 +127,7 @@ Rectangle {
           onCanceled: { root.tileDragCanceled(); moving=false }
         }
         ToolTip.visible: hovered && !tileDragMouse.pressed
-        ToolTip.text: "Split chat pane, or drag to move/swap"
+        ToolTip.text: "Split chat pane, or drag to move/swap. Ctrl-drag anywhere in the pane to move it."
       }
       ChatButton {
         objectName: "chatAnchorButton"

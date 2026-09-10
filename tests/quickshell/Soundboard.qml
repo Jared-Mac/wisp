@@ -9,7 +9,8 @@ ShellRoot {
   property bool failed: false
   function check(value,message) {if(!value){failed=true;console.error("SOUNDBOARD_FAILED: "+message)}}
   function equal(a,b) {check(a===b,"Expected "+a+" to equal "+b)}
-  Wisp.WispTheme {id:theme; profile:"clean_tui"}
+  QtObject {id:colors;property string palette:Quickshell.env("WISP_TEST_PALETTE") || "wisp";property bool managed:false}
+  Wisp.WispTheme {id:theme; profile:Quickshell.env("WISP_TEST_THEME") || "clean_tui";appearanceController:colors}
   Item {
     id: bridge
     property alias soundboard: board
@@ -31,7 +32,7 @@ ShellRoot {
     Wisp.WispSoundboard {id:board;bridge:bridge}
   }
   FloatingWindow {
-    id: window; visible:true; implicitWidth:440;implicitHeight:760
+    id: window; visible:true; implicitWidth:Number(Quickshell.env("WISP_TEST_WIDTH")) || 440;implicitHeight:Number(Quickshell.env("WISP_TEST_HEIGHT")) || 760
     Rectangle {
       id: surface; anchors.fill:parent; color:theme.background
       Components.SoundboardPopup {id:popup;bridge:bridge;theme:theme}
@@ -99,11 +100,40 @@ ShellRoot {
       test.check(played.name==="soundboard_play" && played.args.server_id==="a" && played.args.sound_id==="one","Click sends the selected sound to the voice server")
       bridge.reply(played.id,true,{playing:true})
       board.stop();bridge.reply(String(bridge.serial),true,{playing:false})
-      bridge.effectiveMuted=true;wait(30);test.check(!quickPlay.enabled,"Muted call cannot send sounds");bridge.effectiveMuted=false
+      bridge.effectiveMuted=true;wait(30);test.check(!quickPlay.enabled,"Muted call cannot send sounds")
+      var previewToggle=test.find(callLibrary,"soundboardPreviewMode")
+      mouseClick(previewToggle,previewToggle.width/2,previewToggle.height/2);wait(30)
+      test.check(callLibrary.previewMode && quickPlay.enabled,"Muted microphone permits explicitly selected private preview")
+      mouseClick(quickPlay,quickPlay.width/2,quickPlay.height/2)
+      var preview=bridge.sent[bridge.sent.length-1]
+      test.check(preview.name==="soundboard_preview" && preview.args.sound_id==="one","Preview pad never broadcasts to the room")
+      bridge.reply(preview.id,true,{previewing:true});board.stop();bridge.reply(String(bridge.serial),true,{previewing:false})
+      bridge.effectiveMuted=false;wait(30)
+      test.check(!quickPlay.enabled && callLibrary.previewMode,"Unmuting never silently changes a preview into room playback")
+      mouseClick(previewToggle,previewToggle.width/2,previewToggle.height/2);wait(30)
+      quickPlay.forceActiveFocus();keyClick(Qt.Key_Right);wait(30)
+      var second=test.find(callLibrary,"soundboardQuickPlay-two")
+      test.check(second.activeFocus,"Arrow keys move between sound pads")
+      keyClick(Qt.Key_Space);wait(30)
+      var keyboardPlay=bridge.sent[bridge.sent.length-1]
+      test.check(keyboardPlay.name==="soundboard_play" && keyboardPlay.args.sound_id==="two","Space plays the focused sound")
+      bridge.reply(keyboardPlay.id,true,{playing:false})
       var manage=test.find(popup.contentItem,"soundboardManageButton")
       mouseClick(manage,manage.width/2,manage.height/2);wait(30)
       test.check(!callLibrary.playOnly && test.find(callLibrary,"soundboardUpload").visible,"Manage sounds exposes uploads")
       mouseClick(manage,manage.width/2,manage.height/2);wait(30)
+      var defaults=["Air Horn","Applause","Boing","Drum Roll","Level Up","Ping","Rimshot","Sad Trombone"]
+      board.catalogs={a:defaults.map(function(n,i){return {id:String(i),name:n,owner_id:"a-me",owner_name:"Me",duration_ms:1300}})}
+      wait(50)
+      var pads=test.find(callLibrary,"soundboardPads")
+      test.check(popup.width<=theme.space(420) && popup.height<theme.space(480),"Eight sounds fit a compact popup")
+      test.check(pads.columns>=2 && pads.count===8,"Sounds use a responsive grid")
+      test.find(callLibrary,"soundboardSearch").text="trombone";wait(30)
+      test.equal(pads.count,1)
+      test.find(callLibrary,"soundboardSearch").text="";wait(30)
+      var stopButton=test.find(callLibrary,"soundboardStop")
+      var stopPosition=stopButton.mapToItem(popup.contentItem,0,0)
+      test.check(stopPosition.y>=0 && stopPosition.y+stopButton.height<=popup.contentItem.height,"Stop remains reachable above the scrolling sounds")
       if(screenshot) {popup.contentItem.grabToImage(function(result){result.saveToFile(screenshot.replace(".png","-popup.png"))});wait(200)}
       bridge.currentVoiceRoom=null;wait(50);test.check(!popup.visible,"Leaving closes call popup")
       popup.open();wait(50)

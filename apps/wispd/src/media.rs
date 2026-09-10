@@ -292,6 +292,7 @@ pub(crate) struct MediaManager {
     audio_test: crate::audio_test::AudioTest,
     soundboard: Arc<crate::soundboard::Mixer>,
     soundboard_preview: crate::audio_test::AudioTest,
+    soundboard_monitor: crate::audio_test::AudioTest,
     soundboard_last_play: Mutex<Option<Instant>>,
     soundboard_play_epoch: AtomicU64,
     soundboard_preview_epoch: AtomicU64,
@@ -363,6 +364,7 @@ impl MediaManager {
                 audio_test: crate::audio_test::AudioTest::default(),
                 soundboard: Arc::new(crate::soundboard::Mixer::default()),
                 soundboard_preview: crate::audio_test::AudioTest::default(),
+                soundboard_monitor: crate::audio_test::AudioTest::default(),
                 soundboard_last_play: Mutex::new(None),
                 soundboard_play_epoch: AtomicU64::new(0),
                 soundboard_preview_epoch: AtomicU64::new(0),
@@ -415,7 +417,8 @@ impl MediaManager {
 
     pub(crate) fn soundboard_status(&self) -> serde_json::Value {
         let preview = self.soundboard_preview.status();
-        serde_json::json!({"playing":self.soundboard.active(),"previewing":preview.phase == "playing","error":preview.error})
+        let monitor = self.soundboard_monitor.status();
+        serde_json::json!({"playing":self.soundboard.active() || monitor.phase == "playing","previewing":preview.phase == "playing","error":monitor.error.or(preview.error)})
     }
 
     pub(crate) fn begin_soundboard(&self, preview: bool) -> u64 {
@@ -429,6 +432,7 @@ impl MediaManager {
         let _operation = self.operation.lock().await;
         self.soundboard.stop();
         self.soundboard_preview.stop(true).await;
+        self.soundboard_monitor.stop(true).await;
     }
 
     pub(crate) async fn play_soundboard(
@@ -455,15 +459,38 @@ impl MediaManager {
             self.soundboard_play_epoch.load(Ordering::Acquire) == ticket,
             "Sound playback cancelled"
         );
-        let mut last = self
+        {
+            let last = self
+                .soundboard_last_play
+                .lock()
+                .expect("soundboard cooldown lock");
+            anyhow::ensure!(
+                last.is_none_or(|last| last.elapsed() >= std::time::Duration::from_secs(1)),
+                "Wait a moment before playing another sound"
+            );
+        }
+        let platform = self.platform_audio()?;
+        let inventory = self.reconcile_audio_devices(&platform, true, false);
+        let speaker = inventory.speaker.context("No speaker is available")?;
+        // The local participant never receives their own voice track. Render
+        // just the effect locally, at the same gain as the outgoing mix.
+        let monitor = samples
+            .iter()
+            .map(|sample| crate::soundboard::effect_sample(*sample, volume))
+            .collect();
+        self.soundboard.stop();
+        self.soundboard_preview.stop(true).await;
+        self.soundboard_monitor.play_clip(&speaker, monitor).await?;
+        // Stop/mute can invalidate a download while waiting for the operation
+        // lock, including while the previous speaker pipeline is closing.
+        if self.soundboard_play_epoch.load(Ordering::Acquire) != ticket {
+            self.soundboard_monitor.stop(true).await;
+            bail!("Sound playback cancelled");
+        }
+        *self
             .soundboard_last_play
             .lock()
-            .expect("soundboard cooldown lock");
-        anyhow::ensure!(
-            last.is_none_or(|last| last.elapsed() >= std::time::Duration::from_secs(1)),
-            "Wait a moment before playing another sound"
-        );
-        *last = Some(Instant::now());
+            .expect("soundboard cooldown lock") = Some(Instant::now());
         self.soundboard.play(samples, volume);
         Ok(())
     }
@@ -496,6 +523,7 @@ impl MediaManager {
             "Sound preview cancelled"
         );
         self.soundboard.stop();
+        self.soundboard_monitor.stop(true).await;
         self.soundboard_preview.play_clip(&speaker, samples).await
     }
 
@@ -629,6 +657,10 @@ impl MediaManager {
     pub(crate) async fn select_output_device(&self, id: &str) -> anyhow::Result<AudioInventory> {
         let _operation = self.operation.lock().await;
         self.audio_test.stop(true).await;
+        self.begin_soundboard(false);
+        self.soundboard.stop();
+        self.soundboard_preview.stop(true).await;
+        self.soundboard_monitor.stop(true).await;
         let audio = self.platform_audio()?;
         let device = audio
             .playout_devices()
@@ -1199,6 +1231,7 @@ impl MediaManager {
         self.begin_soundboard(false);
         self.soundboard.stop();
         self.soundboard_preview.stop(true).await;
+        self.soundboard_monitor.stop(true).await;
         self.video_bridge.clear();
         self.connected.store(false, Ordering::Release);
         self.input_level.store(0, Ordering::Release);
@@ -1291,6 +1324,9 @@ impl MediaManager {
         // Serialize preview setup with unmuting: a delayed preview must never
         // start after the microphone has been opened.
         let _operation = self.operation.lock().await;
+        if muted {
+            self.soundboard_monitor.stop(true).await;
+        }
         if !muted {
             self.soundboard_preview.stop(true).await;
         }
@@ -1330,6 +1366,7 @@ impl MediaManager {
         let _operation = self.operation.lock().await;
         if deafened {
             self.soundboard_preview.stop(true).await;
+            self.soundboard_monitor.stop(true).await;
         }
         let deafened = deafened
             || self.session.lock().await.as_ref().is_some_and(|session| {

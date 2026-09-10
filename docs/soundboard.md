@@ -25,10 +25,11 @@ Removal requires confirmation. Upload errors preserve the chosen file and name.
 
 **Preview** plays through the selected speaker. During a call, mute the microphone
 first to keep the preview private. **Play into voice** requires an unmuted,
-undeafened call on the sound's server. It uses the existing voice track, so listeners
+undeafened call on the sound's server. You hear the effect through your selected speaker as well as sending it to the
+room. It uses the existing voice track, so listeners
 don't need a new client to hear sounds. New sounds replace the previous sound;
 there is a one-second interval between room playback starts. Volume affects the
-next playback. **Stop** cancels playback, including a pending download. Muting,
+next playback, for both your speaker and the room. **Stop** cancels playback, including a pending download. Muting,
 deafening, leaving, and voice moderation stop or suppress room playback. Nothing
 automatically joins a room.
 
@@ -57,4 +58,12 @@ The audio tests use generated audio, temporary servers/daemons, and private
 virtual speakers. They check all four import formats, actual audible preview output,
 Stop during pending playback, and room isolation without opening a real microphone
 or joining a production voice room. The room test measures the uploaded tone at
-another temporary client after LiveKit transport, then checks mute and leave.
+both the sender’s selected speaker and another temporary client after LiveKit
+transport, then checks Stop, mute, deafen, output changes, and leave.
+
+The quick menu uses a compact grid of sound pads, with the server in its title.
+Click a pad to play; use arrow keys to move between pads and Space to activate.
+Search filters the pads. Volume and Stop sit above the scrolling grid. Private
+preview is a single explicit toggle: it requires a muted microphone while in a
+call, and never changes into room playback when the microphone is unmuted.
+Manage opens upload, starter sounds, ownership, and removal controls.

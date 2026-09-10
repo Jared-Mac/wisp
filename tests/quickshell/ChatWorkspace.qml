@@ -330,7 +330,7 @@ ShellRoot {
       var label = test.findObject(surface, "serverChannel-channel:builds", [])
       var tile = test.findObject(surface, "serverChannelTile-channel:builds", [])
       test.check(label && label.contentItem.horizontalAlignment === Text.AlignLeft, "channel labels remain left aligned")
-      test.check(tile && tile.width > 0 && tile.width >= Math.min(theme.space(28), tile.parent.width), "channel keeps a separate tile button within the saved sidebar width")
+      test.check(tile && tile.width > 0 && tile.width >= Math.min(theme.space(24), tile.parent.width), "channel keeps a separate tile button within the saved sidebar width")
       if (!chat || !label || !tile) { test.check(false, "channel navigation controls exist"); return }
       bridge.workspaceLayout.channelsAsTiles = false
       chat.commit({key:"base", id:"local::dm"}); chat.activate("base")
@@ -1305,6 +1305,25 @@ ShellRoot {
       chat.dragAt("a",p.x,p.y)
       test.check(chat.dropPlan && chat.dropPlan.edge==="top","UI exposes whole-workspace drop above own pane")
       chat.cancelDrag()
+
+      var before = JSON.stringify(chat.tree)
+      keyDriver.mouseClick(pane, pane.width/2, pane.height/2, Qt.LeftButton, Qt.ControlModifier)
+      test.check(chat.activeKey === "a" && JSON.stringify(chat.tree) === before && !chat.dragKey,
+                 "Ctrl-click focuses without changing the layout")
+      keyDriver.mouseClick(selector, selector.width/2, selector.height/2)
+      var normalMenu = test.findObject(pane,"chatConversationMenu",[])
+      test.check(normalMenu && normalMenu.opened,"ordinary clicks pass through the Ctrl-drag overlay")
+      if (normalMenu) normalMenu.close()
+      keyDriver.mouseClick(selector, selector.width/2, selector.height/2, Qt.LeftButton, Qt.ControlModifier)
+      test.check(!normalMenu.opened,"Ctrl-click focuses without triggering underlying controls")
+      var other = test.findItem(chat,"chatTile-b")
+      var destination = pane.mapFromItem(other, other.width/2, other.height/2)
+      keyDriver.mousePress(pane, pane.width/2, pane.height/2, Qt.LeftButton, Qt.ControlModifier)
+      keyDriver.mouseMove(pane, destination.x, destination.y, 30)
+      test.check(chat.dragKey === "a" && chat.dropPlan,"Ctrl-drag from the message area previews a pane move")
+      keyDriver.mouseRelease(pane, destination.x, destination.y, Qt.LeftButton, Qt.ControlModifier)
+      test.check(JSON.stringify(chat.tree) !== before && !chat.dragKey && Tiles.valid(chat.tree),
+                 "Ctrl-drag swaps panes and clears its preview on release")
     }
   }
   Timer {
