@@ -19,7 +19,7 @@ Rectangle {
     bridge.unreadMarkers.report(readerKey, conversationId, readerFocused, false)
     readTimer.restart()
   }
-  onReaderFocusedChanged: { if (!readerFocused) readerEngaged=false; scheduleRead() }
+  onReaderFocusedChanged: { if (!readerFocused) { if(readerEngaged && !awayFromLatest) bridge.acknowledgeConversation(conversationId,false); readerEngaged=false } scheduleRead() }
   onAwayFromLatestChanged: scheduleRead()
   Timer {
     id: readTimer; interval: 700

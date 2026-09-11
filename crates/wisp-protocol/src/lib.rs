@@ -1040,6 +1040,8 @@ pub struct EditMessageRequest {
 /// attachment hashes belong inside ciphertext, not in this routing envelope.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EncryptedMessageRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recipient_ids: Option<Vec<UserId>>,
     pub id: MessageId,
     pub conversation_id: String,
     pub ciphertext: String,
@@ -1150,6 +1152,8 @@ pub struct RenameServerItemRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateServerChannelRequest {
+    #[serde(default)]
+    pub visibility: Option<String>,
     pub name: String,
     #[serde(default)]
     pub category_id: Option<String>,
@@ -1159,6 +1163,10 @@ pub struct CreateServerChannelRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpdateServerChannelRequest {
+    #[serde(default)]
+    pub visibility: Option<String>,
+    #[serde(default)]
+    pub member_ids: Option<Vec<UserId>>,
     pub name: String,
     #[serde(default)]
     pub category_id: Option<String>,

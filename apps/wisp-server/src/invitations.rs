@@ -30,7 +30,7 @@ async fn authorize(
     }
     if let Some(spot) = room.get::<Option<String>, _>("spot_id") {
         let conversation = format!("spot:{spot}");
-        let member: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM conversation_members WHERE conversation_id = ? AND user_id = ?)")
+        let member: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM accessible_conversation_members WHERE conversation_id = ? AND user_id = ?)")
             .bind(&conversation).bind(recipient.to_string()).fetch_one(&mut *db).await.map_err(ApiError::internal)?;
         let manager: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM server_identity WHERE owner_user_id=?) OR EXISTS(SELECT 1 FROM server_admins WHERE user_id=?)")
             .bind(actor.to_string()).bind(actor.to_string()).fetch_one(&mut *db).await.map_err(ApiError::internal)?;
@@ -197,7 +197,7 @@ pub(super) async fn respond(
             .await?;
         }
         if let Some(conversation) = conversation {
-            let needs_signature: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM chat_rosters WHERE conversation_id=?) AND NOT EXISTS(SELECT 1 FROM conversation_members WHERE conversation_id=? AND user_id=?)")
+            let needs_signature: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM chat_rosters WHERE conversation_id=?) AND NOT EXISTS(SELECT 1 FROM accessible_conversation_members WHERE conversation_id=? AND user_id=?)")
                 .bind(&conversation).bind(&conversation).bind(user.to_string()).fetch_one(&mut *tx).await.map_err(ApiError::internal)?;
             if needs_signature {
                 return Err(ApiError::conflict(

@@ -29,6 +29,6 @@ PATH="$test_dir/bin:$PATH" WISP_TEST_SOUND_LOG="$test_dir/sounds.log" WISP_SOUND
   XDG_CONFIG_HOME="$test_dir/sound-config" WISP_SOCKET="$test_dir/test.sock" QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software \
   timeout 10 qs --path "$test_dir" >"$test_dir/sound-log" 2>&1
 rg -q SOUND_PLAYBACK_OK "$test_dir/sound-log" || { cat "$test_dir/sound-log"; exit 1; }
-[[ $(wc -l < "$test_dir/sounds.log") == 6 ]]
-for sound in self_join member_join message self_leave screen_share_start screen_share_stop; do rg -q "0.4.*$sound.wav" "$test_dir/sounds.log"; done
+[[ $(wc -l < "$test_dir/sounds.log") == 8 ]]
+for sound in self_join member_join message self_leave screen_share_start screen_share_stop stream_viewer_join stream_viewer_leave; do rg -q "0.4.*$sound.wav" "$test_dir/sounds.log"; done
 echo 'Room and screen-share cues, custom file routing, playback queue and global mute passed without playing audio'

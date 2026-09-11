@@ -12,6 +12,9 @@ Column {
   readonly property bool small: adaptive && width < theme.space(180)
   property bool showLeave: true
   property bool showAudio: true
+  property bool showPublishing: true
+  property bool showSoundboard: true
+  property bool showPushToTalk: true
   property bool showInvite: true
   property bool showRemoteStreams: true
   spacing: root.theme.spacing.sm
@@ -34,7 +37,7 @@ Column {
         {label:"Soundboard",action:"soundboard",icon:"volume"},
         {label:"Invite",action:"invite",icon:"invite"},
         {label:"d/c",action:"leave",icon:"disconnect"}
-      ]).filter(function(action) {return (root.showLeave || action.action!=="leave") && (root.showInvite || action.action!=="invite")})
+      ]).filter(function(action) {return (root.showPublishing || ["share","camera"].indexOf(action.action)<0) && (root.showSoundboard || action.action!=="soundboard") && (root.showLeave || action.action!=="leave") && (root.showInvite || action.action!=="invite")})
       ChatButton {
         id: action; required property var modelData
         objectName: "mediaAction-" + modelData.action
@@ -100,7 +103,7 @@ Column {
     }
   }
   ChatButton {
-    id:talk;theme:root.theme;visible:root.bridge.pushToTalkState.enabled;width:parent.width
+    id:talk;theme:root.theme;visible:root.showPushToTalk && root.bridge.pushToTalkState.enabled;width:parent.width
     text:root.bridge.selfState.muted ? "Unmute before talking" : root.bridge.pushToTalkState.active ? "Talking — release to stop" : "Hold to talk"
     iconName:"microphone";enabled:!root.bridge.selfState.muted;primary:!!root.bridge.pushToTalkState.active
     onPressed:root.bridge.pushToTalkPress()

@@ -13,6 +13,7 @@ Column {
   objectName: "savedRoom-" + room.id
   readonly property var people: (room.members || []).map(function(person) { return root.bridge.scopedParticipant(Object.assign({},person,{server_id:String(root.room.server_id || root.bridge.activeServer.id)})) })
   readonly property string conversationId: bridge.roomConversationId(room, true)
+  readonly property int pending: bridge.pendingCount(conversationId)
   readonly property bool current: String(room.server_id) === bridge.voiceServerId
     && !!room.active_hangout_id && room.active_hangout_id === bridge.selfState.hangout_id
   ParticipantMenu { id: participantMenu; bridge: root.bridge; theme: root.theme }
@@ -48,8 +49,8 @@ Column {
           anchors.left: roomIcon.visible ? roomIcon.right : parent.left; anchors.leftMargin: roomIcon.visible ? root.theme.space(8) : 0; anchors.right: root.narrow ? parent.right : actions.left; anchors.rightMargin: root.narrow ? 0 : root.theme.spacing.xs
           y: root.narrow ? root.theme.space(8) : (parent.height-height)/2; elide: Text.ElideRight
           horizontalAlignment: root.narrow ? Text.AlignHCenter : Text.AlignLeft
-          text: root.tiny ? String(root.room.name).slice(0,1).toUpperCase() : root.theme.friendly ? root.room.name + "  · " + root.people.length : "#" + root.room.name + " /" + root.people.length
-          color: root.theme.foreground; font.family: root.theme.font.family
+          text: root.tiny ? String(root.room.name).slice(0,1).toUpperCase() : (root.theme.friendly ? root.room.name + "  · " + root.people.length : "#" + root.room.name + " /" + root.people.length) + (root.pending>0 ? " · "+root.pending+" new" : "")
+          color: root.pending>0 ? root.theme.accent : root.theme.foreground; font.family: root.theme.font.family
           font.pixelSize: root.theme.font.body; font.weight: Font.DemiBold
         }
         Item {
@@ -92,7 +93,7 @@ Column {
           delegate: Item {
             required property var modelData
             required property int index
-            width: root.mainApp ? members.width : Math.min(members.width, participant.width + (streams.visible ? streams.implicitWidth + line.spacing : 0))
+            width: root.mainApp ? members.width : Math.min(members.width, participant.width + (unread.visible ? unread.width + line.spacing : 0) + (streams.visible ? streams.implicitWidth + line.spacing : 0))
             implicitHeight: line.implicitHeight
             Flow {
               id: line; width: root.tiny ? participant.width : parent.width; x: root.tiny ? (parent.width-width)/2 : 0; spacing: root.theme.spacing.xs
@@ -138,6 +139,16 @@ Column {
                   deafened: root.current && participant.self && root.bridge.selfState.deafened
                   localMuted: !participant.self && root.bridge.participantVolumes.isMuted(participant.person)
                 }
+              }
+              ChatButton {
+                id: unread; objectName: "participantUnread-"+modelData.id
+                readonly property var conversation: root.bridge.directFor(participant.person)
+                readonly property int pending: conversation ? root.bridge.pendingCount(conversation.id) : 0
+                visible:pending>0;theme:root.theme;primary:true;text:String(pending);iconName:"chat"
+                height:root.theme.space(24);width:Math.min(implicitWidth,members.width)
+                Accessible.name:"Open "+modelData.display_name+" · "+pending+" unread messages"
+                ToolTip.visible:hovered;ToolTip.text:Accessible.name
+                onClicked:root.bridge.openPendingChat(conversation.id)
               }
               ParticipantStreams {
                 id: streams; bridge: root.bridge; theme: root.theme; adaptive: root.adaptive; availableWidth: members.width

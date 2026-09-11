@@ -81,6 +81,29 @@ Item {
   property bool delegateConversationsToDesktop: false
   signal desktopConversationTileRequested(string id, bool reuseChannel)
   property var pendingConversationTiles: []
+  property var serverPings: ({})
+  function refreshServerPing(id) {
+    id=String(id)
+    var previous=serverPings[id]
+    if (previous && Date.now()-previous.checkedAt<10000) return
+    var request=send("server_ping",{server_id:id})
+    if (request) {
+      serverPings=replaceEntry(serverPings,id,{pending:true,checkedAt:Date.now()})
+      requests[request]={kind:"serverPing",serverId:id}
+    }
+  }
+  function openPendingChat(id) { requestConversationTile(id, false) }
+  function directFor(person) {
+    var serverId=String(person.server_id || activeServer.id)
+    return conversations.filter(function(c) {
+      return String(c.server_id)===serverId && c.kind==="direct"
+        && (c.members || []).some(function(p) { return String(p.id)===String(person.id) })
+    })[0] || null
+  }
+  function pendingCount(id) {
+    var c=conversationById(id)
+    return c && !unreadMarkers.locallyRead(c.id) ? Math.max(Number(c.unread_count || 0),unreadMarkers.pending(c.id) ? 1 : 0) : 0
+  }
   function openChannel(id, forceNewTile) {
     requestConversationTile(id, !forceNewTile && !workspaceLayout.channelsAsTiles)
   }
@@ -119,6 +142,7 @@ Item {
   property alias notificationPolicy: notificationSettings.policy
   property alias roomNotificationSounds: notificationSettings.roomSounds
   property alias audioControlSounds: notificationSettings.audioControlSounds
+  property alias streamViewerSounds: notificationSettings.streamViewerSounds
   property alias screenShareSounds: notificationSettings.screenShareSounds
   property alias selfRoomNotificationSounds: notificationSettings.selfRoomSounds
   readonly property var eventSoundPaths: notificationSettings.eventSounds
@@ -585,7 +609,7 @@ Item {
   }
   readonly property var lastConversation: lastConversationId !== activeConversationId ? conversationById(lastConversationId) : null
   readonly property var unreadConversations: conversations.filter(function(c) {
-    return Number(c.unread_count || 0) > 0 && String(c.id) !== activeConversationId
+    return String(c.server_id)===String(root.activeServer.id) && root.pendingCount(c.id)>0
   })
   property string pendingDirectName: ""
   property string pendingDirectServerId: ""
@@ -762,6 +786,7 @@ Item {
       property bool roomSounds: true
       property bool selfRoomSounds: true
       property bool audioControlSounds: true
+      property bool streamViewerSounds: true
       property bool screenShareSounds: true
       property var eventSounds: ({})
     }
@@ -792,6 +817,7 @@ Item {
   function notificationSoundCommand(kind) {
     if (notificationMuted || notificationVolume <= 0) return []
     if (kind.indexOf("audio_") === 0 && !audioControlSounds) return []
+    if (kind.indexOf("stream_viewer_") === 0 && !streamViewerSounds) return []
     if (kind.indexOf("screen_share_") === 0 && !screenShareSounds) return []
     if (kind.indexOf("self_") === 0 && !selfRoomNotificationSounds) return []
     if (kind.indexOf("member_") === 0 && !roomNotificationSounds) return []
@@ -918,6 +944,7 @@ Item {
     var incoming = ChatLogic.incomingConversationIds(previousFlat, nextFlat, eventName)
     var roomEvents = roomEventsForSnapshots(receivedSnapshot ? snapshot : null,next,eventName)
     var shareEvents = ChatLogic.screenShareSoundEvents(receivedSnapshot ? snapshot : null,next,eventName)
+      .concat(ChatLogic.streamViewerSoundEvents(receivedSnapshot ? snapshot : null,next,eventName))
     var knownInvites = (previousFlat ? previousFlat.room_invitations : []).map(function(i) { return String(i.server_id)+":"+String(i.id) })
     var newInvite = receivedSnapshot && nextFlat.room_invitations.some(function(i) {
       return Date.parse(i.expires_at) > Date.now() && knownInvites.indexOf(String(i.server_id)+":"+String(i.id)) < 0
@@ -938,6 +965,15 @@ Item {
       if (!activeStillVisible) activeConversationId = ""
     }
     receivedSnapshot = true
+    // Only the desktop owns automatic tiles. History/reconnect snapshots do not
+    // generate incoming IDs, and an existing tile never changes focus here.
+    if (!delegateConversationsToDesktop && workspaceLayout.incomingDmsAsTiles) {
+      var incomingDms=incoming.filter(function(id) {
+        var c=root.conversationById(id)
+        return c && c.kind==="direct" && String(c.server_id)===String(root.activeServer.id)
+      }).map(function(id) { return {id:id,background:true} })
+      if (incomingDms.length) pendingConversationTiles=pendingConversationTiles.concat(incomingDms)
+    }
     if (notificationSoundsEnabled && audioCue) playNotificationSound(audioCue)
     if (notificationSoundsEnabled && newInvite) playNotificationSound("room_invite")
     if (notificationSoundsEnabled) shareEvents.forEach(function(kind) { root.playNotificationSound(kind) })
@@ -976,12 +1012,20 @@ Item {
   function markVisibleConversationRead(conversationId) {
     var target = conversationId || focusedConversationId
     if (!unreadMarkers.isReading(target)) return
-    var c = conversationById(target)
-    if (!c || !c.last_message || !c.unread_count) return
-    var id = String(c.id) + "::" + String(c.last_message.id)
-    if (lastReadMessageId === id) return
-    lastReadMessageId = id
-    send("mark_conversation_read", withConversationScope(c.id))
+    acknowledgeConversation(target, false)
+  }
+  function acknowledgeConversation(target, clearDivider) {
+    var c=conversationById(target)
+    if (!c || !c.last_message) return
+    var boundary=unreadMarkers.boundary(c.id)
+    if (clearDivider) unreadMarkers.boundaries=replaceEntry(unreadMarkers.boundaries,String(c.id),undefined)
+    else if (boundary) unreadMarkers.boundaries=replaceEntry(unreadMarkers.boundaries,String(c.id),Object.assign({},boundary,{seen:true}))
+    if (unreadMarkers.locallyRead(c.id) || !c.unread_count) return
+    var request=send("mark_conversation_read",withConversationScope(c.id))
+    if (request) {
+      unreadMarkers.acknowledged=replaceEntry(unreadMarkers.acknowledged,String(c.id),String(c.last_message.id))
+      requests[request]={kind:"readChat",conversationId:String(c.id),boundary:boundary}
+    }
   }
 
   function conversationById(id) {
@@ -1037,7 +1081,7 @@ Item {
       return
     }
     var avatarImageReply = message.type === "result" && (requests[message.id] || {}).kind === "avatar" && (requests[message.id] || {}).action === "image"
-    var handledReply = message.type === "result" && ["voiceRecovery", "soundboard"].indexOf((requests[message.id] || {}).kind) >= 0
+    var handledReply = message.type === "result" && ["voiceRecovery", "soundboard", "serverPing"].indexOf((requests[message.id] || {}).kind) >= 0
     if (message.type === "result") finishRequest(message)
     if (message.type === "result" && !handledReply && !avatarImageReply && message.ok !== true && message.error) {
       lastError = String(message.error.message || "Wisp command failed")
@@ -1192,6 +1236,13 @@ Item {
     delete requests[message.id]
     var value = message.value || ({})
     var conversationId = action.conversationId
+    if (action.kind === "readChat") {
+      if (!message.ok) {unreadMarkers.acknowledged=replaceEntry(unreadMarkers.acknowledged,action.conversationId,undefined);if(action.boundary)unreadMarkers.boundaries=replaceEntry(unreadMarkers.boundaries,action.conversationId,action.boundary)}
+      return
+    }
+    if (action.kind === "serverPing") {
+      serverPings=replaceEntry(serverPings,action.serverId,{pending:false,checkedAt:Date.now(),ms:message.ok ? Number(value.ping_ms) : null});return
+    }
     if (action.kind === "friendship") { friendships.finish(message,action); return }
     if (action.kind === "messageAction") { messageActions.finish(message,action); return }
     if (action.kind === "soundboard") {
@@ -1294,6 +1345,7 @@ Item {
       roomActionFinished(action.action, !!message.ok, message.error ? String(message.error.message || "Could not update room") : "")
     } else if (action.kind === "send") {
       if (message.ok) {
+        acknowledgeConversation(conversationId,true)
         if (action.text !== undefined && draftFor(conversationId) === action.text) setDraft(conversationId, "")
         if (action.token) removeAttachment(conversationId, action.token, true)
         if (action.remaining && action.remaining.length > 0) {

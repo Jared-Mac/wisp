@@ -196,7 +196,7 @@ async fn reactions_are_visible_only_with_the_message_and_only_the_sender_can_rem
         .await
         .unwrap();
     assert_eq!(
-        chat_extras::load_reactions(&state.pool, &messages)
+        chat_extras::load_reactions(&state.pool, &messages, TEST_OWNER_ID.parse().unwrap())
             .await
             .unwrap()
             .len(),
@@ -210,7 +210,7 @@ async fn reactions_are_visible_only_with_the_message_and_only_the_sender_can_rem
         StatusCode::OK
     );
     assert_eq!(
-        chat_extras::load_reactions(&state.pool, &messages)
+        chat_extras::load_reactions(&state.pool, &messages, TEST_OWNER_ID.parse().unwrap())
             .await
             .unwrap()
             .len(),
@@ -223,7 +223,7 @@ async fn reactions_are_visible_only_with_the_message_and_only_the_sender_can_rem
         StatusCode::OK
     );
     assert!(
-        chat_extras::load_reactions(&state.pool, &messages)
+        chat_extras::load_reactions(&state.pool, &messages, TEST_OWNER_ID.parse().unwrap())
             .await
             .unwrap()
             .is_empty()

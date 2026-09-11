@@ -46,7 +46,7 @@ pub(super) async fn directory(
                 .map_err(ApiError::internal)?,
         );
     }
-    let rows=sqlx::query("SELECT cr.conversation_id,cr.signed_roster FROM chat_rosters cr JOIN conversation_members cm ON cm.conversation_id=cr.conversation_id AND cm.user_id=? ORDER BY cr.conversation_id,cr.revision")
+    let rows=sqlx::query("SELECT cr.conversation_id,cr.signed_roster FROM chat_rosters cr JOIN accessible_conversation_members cm ON cm.conversation_id=cr.conversation_id AND cm.user_id=? ORDER BY cr.conversation_id,cr.revision")
         .bind(user.to_string()).fetch_all(&state.pool).await.map_err(ApiError::internal)?;
     let mut rosters = BTreeMap::<String, Vec<Value>>::new();
     for row in rows {
@@ -55,7 +55,26 @@ pub(super) async fn directory(
                 .map_err(ApiError::internal)?,
         );
     }
-    let pending = sqlx::query("SELECT p.conversation_id,p.user_id FROM pending_room_admissions p JOIN conversation_members cm ON cm.conversation_id=p.conversation_id AND cm.user_id=? WHERE cm.role IN ('host','admin') ORDER BY p.created_at")
+    let mut channel_identities = BTreeMap::<String, Value>::new();
+    let channel_keys=sqlx::query("SELECT DISTINCT ci.user_id,ci.public_identity FROM chat_identities ci JOIN channel_access target ON target.user_id=ci.user_id JOIN channel_access actor ON actor.conversation_id=target.conversation_id AND actor.user_id=?")
+        .bind(user.to_string()).fetch_all(&state.pool).await.map_err(ApiError::internal)?;
+    for row in channel_keys {
+        channel_identities.insert(
+            row.get("user_id"),
+            serde_json::from_str(&row.get::<String, _>("public_identity"))
+                .map_err(ApiError::internal)?,
+        );
+    }
+    let mut channel_recipients = BTreeMap::<String, Vec<String>>::new();
+    let audiences=sqlx::query("SELECT target.conversation_id,target.user_id FROM channel_access target JOIN channel_access actor ON actor.conversation_id=target.conversation_id AND actor.user_id=?")
+        .bind(user.to_string()).fetch_all(&state.pool).await.map_err(ApiError::internal)?;
+    for row in audiences {
+        channel_recipients
+            .entry(row.get("conversation_id"))
+            .or_default()
+            .push(row.get("user_id"));
+    }
+    let pending = sqlx::query("SELECT p.conversation_id,p.user_id FROM pending_room_admissions p JOIN accessible_conversation_members cm ON cm.conversation_id=p.conversation_id AND cm.user_id=? WHERE cm.role IN ('host','admin') ORDER BY p.created_at")
         .bind(user.to_string())
         .fetch_all(&state.pool)
         .await
@@ -66,11 +85,11 @@ pub(super) async fn directory(
         // ineligible entry cannot stall later admissions to the same room.
         .filter_map(|row| {
             let user_id = row.get::<String,_>("user_id");
-            keys.contains_key(&user_id).then(|| json!({"conversation_id":row.get::<String,_>("conversation_id"),"user_id":user_id}))
+            (keys.contains_key(&user_id) || channel_identities.contains_key(&user_id)).then(|| json!({"conversation_id":row.get::<String,_>("conversation_id"),"user_id":user_id}))
         })
         .collect::<Vec<_>>();
     Ok(Json(
-        json!({"network":network(&state).await?,"required":state.config.require_chat_e2ee,"identities":keys,"profiles":profiles,"rosters":rosters,"pending_admissions":pending}),
+        json!({"network":network(&state).await?,"required":state.config.require_chat_e2ee,"identities":keys,"profiles":profiles,"rosters":rosters,"pending_admissions":pending,"channel_identities":channel_identities,"channel_recipients":channel_recipients}),
     ))
 }
 
@@ -147,6 +166,12 @@ pub(super) async fn apply_roster(
     request: &SignedRoster,
 ) -> Result<(), ApiError> {
     let roster = &request.roster;
+    let channel: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM server_channels WHERE conversation_id=?)")
+            .bind(&roster.conversation)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(ApiError::internal)?;
     if roster.actor != user || roster.network != network {
         return Err(ApiError::forbidden("Invalid room change identity"));
     }
@@ -268,7 +293,19 @@ pub(super) async fn apply_roster(
                 "Participant encryption identity does not match",
             ));
         }
-        if *id != user {
+        if channel {
+            let existing:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM conversation_members WHERE conversation_id=? AND user_id=?)").bind(&roster.conversation).bind(id.to_string()).fetch_one(&mut *tx).await.map_err(ApiError::internal)?;
+            if !existing {
+                super::channel_access::validate_recipients(
+                    tx,
+                    &roster.conversation,
+                    user,
+                    &[user, *id],
+                )
+                .await?;
+            }
+        }
+        if *id != user && !channel {
             let friend:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM friendships WHERE (first_user_id=? AND second_user_id=?) OR (first_user_id=? AND second_user_id=?))").bind(user.to_string()).bind(id.to_string()).bind(id.to_string()).bind(user.to_string()).fetch_one(&mut *tx).await.map_err(ApiError::internal)?;
             if !friend {
                 return Err(ApiError::forbidden("Only friends can be added to a room"));

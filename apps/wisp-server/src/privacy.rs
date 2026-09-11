@@ -52,6 +52,7 @@ pub(super) async fn validate_roster(
     conversation: &str,
     sender: Uuid,
     hash: &str,
+    recipient_ids: Option<&[Uuid]>,
 ) -> Result<(), ApiError> {
     let encoded:Option<String>=sqlx::query_scalar("SELECT signed_roster FROM chat_rosters WHERE conversation_id=? ORDER BY revision DESC LIMIT 1").bind(conversation).fetch_optional(&mut **tx).await.map_err(ApiError::internal)?;
     let roster: wisp_crypto::roster::SignedRoster =
@@ -70,6 +71,18 @@ pub(super) async fn validate_roster(
             "Encrypted room membership changed; refresh before sending",
         ));
     }
+    let members = roster.roster.members.keys().copied().collect::<Vec<_>>();
+    let recipients = recipient_ids.unwrap_or(&members);
+    if recipients
+        .iter()
+        .any(|id| !roster.roster.members.contains_key(id))
+    {
+        return Err(ApiError::bad_request(
+            "invalid_recipients",
+            "Recipients must belong to the signed channel",
+        ));
+    }
+    super::channel_access::validate_recipients(tx, conversation, sender, recipients).await?;
     Ok(())
 }
 
@@ -92,7 +105,7 @@ pub(super) fn stored(request: EncryptedMessageRequest) -> SendMessageRequest {
         conversation_id: request.conversation_id,
         content_type: "application/vnd.wisp.encrypted+json".into(),
         encryption_version: 1,
-        payload: json!({"id":request.id,"ciphertext":request.ciphertext,"roster_hash":request.roster_hash}),
+        payload: json!({"id":request.id,"ciphertext":request.ciphertext,"roster_hash":request.roster_hash,"recipient_ids":request.recipient_ids}),
     }
 }
 
@@ -129,6 +142,7 @@ pub(super) async fn edit(
         &request.conversation_id,
         user,
         &request.roster_hash,
+        request.recipient_ids.as_deref(),
     )
     .await?;
     if request.id != id || request.conversation_id != row.get::<String, _>("conversation_id") {
@@ -157,11 +171,12 @@ pub(super) async fn edit(
     }
     if row.get::<i64, _>("encryption_version") == 1 {
         // Preserve concurrent retention updates; do not rewrite stale payload.
-        sqlx::query("UPDATE messages SET payload=json_set(payload,'$.ciphertext',?,'$.roster_hash',?),edited_at=? WHERE id=? AND sender_id=?")
-            .bind(&request.ciphertext).bind(&request.roster_hash).bind(Utc::now().to_rfc3339()).bind(id.to_string()).bind(user.to_string()).execute(&mut *tx).await.map_err(ApiError::internal)?;
+        sqlx::query("UPDATE messages SET payload=json_set(payload,'$.ciphertext',?,'$.roster_hash',?,'$.recipient_ids',json(?)),edited_at=? WHERE id=? AND sender_id=?")
+            .bind(&request.ciphertext).bind(&request.roster_hash).bind(serde_json::to_string(&request.recipient_ids).map_err(ApiError::internal)?).bind(Utc::now().to_rfc3339()).bind(id.to_string()).bind(user.to_string()).execute(&mut *tx).await.map_err(ApiError::internal)?;
     } else {
         payload["ciphertext"] = json!(request.ciphertext);
         payload["roster_hash"] = json!(request.roster_hash);
+        payload["recipient_ids"] = json!(request.recipient_ids);
         sqlx::query("UPDATE messages SET payload=?,content_type='application/vnd.wisp.encrypted+json',encryption_version=1,edited_at=? WHERE id=? AND sender_id=?")
             .bind(payload.to_string()).bind(Utc::now().to_rfc3339()).bind(id.to_string()).bind(user.to_string()).execute(&mut *tx).await.map_err(ApiError::internal)?;
     }
@@ -195,6 +210,7 @@ pub(super) async fn begin_upload(
         &request.message.conversation_id,
         user,
         &request.message.roster_hash,
+        request.message.recipient_ids.as_deref(),
     )
     .await?;
     let row = sqlx::query("SELECT * FROM file_uploads WHERE id=? AND owner_id=?")
@@ -219,11 +235,12 @@ pub(super) async fn begin_upload(
         ));
     }
     sqlx::query(
-        "UPDATE file_uploads SET caption=?,keep=?,roster_hash=? WHERE id=? AND message_id IS NULL",
+        "UPDATE file_uploads SET caption=?,keep=?,roster_hash=?,recipient_ids=? WHERE id=? AND message_id IS NULL",
     )
     .bind(&request.message.ciphertext)
     .bind(request.keep)
     .bind(&request.message.roster_hash)
+    .bind(serde_json::to_string(&request.message.recipient_ids).map_err(ApiError::internal)?)
     .bind(request.upload_id.to_string())
     .execute(&mut *tx)
     .await
@@ -250,6 +267,12 @@ pub(super) async fn complete_upload(
     expires: Option<chrono::DateTime<Utc>>,
 ) -> Result<Message, ApiError> {
     let request = EncryptedMessageRequest {
+        recipient_ids: row
+            .get::<Option<String>, _>("recipient_ids")
+            .map(|s| serde_json::from_str(&s))
+            .transpose()
+            .map_err(ApiError::internal)?
+            .flatten(),
         roster_hash: row.get("roster_hash"),
         id: row
             .get::<String, _>("encrypted_message_id")

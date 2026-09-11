@@ -8,6 +8,8 @@ Item {
   required property var person
   property bool compact: false
   readonly property bool tiny: width < theme.space(90)
+  readonly property var conversation: bridge.directFor(person)
+  readonly property int pending: conversation ? bridge.pendingCount(conversation.id) : 0
   readonly property string relationship: bridge.friendships.relationship(person)
   readonly property var state: bridge.friendships.state(person.server_id)
   implicitHeight: theme.space(compact ? 36 : 52)
@@ -17,7 +19,8 @@ Item {
     anchors.left:parent.left; anchors.right:quick.left; anchors.rightMargin:root.theme.space(4); height:parent.height
     padding:root.theme.space(4)
     Accessible.name:String(root.person.display_name)+(root.relationship==="self" ? " · you" : "")
-    onClicked:menu.showPerson(root.person,member)
+    onClicked: if(root.compact && (root.pending>0 || root.relationship==="friend")) root.bridge.openParticipantDirect(root.person); else menu.showPerson(root.person,member)
+    TapHandler {acceptedButtons:Qt.RightButton;onTapped:menu.showPerson(root.person,member)}
     ToolTip.visible:hovered || visualFocus; ToolTip.text:Accessible.name
     background:Rectangle {color:member.hovered || member.visualFocus ? root.theme.alpha(root.theme.foreground,0.06) : "transparent";radius:root.theme.cornerRadius}
     contentItem:Item {
@@ -42,12 +45,13 @@ Item {
     id:quick;objectName:"serverMemberAction-"+String(root.person.id);theme:root.theme
     anchors.right:parent.right;anchors.verticalCenter:parent.verticalCenter
     width:visible ? root.theme.space(root.compact ? 26 : 32) : 0;height:width
-    visible:!root.tiny && root.relationship!=="self";iconOnly:true;forceIcon:true
-    text:root.relationship==="friend" ? "Message" : root.relationship==="incoming" ? "Review friend request" : root.relationship==="outgoing" ? "Request sent" : "Add friend"
+    visible:!root.tiny && root.relationship!=="self";iconOnly:root.pending===0;forceIcon:true
+    primary:root.pending>0
+    text:root.pending>0 ? String(root.pending) : root.relationship==="friend" ? "Message" : root.relationship==="incoming" ? "Review friend request" : root.relationship==="outgoing" ? "Request sent" : "Add friend"
     iconName:root.relationship==="friend" ? "chat" : root.relationship==="outgoing" ? "check" : "invite"
     enabled:!root.state.loading && !root.state.action && root.bridge.friendships.connected(root.person.server_id)
     onClicked: {
-      if(root.relationship==="friend") root.bridge.openParticipantDirect(root.person)
+      if(root.pending>0 || root.relationship==="friend") root.bridge.openParticipantDirect(root.person)
       else if(root.relationship==="none") root.bridge.friendships.act(root.person,"send")
       else menu.showPerson(root.person,quick)
     }

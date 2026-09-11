@@ -53,7 +53,7 @@ Column {
         textAlignment: Text.AlignLeft
         leftPadding: root.theme.space(6)
         text: root.tiny ? String(channelRow.modelData.label).slice(0,1).toUpperCase() : (root.theme.tui ? "# " : "") + String(channelRow.modelData.label)
-          + (channelRow.modelData.unread_count ? " · " + channelRow.modelData.unread_count : "")
+          + (root.bridge.pendingCount(channelRow.modelData.id) ? " · " + root.bridge.pendingCount(channelRow.modelData.id) : "")
         primary: String(root.bridge.activeConversationId) === String(channelRow.modelData.id)
         Accessible.name: "Open " + String(channelRow.modelData.label)
           + (channelRow.modelData.spot_id ? " room chat" : " channel") + " on " + String(channelRow.modelData.server_name)

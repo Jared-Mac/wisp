@@ -1766,6 +1766,14 @@ ShellRoot {
         test.findObject(surface,"serverCategoriesSection",[]).expanded=true
         test.findObject(surface,"serverChannelsSection",[]).expanded=true
         test.check(!!test.findItem(surface, "newServerCategoryName") && !!test.findItem(surface, "createServerChannel"), "Server settings expose category and dedicated-channel creation")
+        var visibility=test.findItem(surface,"channelVisibility")
+        test.check(visibility && visibility.currentIndex===0,"New channels default to everyone")
+        var editAccess=test.findObject(surface,"saveChannel-channel:builds",[]).parent.parent.children.filter(function(item){return item.objectName==="channelAccessEditor"})[0]
+        test.check(editAccess && editAccess.visibility==="members","Existing explicit channel audience is preserved")
+        editAccess.visibility="admins"
+        test.findObject(surface,"saveChannel-channel:builds",[]).clicked()
+        test.check(bridge.sent.some(function(command){return command.name==="update_server_channel" && command.args.visibility==="admins" && command.args.id==="channel:builds"}),"Channel visibility can be edited")
+        bridge.serverSettingsBusy=false
         var serverNameField = test.findItem(surface, "serverNameField")
         var saveServerName = test.findItem(surface, "saveServerName")
         test.check(!!serverNameField && serverNameField.text === "Northstar" && !!saveServerName, "Server settings expose the shared display name")

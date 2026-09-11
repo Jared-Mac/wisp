@@ -17,6 +17,7 @@ Item {
   property alias chatTiles: preferences.chatTiles
   property alias streamsAsTiles: preferences.streamsAsTiles
   property alias channelsAsTiles: preferences.channelsAsTiles
+  property alias incomingDmsAsTiles: preferences.incomingDmsAsTiles
   property alias selectedServerId: preferences.selectedServerId
   signal settingsSaved()
   signal settingsSaveFailed()
@@ -61,6 +62,7 @@ Item {
       property string chatTiles: "" // Main-window split tree; no message content.
       property bool streamsAsTiles: false
       property bool channelsAsTiles: true
+      property bool incomingDmsAsTiles: true
       property string selectedServerId: ""
     }
   }

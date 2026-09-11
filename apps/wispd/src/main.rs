@@ -1480,6 +1480,32 @@ impl Daemon {
 
     #[allow(clippy::too_many_lines)]
     async fn run_command(&self, command: &CommandEnvelope) -> anyhow::Result<Option<Value>> {
+        if command.name == "server_ping" {
+            let id = command.args["server_id"]
+                .as_str()
+                .unwrap_or(&self.primary_server.id);
+            let api = if id == self.primary_server.id {
+                self.api.clone()
+            } else {
+                self.linked_servers
+                    .read()
+                    .await
+                    .get(id)
+                    .context("Server is not connected")?
+                    .api
+                    .clone()
+            };
+            let started = std::time::Instant::now();
+            api.client
+                .get(format!("{}/health", api.base_url.trim_end_matches('/')))
+                .timeout(std::time::Duration::from_secs(4))
+                .send()
+                .await?
+                .error_for_status()?
+                .bytes()
+                .await?;
+            return Ok(Some(json!({"ping_ms":started.elapsed().as_millis()})));
+        }
         if matches!(
             command.name.as_str(),
             "list_people"

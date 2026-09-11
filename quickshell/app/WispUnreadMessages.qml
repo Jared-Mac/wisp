@@ -6,6 +6,8 @@ Item {
   id: root
   required property var bridge
   property var boundaries: ({})
+  property var acknowledged: ({})
+  function locallyRead(id) { var c=bridge.conversationById(id); return !!c && !!c.last_message && acknowledged[String(c.id)]===String(c.last_message.id) }
   property var readers: ({})
   property int serial: 0
   function canonical(id) { return String((bridge.conversationById(id) || {}).id || id) }
@@ -47,7 +49,7 @@ Item {
         var candidates=[]
         if (newMessages.length && !root.isReading(id)) candidates=newMessages
         // Seed offline/reconnect history from the server's non-self unread count.
-        if (!candidates.length && Number(c.unread_count)>0 && !root.isReading(id)) candidates=remote.slice(-Number(c.unread_count))
+        if (!candidates.length && Number(c.unread_count)>0 && !root.isReading(id) && acknowledged[id]!==String((c.last_message || {}).id)) candidates=remote.slice(-Number(c.unread_count))
         if (candidates.length) b={firstId:String(candidates[0].id),createdAt:String(candidates[0].created_at),seen:false}
       } else if (newMessages.length && !root.isReading(id)) b=Object.assign({},b,{seen:false})
       if (b && !messages.some(function(m) { return String(m.id)===b.firstId })) {

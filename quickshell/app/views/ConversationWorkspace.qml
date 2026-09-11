@@ -150,7 +150,7 @@ Rectangle {
         objectName: "chatNewMessagesButton"; theme: root.theme; iconName: ""; primary: true
         visible: root.bridge.unreadMarkers.pending(root.currentId)
         text: "New"; Accessible.name: "Go to new messages in " + root.label(root.current)
-        onClicked: { root.activated(); feed.engageReader(); feed.revealMessage(root.bridge.unreadMarkers.boundary(root.currentId).firstId) }
+        onClicked: { root.activated(); feed.engageReader(); feed.revealMessage(root.bridge.unreadMarkers.boundary(root.currentId).firstId); root.bridge.acknowledgeConversation(root.currentId,true) }
         ToolTip.visible: hovered; ToolTip.text: "Go to the first new message"
       }
       ConversationVoiceAction { bridge: root.bridge; theme: root.theme; conversationId: root.currentId }
@@ -179,7 +179,7 @@ Rectangle {
       Binding { target: chatSelector.background; property: "color"; value: root.theme.alpha(root.theme.foreground, chatSelector.down ? 0.10 : chatSelector.hovered ? 0.06 : root.theme.cleanTui ? 0 : 0.025); when: root.theme.tui; restoreMode: Binding.RestoreBindingOrValue }
       Binding { target: chatSelector.background; property: "border.width"; value: root.theme.cleanTui ? (chatSelector.visualFocus ? 1 : 0) : 1; when: root.theme.tui; restoreMode: Binding.RestoreBindingOrValue }
       Binding { target: chatSelector.background; property: "border.color"; value: chatSelector.visualFocus ? (root.theme.cleanTui ? root.theme.accent : root.chatBorderColor) : chatSelector.hovered ? root.theme.muted : root.theme.separator; when: root.theme.tui; restoreMode: Binding.RestoreBindingOrValue }
-      text: root.label(root.current) + (root.current && root.current.unread_count ? " · " + root.current.unread_count : "")
+      text: root.label(root.current) + (root.current && root.bridge.pendingCount(root.currentId) ? " · " + root.bridge.pendingCount(root.currentId) : "")
       Accessible.name: "Current chat: " + text + ". Choose conversation"
       ToolTip.visible: hovered && selectorLabel.truncated && !allMenu.opened
       ToolTip.text: text

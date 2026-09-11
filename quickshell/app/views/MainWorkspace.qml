@@ -109,7 +109,6 @@ Item {
         }
         SpotsView { width: parent.width; bridge: root.bridge; theme: root.theme; mainApp: true; adaptive: true; horizontal: root.stacked }
         ServerChannelsView { width: parent.width; bridge: root.bridge; theme: root.theme; showHeader: true; adaptive: true }
-        ServerMembersView { width: parent.width; bridge: root.bridge; theme: root.theme }
 
       }
     }
@@ -141,10 +140,15 @@ Item {
       x: (root.stacked ? activity.roomsSize + root.handleSize : 0) + activity.frameInset
       y: (root.stacked ? 0 : activity.roomsSize + root.handleSize) + activity.frameTop
       width: parent.width - x - activity.frameInset; height: Math.max(0, activity.listsHeight - y - activity.frameInset)
-      contentWidth: width; contentHeight: friends.implicitHeight
+      contentWidth: width; contentHeight: peopleColumn.implicitHeight
       clip: true; boundsBehavior: Flickable.StopAtBounds
       ScrollBar.vertical: ScrollBar {}
-      FriendsView { id: friends; showHeader: !root.theme.tui && !root.theme.comfortable; width: parent.width; bridge: root.bridge; theme: root.theme; adaptive: true }
+      Column {
+        id: peopleColumn; width: parent.width; spacing: root.theme.spacing.sm
+        InboxButton { width: parent.width; bridge: root.bridge; theme: root.theme }
+        FriendsView { width: parent.width; bridge: root.bridge; theme: root.theme; adaptive: true; collapsible: true }
+        ServerMembersView { width: parent.width; bridge: root.bridge; theme: root.theme }
+      }
     }
     TerminalFrame {
       visible: (root.theme.tui || root.theme.comfortable) && activity.width >= root.theme.space(100)

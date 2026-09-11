@@ -134,6 +134,14 @@ Item {
       id = String(conversation.id)
       var leaves = Tiles.leaves(root.tree)
       var existing = leaves.filter(function(n) { return n.id === id })[0]
+      if (request.background) {
+        if (existing || root.paneCount>=8) return
+        var next=Tiles.copy(root.tree), empty=Tiles.leaves(next).filter(function(n) { return !n.id })[0]
+        if (empty) empty.id=id
+        else next=Tiles.insert(next,root.activeKey,{key:root.key(),id:id},"bottom",root.key())
+        root.commit(next)
+        return
+      }
       if (existing) {
         root.activate(existing.key)
         root.route(id)

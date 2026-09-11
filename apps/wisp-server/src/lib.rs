@@ -1,6 +1,7 @@
 mod account_profile;
 mod attachments;
 mod avatars;
+mod channel_access;
 mod chat_extras;
 #[cfg(test)]
 mod chat_extras_tests;
@@ -383,7 +384,7 @@ impl AppState {
             knocks,
             room_invitations: invitations::load(&self.pool, self_id).await?,
             conversations,
-            reactions: chat_extras::load_reactions(&self.pool, &messages).await?,
+            reactions: chat_extras::load_reactions(&self.pool, &messages, self_id).await?,
             messages,
             spots,
             devices,
@@ -1761,7 +1762,7 @@ async fn list_messages(
         .await
         .map_err(ApiError::internal)?;
     let rows = sqlx::query(
-        "SELECT m.id, m.conversation_id, m.created_at, m.content_type, m.payload, m.context, m.encryption_version, m.edited_at, u.id AS sender_id, u.display_name FROM messages m JOIN users u ON u.id = m.sender_id JOIN conversation_members cm ON cm.conversation_id = m.conversation_id AND cm.user_id = ? WHERE m.conversation_id = ? AND m.created_at > COALESCE(cm.history_cleared_at, '') AND (? IS NULL OR m.created_at > ?) ORDER BY m.created_at, m.id LIMIT 200",
+        "SELECT m.id, m.conversation_id, m.created_at, m.content_type, m.payload, m.context, m.encryption_version, m.edited_at, u.id AS sender_id, u.display_name FROM messages m JOIN users u ON u.id = m.sender_id JOIN accessible_conversation_members cm ON cm.conversation_id = m.conversation_id AND cm.user_id = ? WHERE m.conversation_id = ? AND m.created_at > COALESCE(cm.history_cleared_at, '') AND (json_extract(m.payload,'$.recipient_ids') IS NULL OR EXISTS(SELECT 1 FROM json_each(m.payload,'$.recipient_ids') recipient WHERE recipient.value=cm.user_id)) AND (? IS NULL OR m.created_at > ?) ORDER BY m.created_at, m.id LIMIT 200",
     )
     .bind(user_id.to_string())
     .bind(&query.conversation_id)
@@ -1852,11 +1853,20 @@ async fn persist_message(
         ));
     }
     if message.encryption_version == 1 {
+        let recipients: Option<Vec<Uuid>> = serde_json::from_value(
+            message
+                .payload
+                .get("recipient_ids")
+                .cloned()
+                .unwrap_or(Value::Null),
+        )
+        .map_err(|_| ApiError::bad_request("invalid_recipients", "Invalid recipient list"))?;
         privacy::validate_roster(
             &mut tx,
             &message.conversation_id,
             sender_id,
             message.payload["roster_hash"].as_str().unwrap_or_default(),
+            recipients.as_deref(),
         )
         .await?;
     }
@@ -2038,7 +2048,7 @@ async fn get_chat_file(
         return Ok(response);
     }
     let user_id = authenticate_headers(&state, &headers).await?;
-    let bytes = sqlx::query_scalar::<_, Vec<u8>>("SELECT cf.data FROM chat_files cf JOIN messages m ON m.id = cf.message_id JOIN conversation_members cm ON cm.conversation_id = m.conversation_id WHERE cf.message_id = ? AND cm.user_id = ? AND m.created_at > COALESCE(cm.history_cleared_at, '')")
+    let bytes = sqlx::query_scalar::<_, Vec<u8>>("SELECT cf.data FROM chat_files cf JOIN messages m ON m.id = cf.message_id JOIN accessible_conversation_members cm ON cm.conversation_id = m.conversation_id WHERE cf.message_id = ? AND cm.user_id = ? AND m.created_at > COALESCE(cm.history_cleared_at, '') AND (json_extract(m.payload,'$.recipient_ids') IS NULL OR EXISTS(SELECT 1 FROM json_each(m.payload,'$.recipient_ids') recipient WHERE recipient.value=cm.user_id))")
         .bind(id.to_string()).bind(user_id.to_string())
         .fetch_optional(&state.pool).await.map_err(ApiError::internal)?
         .ok_or_else(|| ApiError::not_found("file is unavailable"))?;
@@ -2060,7 +2070,7 @@ async fn get_chat_image(
     Path(id): Path<Uuid>,
 ) -> Result<Response, ApiError> {
     let user_id = authenticate_headers(&state, &headers).await?;
-    let png = sqlx::query_scalar::<_, Vec<u8>>("SELECT ci.png FROM chat_images ci JOIN messages m ON m.id = ci.message_id JOIN conversation_members cm ON cm.conversation_id = m.conversation_id WHERE ci.message_id = ? AND cm.user_id = ? AND m.created_at > COALESCE(cm.history_cleared_at, '')")
+    let png = sqlx::query_scalar::<_, Vec<u8>>("SELECT ci.png FROM chat_images ci JOIN messages m ON m.id = ci.message_id JOIN accessible_conversation_members cm ON cm.conversation_id = m.conversation_id WHERE ci.message_id = ? AND cm.user_id = ? AND m.created_at > COALESCE(cm.history_cleared_at, '') AND (json_extract(m.payload,'$.recipient_ids') IS NULL OR EXISTS(SELECT 1 FROM json_each(m.payload,'$.recipient_ids') recipient WHERE recipient.value=cm.user_id))")
         .bind(id.to_string()).bind(user_id.to_string())
         .fetch_optional(&state.pool).await.map_err(ApiError::internal)?
         .ok_or_else(|| ApiError::not_found("image is unavailable"))?;
@@ -2262,7 +2272,7 @@ async fn clear_history_for(
         .execute(&mut *tx).await.map_err(ApiError::internal)?;
     // Only prune the common cleared prefix. Newer messages the other person
     // has not cleared remain available to them, including attachments.
-    sqlx::query("DELETE FROM messages WHERE conversation_id = ? AND conversation_id IN (SELECT id FROM conversations WHERE kind = 'direct') AND (SELECT COUNT(*) FROM conversation_members WHERE conversation_id = ?) = 2 AND (SELECT COUNT(history_cleared_at) FROM conversation_members WHERE conversation_id = ?) = 2 AND created_at <= (SELECT MIN(history_cleared_at) FROM conversation_members WHERE conversation_id = ?)")
+    sqlx::query("DELETE FROM messages WHERE conversation_id = ? AND conversation_id IN (SELECT id FROM conversations WHERE kind = 'direct') AND (SELECT COUNT(*) FROM accessible_conversation_members WHERE conversation_id = ?) = 2 AND (SELECT COUNT(history_cleared_at) FROM accessible_conversation_members WHERE conversation_id = ?) = 2 AND created_at <= (SELECT MIN(history_cleared_at) FROM accessible_conversation_members WHERE conversation_id = ?)")
         .bind(conversation_id).bind(conversation_id).bind(conversation_id).bind(conversation_id)
         .execute(&mut *tx).await.map_err(ApiError::internal)?;
     tx.commit().await.map_err(ApiError::internal)?;
@@ -2295,7 +2305,7 @@ async fn can_clear_room(pool: &SqlitePool, user: UserId, id: &str) -> Result<boo
     if server_conversation(pool, id).await? {
         return server_management::is_manager(pool, user).await;
     }
-    let allowed: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM conversation_members cm JOIN conversations c ON c.id = cm.conversation_id WHERE cm.conversation_id = ? AND cm.user_id = ? AND c.kind != 'direct' AND cm.role IN ('host','admin'))")
+    let allowed: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM accessible_conversation_members cm JOIN conversations c ON c.id = cm.conversation_id WHERE cm.conversation_id = ? AND cm.user_id = ? AND c.kind != 'direct' AND cm.role IN ('host','admin'))")
         .bind(id).bind(user.to_string()).fetch_one(pool).await.map_err(ApiError::internal)?;
     Ok(allowed)
 }
@@ -2668,7 +2678,7 @@ async fn validate_message_context(
         .validate()
         .map_err(|error| ApiError::bad_request("invalid_context", error))?;
     if let Some(reply) = &context.reply_to {
-        let visible: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM messages m JOIN conversation_members cm ON cm.conversation_id=m.conversation_id WHERE m.id=? AND m.conversation_id=? AND cm.user_id=? AND m.created_at>COALESCE(cm.history_cleared_at, '')")
+        let visible: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM messages m JOIN accessible_conversation_members cm ON cm.conversation_id=m.conversation_id WHERE m.id=? AND m.conversation_id=? AND cm.user_id=? AND m.created_at>COALESCE(cm.history_cleared_at, '') AND (json_extract(m.payload,'$.recipient_ids') IS NULL OR EXISTS(SELECT 1 FROM json_each(m.payload,'$.recipient_ids') recipient WHERE recipient.value=cm.user_id))")
             .bind(reply.message_id.to_string()).bind(&request.conversation_id).bind(sender.to_string())
             .fetch_one(&state.pool).await.map_err(ApiError::internal)?;
         if visible == 0 {
@@ -2713,7 +2723,7 @@ async fn ensure_conversation_member(
     user_id: UserId,
 ) -> Result<(), ApiError> {
     let allowed = sqlx::query_scalar::<_, i64>(
-        "SELECT COUNT(*) FROM conversation_members WHERE conversation_id = ? AND user_id = ?",
+        "SELECT COUNT(*) FROM accessible_conversation_members WHERE conversation_id = ? AND user_id = ?",
     )
     .bind(conversation_id)
     .bind(user_id.to_string())
@@ -2747,7 +2757,7 @@ async fn find_or_create_direct_tx(
     friend_id: UserId,
 ) -> Result<String, ApiError> {
     if let Some(id) = sqlx::query_scalar::<_, String>(
-        "SELECT c.id FROM conversations c WHERE c.kind = 'direct' AND (SELECT COUNT(*) FROM conversation_members cm WHERE cm.conversation_id = c.id) = 2 AND EXISTS (SELECT 1 FROM conversation_members cm WHERE cm.conversation_id = c.id AND cm.user_id = ?) AND EXISTS (SELECT 1 FROM conversation_members cm WHERE cm.conversation_id = c.id AND cm.user_id = ?) LIMIT 1",
+        "SELECT c.id FROM conversations c WHERE c.kind = 'direct' AND (SELECT COUNT(*) FROM accessible_conversation_members cm WHERE cm.conversation_id = c.id) = 2 AND EXISTS (SELECT 1 FROM accessible_conversation_members cm WHERE cm.conversation_id = c.id AND cm.user_id = ?) AND EXISTS (SELECT 1 FROM accessible_conversation_members cm WHERE cm.conversation_id = c.id AND cm.user_id = ?) LIMIT 1",
     )
     .bind(self_id.to_string())
     .bind(friend_id.to_string())
@@ -2793,8 +2803,9 @@ async fn load_conversations(
     user_id: UserId,
 ) -> Result<Vec<ConversationView>, ApiError> {
     let ids = sqlx::query_scalar::<_, String>(
-        "SELECT c.id FROM conversations c WHERE EXISTS(SELECT 1 FROM conversation_members cm WHERE cm.conversation_id=c.id AND cm.user_id=?) OR EXISTS(SELECT 1 FROM spots s WHERE s.id=c.spot_id AND s.private=0) ORDER BY COALESCE((SELECT MAX(created_at) FROM messages WHERE conversation_id = c.id), c.created_at) DESC",
+        "SELECT c.id FROM conversations c WHERE EXISTS(SELECT 1 FROM accessible_conversation_members cm WHERE cm.conversation_id=c.id AND cm.user_id=?) OR EXISTS(SELECT 1 FROM spots s WHERE s.id=c.spot_id AND s.private=0) OR EXISTS(SELECT 1 FROM channel_access a WHERE a.conversation_id=c.id AND a.user_id=?) ORDER BY COALESCE((SELECT MAX(created_at) FROM messages WHERE conversation_id = c.id), c.created_at) DESC",
     )
+    .bind(user_id.to_string())
     .bind(user_id.to_string())
     .fetch_all(pool)
     .await
@@ -2814,7 +2825,7 @@ async fn load_recent_messages(
         .await
         .map_err(ApiError::internal)?;
     let rows = sqlx::query(
-        "SELECT recent.id, recent.conversation_id, recent.created_at, recent.content_type, recent.payload, recent.context, recent.encryption_version, recent.edited_at, u.id AS sender_id, u.display_name FROM (SELECT m.* FROM messages m JOIN conversation_members cm ON cm.conversation_id = m.conversation_id WHERE cm.user_id = ? AND m.created_at > COALESCE(cm.history_cleared_at, '') ORDER BY m.created_at DESC, m.id DESC LIMIT 500) recent JOIN users u ON u.id = recent.sender_id ORDER BY recent.created_at, recent.id",
+        "SELECT recent.id, recent.conversation_id, recent.created_at, recent.content_type, recent.payload, recent.context, recent.encryption_version, recent.edited_at, u.id AS sender_id, u.display_name FROM (SELECT m.* FROM messages m JOIN accessible_conversation_members cm ON cm.conversation_id = m.conversation_id WHERE cm.user_id = ? AND m.created_at > COALESCE(cm.history_cleared_at, '') AND (json_extract(m.payload,'$.recipient_ids') IS NULL OR EXISTS(SELECT 1 FROM json_each(m.payload,'$.recipient_ids') recipient WHERE recipient.value=cm.user_id)) ORDER BY m.created_at DESC, m.id DESC LIMIT 500) recent JOIN users u ON u.id = recent.sender_id ORDER BY recent.created_at, recent.id",
     )
     .bind(user_id.to_string())
     .fetch_all(pool)
@@ -2833,9 +2844,14 @@ async fn load_conversation(
         if error.status != StatusCode::FORBIDDEN {
             return Err(error);
         }
-        return room_access::preview(pool, id).await?.ok_or(error);
+        return match room_access::preview(pool, id).await? {
+            Some(room) => Ok(room),
+            None => channel_access::preview(pool, id, user_id)
+                .await?
+                .ok_or(error),
+        };
     }
-    let row = sqlx::query("SELECT c.kind, c.label, c.spot_id, cm.tab_closed, cm.history_cleared_at FROM conversations c JOIN conversation_members cm ON cm.conversation_id = c.id WHERE c.id = ? AND cm.user_id = ?")
+    let row = sqlx::query("SELECT c.kind, c.label, c.spot_id, cm.tab_closed, cm.history_cleared_at FROM conversations c JOIN accessible_conversation_members cm ON cm.conversation_id = c.id WHERE c.id = ? AND cm.user_id = ?")
         .bind(id)
         .bind(user_id.to_string())
         .fetch_optional(pool)
@@ -2866,10 +2882,11 @@ async fn load_conversation(
         })
         .collect::<Result<Vec<_>, ApiError>>()?;
     let message_row = sqlx::query(
-        "SELECT m.id, m.conversation_id, m.created_at, m.content_type, m.payload, m.context, m.encryption_version, m.edited_at, u.id AS sender_id, u.display_name FROM messages m JOIN users u ON u.id = m.sender_id WHERE m.conversation_id = ? AND m.created_at > COALESCE(?, '') ORDER BY m.created_at DESC, m.id DESC LIMIT 1",
+        "SELECT m.id, m.conversation_id, m.created_at, m.content_type, m.payload, m.context, m.encryption_version, m.edited_at, u.id AS sender_id, u.display_name FROM messages m JOIN users u ON u.id = m.sender_id WHERE m.conversation_id = ? AND m.created_at > COALESCE(?, '') AND (json_extract(m.payload,'$.recipient_ids') IS NULL OR EXISTS(SELECT 1 FROM json_each(m.payload,'$.recipient_ids') recipient WHERE recipient.value=?)) ORDER BY m.created_at DESC, m.id DESC LIMIT 1",
     )
     .bind(id)
     .bind(row.get::<Option<String>, _>("history_cleared_at"))
+    .bind(user_id.to_string())
     .fetch_optional(pool)
     .await
     .map_err(ApiError::internal)?;
@@ -2879,13 +2896,14 @@ async fn load_conversation(
         .transpose()?
         .map(Box::new);
     let unread_count = sqlx::query_scalar::<_, i64>(
-        "SELECT COUNT(*) FROM messages m WHERE m.conversation_id = ? AND m.sender_id != ? AND m.created_at > COALESCE((SELECT last_read_at FROM message_reads WHERE conversation_id = ? AND user_id = ?), '0000-01-01T00:00:00Z') AND m.created_at > COALESCE(?, '')",
+        "SELECT COUNT(*) FROM messages m WHERE m.conversation_id = ? AND m.sender_id != ? AND m.created_at > COALESCE((SELECT last_read_at FROM message_reads WHERE conversation_id = ? AND user_id = ?), '0000-01-01T00:00:00Z') AND m.created_at > COALESCE(?, '') AND (json_extract(m.payload,'$.recipient_ids') IS NULL OR EXISTS(SELECT 1 FROM json_each(m.payload,'$.recipient_ids') recipient WHERE recipient.value=?))",
     )
     .bind(id)
     .bind(user_id.to_string())
     .bind(id)
     .bind(user_id.to_string())
     .bind(row.get::<Option<String>, _>("history_cleared_at"))
+    .bind(user_id.to_string())
     .fetch_one(pool)
     .await
     .map_err(ApiError::internal)?;
@@ -2918,7 +2936,7 @@ async fn load_conversation(
     Ok(ConversationView {
         id: id.into(),
         self_role: sqlx::query_scalar(
-            "SELECT role FROM conversation_members WHERE conversation_id = ? AND user_id = ?",
+            "SELECT role FROM accessible_conversation_members WHERE conversation_id = ? AND user_id = ?",
         )
         .bind(id)
         .bind(user_id.to_string())
@@ -2958,7 +2976,7 @@ async fn load_conversation(
 }
 
 async fn load_spots(pool: &SqlitePool, user: UserId) -> Result<Vec<SpotView>, ApiError> {
-    let rows = sqlx::query("SELECT s.id,s.name,s.private,s.category_id,cc.name category_name FROM spots s LEFT JOIN channel_categories cc ON cc.id=s.category_id JOIN conversations c ON c.spot_id=s.id WHERE s.private=0 OR EXISTS(SELECT 1 FROM conversation_members cm WHERE cm.conversation_id=c.id AND cm.user_id=?) ORDER BY COALESCE(cc.position,9223372036854775807),s.name COLLATE NOCASE")
+    let rows = sqlx::query("SELECT s.id,s.name,s.private,s.category_id,cc.name category_name FROM spots s LEFT JOIN channel_categories cc ON cc.id=s.category_id JOIN conversations c ON c.spot_id=s.id WHERE s.private=0 OR EXISTS(SELECT 1 FROM accessible_conversation_members cm WHERE cm.conversation_id=c.id AND cm.user_id=?) ORDER BY COALESCE(cc.position,9223372036854775807),s.name COLLATE NOCASE")
         .bind(user.to_string())
         .fetch_all(pool)
         .await
@@ -3070,7 +3088,7 @@ async fn active_hangout_for_tx(
 
 async fn load_hangouts(pool: &SqlitePool, user: UserId) -> Result<Vec<HangoutView>, ApiError> {
     let rows =
-        sqlx::query("SELECT h.id, h.label FROM hangouts h WHERE h.ended_at IS NULL AND (h.spot_id IS NULL OR EXISTS(SELECT 1 FROM spots s WHERE s.id=h.spot_id AND s.private=0) OR EXISTS(SELECT 1 FROM conversations c JOIN conversation_members cm ON cm.conversation_id = c.id WHERE c.spot_id = h.spot_id AND cm.user_id = ?)) ORDER BY h.created_at")
+        sqlx::query("SELECT h.id, h.label FROM hangouts h WHERE h.ended_at IS NULL AND (h.spot_id IS NULL OR EXISTS(SELECT 1 FROM spots s WHERE s.id=h.spot_id AND s.private=0) OR EXISTS(SELECT 1 FROM conversations c JOIN accessible_conversation_members cm ON cm.conversation_id = c.id WHERE c.spot_id = h.spot_id AND cm.user_id = ?)) ORDER BY h.created_at")
             .bind(user.to_string())
             .fetch_all(pool)
             .await
@@ -3118,7 +3136,7 @@ async fn add_member(
     hangout_id: HangoutId,
     user_id: UserId,
 ) -> Result<(), ApiError> {
-    let allowed: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM hangouts h WHERE h.id = ? AND (h.spot_id IS NULL OR EXISTS(SELECT 1 FROM spots s WHERE s.id=h.spot_id AND s.private=0) OR EXISTS(SELECT 1 FROM conversations c JOIN conversation_members cm ON cm.conversation_id = c.id WHERE c.spot_id = h.spot_id AND cm.user_id = ?)))")
+    let allowed: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM hangouts h WHERE h.id = ? AND (h.spot_id IS NULL OR EXISTS(SELECT 1 FROM spots s WHERE s.id=h.spot_id AND s.private=0) OR EXISTS(SELECT 1 FROM conversations c JOIN accessible_conversation_members cm ON cm.conversation_id = c.id WHERE c.spot_id = h.spot_id AND cm.user_id = ?)))")
         .bind(hangout_id.to_string()).bind(user_id.to_string()).fetch_one(&mut **tx).await.map_err(ApiError::internal)?;
     if !allowed {
         return Err(ApiError::forbidden(

@@ -26,6 +26,7 @@ fn signed_room_admissions_do_not_require_direct_friendship() {
     let host_key = wisp_crypto::Identity::generate().unwrap();
     let newcomer_key = wisp_crypto::Identity::generate().unwrap();
     let vault = Vault {
+        channel_recipients: RwLock::new(BTreeMap::new()),
         ring: Keyring::create(temp.path(), account).unwrap(),
         network: Uuid::new_v4(),
         account,
@@ -58,6 +59,8 @@ fn signed_room_admissions_do_not_require_direct_friendship() {
     .sign(&host_key)
     .unwrap();
     let mut directory = Directory {
+        channel_identities: BTreeMap::new(),
+        channel_recipients: BTreeMap::new(),
         network: vault.network,
         identities: BTreeMap::from([
             (account, vault.ring.identity().public()),
@@ -1130,4 +1133,84 @@ async fn reaction_roundtrip(
         .unwrap();
     assert_eq!(removed["added"], false);
     assert!(alice.snapshot().await.unwrap().reactions.is_empty());
+}
+
+#[test]
+fn channel_access_filters_actual_ciphertext_recipients_without_rewriting_signed_rosters() {
+    let temp = tempfile::tempdir().unwrap();
+    fs::set_permissions(temp.path(), fs::Permissions::from_mode(0o700)).unwrap();
+    let account = Uuid::new_v4();
+    let former = Uuid::new_v4();
+    let other = wisp_crypto::Identity::generate().unwrap();
+    let vault = Vault {
+        ring: Keyring::create(temp.path(), account).unwrap(),
+        network: Uuid::new_v4(),
+        account,
+        temporary: temp.path().join("temporary"),
+        contacts: BTreeMap::new(),
+        channel_recipients: RwLock::new(BTreeMap::from([(
+            "channel".into(),
+            BTreeSet::from([account]),
+        )])),
+    };
+    let roster = Roster {
+        network: vault.network,
+        conversation: "channel".into(),
+        revision: 0,
+        previous: None,
+        actor: account,
+        members: BTreeMap::from([
+            (
+                account,
+                Member {
+                    identity: vault.ring.identity().public(),
+                    role: Role::Admin,
+                },
+            ),
+            (
+                former,
+                Member {
+                    identity: other.public(),
+                    role: Role::Member,
+                },
+            ),
+        ]),
+    }
+    .sign(vault.ring.identity())
+    .unwrap();
+    let id = Uuid::new_v4();
+    let content = Content {
+        context: None,
+        content_type: "text/plain".into(),
+        payload: json!("Only for current members"),
+        attachment: None,
+    };
+    let encrypted = Privacy::seal(&vault, &roster, id, content).unwrap();
+    assert_eq!(encrypted.recipient_ids, Some(vec![account]));
+    assert_eq!(roster.roster.members.len(), 2);
+    let binding = MessageContext {
+        network: vault.network,
+        conversation: "channel".into(),
+        sender: account,
+        message: id,
+        roster: roster.hash().unwrap(),
+    };
+    let bytes = STANDARD.decode(encrypted.ciphertext).unwrap();
+    let (_, recipients) = binding
+        .open_with_recipients(
+            vault.ring.identity(),
+            account,
+            &vault.ring.identity().public(),
+            &bytes,
+        )
+        .unwrap();
+    assert_eq!(
+        recipients.keys().copied().collect::<Vec<_>>(),
+        vec![account]
+    );
+    assert!(
+        binding
+            .open_with_recipients(&other, former, &vault.ring.identity().public(), &bytes)
+            .is_err()
+    );
 }

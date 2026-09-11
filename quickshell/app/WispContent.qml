@@ -519,17 +519,18 @@ FocusScope {
         theme: root.theme
         onSelected: root.maybeDismiss()
       }
-      ServerMembersView {
-        width: parent.width
-        bridge: root.bridge
-        theme: root.theme
-      }
+      InboxButton { width: parent.width; bridge: root.bridge; theme: root.theme }
       FriendsView {
         collapsible: true
         width: parent.width
         bridge: root.bridge
         theme: root.theme
         onSelected: root.maybeDismiss()
+      }
+      ServerMembersView {
+        width: parent.width
+        bridge: root.bridge
+        theme: root.theme
       }
 
       MessagesView {

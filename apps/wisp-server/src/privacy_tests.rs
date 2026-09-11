@@ -71,6 +71,7 @@ fn sealed(
     let id = Uuid::new_v4();
     let context = format!("test-network/{conversation}/{TEST_OWNER_ID}/{id}/message");
     wisp_protocol::EncryptedMessageRequest {
+        recipient_ids: None,
         roster_hash: roster_hash.into(),
         id,
         conversation_id: conversation.into(),

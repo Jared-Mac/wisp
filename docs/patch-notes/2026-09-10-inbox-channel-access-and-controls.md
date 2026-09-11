@@ -1,0 +1,7 @@
+- Added a pending-chat inbox and unread indicators beside people and channels.
+- Incoming DMs open in new tiles by default, with a setting to disable this. Your current chat stays focused.
+- Friend names open text chat; voice requests use the dedicated presence icon. Other members now appear below Friends.
+- New text channels are visible to everyone by default. Admins can edit access for all members, admins, or selected accounts.
+- New-message indicators clear after reading and interaction, pressing New, or replying.
+- Compacted share, camera, and disconnect into the room header.
+- Added stream-viewer sounds and ping in the server-name tooltip. Avatar visibility remains adjustable in Appearance.

@@ -96,3 +96,17 @@ function screenShareSoundEvents(previous, next, eventName) {
   if (newSharing.some(function(id){return oldSharing.indexOf(id)<0})) result.push("screen_share_start")
   return result
 }
+
+function streamViewerSoundEvents(previous, next, eventName) {
+  if (!previous || !next || eventName!=="video_viewers_changed") return []
+  var before=previous.self || {}, after=next.self || {}
+  if (!after.hangout_id || before.hangout_id!==after.hangout_id
+      || previous.voice_server_id!==next.voice_server_id
+      || !(before.media || {}).livekit_connected || !(after.media || {}).livekit_connected) return []
+  var oldShare=(before.media || {}).screen_share || {}, newShare=(after.media || {}).screen_share || {}
+  if (!oldShare.active || !newShare.active) return []
+  var oldViewers=oldShare.viewers || [], newViewers=newShare.viewers || [], events=[]
+  if (newViewers.some(function(p){return oldViewers.indexOf(p)<0})) events.push("stream_viewer_join")
+  if (oldViewers.some(function(p){return newViewers.indexOf(p)<0})) events.push("stream_viewer_leave")
+  return events
+}
