@@ -13,6 +13,8 @@ Item {
   property string clientName: "quickshell"
   readonly property alias messageActions: messageActions
   WispMessageActions { id: messageActions; bridge: root }
+  readonly property alias friendships: friendships
+  WispFriendships { id: friendships; bridge: root }
   readonly property alias voiceRecovery: voiceRecovery
   WispVoiceRecovery { id: voiceRecovery; bridge: root }
   readonly property alias soundboard: soundboard
@@ -41,6 +43,7 @@ Item {
   }
   property string lastAppliedVolumes: ""
   onDaemonConnectedChanged: {
+    if (!daemonConnected) friendships.reset()
     if (!daemonConnected) messageActions.disconnected()
     chatExtras.invalidate()
     soundboard.reset()
@@ -914,6 +917,7 @@ Item {
       return Date.parse(i.expires_at) > Date.now() && knownInvites.indexOf(String(i.server_id)+":"+String(i.id)) < 0
     })
     snapshot = next
+    Qt.callLater(function() { friendships.sync(eventName || "") })
     privacySnapshotReady = true
     Qt.callLater(refreshPrivacy)
     pendingCreatedConversations = pendingCreatedConversations.filter(function(pending) {
@@ -1178,6 +1182,7 @@ Item {
     delete requests[message.id]
     var value = message.value || ({})
     var conversationId = action.conversationId
+    if (action.kind === "friendship") { friendships.finish(message,action); return }
     if (action.kind === "messageAction") { messageActions.finish(message,action); return }
     if (action.kind === "soundboard") {
       soundboard.reply(message, action)

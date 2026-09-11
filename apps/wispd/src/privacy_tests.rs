@@ -580,6 +580,15 @@ async fn two_clients_encrypt_restore_and_admit_a_friend_without_manual_verificat
     })
     .await
     .unwrap();
+    // Start with two server members who have not opted into friendship.
+    let pool = sqlx::SqlitePool::connect(&database_url).await.unwrap();
+    sqlx::query("DELETE FROM friendships WHERE first_user_id=? AND second_user_id=?")
+        .bind("00000000-0000-4000-8000-000000000001")
+        .bind("00000000-0000-4000-8000-000000000002")
+        .execute(&pool)
+        .await
+        .unwrap();
+    pool.close().await;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let server = format!("http://{}", listener.local_addr().unwrap());
     let task = tokio::spawn(async move {
@@ -597,6 +606,46 @@ async fn two_clients_encrypt_restore_and_admit_a_friend_without_manual_verificat
     let backup = temp.path().join("bob-recovery.key");
     av.initialize(&alice).await.unwrap();
     bv.enable(&bob, &backup, None).await.unwrap();
+    assert!(
+        !alice
+            .snapshot()
+            .await
+            .unwrap()
+            .friends
+            .iter()
+            .any(|f| f.user.id == b)
+    );
+    assert!(alice.create_direct(b.to_string()).await.is_err());
+    let _: Value = decode(
+        alice
+            .request(reqwest::Method::POST, &format!("/v1/friend-requests/{b}"))
+            .send()
+            .await
+            .unwrap(),
+    )
+    .await
+    .unwrap();
+    assert!(!av.active().unwrap().unwrap().contacts.contains_key(&b));
+    assert!(!bv.active().unwrap().unwrap().contacts.contains_key(&a));
+    let _: Value = decode(
+        bob.request(
+            reqwest::Method::POST,
+            &format!("/v1/friend-requests/{a}/accept"),
+        )
+        .send()
+        .await
+        .unwrap(),
+    )
+    .await
+    .unwrap();
+    av.reconcile_pending_admissions(&alice, &alice.snapshot().await.unwrap())
+        .await
+        .unwrap();
+    bv.reconcile_pending_admissions(&bob, &bob.snapshot().await.unwrap())
+        .await
+        .unwrap();
+    assert!(av.active().unwrap().unwrap().contacts.contains_key(&b));
+    assert!(bv.active().unwrap().unwrap().contacts.contains_key(&a));
     let conversation = alice.create_direct("Owner".into()).await.unwrap();
     let (vault, roster) = av.recipients(&alice, &conversation).await.unwrap();
     let mut directory = av.directory(&alice, &vault).await.unwrap();

@@ -17,6 +17,7 @@ Rectangle {
   }
   Timer { id: highlightTimer; interval: 2500; onTriggered: root.highlightedId="" }
   Connections { target: root.bridge.messageActions; function onMessageLocated(conversationId,messageId) { if (root.bridge.messageActions.canonical(root.conversationId)===conversationId) Qt.callLater(function(){root.revealMessage(messageId)}) } }
+  ParticipantMenu { id: authorMenu; bridge:root.bridge; theme:root.theme; voiceControls:false }
   ForwardMessageDialog { id: forwardDialog; bridge: root.bridge; theme: root.theme }
   property string editingId: ""
   property string deletingId: ""
@@ -104,7 +105,10 @@ Rectangle {
       HoverHandler { id: messageHover }
       Component.onCompleted: { if (isImage) root.bridge.loadChatImage(String(modelData.id));root.bridge.chatExtras.loadText(serverId,copyText) }
       onCopyTextChanged:root.bridge.chatExtras.loadText(serverId,copyText)
-      WispAvatar { bridge: root.bridge; userId: String(message.modelData.sender.id); serverId: message.serverId; theme: root.theme; name: message.modelData.sender.display_name || ""; visible: root.theme.friendly && root.theme.showAvatars; width: root.theme.space(32); height: width }
+      WispAvatar {
+        TapHandler { onTapped: authorMenu.showPerson(Object.assign({},message.modelData.sender,{server_id:message.serverId}),parent) }
+        HoverHandler { cursorShape:Qt.PointingHandCursor }
+        bridge: root.bridge; userId: String(message.modelData.sender.id); serverId: message.serverId; theme: root.theme; name: message.modelData.sender.display_name || ""; visible: root.theme.friendly && root.theme.showAvatars; width: root.theme.space(32); height: width }
       Column {
         id: transcript
         x: root.theme.friendly && root.theme.showAvatars ? root.theme.space(44) : 0
@@ -113,10 +117,19 @@ Rectangle {
       Row {
         id: messageHeading
         spacing: root.theme.spacing.lg
-        Text {
+        Button {
+          id: authorButton
+          objectName:"messageAuthor-"+String(message.modelData.id)
+          padding:0; implicitHeight:authorLabel.implicitHeight; implicitWidth:Math.min(authorLabel.implicitWidth,Math.max(40,transcript.width-root.theme.space(150)))
+          Accessible.name:"View "+String(message.modelData.sender.display_name || "member")
+          onClicked:authorMenu.showPerson(Object.assign({},message.modelData.sender,{server_id:message.serverId}),authorButton)
+          background:Rectangle {color:authorButton.hovered ? root.theme.alpha(root.theme.accent,0.10) : "transparent";radius:2}
+          contentItem:Text {
+          id:authorLabel; textFormat:Text.PlainText;elide:Text.ElideRight
           text: (root.theme.cleanTui || root.theme.refinedTui) ? String(message.modelData.sender.display_name || "") : root.theme.tui ? "<" + String(message.modelData.sender.display_name || "") + ">" : String(message.modelData.sender.display_name || "")
           color: !root.theme.colorEnabled("senderNames") ? root.theme.foreground : message.modelData.sender.id === root.bridge.selfState.id ? root.theme.accent : root.theme.secondaryAccent
           font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption; font.bold: true
+        }
         }
         Text {
           Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }

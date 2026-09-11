@@ -5,6 +5,9 @@ mod chat_extras;
 #[cfg(test)]
 mod chat_extras_tests;
 mod chat_identity;
+mod friendships;
+#[cfg(test)]
+mod friendships_tests;
 mod groups;
 mod invitation_privacy;
 mod invitations;
@@ -527,6 +530,12 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/devices/{id}", delete(revoke_device))
         .route("/v1/admin/invites", post(create_invite))
         .route("/v1/account-invites", post(create_account_invite))
+        .route("/v1/people", get(friendships::people))
+        .route(
+            "/v1/friend-requests/{id}",
+            post(friendships::send).delete(friendships::dismiss),
+        )
+        .route("/v1/friend-requests/{id}/accept", post(friendships::accept))
         .route("/v1/snapshot", get(snapshot))
         .route("/v1/events", get(events))
         .route("/v1/presence", post(set_presence))

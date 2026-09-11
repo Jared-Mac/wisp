@@ -9,6 +9,7 @@ mod avatars;
 mod chat_extras;
 mod chat_images;
 mod chat_transfers;
+mod friendships;
 mod media;
 mod message_actions;
 mod network;
@@ -1479,6 +1480,15 @@ impl Daemon {
 
     #[allow(clippy::too_many_lines)]
     async fn run_command(&self, command: &CommandEnvelope) -> anyhow::Result<Option<Value>> {
+        if matches!(
+            command.name.as_str(),
+            "list_people"
+                | "send_friend_request"
+                | "accept_friend_request"
+                | "dismiss_friend_request"
+        ) {
+            return self.friendship_command(command).await.map(Some);
+        }
         if matches!(
             command.name.as_str(),
             "send_reply" | "forward_message" | "list_pins" | "set_message_pin" | "load_message"

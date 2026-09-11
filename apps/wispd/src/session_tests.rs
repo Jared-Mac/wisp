@@ -43,6 +43,104 @@ pub(crate) fn resident_bytes() -> u64 {
 }
 
 #[tokio::test]
+async fn member_directory_commands_use_the_selected_server_account() {
+    let (url, task) = isolated_server().await;
+    let (api, snapshot) = ServerApi::connect_with_auth(
+        url.clone(),
+        AuthMethod::Development {
+            profile: "Owner".into(),
+        },
+    )
+    .await
+    .unwrap();
+    let owner = snapshot.self_state.user.id;
+    let (linked_api, linked_snapshot) = ServerApi::connect_with_auth(
+        url.clone(),
+        AuthMethod::Development {
+            profile: "MemberA".into(),
+        },
+    )
+    .await
+    .unwrap();
+    let member = linked_snapshot.self_state.user.id;
+    let primary = ServerView {
+        id: "primary".into(),
+        name: "Primary".into(),
+        url: url.clone(),
+        connected: true,
+    };
+    let linked_view = ServerView {
+        id: "linked".into(),
+        name: "Linked".into(),
+        url,
+        connected: true,
+    };
+    let (media, _) = MediaManager::new(false, None);
+    let daemon = Daemon::new(
+        "Owner".into(),
+        primary.clone(),
+        vec![primary, linked_view.clone()],
+        api,
+        snapshot,
+        None,
+        media,
+        false,
+        Duration::from_secs(30),
+        ShortcutManager::from_environment(),
+    );
+    daemon.linked_servers.write().await.insert(
+        "linked".into(),
+        Arc::new(LinkedServer {
+            privacy: privacy::Privacy::new(&linked_api.base_url, member),
+            api: linked_api,
+            view: linked_view,
+            state: RwLock::new(linked_snapshot),
+            connected: AtomicBool::new(true),
+            media_key: None,
+        }),
+    );
+    for (server, account) in [("primary", owner), ("linked", member)] {
+        let result = daemon
+            .run_command(&CommandEnvelope::new(
+                "fixture",
+                "list_people",
+                json!({"server_id":server}),
+            ))
+            .await
+            .unwrap()
+            .unwrap();
+        let self_row = result["people"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|p| p["relationship"] == "self")
+            .unwrap();
+        assert_eq!(self_row["id"], account.to_string());
+    }
+    assert!(
+        daemon
+            .run_command(&CommandEnvelope::new(
+                "fixture",
+                "list_people",
+                json!({"server_id":"missing"})
+            ))
+            .await
+            .is_err()
+    );
+    assert!(
+        daemon
+            .run_command(&CommandEnvelope::new(
+                "fixture",
+                "send_friend_request",
+                json!({"server_id":"linked","user_id":"../accounts"})
+            ))
+            .await
+            .is_err()
+    );
+    task.abort();
+}
+
+#[tokio::test]
 #[ignore = "requires WISP_TEST_LIVEKIT_BINARY; isolated relay only, no capture or publication"]
 #[allow(clippy::too_many_lines)]
 async fn failed_rtc_join_releases_resources_without_growth() {

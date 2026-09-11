@@ -12,11 +12,13 @@ Item {
   readonly property var accountSettings: JSON.parse(JSON.stringify(preferences.accounts[account] || ({})))
   readonly property var favorites: Array.isArray(accountSettings.favorites) ? accountSettings.favorites : []
   readonly property bool collapsed: accountSettings.collapsed === true
+  readonly property bool showMembers: accountSettings.showMembers === true
+  readonly property bool membersCollapsed: accountSettings.membersCollapsed === true
   property string error: ""
   function save(favorites, collapsed) {
     if (!account) return
     var accounts = Object.assign({}, preferences.accounts)
-    accounts[account] = {favorites: favorites, collapsed: collapsed}
+    accounts[account] = Object.assign({},accountSettings,{favorites: favorites, collapsed: collapsed})
     preferences.accounts = accounts
     error = ""
     settings.writeAdapter()
@@ -28,6 +30,13 @@ Item {
     save(isFavorite(friend) ? favorites.filter(function(value) { return value !== key }) : favorites.concat([key]), collapsed)
   }
   function toggleCollapsed() { save(favorites, !collapsed) }
+  function setMemberPreference(key, value) {
+    if (!account) return
+    var accounts=Object.assign({},preferences.accounts), patch={}
+    patch[key]=!!value
+    accounts[account]=Object.assign({},accountSettings,patch)
+    preferences.accounts=accounts; error=""; settings.writeAdapter()
+  }
   FileView {
     id: settings
     path: (Quickshell.env("XDG_CONFIG_HOME") || Quickshell.env("HOME") + "/.config") + "/wisp/friends.json"

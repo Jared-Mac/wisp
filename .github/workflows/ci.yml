@@ -31,6 +31,9 @@ jobs:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Check source for private account artifacts
+        run: python3 scripts/check-repository-privacy.py
+
       - name: Install native build dependencies
         run: |
           llvm_key="$RUNNER_TEMP/llvm-snapshot.gpg.key"

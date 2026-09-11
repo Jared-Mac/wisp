@@ -33,6 +33,7 @@ ShellRoot {
     property bool serverSettingsBusy:false
     property bool audioTestBusy:false
     property var audioTestState:({phase:"idle"})
+    property var friendships:({busy:false})
     property var soundboard:({pending:false,playing:false,previewing:false,busy:{}})
   }
   Wisp.WispUpdates {id:updater;bridge:bridge;initialized:true;ready:true;leasePath:Quickshell.env("WISP_TEST_LEASE");processStart:"fixture"}
@@ -60,6 +61,8 @@ ShellRoot {
       test.check(!updater.safe,"reply-only draft blocks install")
       bridge.messageActions={replies:{}};input.wait(30)
       test.check(updater.safe,"idle client can install")
+      bridge.friendships={busy:true};input.wait(20);test.check(!updater.safe,"pending friend request blocks installation")
+      bridge.friendships={busy:false}
       updater.setPreference("automatic",false);updater.setPreference("background_checks",false);updater.setPreference("check_on_launch",false);updater.setPreference("interval_minutes",30);input.wait(1200)
       test.check(!updater.preferences.automatic && !updater.preferences.background_checks && !updater.preferences.check_on_launch && updater.preferences.interval_minutes===30,"all preferences save independently")
       test.check(test.find(settings,"checkForUpdates").enabled,"manual check stays available with all automatic controls off")
