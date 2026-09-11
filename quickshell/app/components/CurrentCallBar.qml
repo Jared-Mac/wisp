@@ -8,6 +8,7 @@ Rectangle {
   property bool compact: false
   property bool horizontal: false
   property bool adaptive: false
+  property bool showAudio: true
   readonly property real inset: adaptive ? Math.min(theme.spacing.md, Math.max(0,(width-theme.space(20))/8)) : theme.spacing.md
   readonly property bool narrow: adaptive && width < theme.space(140)
   property real maximumHeight: theme.space(210)
@@ -74,6 +75,7 @@ Rectangle {
     MediaControls {
       id: controls; width: parent.width; bridge: root.bridge; theme: root.theme; compact: root.compact; adaptive: root.adaptive; showLeave: false
       showInvite: !root.inviteInRoomHeader
+      showAudio: root.showAudio
       showRemoteStreams: !root.inviteInRoomHeader
       onCameraRequested: root.cameraRequested()
     }

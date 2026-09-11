@@ -1001,7 +1001,7 @@ ShellRoot {
       var tip=test.findObject(audio,"muteTooltip",[])
       var control=test.findItem(audio,"muteControl")
       var p=tip.contentItem.mapToItem(surface,0,0)
-      test.check(tip.visible && p.y>=control.mapToItem(surface,0,control.height).y,"mute tooltip appears below its button")
+      test.check(tip.visible && (audio.tooltipAbove ? p.y+tip.contentItem.height<=control.mapToItem(surface,0,0).y : p.y>=control.mapToItem(surface,0,control.height).y),"mute tooltip opens toward available space")
       test.check(p.x>=0 && p.x+tip.contentItem.width<=surface.width && p.y+tip.contentItem.height<=surface.height,"mute tooltip fits window")
       var path=Quickshell.env("WISP_CHAT_SCREENSHOT")
       if(path)surface.grabToImage(function(result){result.saveToFile(path.replace(".png","-mute.png"))})
@@ -1017,7 +1017,7 @@ ShellRoot {
       var tip=test.findObject(audio,"deafenTooltip",[])
       var control=test.findItem(audio,"deafenControl")
       var p=tip.contentItem.mapToItem(surface,0,0)
-      test.check(tip.visible && p.y>=control.mapToItem(surface,0,control.height).y,"deafen tooltip appears below its button")
+      test.check(tip.visible && (audio.tooltipAbove ? p.y+tip.contentItem.height<=control.mapToItem(surface,0,0).y : p.y>=control.mapToItem(surface,0,control.height).y),"deafen tooltip opens toward available space")
       test.check(p.x>=0 && p.x+tip.contentItem.width<=surface.width && p.y+tip.contentItem.height<=surface.height,"deafen tooltip fits window")
       var path=Quickshell.env("WISP_CHAT_SCREENSHOT")
       if(path)tip.contentItem.parent.grabToImage(function(result){result.saveToFile(path.replace(".png","-deafen.png"))})
@@ -1134,7 +1134,7 @@ ShellRoot {
       var pane=test.findItem(chat,"chatTile-"+original.key)
       var add=test.findItem(window.contentItem,"headerAddChatButton")
       var audio=test.findItem(window.contentItem,"globalAudioControls")
-      test.check(add && add.visible && add.enabled && add.parent===audio.parent && add.x<audio.x,"Add Chat is in the header just left of mute/deafen")
+      test.check(add && add.visible && add.enabled && add.mapToItem(window.contentItem,0,0).y<audio.mapToItem(window.contentItem,0,0).y,"Add Chat stays in the header above sidebar audio controls")
       test.check(!test.findItem(pane,"addChatTileButton"),"chat panes have no Add Chat button")
       add.clicked()
       var picker=test.findObject(window.contentItem,"headerAddChatPicker",[])
@@ -1616,6 +1616,19 @@ ShellRoot {
       var surface = test.compactMode ? compactSurface : window.contentItem
       if (test.mode === "sidebar") {
         var activity = test.findItem(surface,"activityPane")
+        var footer=test.findItem(activity,"sidebarAudioFooter")
+        var audio=test.findItem(footer,"globalAudioControls")
+        var headerAudio=test.findItem(test.findItem(surface,"alwaysVisibleControls"),"globalAudioControls")
+        test.check(footer && audio && !headerAudio,"audio controls live only in the sidebar when expanded")
+        for (var name of ["muteControl","deafenControl"]) {
+          var button=test.findItem(footer,name), bp=button.mapToItem(footer,0,0)
+          test.check(bp.x>=0 && bp.y>=0 && bp.x+button.width<=footer.width+1 && bp.y+button.height<=footer.height+1,"footer keeps "+name+" in bounds")
+        }
+        var footerY=footer.mapToItem(surface,0,0).y
+        var friendsList=test.findItem(activity,"friendsPane")
+        friendsList.contentY=Math.max(0,friendsList.contentHeight-friendsList.height)
+        test.check(footer.mapToItem(surface,0,0).y===footerY,"audio footer stays fixed while lists scroll")
+        friendsList.contentY=0
         var avatar = test.findItem(activity,"friendAvatar")
         var dot = test.findItem(test.findItem(activity,"friendsPane"),"friendConnectionDot")
         if (avatar) test.check(Math.abs(dot.x+dot.width-avatar.x-avatar.width)<1 && Math.abs(dot.y+dot.height-avatar.y-avatar.height)<1,

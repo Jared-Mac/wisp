@@ -25,6 +25,7 @@ Item {
   readonly property bool stacked: !drawerMode && ((width < theme.space(600) && !(layout.activityWidth > 0)) || dock === "top" || dock === "bottom")
   readonly property bool reversed: dock === "right" || dock === "bottom"
   readonly property bool collapsed: drawerMode ? !drawerOpen : layout.activityCollapsed
+  readonly property bool audioInSidebar: !collapsed
   readonly property real handleSize: theme.space(theme.cleanTui ? 6 : 10)
   readonly property real dividerSize: collapsed || drawerMode ? 0 : handleSize
   readonly property real available: Math.max(1, (stacked ? height : width) - dividerSize)
@@ -63,8 +64,9 @@ Item {
     width: root.stacked ? root.width : root.activitySize
     height: root.stacked ? root.activitySize : root.height
     Rectangle { anchors.fill: parent; visible: root.theme.friendly || root.theme.comfortable; color: root.theme.comfortable ? root.theme.surface : root.theme.sidebar; radius: root.theme.cornerRadius }
-    readonly property real available: Math.max(1, (root.stacked ? width : height) - root.handleSize)
-    readonly property real listsHeight: root.stacked ? height - roomCallBar.height - (roomCallBar.visible ? root.theme.space(8) : 0) : height
+    readonly property real usableHeight: Math.max(0,height-audioFooter.height-frameInset-root.theme.spacing.sm)
+    readonly property real available: Math.max(1, (root.stacked ? width : usableHeight) - root.handleSize)
+    readonly property real listsHeight: root.stacked ? usableHeight - roomCallBar.height - (roomCallBar.visible ? root.theme.space(8) : 0) : usableHeight
     readonly property real minimumPane: root.theme.space(44)
     readonly property real frameInset: Math.min(Math.max(2,(width-root.theme.space(24))/10), root.theme.friendly ? root.theme.space(10) : (root.theme.tui || root.theme.comfortable) ? root.theme.space(root.theme.cleanTui ? 10 : 8) : 0)
     readonly property real frameTop: width < root.theme.space(100) ? root.theme.space(4) : root.theme.friendly ? root.theme.space(12) : (root.theme.tui || root.theme.comfortable) ? root.theme.space(22) : 0
@@ -113,11 +115,12 @@ Item {
     }
     CurrentCallBar {
           id: roomCallBar
-          x: activity.frameInset; y: root.stacked ? parent.height - height - activity.frameInset : rooms.y + rooms.height + (visible ? root.theme.space(8) : 0)
+          x: activity.frameInset; y: root.stacked ? activity.usableHeight - height - activity.frameInset : rooms.y + rooms.height + (visible ? root.theme.space(8) : 0)
           width: root.stacked ? parent.width - activity.frameInset * 2 : rooms.width; height: visible ? implicitHeight : 0
           bridge: root.bridge; theme: root.theme
           maximumHeight: Math.min(root.theme.space(roomCallBar.narrow ? 280 : 210), activity.height/2)
           compact: true; adaptive: true; horizontal: root.stacked
+          showAudio: false
           roomInvitesInHeader: !root.drawerMode || root.drawerOpen
           onCameraRequested: root.cameraRequested()
         }
@@ -154,6 +157,30 @@ Item {
       width: parent.width - x; height: activity.listsHeight - y
       theme: root.theme; title: root.theme.comfortable ? "Friends" : root.theme.cleanTui ? "02 /friends" : "02: /friends"; ink: root.theme.friendSectionColor
     }
+    Rectangle {
+      id: audioFooter; objectName: "sidebarAudioFooter"
+      x: activity.frameInset; y: parent.height-height-activity.frameInset
+      width: Math.max(1,parent.width-activity.frameInset*2)
+      height: audio.height+root.theme.spacing.sm*2
+      color: root.theme.surface; radius: root.theme.cornerRadius
+      Rectangle {width:parent.width;height:1;color:root.theme.separator}
+      Text {
+        anchors.left: parent.left; anchors.leftMargin: root.theme.spacing.md; anchors.verticalCenter: parent.verticalCenter
+        visible: audioFooter.width-audio.width > root.theme.space(80)
+        text: root.theme.tui ? "/audio" : "Audio"
+        color: root.theme.muted; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
+      }
+      AudioStateIndicator {
+        id: audio; objectName: "globalAudioControls"
+        bridge: root.bridge; theme: root.theme
+        adaptive: true; availableWidth: Math.max(1,audioFooter.width-Math.min(root.theme.spacing.sm*2,Math.max(0,audioFooter.width-root.theme.space(24))))
+        tooltipAbove: true
+        x: audioFooter.width-audio.width > root.theme.space(80) ? audioFooter.width-width-root.theme.spacing.sm : (audioFooter.width-width)/2
+        anchors.verticalCenter: parent.verticalCenter
+        muted: !!root.bridge.selfState.muted || !!root.bridge.selfState.deafened
+        deafened: !!root.bridge.selfState.deafened
+      }
+    }
   }
   ResizeHandle {
     id: activityDivider
@@ -181,7 +208,7 @@ Item {
     anchors.bottom: parent.bottom; width: parent.width
     height: visible ? item.implicitHeight : 0
     sourceComponent: CurrentCallBar {
-      bridge: root.bridge; theme: root.theme; roomInvitesInHeader: false
+      bridge: root.bridge; theme: root.theme; roomInvitesInHeader: false; showAudio: false
       onCameraRequested: root.cameraRequested()
     }
   }

@@ -14,6 +14,8 @@ Column {
   signal navigationRequested()
   property bool showAddChat: false
   property bool canAddChat: false
+  property bool showAudioControls: true
+  property bool audioFallback: false
   signal addChatRequested(string conversationId)
   function closeMenus() { presenceMenu.close(); addChatPicker.close(); soundboardMenu.close() }
   width: parent ? parent.width : 0
@@ -132,7 +134,7 @@ Column {
       }
       AudioStateIndicator {
         objectName: "globalAudioControls"
-        visible: !root.theme.friendly || !root.bridge.currentVoiceRoom
+        visible: root.showAudioControls && (root.audioFallback || !root.theme.friendly || !root.bridge.currentVoiceRoom)
         bridge: root.bridge; theme: root.theme
         muted: !!root.bridge.selfState.muted || !!root.bridge.selfState.deafened
         deafened: !!root.bridge.selfState.deafened

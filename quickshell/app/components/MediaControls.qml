@@ -11,6 +11,7 @@ Column {
   property bool adaptive: false
   readonly property bool small: adaptive && width < theme.space(180)
   property bool showLeave: true
+  property bool showAudio: true
   property bool showInvite: true
   property bool showRemoteStreams: true
   spacing: root.theme.spacing.sm
@@ -24,7 +25,7 @@ Column {
     x: (root.width-width)/2; spacing: root.theme.spacing.sm
     Repeater {
       id: controlRepeater
-      model: (root.theme.friendly || root.small ? [
+      model: (root.showAudio && (root.theme.friendly || root.small) ? [
         {label:root.bridge.selfState.muted ? "Unmute" : "Mute",action:"mute",icon:root.bridge.selfState.muted ? "microphone-off" : "microphone"},
         {label:root.bridge.selfState.deafened ? "Undeafen" : "Deafen",action:"deafen",icon:root.bridge.selfState.deafened ? "headphones-off" : "headphones"}
       ] : []).concat([
@@ -45,7 +46,7 @@ Column {
         enabled: controlEnabled
         destructive: publishing || modelData.action==="leave"
         primary: root.theme.friendly && (modelData.action==="mute" && root.bridge.selfState.muted || modelData.action==="deafen" && root.bridge.selfState.deafened)
-        width: root.small || modelData.action === "invite" ? Math.min(root.width,root.theme.space(32)) : root.theme.friendly ? (root.compact ? root.theme.space(32) : (controls.width-controls.spacing*3)/4) : Math.min(root.width,actionLabel.implicitWidth+root.theme.space(20))
+        width: root.small || modelData.action === "invite" ? Math.min(root.width,root.theme.space(32)) : root.theme.friendly ? (root.compact ? root.theme.space(32) : (controls.width-controls.spacing*3)/4) : Math.min(root.width,actionMetrics.advanceWidth+root.theme.space(20))
         height: root.theme.space(root.theme.friendly || root.small ? (root.compact ? 32 : 40) : root.theme.tui ? 28 : 34)
         Accessible.name: modelData.action==="share" ? (publishing ? "Stop sharing screen" : "Share screen") : modelData.action==="camera" ? (publishing ? "Stop camera" : "Start camera") : modelData.action==="leave" ? "Disconnect from voice" : modelData.label
         ToolTip.visible: hovered || visualFocus; ToolTip.text: Accessible.name
@@ -58,6 +59,7 @@ Column {
           else if(modelData.action==="deafen") root.bridge.toggleDeafened()
           else {root.bridge.leave();root.leaveRequested()}
         }
+        TextMetrics { id: actionMetrics; font: actionLabel.font; text: actionLabel.text }
         contentItem: Item {
           WispIcon {theme:root.theme;name:action.iconName;ink:action.labelColor;visible:root.theme.friendly || action.forceIcon;anchors.centerIn:parent;width:Math.min(parent.width,root.theme.space(root.compact ? 18 : 20));height:width}
           Text {

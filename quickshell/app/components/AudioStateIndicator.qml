@@ -1,16 +1,23 @@
 import QtQuick
 import QtQuick.Controls
 
-Row {
+Grid {
   id: root
 
   required property var bridge
   required property var theme
   property bool muted: false
   property bool deafened: false
+  property bool adaptive: false
+  property real availableWidth: 100000
+  property bool tooltipAbove: false
+  readonly property bool compactSymbols: adaptive && availableWidth < theme.space(220)
+  readonly property real buttonHeight: theme.space(theme.comfortable ? 36 : 32)
+  readonly property bool stacked: adaptive && availableWidth < mutedIcon.width + deafenedIcon.width + spacing
+  columns: stacked ? 1 : 2
 
   spacing: root.theme.spacing.sm
-  height: root.theme.space(root.theme.comfortable ? 36 : 32)
+  height: root.stacked ? root.buttonHeight * 2 + spacing : root.buttonHeight
 
   Rectangle {
     id: mutedIcon
@@ -20,7 +27,7 @@ Row {
     Accessible.name: root.muted ? "Unmute microphone" : "Mute microphone"
     Keys.onSpacePressed: root.bridge.toggleMuted()
     Keys.onReturnPressed: root.bridge.toggleMuted()
-    width: root.theme.space(root.theme.comfortable ? 92 : 32)
+    width: Math.min(root.availableWidth,root.theme.space(root.theme.comfortable && !root.compactSymbols ? 92 : 32))
     height: root.theme.space(root.theme.comfortable ? 36 : 32)
     radius: root.theme.cornerRadius
     color: root.theme.tui && !root.theme.comfortable ? "transparent" : root.muted
@@ -30,7 +37,7 @@ Row {
     border.width: root.theme.tui && !root.theme.comfortable && !activeFocus ? 0 : 1
 
     Image {
-      visible: !root.theme.tui && !root.theme.comfortable && !root.theme.friendly
+      visible: !root.theme.tui && !root.theme.comfortable && !root.theme.friendly && !root.compactSymbols
       anchors.centerIn: parent
       width: root.theme.space(20)
       height: width
@@ -39,9 +46,9 @@ Row {
         : "../assets/microphone.svg")
       fillMode: Image.PreserveAspectFit
     }
-    WispIcon { anchors.centerIn: parent; theme: root.theme; name: root.muted ? "microphone-off" : "microphone"; ink: root.muted ? root.theme.warning : root.theme.foreground; visible: root.theme.friendly }
+    WispIcon { anchors.centerIn: parent; theme: root.theme; name: root.muted ? "microphone-off" : "microphone"; ink: root.muted ? root.theme.warning : root.theme.foreground; visible: root.theme.friendly || root.compactSymbols && !root.theme.tui }
     Text {
-      anchors.centerIn: parent; visible: root.theme.tui || root.theme.comfortable
+      anchors.centerIn: parent; visible: root.theme.tui || root.theme.comfortable && !root.compactSymbols
       text: root.theme.comfortable ? (root.muted ? "Unmute" : "Mute") : "[M]"; color: root.muted ? root.theme.warning : root.theme.foreground
       font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
     }
@@ -60,7 +67,7 @@ Row {
       objectName: "muteTooltip"
       visible: mutedMouse.containsMouse
       x: (parent.width - width) / 2
-      y: parent.height + root.theme.spacing.sm
+      y: root.tooltipAbove ? -height-root.theme.spacing.sm : parent.height + root.theme.spacing.sm
       margins: root.theme.spacing.sm
       padding: root.theme.spacing.sm
       width: Math.min(mutedTip.implicitWidth + padding * 2, root.Window.window ? root.Window.window.width - margins * 2 : root.theme.space(360))
@@ -90,7 +97,7 @@ Row {
     Accessible.name: root.deafened ? "Undeafen" : "Deafen"
     Keys.onSpacePressed: root.bridge.toggleDeafened()
     Keys.onReturnPressed: root.bridge.toggleDeafened()
-    width: root.theme.space(root.theme.comfortable ? 102 : 32)
+    width: Math.min(root.availableWidth,root.theme.space(root.theme.comfortable && !root.compactSymbols ? 102 : 32))
     height: root.theme.space(root.theme.comfortable ? 36 : 32)
     radius: root.theme.cornerRadius
     color: root.theme.tui && !root.theme.comfortable ? "transparent" : root.deafened
@@ -100,7 +107,7 @@ Row {
     border.width: root.theme.tui && !root.theme.comfortable && !activeFocus ? 0 : 1
 
     Image {
-      visible: !root.theme.tui && !root.theme.comfortable && !root.theme.friendly
+      visible: !root.theme.tui && !root.theme.comfortable && !root.theme.friendly && !root.compactSymbols
       anchors.centerIn: parent
       width: root.theme.space(20)
       height: width
@@ -109,9 +116,9 @@ Row {
         : "../assets/headphones.svg")
       fillMode: Image.PreserveAspectFit
     }
-    WispIcon { anchors.centerIn: parent; theme: root.theme; name: root.deafened ? "headphones-off" : "headphones"; ink: root.deafened ? root.theme.danger : root.theme.foreground; visible: root.theme.friendly }
+    WispIcon { anchors.centerIn: parent; theme: root.theme; name: root.deafened ? "headphones-off" : "headphones"; ink: root.deafened ? root.theme.danger : root.theme.foreground; visible: root.theme.friendly || root.compactSymbols && !root.theme.tui }
     Text {
-      anchors.centerIn: parent; visible: root.theme.tui || root.theme.comfortable
+      anchors.centerIn: parent; visible: root.theme.tui || root.theme.comfortable && !root.compactSymbols
       text: root.theme.comfortable ? (root.deafened ? "Undeafen" : "Deafen") : "[D]"; color: root.deafened ? root.theme.danger : root.theme.foreground
       font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
     }
@@ -130,7 +137,7 @@ Row {
       objectName: "deafenTooltip"
       visible: deafenedMouse.containsMouse
       x: (parent.width - width) / 2
-      y: parent.height + root.theme.spacing.sm
+      y: root.tooltipAbove ? -height-root.theme.spacing.sm : parent.height + root.theme.spacing.sm
       margins: root.theme.spacing.sm
       padding: root.theme.spacing.sm
       width: Math.min(deafenedTip.implicitWidth + padding * 2, root.Window.window ? root.Window.window.width - margins * 2 : root.theme.space(360))

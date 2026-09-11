@@ -263,6 +263,8 @@ FocusScope {
     SettingsView {
       id: accessControls
       objectName: "alwaysVisibleControls"
+      audioFallback: root.presentation === "app"
+      showAudioControls: !(root.presentation === "app" && root.showingChats && dashboardLoader.item && dashboardLoader.item.audioInSidebar)
       showActivityToggle: root.presentation === "app" && root.showingChats
       activityStacked: !root.wideLayout
       navigationDrawer: !!dashboardLoader.item && !!dashboardLoader.item.drawerMode

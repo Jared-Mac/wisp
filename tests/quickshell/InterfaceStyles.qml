@@ -76,7 +76,7 @@ ShellRoot {
           test.check(!!serverPeople && !!test.find(serverPeople,"sidebarServerMembers"), "People list lives in the server pane at " + style + "/" + w)
           var pos = bar.mapToItem(page,0,0), friendPos = friends.mapToItem(page,0,0)
           test.check(bar.visible && pos.y + bar.height <= friendPos.y, "voice controls remain above friends at " + style + "/" + w)
-          var mute = test.find(bar,"mediaAction-mute"), camera = test.find(bar,"mediaAction-camera")
+          var mute = test.find(test.find(page,"sidebarAudioFooter"),"muteControl"), camera = test.find(bar,"mediaAction-camera")
           test.check(mute.visible && mute.width >= 32 && camera.mapToItem(bar,0,0).y + camera.height <= bar.height, "all voice controls fit at " + style + "/" + w)
           var watch = test.find(page,"roomParticipants")
           test.check(watch.visible && watch.height > 40, "participants stay visible on separate rows")
@@ -92,7 +92,7 @@ ShellRoot {
               test.check(Math.abs(rail.width-theme.space(railWidth)) < 1,"sidebar honors width " + railWidth)
               var controls = test.find(page,"currentCallBar")
               for (var action of ["mute","deafen","share","camera"]) {
-                var button = test.find(controls,"mediaAction-"+action), p = button.mapToItem(rail,0,0)
+                var button = test.find(action === "mute" || action === "deafen" ? test.find(page,"sidebarAudioFooter") : controls, action === "mute" ? "muteControl" : action === "deafen" ? "deafenControl" : "mediaAction-"+action), p = button.mapToItem(rail,0,0)
                 test.check(button.visible && button.width >= theme.space(18) && p.x >= 0 && p.x+button.width <= rail.width+1,"reachable "+action+" at "+railWidth)
               }
               var drop = test.find(page,"activeServerSelector"), gear = test.find(page,"serverSettingsShortcut")
@@ -115,6 +115,7 @@ ShellRoot {
             test.check(rail.width === theme.space(24) && !bridge.workspaceLayout.activityCollapsed,"drag clamps to visible minimum")
             bridge.workspaceLayout.activityCollapsed = true; input.wait(20)
             test.check(!rail.visible,"explicit collapse hides sidebar")
+            test.check(test.find(test.find(page,"alwaysVisibleControls"),"muteControl").visible,"collapsed sidebar keeps header audio available")
             bridge.workspaceLayout.activityCollapsed = false; input.wait(20)
             test.check(rail.visible && rail.width === theme.space(24),"expand restores saved rail")
           }
@@ -137,13 +138,15 @@ ShellRoot {
             test.check(callPos.y+callBar.height<=horizontalRail.height && callBar.height<=theme.space(64),"compact horizontal voice toolbar fits")
             test.check(test.find(callBar,"currentCallConnection").visible,"horizontal voice toolbar retains connection status")
             test.check(pane.height>=theme.space(190),"chat remains usable below or above Activity")
-            roomPane.contentY=Math.max(0,roomPane.contentHeight-roomPane.height); input.wait(20)
-            var lastRoom=test.find(page,"joinRoom-quiet"), lp=lastRoom.mapToItem(roomPane,0,0)
+            var lastRoom=test.find(page,"joinRoom-quiet")
+            roomPane.contentY=Math.min(roomPane.contentHeight-roomPane.height, Math.max(0,lastRoom.mapToItem(roomPane.contentItem,0,0).y+lastRoom.height-roomPane.height)); input.wait(20)
+            var lp=lastRoom.mapToItem(roomPane,0,0)
             test.check(lp.y>=0 && lp.y+lastRoom.height<=roomPane.height,"scrolling exposes the last room action")
             roomPane.contentY=0
             for (var control of ["mute","deafen","share","camera"]) {
-              var controlButton=test.find(callBar,"mediaAction-"+control), cp=controlButton.mapToItem(callBar,0,0)
-              test.check(cp.x>=0 && cp.y>=0 && cp.x+controlButton.width<=callBar.width && cp.y+controlButton.height<=callBar.height,"horizontal toolbar exposes "+control)
+              var controlHost=control === "mute" || control === "deafen" ? test.find(page,"sidebarAudioFooter") : callBar
+              var controlButton=test.find(controlHost,control === "mute" ? "muteControl" : control === "deafen" ? "deafenControl" : "mediaAction-"+control), cp=controlButton.mapToItem(controlHost,0,0)
+              test.check(cp.x>=0 && cp.y>=0 && cp.x+controlButton.width<=controlHost.width && cp.y+controlButton.height<=controlHost.height,"horizontal toolbar exposes "+control)
             }
             if(windowHeight===800) test.capture(style+"-"+horizontalDock+"-"+canvas.width)
             var oldRoomsWidth=roomPane.width, oldVerticalRatio=bridge.workspaceLayout.roomsRatio
