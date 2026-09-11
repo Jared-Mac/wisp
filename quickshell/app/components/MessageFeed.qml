@@ -96,7 +96,7 @@ Rectangle {
     anchors.fill: parent
     anchors.margins: root.theme.space(root.theme.cleanTui ? 12 : root.theme.tui ? 6 : 16)
     clip: true
-    spacing: root.theme.space(root.theme.cleanTui ? 14 : root.theme.tui ? 12 : 18)
+    spacing: 0
     model: stableMessages
     property bool followBottom: true
     function followLatest() { if (followBottom && !moving && !messageScrollBar.pressed) positionViewAtEnd() }
@@ -111,7 +111,14 @@ Rectangle {
     }
     delegate: Item {
       id: message
-      implicitHeight: transcript.implicitHeight + newMessagesDivider.height
+      required property int index
+      readonly property var previousMessage: index > 0 ? root.incomingMessages[index-1] : null
+      readonly property bool sameAuthor: !!previousMessage && !startsUnread
+        && String(previousMessage.sender.id)===String(modelData.sender.id)
+        && String(previousMessage.server_id || root.bridge.activeServer.id)===serverId
+        && new Date(previousMessage.created_at).toDateString()===new Date(modelData.created_at).toDateString()
+      readonly property real messageGap: index===0 ? 0 : root.theme.space(sameAuthor ? 6 : root.theme.cleanTui ? 14 : root.theme.tui ? 12 : 18)
+      implicitHeight: Math.max(transcript.implicitHeight, avatar.visible ? avatar.height : 0) + newMessagesDivider.height + messageGap
       readonly property bool startsUnread: !!root.unreadBoundary && root.unreadBoundary.firstId===String(modelData.id)
       required property var modelData
       readonly property bool isImage: modelData.content_type === "image/png"
@@ -128,6 +135,7 @@ Rectangle {
       onCopyTextChanged:root.bridge.chatExtras.loadText(serverId,copyText)
       Item {
         id: newMessagesDivider
+        y: message.messageGap
         objectName: "newMessagesDivider-" + String(message.modelData.id)
         width: messages.width; height: message.startsUnread ? root.theme.space(28) : 0
         visible: message.startsUnread
@@ -144,13 +152,14 @@ Rectangle {
         }
       }
       WispAvatar {
-        y: newMessagesDivider.height
+        id: avatar; objectName:"messageAvatar-"+String(message.modelData.id)
+        y: newMessagesDivider.height + message.messageGap
         TapHandler { onTapped: authorMenu.showPerson(Object.assign({},message.modelData.sender,{server_id:message.serverId}),parent) }
         HoverHandler { cursorShape:Qt.PointingHandCursor }
-        bridge: root.bridge; userId: String(message.modelData.sender.id); serverId: message.serverId; theme: root.theme; name: message.modelData.sender.display_name || ""; visible: root.theme.friendly && root.theme.showAvatars; width: root.theme.space(32); height: width }
+        bridge: root.bridge; userId: String(message.modelData.sender.id); serverId: message.serverId; theme: root.theme; name: message.modelData.sender.display_name || ""; visible: root.theme.friendly && root.theme.showAvatars && !message.sameAuthor; width: root.theme.space(32); height: width }
       Column {
         id: transcript
-        y: newMessagesDivider.height
+        y: newMessagesDivider.height + message.messageGap
         x: root.theme.friendly && root.theme.showAvatars ? root.theme.space(44) : 0
         width: parent.width-x
         spacing: root.theme.comfortable ? root.theme.space(6) : root.theme.tui ? root.theme.space(2) : root.theme.spacing.md
@@ -384,7 +393,7 @@ Rectangle {
         font.family: root.theme.font.family; font.pixelSize: root.theme.font.body
       }
       }
-      ReactionBar {actionHost: root.theme.comfortable || root.theme.refinedTui ? messageHeading : null; revealActions: messageHover.hovered; width:parent.width;bridge:root.bridge;theme:root.theme;serverId:message.serverId;messageId:String(message.modelData.id)}
+      ReactionBar {allowed:!message.isInvitation;actionHost:messageHeading;revealActions:messageHover.hovered; width:parent.width;bridge:root.bridge;theme:root.theme;serverId:message.serverId;messageId:String(message.modelData.id)}
       Repeater {
         model:Markup.youtube(message.copyText)
         VideoEmbed {required property string modelData;theme:root.theme;videoId:modelData}

@@ -184,8 +184,15 @@ pub(super) async fn react(
         .execute(&mut *tx)
         .await
         .map_err(ApiError::internal)?;
-    let conversation: String = sqlx::query_scalar("SELECT m.conversation_id FROM messages m JOIN conversation_members cm ON cm.conversation_id=m.conversation_id AND cm.user_id=? WHERE m.id=? AND m.created_at>COALESCE(cm.history_cleared_at,'')")
+    let message = sqlx::query("SELECT m.conversation_id,m.content_type FROM messages m JOIN conversation_members cm ON cm.conversation_id=m.conversation_id AND cm.user_id=? WHERE m.id=? AND m.created_at>COALESCE(cm.history_cleared_at,'')")
         .bind(user.to_string()).bind(target.to_string()).fetch_optional(&mut *tx).await.map_err(ApiError::internal)?.ok_or_else(|| ApiError::not_found("Message unavailable"))?;
+    if message.get::<String, _>("content_type") == "application/vnd.wisp.room-invitation+json" {
+        return Err(ApiError::bad_request(
+            "invalid_reaction_target",
+            "Invitations do not support reactions",
+        ));
+    }
+    let conversation: String = message.get("conversation_id");
     let (kind, payload, version) = if let Some(encrypted) = request.encrypted {
         if encrypted.id != request.id
             || encrypted.conversation_id != conversation

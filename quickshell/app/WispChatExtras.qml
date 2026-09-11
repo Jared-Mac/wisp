@@ -57,6 +57,8 @@ Item {
     return Object.keys(grouped).map(function(e){return grouped[e]})
   }
   function react(server,target,emoji) {
+    var message=(bridge.participantServer({server_id:server}).messages || []).filter(function(m){return String(m.id)===String(target)})[0]
+    if (!message || message.content_type==="application/vnd.wisp.room-invitation+json") return
     var k=key(server,target)
     if(pendingReactions[k]) return
     var id=request("toggle_reaction",{server_id:server,message_id:target,emoji:emoji},{action:"reaction",key:k})

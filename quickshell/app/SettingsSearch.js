@@ -33,6 +33,7 @@ var entries = [
   {section:"notifications", target:"settingsNotifications", label:"Message notification sounds", keywords:"chat mute sound alerts focus background policy"},
   {section:"notifications", target:"settingsNotificationVolume", label:"Notification volume and custom sound", keywords:"chat alert chime test file"},
   {section:"notifications", target:"audioControlSoundsSetting",label:"Mute and deafen sounds",keywords:"mic microphone unmute undeafen audio cues"},
+  {section:"notifications", target:"screenShareSoundsSetting",label:"Screen-share start and stop sounds",keywords:"stream sharing notifications voice custom sound alert"},
   {section:"notifications",target:"settingsRoomSounds", label:"Room sounds", keywords:"notifications voice join leave disconnect custom sound"},
   {section:"notifications", target:"settingsChatNotifications", label:"Chat notifications", keywords:"mute individual conversation sound"},
   {section:"privacy", target:"privacySettingsView", label:"Chat encryption and recovery files", keywords:"privacy security backup restore keys e2ee"},

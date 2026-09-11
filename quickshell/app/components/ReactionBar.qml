@@ -9,7 +9,9 @@ Flow {
   required property string messageId
   property Item actionHost: null
   property bool revealActions: true
-  property var reactions:bridge.chatExtras.groups(serverId,messageId)
+  property bool allowed: true
+  visible: allowed
+  property var reactions:allowed ? bridge.chatExtras.groups(serverId,messageId) : []
   spacing:theme.space(5)
   Repeater {
     model:root.reactions
@@ -33,10 +35,11 @@ Flow {
   }
   ChatButton {
     parent: root.actionHost || root
-    quiet: root.theme.comfortable || root.theme.refinedTui
-    opacity: !(root.theme.comfortable || root.theme.refinedTui) || root.revealActions || activeFocus || picker.opened ? 1 : 0
+    visible:root.allowed
+    quiet: true
+    opacity: root.revealActions || activeFocus || picker.opened ? 1 : 0
     objectName:"addReaction-"+root.messageId
-    theme:root.theme;text:"+☺";iconName:"emoji";iconOnly:root.theme.friendly;implicitWidth:root.theme.space(42);implicitHeight:root.theme.space(28)
+    theme:root.theme;text:"+☺";iconName:"emoji";iconOnly:root.theme.friendly;implicitWidth:root.theme.space(root.actionHost ? 26 : 42);implicitHeight:root.theme.space(root.actionHost ? 20 : 28)
     Accessible.name:"Add reaction"
     onClicked:picker.open()
     EmojiPicker {id:picker;objectName:"reactionPicker-"+root.messageId;bridge:root.bridge;theme:root.theme;serverId:root.serverId;width:Math.min(root.width,root.theme.space(340));onPicked:emoji=>root.bridge.chatExtras.react(root.serverId,root.messageId,emoji)}

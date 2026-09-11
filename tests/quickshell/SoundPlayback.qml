@@ -12,6 +12,11 @@ ShellRoot {
       playNotificationSound("member_join")
       playNotificationSound("member_leave")
       playNotificationSound("self_leave")
+      playNotificationSound("screen_share_start")
+      playNotificationSound("screen_share_stop")
+      screenShareSounds=false
+      if (notificationSoundCommand("screen_share_start").length || notificationSoundCommand("screen_share_stop").length) console.error("SOUND_TEST_FAILED screen-share mute")
+      screenShareSounds=true
     }
   }
   Timer {

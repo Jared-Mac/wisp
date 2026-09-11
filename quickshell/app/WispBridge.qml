@@ -119,6 +119,7 @@ Item {
   property alias notificationPolicy: notificationSettings.policy
   property alias roomNotificationSounds: notificationSettings.roomSounds
   property alias audioControlSounds: notificationSettings.audioControlSounds
+  property alias screenShareSounds: notificationSettings.screenShareSounds
   property alias selfRoomNotificationSounds: notificationSettings.selfRoomSounds
   readonly property var eventSoundPaths: notificationSettings.eventSounds
   property var soundQueue: []
@@ -761,6 +762,7 @@ Item {
       property bool roomSounds: true
       property bool selfRoomSounds: true
       property bool audioControlSounds: true
+      property bool screenShareSounds: true
       property var eventSounds: ({})
     }
   }
@@ -790,6 +792,7 @@ Item {
   function notificationSoundCommand(kind) {
     if (notificationMuted || notificationVolume <= 0) return []
     if (kind.indexOf("audio_") === 0 && !audioControlSounds) return []
+    if (kind.indexOf("screen_share_") === 0 && !screenShareSounds) return []
     if (kind.indexOf("self_") === 0 && !selfRoomNotificationSounds) return []
     if (kind.indexOf("member_") === 0 && !roomNotificationSounds) return []
     var soundDirectory = Quickshell.env("WISP_SOUND_DIR") || configHome + "/quickshell/wisp/assets"
@@ -914,6 +917,7 @@ Item {
     var nextFlat=flattenedSnapshot(next)
     var incoming = ChatLogic.incomingConversationIds(previousFlat, nextFlat, eventName)
     var roomEvents = roomEventsForSnapshots(receivedSnapshot ? snapshot : null,next,eventName)
+    var shareEvents = ChatLogic.screenShareSoundEvents(receivedSnapshot ? snapshot : null,next,eventName)
     var knownInvites = (previousFlat ? previousFlat.room_invitations : []).map(function(i) { return String(i.server_id)+":"+String(i.id) })
     var newInvite = receivedSnapshot && nextFlat.room_invitations.some(function(i) {
       return Date.parse(i.expires_at) > Date.now() && knownInvites.indexOf(String(i.server_id)+":"+String(i.id)) < 0
@@ -936,6 +940,7 @@ Item {
     receivedSnapshot = true
     if (notificationSoundsEnabled && audioCue) playNotificationSound(audioCue)
     if (notificationSoundsEnabled && newInvite) playNotificationSound("room_invite")
+    if (notificationSoundsEnabled) shareEvents.forEach(function(kind) { root.playNotificationSound(kind) })
     if (notificationSoundsEnabled) roomEvents.forEach(function(kind) { if (kind.indexOf("audio_") === 0 && !audioControlSounds) return []
     if (kind.indexOf("self_") !== 0) root.playNotificationSound(kind) })
     voiceRecovery.observe(next, eventName)

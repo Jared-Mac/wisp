@@ -74,3 +74,25 @@ function roomSoundEvents(previous, next, eventName) {
   if (newMembers.some(function(id) { return oldMembers.indexOf(id) < 0 })) events.push("member_join")
   return events
 }
+
+function screenShareSoundEvents(previous, next, eventName) {
+  if (!previous || !next || !eventName || ["snapshot", "server_reconnected", "server_disconnected"].indexOf(eventName)>=0) return []
+  var before=previous.self || {}, after=next.self || {}
+  var roomId=String(after.hangout_id || "")
+  var serverId=String(next.voice_server_id || next.selected_server_id || "")
+  if (!roomId || String(before.hangout_id || "")!==roomId
+      || String(previous.voice_server_id || previous.selected_server_id || "")!==serverId
+      || !(before.media || {}).livekit_connected || !(after.media || {}).livekit_connected) return []
+  function sharers(snapshot) {
+    var states=snapshot.server_states || []
+    var state=states.length ? states.filter(function(s){return String(s.server.id)===serverId})[0] : snapshot
+    if (!state || (state.server || {}).connected===false) return null
+    var room=(state.hangouts || []).filter(function(h){return String(h.id)===roomId})[0]
+    return room ? (room.sharing || []).map(function(p){return String(p.id)}) : null
+  }
+  var oldSharing=sharers(previous), newSharing=sharers(next), result=[]
+  if (!oldSharing || !newSharing) return []
+  if (oldSharing.some(function(id){return newSharing.indexOf(id)<0})) result.push("screen_share_stop")
+  if (newSharing.some(function(id){return oldSharing.indexOf(id)<0})) result.push("screen_share_start")
+  return result
+}
