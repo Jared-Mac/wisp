@@ -4,6 +4,7 @@ import "../components"
 
 Column {
   id: root
+  objectName:"serverPeopleSection"
   required property var bridge
   required property var theme
   readonly property string serverId:String(bridge.activeServer.id)
@@ -15,11 +16,11 @@ Column {
     ChatButton {
       id:heading;objectName:"members-collapse";theme:root.theme
       visible:root.width>=root.theme.space(56);width:visible ? Math.max(0,parent.width-browse.width-parent.spacing) : 0;height:root.theme.space(30)
-      text:"Members · "+root.state.people.length;iconName:"people";iconOnly:width<root.theme.space(110);forceIcon:iconOnly;quiet:true;textAlignment:Text.AlignLeft
-      Accessible.name:root.bridge.friendPreferences.membersCollapsed ? "Expand server members" : "Collapse server members"
+      text:(root.theme.tui ? "/people · " : "People · ")+root.state.people.length;iconName:"people";iconOnly:width<root.theme.space(110);forceIcon:iconOnly;quiet:true;textAlignment:Text.AlignLeft
+      Accessible.name:root.bridge.friendPreferences.membersCollapsed ? "Expand people" : "Collapse people"
       onClicked:root.bridge.friendPreferences.setMemberPreference("membersCollapsed",!root.bridge.friendPreferences.membersCollapsed)
     }
-    ChatButton {id:browse;objectName:"browseMembers";theme:root.theme;text:"Search members";iconName:"search";iconOnly:true;forceIcon:true;width:Math.min(root.theme.space(28),parent.width);height:root.theme.space(28);onClicked:directory.showServer(root.serverId)}
+    ChatButton {id:browse;objectName:"browseMembers";theme:root.theme;text:"Search people";iconName:"search";iconOnly:true;forceIcon:true;width:Math.min(root.theme.space(28),parent.width);height:root.theme.space(28);onClicked:directory.showServer(root.serverId)}
   }
   ServerMemberList {
     id:members;objectName:"sidebarServerMembers";width:parent.width

@@ -16,14 +16,11 @@ Column {
   width: parent ? parent.width : 0
   spacing: root.theme.space(1)
 
-  ServerPeopleDialog { id: directory; bridge:root.bridge; theme:root.theme }
-  Row {
-    width:parent.width;spacing:root.theme.space(2)
   Button {
     id: collapseButton
     visible: root.showHeader && !root.tiny
     objectName: "friends-collapse"
-    width: visible ? Math.max(0,parent.width-peopleButton.width-parent.spacing) : 0
+    width: visible ? parent.width : 0
     height: root.collapsible ? root.theme.space(root.theme.tui ? 26 : 30) : root.theme.space(20)
     enabled: root.collapsible
     Accessible.name: root.collapsed ? "Expand friends" : "Collapse friends"
@@ -51,17 +48,6 @@ Column {
     }
   }
 
-    ChatButton {
-      id:peopleButton;objectName:"openServerPeople";theme:root.theme;text:"Members"
-      readonly property int incoming:root.bridge.friendships.state(root.bridge.activeServer.id).people.filter(function(p){return p.relationship==="incoming"}).length
-      iconName:"people";iconOnly:root.showHeader || root.tiny;forceIcon:iconOnly;quiet:incoming===0;primary:incoming>0
-      Accessible.name:"Server members"+(incoming ? " · "+incoming+" friend requests" : " and friend requests")
-      width:root.showHeader || root.tiny ? Math.min(root.theme.space(28),parent.width) : parent.width;height:root.theme.space(28)
-      onClicked:directory.showServer(root.bridge.activeServer.id)
-      Rectangle {visible:peopleButton.incoming>0;anchors.right:parent.right;anchors.top:parent.top;width:7;height:7;radius:4;color:root.theme.accent;border.width:1;border.color:root.theme.surface}
-    }
-  }
-
   NowView {
     objectName: "friendCalls"
     width: parent.width; visible: !root.collapsed && visibleHangouts.length > 0
@@ -78,10 +64,6 @@ Column {
       theme: root.theme; adaptive: root.adaptive
       onSelected: root.selected()
     }
-  }
-  ServerMembersView {
-    width:parent.width;visible:root.bridge.friendPreferences.showMembers
-    bridge:root.bridge;theme:root.theme
   }
   Text {
     width: parent.width; wrapMode: Text.WordWrap

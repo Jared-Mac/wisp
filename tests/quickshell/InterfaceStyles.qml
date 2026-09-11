@@ -72,6 +72,8 @@ ShellRoot {
           input.wait(100)
           test.check(canvas.width === w, "fixture resized to " + w)
           var bar = test.find(page,"currentCallBar"), rooms = test.find(page,"roomsPane"), friends = test.find(page,"friendsPane")
+          var serverPeople = test.find(rooms,"serverPeopleSection")
+          test.check(!!serverPeople && !!test.find(serverPeople,"sidebarServerMembers"), "People list lives in the server pane at " + style + "/" + w)
           var pos = bar.mapToItem(page,0,0), friendPos = friends.mapToItem(page,0,0)
           test.check(bar.visible && pos.y + bar.height <= friendPos.y, "voice controls remain above friends at " + style + "/" + w)
           var mute = test.find(bar,"mediaAction-mute"), camera = test.find(bar,"mediaAction-camera")

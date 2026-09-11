@@ -12,7 +12,6 @@ Item {
   readonly property var accountSettings: JSON.parse(JSON.stringify(preferences.accounts[account] || ({})))
   readonly property var favorites: Array.isArray(accountSettings.favorites) ? accountSettings.favorites : []
   readonly property bool collapsed: accountSettings.collapsed === true
-  readonly property bool showMembers: accountSettings.showMembers === true
   readonly property bool membersCollapsed: accountSettings.membersCollapsed === true
   property string error: ""
   function save(favorites, collapsed) {

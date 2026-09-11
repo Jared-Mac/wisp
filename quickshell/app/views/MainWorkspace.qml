@@ -107,6 +107,7 @@ Item {
         }
         SpotsView { width: parent.width; bridge: root.bridge; theme: root.theme; mainApp: true; adaptive: true; horizontal: root.stacked }
         ServerChannelsView { width: parent.width; bridge: root.bridge; theme: root.theme; showHeader: true; adaptive: true }
+        ServerMembersView { width: parent.width; bridge: root.bridge; theme: root.theme }
 
       }
     }
