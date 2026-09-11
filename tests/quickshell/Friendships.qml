@@ -9,6 +9,8 @@ import "app/views" as Views
 ShellRoot {
   id:test
   property bool failed:false
+  property bool transportConnected:false
+  property bool dropNextList:false
   function check(ok,label){if(!ok){failed=true;console.error("FRIENDSHIPS_FAILED: "+label)}}
   function find(item,name,seen){
     if(!item)return null;seen=seen || [];if(seen.indexOf(item)>=0)return null;seen.push(item)
@@ -22,7 +24,8 @@ ShellRoot {
   function ackLists(){Object.keys(bridge.requests).forEach(function(id){var r=bridge.requests[id];if(r.kind==="friendship" && r.action==="list")test.ack(id,true,r.server_id==="other" ? [{id:"otherSelf",display_name:"Me",relationship:"self"},{id:"river",display_name:"River elsewhere",relationship:"none"}] : test.catalog)})}
   function last(){return bridge.sent[bridge.sent.length-1]}
   Wisp.WispTheme {id:theme;profile:Quickshell.env("WISP_TEST_THEME") || "soft_graphite"}
-  Wisp.WispBridge {id:bridge;property var sent:[];function send(name,args){var id="fake-"+(++requestId);sent.push({id:id,name:name,args:args});return id}}
+  Wisp.WispBridge {id:bridge;property var sent:[];function send(name,args){if(name==="list_people" && test.dropNextList){test.dropNextList=false;return}var id="fake-"+(++requestId);sent.push({id:id,name:name,args:args});return id}}
+  Binding {target:bridge.friendships;property:"transportReady";value:test.transportConnected && bridge.receivedSnapshot && !bridge.updates.preparing}
   Component {id:savedPreferences;Wisp.WispFriendPreferences {account:"self"}}
   FloatingWindow {
     id:window;visible:true;implicitWidth:760;implicitHeight:700;color:theme.background
@@ -47,6 +50,11 @@ ShellRoot {
     bridge.applySnapshot(data)
   }
   Timer {running:true;interval:500;onTriggered:{
+    test.check(!bridge.sent.some(function(c){return c.name==="list_people"}) && !bridge.friendships.state("local").error,"startup waits for the client without a reconnect error")
+    test.dropNextList=true;test.transportConnected=true;input.wait(40)
+    test.check(bridge.friendships.state("local").waiting && !bridge.friendships.state("local").error,"a blocked request stays pending")
+    // No server snapshot or voice action is needed to retry a dropped send.
+    input.wait(1100)
     test.ackLists();input.wait(40)
     test.check(!bridge.friendPreferences.membersCollapsed,"server member section is expanded by default")
     test.check(bridge.friendships.state("local").people.length===4,"directory includes nonfriends and self")
@@ -54,6 +62,15 @@ ShellRoot {
     test.check(test.find(serverPeople,"sidebarServerMembers").visible && test.find(trayPeople,"sidebarServerMembers").visible,"People lists are visible in server sections")
     test.check(test.find(serverPeople,"sidebarServerMembers").count===2 && test.find(trayPeople,"sidebarServerMembers").count===2,"sidebar excludes self and existing friends in main and tray")
     test.check(serverPeople.otherMembers.every(function(p){return p.id!=="self" && p.id!=="friend"}),"Friends are not duplicated in Other members")
+    bridge.updates.info={phase:"preparing"};bridge.friendships.refresh("local",true);input.wait(20)
+    test.check(bridge.friendships.state("local").waiting && serverPeople.otherMembers.length===2,"update preparation keeps the loaded directory visible")
+    bridge.updates.info={phase:"updated"};input.wait(30)
+    test.check(bridge.friendships.state("local").loading && !bridge.friendships.state("local").waiting,"finishing an update retries without a server reconnect")
+    test.ackLists();input.wait(20)
+    bridge.selectServer("other");input.wait(30)
+    test.check(serverPeople.serverId==="other" && trayPeople.serverId==="other" && serverPeople.otherMembers.length===1 && serverPeople.otherMembers[0].display_name==="River elsewhere","both lists follow the selected server without voice")
+    bridge.selectServer("local");input.wait(30)
+    test.check(serverPeople.otherMembers.length===2 && !bridge.snapshot.self.hangout_id && bridge.sent.every(function(c){return c.name!=="join" && c.name!=="join_friend"}),"returning to the server restores its members without joining a room")
     var liveFriends=JSON.parse(JSON.stringify(bridge.snapshot));liveFriends.server_states[0].friends.push({id:"river",display_name:"River",online:true,presence:"open"});bridge.applySnapshot(liveFriends);input.wait(20)
     test.check(serverPeople.otherMembers.length===1,"snapshot friendship removes a duplicate even before the directory refresh")
     liveFriends.server_states[0].friends.pop();bridge.applySnapshot(liveFriends);input.wait(20)

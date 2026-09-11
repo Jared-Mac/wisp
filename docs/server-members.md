@@ -23,6 +23,9 @@ until the user explicitly requests it.
 Member catalogs refresh on connection, account profile changes, friendship
 events and manual refresh. Ordinary presence snapshots do not fetch the
 directory. Open member menus and keyboard focus survive request-state changes.
+The sidebar loads the selected server's directory independently of voice.
+Requests deferred during startup or client installation retry when the client
+is ready, including when the server itself remained connected throughout.
 
 Validation:
 

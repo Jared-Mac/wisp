@@ -34,7 +34,7 @@ Dialog {
       height:Math.max(40,parent.height-serverPicker.height-search.height-requestsOnly.height-status.height-retry.height-parent.spacing*5)
       people:root.people;bridge:root.bridge;theme:root.theme
       Text {anchors.centerIn:parent;width:parent.width;horizontalAlignment:Text.AlignHCenter;wrapMode:Text.Wrap;visible:members.count===0
-        text:root.state.loading ? "Loading people…" : root.state.error ? "" : !root.bridge.friendships.connected(root.serverId) ? "Reconnect to view people" : requestsOnly.checked ? "No friend requests" : "No matching people"
+        text:root.state.loading || root.state.waiting ? "Loading people…" : root.state.error ? "" : !root.bridge.friendships.connected(root.serverId) ? "Server offline" : requestsOnly.checked ? "No friend requests" : "No matching people"
         color:root.theme.muted;font.family:root.theme.font.family;font.pixelSize:root.theme.font.caption}
     }
     Text {id:status;width:parent.width;textFormat:Text.PlainText;wrapMode:Text.Wrap;text:root.state.error || root.state.feedback || "";color:root.state.error ? root.theme.danger : root.theme.muted;font.family:root.theme.font.family;font.pixelSize:root.theme.font.caption}

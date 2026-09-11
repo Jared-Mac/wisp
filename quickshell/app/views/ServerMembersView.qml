@@ -9,6 +9,10 @@ Column {
   required property var theme
   readonly property string serverId:String(bridge.activeServer.id)
   readonly property var state:bridge.friendships.state(serverId)
+  function ensureMembers() { if (visible) bridge.friendships.ensure(serverId) }
+  Component.onCompleted: Qt.callLater(ensureMembers)
+  onServerIdChanged: Qt.callLater(ensureMembers)
+  onVisibleChanged: if (visible) Qt.callLater(ensureMembers)
   readonly property var otherMembers:state.people.filter(function(person) {
     var relationship=bridge.friendships.relationship(person)
     return relationship!=="self" && relationship!=="friend"
@@ -39,7 +43,7 @@ Column {
   }
   Text {
     width:parent.width;visible:!root.bridge.friendPreferences.membersCollapsed && !!text
-    textFormat:Text.PlainText;wrapMode:Text.Wrap;text:root.state.error || root.state.feedback || (root.state.loading && !root.state.ready ? "Loading…" : root.state.ready && !root.otherMembers.length ? "No other members" : "")
+    textFormat:Text.PlainText;wrapMode:Text.Wrap;text:root.state.error || root.state.feedback || ((root.state.loading || root.state.waiting) && !root.state.ready ? "Loading…" : root.state.ready && !root.otherMembers.length ? "No other members" : "")
     color:root.state.error ? root.theme.danger : root.theme.muted;font.family:root.theme.font.family;font.pixelSize:root.theme.font.caption
   }
 }

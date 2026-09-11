@@ -5,6 +5,8 @@ Item {
   required property var bridge
   property var catalogs: ({})
   property string connectionKey: ""
+  property bool transportReady: bridge.daemonConnected && bridge.receivedSnapshot && !bridge.updates.preparing
+  onTransportReadyChanged: if (transportReady) Qt.callLater(sync)
   readonly property bool busy: Object.keys(catalogs).some(function(id) { return !!catalogs[id].action })
   function state(serverId) { return catalogs[String(serverId)] || {people:[],ready:false,loading:false,action:"",error:"",feedback:""} }
   function put(serverId, patch) { catalogs=bridge.replaceEntry(catalogs,String(serverId),Object.assign({},state(serverId),patch)) }
@@ -17,13 +19,20 @@ Item {
     return match ? match.relationship : "none"
   }
   function sync(eventName) {
+    if (!transportReady) return
     var ids=bridge.serverStates.filter(function(s){return s.server.connected!==false}).map(function(s){return String(s.server.id)})
     var key=bridge.serverStates.map(function(s){return String(s.server.id)+":"+String((s.self || {}).id)+":"+String(s.server.connected)}).join("|")
     if (key!==connectionKey) {
       connectionKey=key; catalogs=({}); ids.forEach(refresh)
     } else if (["friend_requests_changed","friendship_changed","account_profile_changed","server_reconnected"].indexOf(eventName)>=0) {
       ids.forEach(function(id) { refresh(id,true) })
+    } else {
+      ids.forEach(function(id) { if (state(id).waiting) refresh(id) })
     }
+  }
+  function ensure(serverId) {
+    var current=state(serverId)
+    if (!current.ready || current.waiting) refresh(serverId)
   }
   function reset() {
     Object.keys(bridge.requests).forEach(function(id) { if(bridge.requests[id].kind==="friendship") delete bridge.requests[id] })
@@ -33,10 +42,11 @@ Item {
     serverId=String(serverId)
     if (!serverId || !connected(serverId)) return
     if (state(serverId).loading || state(serverId).action) { if(invalidate) put(serverId,{dirty:true}); return }
+    if (!transportReady) { put(serverId,{waiting:true,error:""}); return }
     var id=bridge.send("list_people",{server_id:serverId})
-    if (!id) { put(serverId,{error:"Reconnect to view server members."}); return }
+    if (!id) { put(serverId,{waiting:true,error:""}); return }
     bridge.requests[id]={kind:"friendship",server_id:serverId,action:"list",connectionKey:connectionKey}
-    put(serverId,{loading:true,error:"",requestId:id,dirty:false})
+    put(serverId,{loading:true,waiting:false,error:"",requestId:id,dirty:false})
   }
   function act(person, action) {
     person=bridge.scopedParticipant(person)
@@ -66,6 +76,12 @@ Item {
     put(serverId,patch)
     if (patch.feedback) feedbackTimer.restart()
     if (dirty) refresh(serverId)
+  }
+  Timer {
+    // Retry only requests that could not be sent; loaded catalogs never poll.
+    interval:1000;repeat:true
+    running:root.transportReady && Object.keys(root.catalogs).some(function(id) { return root.connected(id) && !!root.state(id).waiting })
+    onTriggered:root.sync()
   }
   Timer {
     id:feedbackTimer;interval:6000

@@ -1,0 +1,1 @@
+- Fixed the server member list getting stuck on “Reconnect” after startup or an update. It now loads for the selected server without joining voice.
