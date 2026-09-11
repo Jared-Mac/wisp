@@ -10,6 +10,7 @@ Column {
   required property string conversationId
   property bool spacious: false
   property bool autoGrow: false
+  property bool compact: false
   readonly property alias emojiPicker: composerEmojiPicker
   readonly property alias mentionPicker: mentionPicker
   readonly property var mentionQuery: Mentions.query(editor.text,editor.cursorPosition)
@@ -40,7 +41,8 @@ Column {
   }
   signal editorFocused()
   property real maximumEditorHeight: theme.space(160)
-  readonly property real naturalEditorHeight: Math.max(theme.space(40), editor.contentHeight + editor.topPadding + editor.bottomPadding + (theme.tui ? theme.spacing.sm : theme.spacing.lg) * 2)
+  readonly property real editorMargin: compact ? theme.space(4) : theme.tui ? theme.spacing.sm : theme.spacing.lg
+  readonly property real naturalEditorHeight: Math.max(theme.space(40), editor.contentHeight + editor.topPadding + editor.bottomPadding + editorMargin * 2)
   property real editorHeight: theme.space(theme.tui && !spacious ? 44 : spacious ? 106 : 66)
   readonly property var attachments: bridge.attachmentsFor(conversationId)
   readonly property var conversation: bridge.conversationById(conversationId)
@@ -150,7 +152,7 @@ Column {
     id: messageBox
     objectName: "composerMessageBox"
     width: parent.width
-    height: root.autoGrow ? Math.min(root.maximumEditorHeight, root.naturalEditorHeight) : root.editorHeight
+    height: root.autoGrow || root.compact ? Math.min(root.maximumEditorHeight, root.naturalEditorHeight) : root.editorHeight
     radius: root.theme.cornerRadius
     color: root.theme.comfortable ? root.theme.surface : root.theme.tui ? root.theme.background : root.theme.alpha(root.theme.foreground, 0.06)
     border.width: editor.activeFocus || root.theme.tui ? 1 : 0
@@ -164,7 +166,7 @@ Column {
     ScrollView {
       objectName: "composerTextViewport"
       anchors.fill: parent
-      anchors.margins: root.theme.tui ? root.theme.spacing.sm : root.theme.spacing.lg
+      anchors.margins: root.editorMargin
       anchors.leftMargin: root.theme.friendly ? root.theme.space(42) : root.theme.tui && !root.theme.comfortable ? root.theme.space(24) : root.theme.spacing.lg
       anchors.rightMargin: sendButton.width + emojiButton.width + root.theme.spacing.lg * 3
       TextArea {
@@ -183,6 +185,9 @@ Column {
         font.family: root.theme.font.family
         font.pixelSize: root.theme.font.body
         wrapMode: TextEdit.Wrap
+        verticalAlignment: root.compact ? TextEdit.AlignVCenter : TextEdit.AlignTop
+        Binding { target: editor; property: "topPadding"; value: 0; when: root.compact; restoreMode: Binding.RestoreBindingOrValue }
+        Binding { target: editor; property: "bottomPadding"; value: 0; when: root.compact; restoreMode: Binding.RestoreBindingOrValue }
         textFormat: TextEdit.PlainText
         selectByMouse: true
         background: null

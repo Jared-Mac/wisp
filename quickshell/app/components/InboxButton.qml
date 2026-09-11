@@ -15,7 +15,7 @@ ChatButton {
   onClicked: inbox.open()
   Popup {
     id: inbox; objectName: "chatInboxPopup"
-    parent: Overlay.overlay
+    parent: root.Overlay.overlay || root
     anchors.centerIn: parent
     width: Math.min(root.theme.space(400), parent.width-root.theme.space(24))
     height: Math.min(parent.height-root.theme.space(24),root.theme.space(64)+entries.contentHeight)

@@ -23,7 +23,9 @@ ChatButton {
   Timer {id:closeDelay;interval:250;onTriggered:if(!root.hovered && !inside.hovered && !root.keepOpen)peek.close()}
   Popup {
     id:peek;objectName:root.objectName+"Popup"
-    parent:Overlay.overlay
+    // Resolve through the persistent button: a tray close destroys its window
+    // and overlay, while the button remains for the next popup lifecycle.
+    parent:root.Overlay.overlay || root
     width:Math.min(root.panelWidth,parent ? parent.width-16 : root.panelWidth)
     height:Math.min(body.implicitHeight+padding*2,parent ? parent.height-24 : root.theme.space(360),root.theme.space(420))
     padding:root.theme.space(10)

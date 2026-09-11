@@ -153,6 +153,24 @@ ShellRoot {
         }
         trigger.popup.close()
       }
+      // Layer-shell panels recreate their backing window when reopened.
+      // Exercise clicks and loaded content, not only the popup's opened flag.
+      for(var cycle=0;cycle<3;cycle++) {
+        window.visible=false;input.wait(100);window.visible=true;input.wait(150)
+        for(var menuName of ["trayRoomsPeek","trayFriendsPeek"]) {
+          var menuButton=test.find(page,menuName)
+          input.mouseClick(menuButton,menuButton.width/2,menuButton.height/2);input.wait(150)
+          test.check(menuButton.popup.opened && menuButton.popup.height>40,"click opens "+menuName+" after reopening the tray")
+          var expected=menuName==="trayRoomsPeek" ? "savedRoom-quiet" : "favorite-riley"
+          var menuEntry=test.find(menuButton.popup.contentItem,expected)
+          test.check(!!menuEntry && menuEntry.visible && menuEntry.width>0,"reopened menu lists "+expected)
+          if(menuName==="trayRoomsPeek" && menuEntry) {
+            var join=test.find(menuEntry,"joinRoom-quiet")
+            test.check(join && join.visible && join.enabled,"room picker offers an available Join button")
+          }
+          menuButton.popup.close();input.mouseMove(window.contentItem,10,10);input.wait(50)
+        }
+      }
       test.find(page,"trayChatFocusToggle").clicked();input.wait(120)
       test.check(!!test.find(page,"barWorkspace") && test.find(page,"trayComposerEditor").text==="Draft survives popup resizing","leaving focus restores the layout and draft")
       test.check(bridge.friendPreferences.trayCollapsed===savedFriends && bridge.friendPreferences.trayMembersCollapsed===savedMembers,"focus mode preserves section choices")

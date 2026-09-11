@@ -242,6 +242,7 @@ Column {
       }
       ChatComposer {
         id: composer
+        compact: true
         onEditorFocused: feed.engageReader()
         width: parent.width
         bridge: root.bridge; theme: root.theme; conversationId: root.bridge.activeConversationId
