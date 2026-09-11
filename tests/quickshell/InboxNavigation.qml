@@ -11,6 +11,11 @@ ShellRoot {
   property int sequence:0
   function check(ok,label){if(!ok){failed=true;console.error("INBOX_FAILED: "+label)}}
   function find(item,name){if(!item)return null;if(item.objectName===name)return item;var children=item.children || [];for(var i=0;i<children.length;i++){var found=find(children[i],name);if(found)return found}if(item.contentItem && children.indexOf(item.contentItem)<0)return find(item.contentItem,name);return null}
+  function pingReply(ms,ok) {
+    var id=Object.keys(bridge.requests).filter(function(id){return bridge.requests[id].kind==="serverPing"})[0]
+    check(!!id,"ping request is pending")
+    if(id)bridge.finishRequest({id:id,ok:ok!==false,value:{ping_ms:ms}})
+  }
   function incoming(id,event){
     var data=JSON.parse(JSON.stringify(bridge.snapshot)),state=data.server_states[0]
     var c=state.conversations.filter(function(c){return c.id===id})[0]
@@ -92,6 +97,18 @@ ShellRoot {
     var selector=test.find(workspace,"activeServerSelector");start=bridge.sent.length
     input.mouseMove(selector,8,8);input.wait(30);bridge.refreshServerPing("local")
     var pings=bridge.sent.slice(start).filter(function(c){return c.name==="server_ping"});test.check(pings.length===1,"hover ping is scoped and cached")
+    test.pingReply(408);input.wait(20)
+    test.check(bridge.serverPings.local.pending && bridge.serverPings.local.ms===undefined,"a high first sample is hidden while it is confirmed")
+    test.check(bridge.sent.slice(start).filter(function(c){return c.name==="server_ping"}).length===2,"high latency triggers one immediate recheck")
+    test.pingReply(29);input.wait(20)
+    test.check(bridge.serverPings.local.ms===29 && !bridge.serverPings.local.pending,"a one-off spike is replaced by the confirmation reading")
+    bridge.refreshServerPing("local");test.check(bridge.sent.slice(start).filter(function(c){return c.name==="server_ping"}).length===2,"confirmed reading retains the ten-second cache")
+    bridge.serverPings=({});bridge.refreshServerPing("local");test.pingReply(408);test.pingReply(220)
+    test.check(bridge.serverPings.local.ms===220 && !bridge.serverPings.local.pending,"persistent high latency is displayed without repeated retries")
+    bridge.serverPings=({});start=bridge.sent.length;bridge.refreshServerPing("local");test.pingReply(100)
+    test.check(bridge.serverPings.local.ms===100 && bridge.sent.length===start+1,"100 ms does not trigger a recheck")
+    bridge.serverPings=({});bridge.refreshServerPing("local");test.pingReply(408);test.pingReply(null,false)
+    test.check(bridge.serverPings.local.ms===null && !bridge.serverPings.local.pending,"failed confirmation does not publish an unverified spike")
     var soundboard=test.find(workspace,"audioSoundboardButton"),mute=test.find(workspace,"muteControl")
     test.check(soundboard!==null && Math.abs(soundboard.mapToItem(canvas,0,0).y-mute.mapToItem(canvas,0,0).y)<2,"soundboard sits beside mute and deafen")
     var disconnect=test.find(workspace,"currentCallDisconnect"),share=test.find(workspace,"mediaAction-share"),camera=test.find(workspace,"mediaAction-camera")

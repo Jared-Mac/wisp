@@ -46,6 +46,7 @@ Item {
   }
   property string lastAppliedVolumes: ""
   onDaemonConnectedChanged: {
+    if (!daemonConnected) serverPings=({})
     if (!daemonConnected) friendships.reset()
     if (!daemonConnected) messageActions.disconnected()
     chatExtras.invalidate()
@@ -87,12 +88,15 @@ Item {
   function refreshServerPing(id) {
     id=String(id)
     var previous=serverPings[id]
-    if (previous && Date.now()-previous.checkedAt<10000) return
+    if (previous && (previous.pending || Date.now()-previous.checkedAt<10000)) return
+    requestServerPing(id,false)
+  }
+  function requestServerPing(id, confirmation) {
     var request=send("server_ping",{server_id:id})
     if (request) {
-      serverPings=replaceEntry(serverPings,id,{pending:true,checkedAt:Date.now()})
-      requests[request]={kind:"serverPing",serverId:id}
-    }
+      serverPings=replaceEntry(serverPings,id,{pending:true,checkedAt:Date.now(),requestId:request})
+      requests[request]={kind:"serverPing",serverId:id,confirmation:confirmation}
+    } else serverPings=replaceEntry(serverPings,id,{pending:false,checkedAt:Date.now(),ms:null})
   }
   function openPendingChat(id) { requestConversationTile(id, false, true) }
   function directFor(person) {
@@ -1270,7 +1274,12 @@ Item {
       return
     }
     if (action.kind === "serverPing") {
-      serverPings=replaceEntry(serverPings,action.serverId,{pending:false,checkedAt:Date.now(),ms:message.ok ? Number(value.ping_ms) : null});return
+      if ((serverPings[action.serverId] || {}).requestId!==String(message.id)) return
+      var measured=message.ok && value.ping_ms!==undefined && value.ping_ms!==null ? Number(value.ping_ms) : NaN
+      if (measured>100 && isFinite(measured) && !action.confirmation) {
+        requestServerPing(action.serverId,true);return
+      }
+      serverPings=replaceEntry(serverPings,action.serverId,{pending:false,checkedAt:Date.now(),ms:isFinite(measured) && measured>=0 ? measured : null});return
     }
     if (action.kind === "friendship") { friendships.finish(message,action); return }
     if (action.kind === "messageAction") { messageActions.finish(message,action); return }
