@@ -27,8 +27,12 @@ ShellRoot {
   FloatingWindow {
     id:window;visible:true;implicitWidth:760;implicitHeight:700;color:theme.background
     Row {id:scene;anchors.fill:parent;anchors.margins:16;spacing:16
-      Views.FriendsView {id:friends;width:230;bridge:bridge;theme:theme;collapsible:true;adaptive:true}
-      Column {width:parent.width-friends.width-parent.spacing;spacing:16
+      Column {id:leftSidebar;width:230;spacing:8
+        Views.ServerMembersView {id:serverPeople;width:parent.width;bridge:bridge;theme:theme}
+        Views.FriendsView {id:friends;width:parent.width;bridge:bridge;theme:theme;collapsible:true;adaptive:true}
+      }
+      Column {width:parent.width-leftSidebar.width-parent.spacing;spacing:16
+        Views.ServerMembersView {id:trayPeople;width:parent.width;bridge:bridge;theme:theme}
         Views.FriendsView {id:tray;width:parent.width;bridge:bridge;theme:theme;collapsible:true}
         Components.MessageFeed {id:feed;width:parent.width;height:220;bridge:bridge;theme:theme;conversationId:"local::chat"}
       }
@@ -46,9 +50,10 @@ ShellRoot {
     test.ackLists();input.wait(40)
     test.check(bridge.friendships.state("local").people.length===4,"directory includes nonfriends and self")
     var before=bridge.sent.length;bridge.friendships.sync("presence_changed");test.check(bridge.sent.length===before,"ordinary presence updates do not refetch directory")
-    test.find(friends,"openServerPeople").clicked();input.wait(30);test.ackLists();input.wait(20)
-    var dialog=test.find(friends,"serverPeopleDialog"),list=test.find(dialog,"serverPeopleList"),search=test.find(dialog,"memberSearch")
-    test.check(dialog.opened && list.count===4,"server directory accessible beside Friends")
+    test.check(test.find(serverPeople,"sidebarServerMembers").visible && test.find(trayPeople,"sidebarServerMembers").visible,"People lists are visible in server sections")
+    test.find(serverPeople,"browseMembers").clicked();input.wait(30);test.ackLists();input.wait(20)
+    var dialog=test.find(serverPeople,"serverPeopleDialog"),list=test.find(dialog,"serverPeopleList"),search=test.find(dialog,"memberSearch")
+    test.check(dialog.opened && list.count===4,"server directory accessible from People")
     search.text="riv";input.wait(30);test.check(list.count===1,"search finds nonfriend")
     var add=test.find(dialog,"serverMemberAction-river");add.clicked()
     test.check(test.last().name==="send_friend_request" && test.last().args.server_id==="local" && test.last().args.user_id==="river","quick add uses member ID and server scope")
@@ -65,15 +70,15 @@ ShellRoot {
     var incomingMenu=test.find(test.find(dialog,"serverMember-sage").parent,"participantMenu");test.find(incomingMenu,"addFriend").clicked()
     test.check(test.last().name==="accept_friend_request","incoming request requires acceptance")
     test.catalog=test.catalog.map(function(p){return Object.assign({},p,p.id==="sage" ? {relationship:"friend"} : {})});test.ack(test.last().id,true);incomingMenu.close();only.checked=false
-    var toggle=test.find(dialog,"showServerMembers");toggle.checked=true;toggle.toggled();input.wait(40);dialog.close();input.wait(30)
-    test.check(test.find(friends,"sidebarServerMembers").visible && test.find(tray,"sidebarServerMembers").visible,"optional independent list appears below friends on main and tray")
+    dialog.close();input.wait(30)
     bridge.friendPreferences.toggleCollapsed();input.wait(20)
-    test.check(test.find(friends,"sidebarServerMembers").visible,"collapsing Friends does not hide server members")
-    var restored=savedPreferences.createObject(window.contentItem);input.wait(80);test.check(restored.showMembers && restored.collapsed,"member preference persists and preserves friend collapse");restored.destroy()
-    friends.showHeader=false;input.wait(20);test.check(test.find(friends,"openServerPeople").visible,"member access remains available with frame-style headers");friends.showHeader=true
-    friends.width=24;input.wait(20)
-    test.check(test.find(friends,"openServerPeople").width<=24,"member access fits minimum sidebar")
-    friends.width=230;bridge.friendPreferences.toggleCollapsed()
+    test.check(test.find(serverPeople,"sidebarServerMembers").visible,"collapsing Friends does not hide People")
+    test.find(serverPeople,"members-collapse").clicked();input.wait(20)
+    var restored=savedPreferences.createObject(window.contentItem);input.wait(80);test.check(restored.membersCollapsed && restored.collapsed,"People and Friends collapse preferences persist independently");restored.destroy()
+    test.find(serverPeople,"members-collapse").clicked();bridge.friendPreferences.toggleCollapsed()
+    leftSidebar.width=24;input.wait(20)
+    test.check(test.find(serverPeople,"browseMembers").width<=24,"People search fits minimum server sidebar")
+    leftSidebar.width=230
     test.find(feed,"messageAuthor-message").clicked();input.wait(20);test.ackLists();input.wait(20)
     var authorMenu=test.find(feed,"participantMenu");test.check(authorMenu.opened && test.find(authorMenu,"addFriend").visible && !test.find(authorMenu,"participantMenuVolume").visible,"chat author opens Add friend without voice controls")
     authorMenu.close()
@@ -82,7 +87,7 @@ ShellRoot {
     before=bridge.sent.length;bridge.friendships.act({id:"self",server_id:"local"},"send");bridge.friendships.act({id:"friend",server_id:"local"},"send");test.check(bridge.sent.length===before,"self and existing friends cannot receive requests")
     bridge.friendships.sync("friend_requests_changed");test.check(bridge.sent.length===before+2,"request events refresh connected servers");test.ackLists()
     if(test.failed){Qt.quit();return}
-    if(Quickshell.env("WISP_FRIENDSHIPS_SCREENSHOT")){test.find(friends,"openServerPeople").clicked();test.ackLists();input.wait(60);dialog.contentItem.parent.grabToImage(function(im){im.saveToFile(Quickshell.env("WISP_FRIENDSHIPS_SCREENSHOT"));console.log("FRIENDSHIPS_OK");Qt.quit()})}
+    if(Quickshell.env("WISP_FRIENDSHIPS_SCREENSHOT")){test.find(serverPeople,"browseMembers").clicked();test.ackLists();input.wait(60);dialog.contentItem.parent.grabToImage(function(im){im.saveToFile(Quickshell.env("WISP_FRIENDSHIPS_SCREENSHOT"));console.log("FRIENDSHIPS_OK");Qt.quit()})}
     else {console.log("FRIENDSHIPS_OK");Qt.quit()}
   }}
 }

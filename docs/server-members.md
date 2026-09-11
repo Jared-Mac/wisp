@@ -1,10 +1,10 @@
 # Server members and friend requests
 
-The member button beside Friends opens the active server's searchable directory.
-The directory also offers a server selector, a friend-request filter, and a saved
-“Show members below Friends” preference. The member list is independent of the
-Friends section and can be collapsed separately. Both main and tray views use
-the same controls. Chat author names and room participants open a person menu.
+The People section in the server pane shows everyone enrolled in the active
+server. It can be collapsed separately from Rooms and Friends, and its search
+button opens the full directory with a server selector and friend-request
+filter. Both main and tray views use the same controls. Chat author names and
+room participants also open a person menu.
 
 Authenticated members can see account IDs and display names on their server.
 The directory does not expose login names, credentials, private-room membership,

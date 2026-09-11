@@ -15,4 +15,4 @@ for theme in ${WISP_TEST_THEMES:-soft_graphite daylight hearth clean_tui}; do
   if rg 'FRIENDSHIPS_FAILED|TypeError|ReferenceError|Binding loop|Cannot assign|Cannot anchor|Failed to load' "$test_dir/log"; then cat "$test_dir/log"; exit 1; fi
   rg -q FRIENDSHIPS_OK "$test_dir/log" || { cat "$test_dir/log"; exit 1; }
 done
-echo 'Server member directory, sidebar preferences and friend request actions passed in all requested themes'
+echo 'Server People section, directory and friend request actions passed in all requested themes'
