@@ -43,6 +43,7 @@ pub(crate) fn resident_bytes() -> u64 {
 }
 
 #[tokio::test]
+#[allow(clippy::too_many_lines)]
 async fn member_directory_commands_use_the_selected_server_account() {
     let (url, task) = isolated_server().await;
     let (api, snapshot) = ServerApi::connect_with_auth(
