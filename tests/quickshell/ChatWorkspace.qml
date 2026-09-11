@@ -1620,7 +1620,7 @@ ShellRoot {
         var audio=test.findItem(footer,"globalAudioControls")
         var headerAudio=test.findItem(test.findItem(surface,"alwaysVisibleControls"),"globalAudioControls")
         test.check(footer && audio && !headerAudio,"audio controls live only in the sidebar when expanded")
-        for (var name of ["muteControl","deafenControl"]) {
+        for (var name of ["muteControl","deafenControl","audioSoundboardButton"]) {
           var button=test.findItem(footer,name), bp=button.mapToItem(footer,0,0)
           test.check(bp.x>=0 && bp.y>=0 && bp.x+button.width<=footer.width+1 && bp.y+button.height<=footer.height+1,"footer keeps "+name+" in bounds")
         }

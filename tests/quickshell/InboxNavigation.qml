@@ -73,7 +73,8 @@ ShellRoot {
     var selector=test.find(workspace,"activeServerSelector");start=bridge.sent.length
     input.mouseMove(selector,8,8);input.wait(30);bridge.refreshServerPing("local")
     var pings=bridge.sent.slice(start).filter(function(c){return c.name==="server_ping"});test.check(pings.length===1,"hover ping is scoped and cached")
-    test.check(test.find(workspace,"serverSoundboardButton")!==null,"other developer soundboard shortcut is preserved")
+    var soundboard=test.find(workspace,"audioSoundboardButton"),mute=test.find(workspace,"muteControl")
+    test.check(soundboard!==null && Math.abs(soundboard.mapToItem(canvas,0,0).y-mute.mapToItem(canvas,0,0).y)<2,"soundboard sits beside mute and deafen")
     var disconnect=test.find(workspace,"currentCallDisconnect"),share=test.find(workspace,"mediaAction-share"),camera=test.find(workspace,"mediaAction-camera")
     test.check(Math.abs(disconnect.mapToItem(canvas,0,0).y-share.mapToItem(canvas,0,0).y)<2 && Math.abs(camera.mapToItem(canvas,0,0).y-share.mapToItem(canvas,0,0).y)<2,"share camera and disconnect align on one row")
     appearance.setShowAvatars(false);input.wait(40);test.check(!test.find(workspace,"friendAvatar").visible,"hide avatars applies to friends");appearance.setShowAvatars(true)

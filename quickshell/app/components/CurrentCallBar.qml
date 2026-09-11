@@ -83,7 +83,7 @@ Rectangle {
     MediaControls {
       id: controls; width: parent.width; bridge: root.bridge; theme: root.theme; compact: root.compact; adaptive: root.adaptive; showLeave: false
       showInvite: !root.inviteInRoomHeader
-      showAudio: root.showAudio; showPublishing:false; showSoundboard:true
+      showAudio: root.showAudio; showPublishing:false; showSoundboard:root.showAudio && (root.theme.friendly || small)
       showRemoteStreams: !root.inviteInRoomHeader
       onCameraRequested: root.cameraRequested()
     }

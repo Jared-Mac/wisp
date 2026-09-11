@@ -24,6 +24,12 @@ ShellRoot {
     return null
   }
   function last() { return bridge.sent[bridge.sent.length - 1] }
+  function visibleItem(item, name) {
+    if (!item || !item.visible) return null
+    if (item.objectName === name) return item
+    for (var child of item.children || []) { var found = visibleItem(child,name); if (found) return found }
+    return null
+  }
   function reply(value) { bridge.finishRequest({id:"test-" + bridge.requestId,ok:true,value:value}) }
   function screenshot(label, target) {
     var path = Quickshell.env("WISP_SETTINGS_SCREENSHOT")
@@ -71,11 +77,12 @@ ShellRoot {
   Timer {
     interval: 550; running: true
     onTriggered: {
-      var soundboardButton=test.find(page,"headerSoundboardButton")
+      test.check(!test.find(page,"headerSoundboardButton"),"redundant top soundboard button is removed")
+      var soundboardButton=test.visibleItem(page,"audioSoundboardButton")
       test.check(soundboardButton && soundboardButton.visible,"Soundboard is reachable before joining a call")
       input.mouseClick(soundboardButton,soundboardButton.width/2,soundboardButton.height/2);input.wait(80)
-      var sounds=test.object(test.find(page,"alwaysVisibleControls"),"soundboardPopup",[])
-      test.check(sounds && sounds.opened && !sounds.managing && sounds.serverId==="local","Main soundboard button opens selected server's playback menu")
+      var sounds=soundboardButton ? test.object(soundboardButton.parent,"soundboardPopup",[]) : null
+      test.check(sounds && sounds.opened && sounds.serverId==="local","Audio soundboard button opens selected server's compact playback menu")
       test.screenshot("soundboard",page);input.wait(100)
       if(sounds)sounds.close();input.wait(80)
       var selector = test.find(page,"activeServerSelector")

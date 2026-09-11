@@ -17,7 +17,7 @@ Column {
   property bool showAudioControls: true
   property bool audioFallback: false
   signal addChatRequested(string conversationId)
-  function closeMenus() { presenceMenu.close(); addChatPicker.close(); soundboardMenu.close() }
+  function closeMenus() { presenceMenu.close(); addChatPicker.close() }
   width: parent ? parent.width : 0
   spacing: root.theme.spacing.sm
 
@@ -103,16 +103,6 @@ Column {
         }
       }
     }
-    ChatButton {
-      id: soundboardButton
-      objectName: "headerSoundboardButton"
-      theme: root.theme; text: "Soundboard ▾"
-      height: root.theme.space(root.theme.comfortable ? 36 : 30)
-      Accessible.name: "Open soundboard"
-      ToolTip.visible: hovered; ToolTip.text: "Play a sound"
-      HoverHandler { id: soundboardPointer }
-      onClicked: soundboardMenu.openAt(soundboardButton, soundboardPointer.hovered ? soundboardPointer.point.position : Qt.point(width/2, height))
-    }
     Item { width: root.theme.spacing.sm; height: root.theme.space(30) }
     Row {
       spacing: root.theme.spacing.sm
@@ -143,7 +133,6 @@ Column {
       }
     }
   }
-  SoundboardPopup { id: soundboardMenu; bridge: root.bridge; theme: root.theme; hostItem: root }
   NewChatDialog {
     id: newChatDialog; objectName: "headerNewChatDialog"
     bridge: root.bridge; theme: root.theme

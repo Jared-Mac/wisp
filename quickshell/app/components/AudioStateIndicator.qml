@@ -11,13 +11,15 @@ Grid {
   property bool adaptive: false
   property real availableWidth: 100000
   property bool tooltipAbove: false
-  readonly property bool compactSymbols: adaptive && availableWidth < theme.space(220)
+  readonly property bool compactSymbols: adaptive && availableWidth < theme.space(260)
   readonly property real buttonHeight: theme.space(theme.comfortable ? 36 : 32)
-  readonly property bool stacked: adaptive && availableWidth < mutedIcon.width + deafenedIcon.width + spacing
-  columns: stacked ? 1 : 2
+  columns: !adaptive || availableWidth >= mutedIcon.width + deafenedIcon.width + soundboardButton.width + spacing * 2
+    ? 3 : availableWidth >= Math.max(mutedIcon.width, deafenedIcon.width, soundboardButton.width) * 2 + spacing ? 2 : 1
 
   spacing: root.theme.spacing.sm
-  height: root.stacked ? root.buttonHeight * 2 + spacing : root.buttonHeight
+  height: Math.ceil(3 / columns) * root.buttonHeight + (Math.ceil(3 / columns) - 1) * spacing
+
+  SoundboardPopup { id: soundboardMenu; bridge: root.bridge; theme: root.theme; hostItem: root }
 
   Rectangle {
     id: mutedIcon
@@ -155,5 +157,16 @@ Grid {
         font.pixelSize: root.theme.font.caption
       }
     }
+  }
+
+  ChatButton {
+    id: soundboardButton
+    objectName: "audioSoundboardButton"
+    theme: root.theme; text: "Soundboard"; iconName: "soundboard"; iconOnly: true; forceIcon: true
+    width: Math.min(root.availableWidth, root.theme.space(32)); height: root.buttonHeight
+    Accessible.name: "Open soundboard"
+    ToolTip.visible: hovered || visualFocus; ToolTip.text: "Soundboard"
+    HoverHandler { id: soundboardPointer }
+    onClicked: soundboardMenu.openAt(soundboardButton, soundboardPointer.hovered ? soundboardPointer.point.position : Qt.point(width/2, height))
   }
 }

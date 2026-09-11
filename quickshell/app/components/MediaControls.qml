@@ -34,7 +34,7 @@ Column {
       ] : []).concat([
         {label:root.bridge.sharing ? "Stop share" : root.bridge.shareStarting ? "Choosing…" : "Share",action:"share",icon:root.bridge.sharing ? "screen-off" : "screen"},
         {label:root.bridge.cameraActive ? "Stop cam" : root.bridge.cameraStarting ? "Starting…" : "Camera",action:"camera",icon:root.bridge.cameraActive ? "camera-off" : "camera"},
-        {label:"Soundboard",action:"soundboard",icon:"volume"},
+        {label:"Soundboard",action:"soundboard",icon:"soundboard"},
         {label:"Invite",action:"invite",icon:"invite"},
         {label:"d/c",action:"leave",icon:"disconnect"}
       ]).filter(function(action) {return (root.showPublishing || ["share","camera"].indexOf(action.action)<0) && (root.showSoundboard || action.action!=="soundboard") && (root.showLeave || action.action!=="leave") && (root.showInvite || action.action!=="invite")})
