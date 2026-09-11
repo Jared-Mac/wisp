@@ -128,6 +128,7 @@ ShellRoot {
     }
   }
   Component.onCompleted: {
+    bridge.workspaceLayout.trayChatFocused=false
     if (Quickshell.env("WISP_TEST_DOCK")) bridge.workspaceLayout.dock = Quickshell.env("WISP_TEST_DOCK")
     bridge.workspaceLayout.activityCollapsed = Quickshell.env("WISP_TEST_COLLAPSED") === "1"
     var data = JSON.parse(JSON.stringify(bridge.snapshot))

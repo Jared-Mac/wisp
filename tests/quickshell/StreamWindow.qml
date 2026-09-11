@@ -49,6 +49,7 @@ ShellRoot {
   TestCase { id: keys; parent: window.contentItem; when: false }
   Components.ParticipantVolumeMenu { id: roomVolumes; parent: window.contentItem; bridge: bridge; theme: theme; people: bridge.hangouts.length ? bridge.hangouts[0].members : [] }
   Component.onCompleted: {
+    bridge.workspaceLayout.trayChatFocused=false
     var data=JSON.parse(JSON.stringify(bridge.snapshot))
     data.self.id="self"; data.self.display_name="MemberA"; data.self.hangout_id="test_room"; data.self.muted=false
     data.self.media.remote_audio_participants=["Owner"]

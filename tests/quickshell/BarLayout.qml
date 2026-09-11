@@ -38,6 +38,7 @@ ShellRoot {
   }
   TestCase { id: input; parent:window.contentItem; when:false }
   Component.onCompleted: {
+    bridge.workspaceLayout.trayChatFocused=false
     if(Quickshell.env("WISP_TEST_THEME"))appearance.setPalette(Quickshell.env("WISP_TEST_THEME"))
     var data = JSON.parse(JSON.stringify(bridge.snapshot))
     var people = [{id:"self",display_name:"Ash"},{id:"riley",display_name:"Riley"}]

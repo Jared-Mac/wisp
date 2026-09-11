@@ -71,7 +71,7 @@ Item {
       property bool activityCollapsed: false
       property real roomsRatio: 0 // Fit the room list until its divider is moved.
       property bool trayRoomsCollapsed: false
-      property bool trayChatFocused: false
+      property bool trayChatFocused: true
       property string chatTiles: "" // Main-window split tree; no message content.
       property bool streamsAsTiles: false
       property bool channelsAsTiles: true
