@@ -16,6 +16,7 @@ Column {
   property bool canAddChat: false
   property bool showAudioControls: true
   property bool showSoundboardShortcut: true
+  property bool compactPresence: false
   property bool audioFallback: false
   signal addChatRequested(string conversationId)
   function closeMenus() { presenceMenu.close(); addChatPicker.close(); soundboardMenu.close() }
@@ -39,7 +40,7 @@ Column {
     ChatButton {
       id: presenceButton
       objectName: root.theme.friendly ? "availabilityPicker" : "presenceMenuButton"
-      visible: root.theme.comfortable || root.theme.refinedTui || root.theme.friendly
+      visible: root.compactPresence || root.theme.comfortable || root.theme.refinedTui || root.theme.friendly
       theme: root.theme
       text: "Presence: " + String(root.bridge.selfState.presence || "away") + " ▾"
       Accessible.name: "Who may join: " + String(root.bridge.selfState.presence || "away")
@@ -66,7 +67,7 @@ Column {
       }
     }
     Repeater {
-      model: root.theme.comfortable || root.theme.refinedTui || root.theme.friendly ? [] : ["open", "knock", "closed", "away"]
+      model: root.compactPresence || root.theme.comfortable || root.theme.refinedTui || root.theme.friendly ? [] : ["open", "knock", "closed", "away"]
       delegate: Rectangle {
         objectName: "presence-" + modelData
         required property string modelData

@@ -137,12 +137,14 @@ just plugin-sync
 omarchy-shell shell toggle dev.wisp
 ```
 
-The Omarchy adapter and generic tray popup use the same compact `WispContent`
-presentation; the adapter simply supplies Omarchy's native anchored popup host.
-The adapter uses the newer numbered-section, bracketed-action, prompt-composer,
-and live-status treatment while retaining Omarchy's active colors, font, scale,
-corners, and popup geometry. It remains compact and does not inherit the
-standalone window's selected palette.
+The Omarchy adapter opens a wide popup with rooms and channels on the left,
+chat in the center, and friends and other members on the right. Each column
+scrolls independently; a fixed audio strip keeps call controls and the soundboard
+within reach. Selecting a friend or channel keeps the popup open. Narrow displays
+fall back to the compact layout used by the generic tray popup.
+Both share `WispContent`; the adapter retains Omarchy's active colors, font,
+scale, corners and anchored popup host, independently of the standalone palette.
+Validate the horizontal layout with `bash scripts/test-bar-layout.sh`.
 Both offer **Open app** for the separate resizable layout. The adapter and the
 standalone configuration have independent pushed connections to `wispd`; call
 state remains daemon-owned. The adapter is not required on CachyOS or other

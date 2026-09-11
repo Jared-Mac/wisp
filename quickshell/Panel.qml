@@ -296,10 +296,11 @@ Panel {
       theme: pluginTheme
       logoSource: Qt.resolvedUrl("app/assets/waveform.svg")
       presentation: "panel"
+      horizontalPanel: true
       contentPadding: 0
       showAppButton: true
       showCloseButton: false
-      dismissOnNavigate: true
+      dismissOnNavigate: false
       onAppRequested: {
         root.close()
         sessionLauncher.openApp()

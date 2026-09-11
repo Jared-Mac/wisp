@@ -12,6 +12,8 @@ FocusScope {
   required property var theme
   required property url logoSource
   property string presentation: "panel"
+  property bool horizontalPanel: false
+  readonly property bool landscapePanel: horizontalPanel && presentation === "panel" && width >= theme.space(680)
   property var anchorController: null
   property int contentPadding: theme.comfortable ? theme.space(18) : theme.cleanTui ? theme.space(14) : theme.tui ? theme.space(10) : theme.spacing.huge
   property bool dismissOnNavigate: false
@@ -29,17 +31,17 @@ FocusScope {
     && width - contentPadding * 2 >= theme.space(600)
     && ["top", "bottom"].indexOf(bridge.workspaceLayout.dock) < 0
   readonly property int contentWidthLimit: 0
-  readonly property bool inlineHeader: presentation === "app" && width - contentPadding * 2 >= theme.space(theme.comfortable ? 1100 : 740)
+  readonly property bool inlineHeader: landscapePanel || presentation === "app" && width - contentPadding * 2 >= theme.space(theme.comfortable ? 1100 : 740)
 
   signal closeRequested()
   signal appRequested()
   signal popOutLocalPreviewsRequested()
 
   implicitWidth: presentation === "app"
-    ? theme.space(960) : theme.space(390) + contentPadding * 2
+    ? theme.space(960) : theme.space(horizontalPanel ? 960 : 390) + contentPadding * 2
   implicitHeight: presentation === "app"
     ? theme.space(840)
-    : Math.min(theme.space(800), fixedHeader.height + panelColumn.implicitHeight + contentPadding * 2 + theme.spacing.lg)
+    : landscapePanel ? theme.space(560) : Math.min(theme.space(800), fixedHeader.height + panelColumn.implicitHeight + contentPadding * 2 + theme.spacing.lg)
   focus: true
 
   function maybeDismiss() {
@@ -190,7 +192,7 @@ FocusScope {
       IdentityMenu {
         id: accountMenu
         anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
-        maximumWidth: root.inlineHeader ? Math.min(root.theme.space(root.theme.comfortable ? 320 : 220), Math.max(0, headerActions.x - root.theme.space(root.theme.comfortable ? 540 : 520) - root.theme.spacing.lg * 2)) : Math.max(0, headerActions.x - root.theme.spacing.lg)
+        maximumWidth: root.landscapePanel ? Math.min(root.theme.space(260), root.width*0.32) : root.inlineHeader ? Math.min(root.theme.space(root.theme.comfortable ? 320 : 220), Math.max(0, headerActions.x - root.theme.space(root.theme.comfortable ? 540 : 520) - root.theme.spacing.lg * 2)) : Math.max(0, headerActions.x - root.theme.spacing.lg)
         bridge: root.bridge; theme: root.theme; logoSource: root.logoSource
         showWordmark: root.presentation === "app"
         homeAvailable: !root.showingChats
@@ -264,8 +266,9 @@ FocusScope {
       id: accessControls
       objectName: "alwaysVisibleControls"
       audioFallback: root.presentation === "app"
-      showSoundboardShortcut: root.presentation !== "app"
-      showAudioControls: !(root.presentation === "app" && root.showingChats && dashboardLoader.item && dashboardLoader.item.audioInSidebar)
+      showSoundboardShortcut: root.presentation !== "app" && !root.landscapePanel
+      compactPresence: root.landscapePanel
+      showAudioControls: !(root.landscapePanel && root.showingChats) && !(root.presentation === "app" && root.showingChats && dashboardLoader.item && dashboardLoader.item.audioInSidebar)
       showActivityToggle: root.presentation === "app" && root.showingChats
       activityStacked: !root.wideLayout
       navigationDrawer: !!dashboardLoader.item && !!dashboardLoader.item.drawerMode
@@ -316,7 +319,7 @@ FocusScope {
     contentHeight: panelColumn.implicitHeight + root.contentPadding * 2
     clip: true
     boundsBehavior: Flickable.StopAtBounds
-    interactive: root.presentation !== "app" || !root.showingChats
+    interactive: root.presentation !== "app" && !root.landscapePanel || !root.showingChats
 
     Column {
       id: panelColumn
@@ -415,11 +418,11 @@ FocusScope {
         id: dashboardLoader
         visible: root.showingChats
         width: parent.width
-        height: root.presentation === "app" && root.showingChats
+        height: (root.presentation === "app" || root.landscapePanel) && root.showingChats
           ? Math.max(1, scrollView.height - y - root.contentPadding)
           : implicitHeight
         sourceComponent: root.presentation === "app"
-          ? wideDashboardComponent : compactDashboardComponent
+          ? wideDashboardComponent : root.landscapePanel ? barDashboardComponent : compactDashboardComponent
       }
     }
   }
@@ -540,6 +543,16 @@ FocusScope {
         theme: root.theme
       }
 
+    }
+  }
+
+  Component {
+    id: barDashboardComponent
+    BarWorkspace {
+      bridge: root.bridge; theme: root.theme
+      onCameraRequested: root.requestCamera()
+      onServerSettingsRequested: root.openServerSettings()
+      onCreateRoomRequested: identityRoomManager.createRoom()
     }
   }
 
