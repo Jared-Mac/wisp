@@ -430,7 +430,7 @@ FocusScope {
   Rectangle {
     id: terminalStatus
     objectName: "terminalStatusLine"
-    visible: root.theme.tui && !root.theme.comfortable
+    visible: root.theme.tui && !root.theme.comfortable && !root.horizontalPanel
     anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
     height: root.theme.space(root.theme.cleanTui ? 22 : 24)
     color: root.theme.statusBackground
