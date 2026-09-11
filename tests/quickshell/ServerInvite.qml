@@ -35,7 +35,10 @@ ShellRoot {
     var button = find(selector, "serverInviteFriend")
     if (!button || !button.enabled) throw new Error("Invite action must be reachable")
     var settings = find(selector, "serverSettingsShortcut")
-    if (!settings || !settings.visible || settings.y >= button.y) throw new Error("Server settings must remain above invite action")
+    if (!settings || !settings.visible || settings.y !== button.y || button.x + button.width > settings.x) throw new Error("Compact invite must sit beside server settings without overlap")
+    if (button.width !== theme.space(36) || !button.iconOnly) throw new Error("Invite uses a compact icon button")
+    var dropdown = find(selector, "activeServerSelector")
+    var dropdownWidth = dropdown.width
     var expandedHeight = selector.implicitHeight
     selector.visible = false
     input.wait(50)
@@ -43,7 +46,7 @@ ShellRoot {
     selector.visible = true
     selector.showInvite = false
     input.wait(50)
-    if (button.visible || selector.implicitHeight >= expandedHeight) throw new Error("The explicit invite setting controls reserved space")
+    if (button.visible || selector.implicitHeight !== expandedHeight || dropdown.width <= dropdownWidth) throw new Error("Hiding inline invite returns space to the server selector")
     var compactHeight = selector.implicitHeight
     selector.visible = false
     input.wait(50)

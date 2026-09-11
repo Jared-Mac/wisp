@@ -12,7 +12,7 @@ Item {
   property bool compact: false
   property bool horizontal: false
   property bool showInvite: true
-  readonly property bool inlineInvite: horizontal && showInvite && !narrow
+  readonly property bool inlineInvite: showInvite && !narrow && (horizontal || width >= theme.space(200))
   signal settingsRequested()
   implicitHeight: selector.height + (narrow && settingsButton.visible ? settingsButton.height + root.theme.spacing.xs : 0) + (root.showInvite && !inlineInvite ? inviteButton.height + root.theme.spacing.xs : 0)
   TextMetrics { id: serverMetrics; font: selector.font; text: serverLabel.text }
@@ -127,9 +127,9 @@ Item {
     id: inviteButton
     objectName: "serverInviteFriend"
     y: root.inlineInvite ? 1 : selector.height + (root.narrow && settingsButton.visible ? settingsButton.height + root.theme.spacing.xs : 0) + root.theme.spacing.xs
-    x: root.inlineInvite ? (settingsButton.visible ? settingsButton.x - root.theme.spacing.sm : parent.width) - width : 0
-    width: root.inlineInvite ? root.theme.space(36) : parent.width; height: root.inlineInvite ? selector.height - 2 : root.theme.space(28)
-    text: "Invite friend"; iconName: "invite"; iconOnly: root.narrow || root.inlineInvite; forceIcon: root.narrow || root.inlineInvite
+    x: root.inlineInvite ? (settingsButton.visible ? settingsButton.x - root.theme.spacing.sm : parent.width) - width : root.narrow ? (parent.width-width)/2 : parent.width-width
+    width: Math.min(parent.width,root.theme.space(36)); height: root.inlineInvite ? selector.height - 2 : root.theme.space(28)
+    text: "Invite friend"; iconName: "invite"; iconOnly: true; forceIcon: true
     ToolTip.visible: hovered; ToolTip.text: "Invite a friend to this server"
     visible: root.showInvite
     enabled: root.bridge.activeServer.connected !== false
