@@ -16,9 +16,8 @@ ShellRoot {
     for (var child of item.children || []) { var found=find(child,name); if(found) return found }
     return null
   }
-  Wisp.WispAppearance { id: appearance; environment: "omarchy"; managed: true }
-  Wisp.WispTheme { id: theme; appearanceController: appearance; profile:"legacy"; tuiTreatment:true
-    foreground:"#c2c5de"; background:"#0d1021"; surface:"#0d1021"; accent:"#aaa0f4"; muted:"#929bb9"; danger:"#f7768e"; cornerRadius:8 }
+  Wisp.WispAppearance { id: appearance; environment: "omarchy"; managed: !Quickshell.env("WISP_TEST_THEME") }
+  Wisp.WispTheme { id: theme; appearanceController: appearance; profile:Quickshell.env("WISP_TEST_THEME") || "legacy"; tuiTreatment:appearance.managed }
   Wisp.WispBridge {
     id: bridge
     property var sent: []
@@ -32,9 +31,14 @@ ShellRoot {
       logoSource:Qt.resolvedUrl("app/assets/waveform.svg")
       presentation:"panel"; horizontalPanel:true; contentPadding:10; showAppButton:true
     }
+    Wisp.WispContent {
+      id:desktop;visible:false;width:1100;height:800;bridge:bridge;theme:theme
+      logoSource:Qt.resolvedUrl("app/assets/waveform.svg");presentation:"app"
+    }
   }
   TestCase { id: input; parent:window.contentItem; when:false }
   Component.onCompleted: {
+    if(Quickshell.env("WISP_TEST_THEME"))appearance.setPalette(Quickshell.env("WISP_TEST_THEME"))
     var data = JSON.parse(JSON.stringify(bridge.snapshot))
     var people = [{id:"self",display_name:"Ash"},{id:"riley",display_name:"Riley"}]
     data.self.id = "self"; data.self.display_name = "Ash"; data.self.connection = "connected"; data.self.presence = "open"
@@ -97,6 +101,46 @@ ShellRoot {
         var screenshot=Quickshell.env("WISP_BAR_SCREENSHOTS")
         if(screenshot) { page.grabToImage(function(result){result.saveToFile(screenshot+"/bar-"+size.width+".png")}); input.wait(100) }
       }
+      test.fixtureWidth=960;test.fixtureHeight=560;input.wait(80)
+      var savedFriends=bridge.friendPreferences.trayCollapsed,savedMembers=bridge.friendPreferences.trayMembersCollapsed
+      test.find(page,"trayChatFocusToggle").clicked();input.wait(120)
+      test.check(page.trayChatFocused && !desktop.trayChatFocused && !test.find(desktop,"trayChatFocusToggle"),"chat focus is tray-only")
+      test.check(!test.find(page,"barRoomsPane") && !test.find(page,"barFriendsPane"),"focus mode removes the surrounding columns")
+      test.check(test.find(page,"trayComposerEditor").text==="Draft survives popup resizing","focus toggle preserves the chat draft")
+      for(var focusSize of [Qt.size(960,560),Qt.size(460,700),Qt.size(320,600)]) {
+        test.fixtureWidth=focusSize.width;test.fixtureHeight=focusSize.height;input.wait(120)
+        var focused=test.find(page,"trayFocusedWorkspace"),focusChat=test.find(page,"focusedTrayChat"),audioRow=test.find(page,"focusedTrayControls")
+        test.check(focusChat.width===focused.width && focusChat.height>focused.height*0.85,"chat fills the focused tray at "+focusSize.width)
+        for(var action of ["mute","deafen","soundboard","share","camera","leave"]) {
+          var control=test.find(page,"focusedAudio-"+action),at=control.mapToItem(audioRow,0,0)
+          test.check(at.y===0 && at.x>=0 && at.x+control.width<=audioRow.width+1,"all audio buttons fit one row at "+focusSize.width)
+        }
+        var focusButton=test.find(page,"trayChatFocusToggle"),pin=test.find(page,"chatPinsButton")
+        test.check(Math.abs(focusButton.mapToItem(pin.parent,0,0).x+focusButton.width+theme.spacing.sm-pin.x)<1,"focus toggle sits beside pins")
+        var screenshot=Quickshell.env("WISP_BAR_SCREENSHOTS")
+        if(screenshot){page.grabToImage(function(result){result.saveToFile(screenshot+"/focus-"+focusSize.width+".png")});input.wait(100)}
+      }
+      test.fixtureWidth=960;test.fixtureHeight=560;input.wait(100)
+      for(var peekName of ["trayVoicePeek","trayFriendsPeek","trayRoomsPeek"]) {
+        var trigger=test.find(page,peekName)
+        input.mouseMove(trigger,trigger.width/2,trigger.height/2);input.wait(600)
+        test.check(trigger.popup.opened && trigger.popup.height>40,"hover opens "+peekName)
+        if(trigger.popup.opened) {
+          if(peekName==="trayVoicePeek") {
+            var room=test.find(trigger.popup.contentItem,"savedRoom-lounge")
+            test.check(room && room.current && room.room.name==="Lounge" && room.people.length===2,"voice hover shows the connected room and its participants")
+            test.check(test.find(room,"joinRoom-lounge").text==="inv","voice hover offers an invite instead of rejoining")
+          }
+          input.mouseMove(trigger.popup.contentItem,20,20);input.wait(300)
+          test.check(trigger.popup.opened,"hover panel stays open while its contents are used")
+          var screenshot=Quickshell.env("WISP_BAR_SCREENSHOTS")
+          if(screenshot){trigger.popup.contentItem.grabToImage(function(result){result.saveToFile(screenshot+"/"+peekName+".png")});input.wait(100)}
+        }
+        trigger.popup.close()
+      }
+      test.find(page,"trayChatFocusToggle").clicked();input.wait(120)
+      test.check(!!test.find(page,"barWorkspace") && test.find(page,"trayComposerEditor").text==="Draft survives popup resizing","leaving focus restores the layout and draft")
+      test.check(bridge.friendPreferences.trayCollapsed===savedFriends && bridge.friendPreferences.trayMembersCollapsed===savedMembers,"focus mode preserves section choices")
       var before=bridge.sent.length
       var sound=test.find(test.find(page,"sidebarAudioFooter"),"audioSoundboardButton")
       input.mouseMove(sound,sound.width/2,sound.height/2); input.mouseClick(sound,sound.width/2,sound.height/2); input.wait(80)

@@ -6,13 +6,14 @@ Column {
   id: root
   required property var bridge
   required property var theme
+  property string presentation: "app"
   property bool adaptive: false
   readonly property bool narrow: adaptive && width < theme.space(140)
   readonly property bool tiny: adaptive && width < theme.space(80)
   signal selected()
   property bool collapsible: false
   property bool showHeader: true
-  readonly property bool collapsed: collapsible && bridge.friendPreferences.collapsed
+  readonly property bool collapsed: collapsible && bridge.friendPreferences.collapsedFor(presentation)
   width: parent ? parent.width : 0
   spacing: root.theme.space(1)
 
@@ -24,7 +25,7 @@ Column {
     height: root.collapsible ? root.theme.space(root.theme.tui ? 26 : 30) : root.theme.space(20)
     enabled: root.collapsible
     Accessible.name: root.collapsed ? "Expand friends" : "Collapse friends"
-    onClicked: root.bridge.friendPreferences.toggleCollapsed()
+    onClicked: root.bridge.friendPreferences.toggleCollapsed(root.presentation)
     background: Rectangle {
       color: collapseButton.hovered && root.collapsible ? root.theme.alpha(root.theme.foreground, 0.06) : "transparent"
       radius: root.theme.cornerRadius

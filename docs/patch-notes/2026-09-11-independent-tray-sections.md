@@ -1,0 +1,3 @@
+- Friends and Other members now remember separate expanded/collapsed states in the tray and full app. Changing one view leaves the other unchanged.
+- The tray has a new chat-focus toggle beside message pins. It gives chat more space, keeps audio controls on one compact row, and reveals participants, friends, and rooms on hover or click.
+- Tray chat shortcuts are smaller, with tooltips and an unread badge. Switching layouts keeps your draft and saved section choices.

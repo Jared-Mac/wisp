@@ -14,6 +14,7 @@ Item {
   property alias activityCollapsed: preferences.activityCollapsed
   property alias roomsRatio: preferences.roomsRatio
   property alias trayRoomsCollapsed: preferences.trayRoomsCollapsed
+  property alias trayChatFocused: preferences.trayChatFocused
   property alias chatTiles: preferences.chatTiles
   property alias streamsAsTiles: preferences.streamsAsTiles
   property alias channelsAsTiles: preferences.channelsAsTiles
@@ -70,6 +71,7 @@ Item {
       property bool activityCollapsed: false
       property real roomsRatio: 0 // Fit the room list until its divider is moved.
       property bool trayRoomsCollapsed: false
+      property bool trayChatFocused: false
       property string chatTiles: "" // Main-window split tree; no message content.
       property bool streamsAsTiles: false
       property bool channelsAsTiles: true

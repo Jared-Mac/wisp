@@ -837,7 +837,7 @@ ShellRoot {
       test.check(bridge.sortedFriends[0].id === "member_c", "offline favorite precedes online non-favorite")
       var collapse = test.findItem(compactSurface, "friends-collapse")
       if (collapse) collapse.clicked()
-      test.check(bridge.friendPreferences.collapsed && !test.findItem(compactSurface, "favorite-owner"), "collapse hides rows")
+      test.check(bridge.friendPreferences.trayCollapsed && !test.findItem(compactSurface, "favorite-owner"), "collapse hides rows")
       if (collapse) collapse.clicked()
       test.check(!!test.findItem(compactSurface, "favorite-owner"), "expand restores rows")
       test.check(bridge.sent.length === before, "favorite and collapse do not join rooms or send commands")

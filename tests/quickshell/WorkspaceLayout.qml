@@ -16,6 +16,7 @@ ShellRoot {
         layout.activityHeight = 270; layout.activityColumnsRatio = 0.64
         layout.roomsRatio = 0.6; layout.activityCollapsed = true
         layout.trayRoomsCollapsed = true
+        layout.trayChatFocused = true
         layout.setChannelsAsTiles(false)
         layout.chatTiles = '{"key":"split","axis":"x","ratio":0.35,"a":{"key":"a","id":"room"},"b":{"key":"b","id":"dm"}}'
       }
@@ -26,7 +27,7 @@ ShellRoot {
     onTriggered: {
       if (layout.activityWidth !== 24 || layout.dock !== "right" || Math.abs(layout.activityRatio - 0.35) > 0.001
           || layout.activityHeight !== 270 || Math.abs(layout.activityColumnsRatio - 0.64) > 0.001
-          || Math.abs(layout.roomsRatio - 0.6) > 0.001 || !layout.activityCollapsed || !layout.trayRoomsCollapsed || JSON.parse(layout.chatTiles).b.id !== "dm" || layout.channelsAsTiles || !layout.streamsAsTiles || layout.error)
+          || Math.abs(layout.roomsRatio - 0.6) > 0.001 || !layout.activityCollapsed || !layout.trayRoomsCollapsed || !layout.trayChatFocused || JSON.parse(layout.chatTiles).b.id !== "dm" || layout.channelsAsTiles || !layout.streamsAsTiles || layout.error)
         console.error("LAYOUT_FAILED persistence")
       else console.log("LAYOUT_OK")
       Qt.quit()

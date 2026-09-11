@@ -4,6 +4,7 @@ repo_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 test_dir=$(mktemp -d)
 trap 'rm -rf -- "$test_dir"' EXIT
 mkdir -p "$test_dir/config/wisp"
+printf '%s\n' '{"accounts":{"legacy-account":{"favorites":["old"],"collapsed":true,"membersCollapsed":true}}}' > "$test_dir/config/wisp/friends.json"
 cp -a "$repo_dir/quickshell/app" "$test_dir/app"
 cp "$repo_dir/tests/quickshell/Friends.qml" "$test_dir/shell.qml"
 for reload in 0 1; do

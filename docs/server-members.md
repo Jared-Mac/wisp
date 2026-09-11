@@ -3,8 +3,11 @@
 Friends is the primary list for accepted friends, with presence, favorites and
 voice actions. The Other members section shows nonfriends and pending requests
 from the active server, without repeating friends or your own account. It is
-shown by default and remembers an explicit collapse independently. Its search
-button opens the full server directory,
+shown by default and remembers an explicit collapse independently. Friends and
+Other members also remember separate collapse choices for the desktop app and
+tray popup. Existing choices are preserved initially; editing one view leaves
+the other unchanged. Favorites remain shared. The Other members search button
+opens the full server directory,
 including friends and yourself, with a server selector and friend-request filter.
 Both main and tray views use the same controls. Chat author names and room
 participants also open a person menu.

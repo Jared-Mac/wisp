@@ -35,8 +35,8 @@ ShellRoot {
         Views.FriendsView {id:friends;width:parent.width;bridge:bridge;theme:theme;collapsible:true;adaptive:true}
       }
       Column {width:parent.width-leftSidebar.width-parent.spacing;spacing:16
-        Views.ServerMembersView {id:trayPeople;width:parent.width;bridge:bridge;theme:theme}
-        Views.FriendsView {id:tray;width:parent.width;bridge:bridge;theme:theme;collapsible:true}
+        Views.ServerMembersView {id:trayPeople;width:parent.width;bridge:bridge;theme:theme;presentation:"panel"}
+        Views.FriendsView {id:tray;width:parent.width;bridge:bridge;theme:theme;collapsible:true;presentation:"panel"}
         Components.MessageFeed {id:feed;width:parent.width;height:220;bridge:bridge;theme:theme;conversationId:"local::chat"}
       }
     }
@@ -96,6 +96,15 @@ ShellRoot {
     input.wait(20);test.check(serverPeople.otherMembers.length===1 && trayPeople.otherMembers.length===1,"accepted requests leave both inline member lists")
     test.check(list.count===4,"full directory retains friends, other members and self")
     dialog.close();input.wait(30)
+    test.find(tray,"friends-collapse").clicked();test.find(serverPeople,"members-collapse").clicked();input.wait(30)
+    test.check(tray.collapsed && !friends.collapsed && serverPeople.collapsed && !trayPeople.collapsed,"tray friends and app members collapse independently")
+    var independent=savedPreferences.createObject(window.contentItem);input.wait(80)
+    test.check(!independent.collapsed && independent.trayCollapsed && independent.membersCollapsed && !independent.trayMembersCollapsed,"different app and tray states survive reopening")
+    independent.destroy()
+    test.find(friends,"friends-collapse").clicked();test.find(trayPeople,"members-collapse").clicked()
+    test.find(tray,"friends-collapse").clicked();test.find(serverPeople,"members-collapse").clicked();input.wait(30)
+    test.check(friends.collapsed && !tray.collapsed && trayPeople.collapsed && !serverPeople.collapsed,"expanding either view leaves the other view collapsed")
+    test.find(friends,"friends-collapse").clicked();test.find(trayPeople,"members-collapse").clicked()
     bridge.friendPreferences.toggleCollapsed();input.wait(20)
     test.check(test.find(serverPeople,"sidebarServerMembers").visible,"collapsing Friends does not hide People")
     test.find(serverPeople,"members-collapse").clicked();input.wait(20)

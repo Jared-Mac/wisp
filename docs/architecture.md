@@ -151,6 +151,13 @@ shared TUI structure while overriding visual tokens with Omarchy's host colors,
 font, scale, corners, and geometry. Each active
 frontend has its own pushed IPC connection; none owns call state.
 
+The tray's chat-focus toggle sits beside message pins and persists separately
+from the desktop layout. It replaces the surrounding panels with one compact
+audio row. Voice, friends/members and rooms open on hover or click; interacting
+with a hover panel keeps it open until dismissed. Toggling focus preserves chat
+drafts and the tray's saved section choices. Friends and Other members store
+separate collapse values for the tray and desktop, while favorites stay shared.
+
 The Voice MVP reliability gate is intentionally short and deterministic rather
 than a one-hour soak. It connects Owner plus MemberA, MemberB, and MemberC; cycles the
 real media session through leave/rejoin; starts two independent Quickshell IPC

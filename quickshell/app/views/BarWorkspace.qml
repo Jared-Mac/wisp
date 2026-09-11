@@ -79,8 +79,8 @@ Item {
     Column {
       id: people; width: parent.width; spacing: root.theme.spacing.lg
       InboxButton { width: parent.width; bridge: root.bridge; theme: root.theme }
-      FriendsView { width: parent.width; bridge: root.bridge; theme: root.theme; adaptive: true }
-      ServerMembersView { width: parent.width; bridge: root.bridge; theme: root.theme }
+      FriendsView { width: parent.width; bridge: root.bridge; theme: root.theme; adaptive: true; collapsible: true; presentation: "panel" }
+      ServerMembersView { width: parent.width; bridge: root.bridge; theme: root.theme; presentation: "panel" }
     }
   }
   SidebarAudioControls {

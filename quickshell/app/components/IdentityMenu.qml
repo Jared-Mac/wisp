@@ -8,6 +8,7 @@ Button {
   required property var theme
   required property url logoSource
   property bool showWordmark: false
+  property bool compact: false
   property real maximumWidth: 300
   property bool homeAvailable: false
   property bool showLayout: false
@@ -17,13 +18,15 @@ Button {
   signal newRoomRequested()
   signal homeRequested()
   function closeMenu() { menu.close() }
-  implicitHeight: theme.space(theme.comfortable ? 54 : 42)
-  implicitWidth: root.theme.comfortable ? Math.min(maximumWidth, root.theme.space(300)) : Math.min(maximumWidth,
+  implicitHeight: theme.space(compact ? 32 : theme.comfortable ? 54 : 42)
+  implicitWidth: compact ? theme.space(32) : root.theme.comfortable ? Math.min(maximumWidth, root.theme.space(300)) : Math.min(maximumWidth,
     Math.max(useWordmark ? wordmark.implicitWidth : titleText.implicitWidth,
              statusText.implicitWidth + theme.space(12))
       + (logo.visible ? theme.space(66) : theme.space(34)))
-  padding: useWordmark ? theme.space(2) : theme.spacing.sm
+  padding: compact || useWordmark ? theme.space(2) : theme.spacing.sm
   Accessible.name: "Wisp account menu for " + String(bridge.selfState.display_name || bridge.configuredProfile || "your profile")
+  ToolTip.visible: compact && (hovered || visualFocus)
+  ToolTip.text: Accessible.name + " · " + bridge.selfStatusLabel
   onClicked: menu.opened ? menu.close() : menu.open()
   Keys.onDownPressed: menu.open()
   background: Rectangle {
@@ -36,12 +39,13 @@ Button {
   contentItem: Item {
     Item {
       id: logo
-      width: visible ? root.theme.space(30) : 0; height: width
-      visible: !root.theme.tui && !root.useWordmark
+      width: visible ? root.theme.space(root.compact ? 28 : 30) : 0; height: width
+      visible: root.compact || !root.theme.tui && !root.useWordmark
       anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
       Image { anchors.fill: parent; source: root.logoSource; fillMode: Image.PreserveAspectFit }
     }
     Column {
+      visible: !root.compact
       anchors.left: logo.visible ? logo.right : parent.left
       anchors.leftMargin: logo.visible ? root.theme.spacing.md : 0
       anchors.right: arrow.left; anchors.rightMargin: root.theme.spacing.md
@@ -97,9 +101,10 @@ Button {
         }
       }
     }
-    WispIcon { anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; theme: root.theme; name: "chevron"; visible: root.theme.friendly }
+    WispIcon { anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; theme: root.theme; name: "chevron"; visible: root.theme.friendly && !root.compact }
     Text {
       id: arrow
+      visible: !root.compact
       opacity: root.theme.friendly ? 0 : 1
       anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
       text: root.theme.tui ? "[≡]" : "▾"; color: root.theme.muted

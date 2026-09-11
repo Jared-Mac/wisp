@@ -33,6 +33,7 @@ var paths = {
   moon: '<path d="M20 15A9 9 0 0 1 9 3a9 9 0 1 0 11 12Z"/>',
   palette: '<path d="M12 3a9 9 0 1 0 0 18h1a2 2 0 0 0 1-4c-2-1-1-3 1-3h3c5 0 4-11-6-11Z"/><circle cx="7" cy="9" r=".8"/><circle cx="11" cy="6" r=".8"/><circle cx="16" cy="8" r=".8"/><circle cx="6" cy="14" r=".8"/>',
   layout: '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18M9 12h12"/>',
+  focus: '<path d="M9 3H3v6M15 3h6v6M3 15v6h6M21 15v6h-6"/><path d="m8 8-5-5m13 5 5-5M8 16l-5 5m13-5 5 5"/>',
   grip: '<path d="M8 5h.1M16 5h.1M8 12h.1M16 12h.1M8 19h.1M16 19h.1" stroke-width="3"/>',
   window: '<path d="M14 3h7v7M21 3l-9 9M10 3H3v18h18v-7"/>',
   tile: '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18m9-12-4 3 4 3"/>',
