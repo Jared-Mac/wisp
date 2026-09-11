@@ -8,6 +8,7 @@ Item {
   property var busy: ({})
   property var feedback: ({})
   property int epoch: 0
+  signal saved(string serverId, bool success)
   // A server can reconnect while the local daemon stays connected. Reload any
   // pictures that may have changed while its event stream was unavailable.
   readonly property string connections: JSON.stringify(((bridge.snapshot || {}).server_states || []).map(function(state) {
@@ -48,6 +49,7 @@ Item {
       busy = bridge.replaceEntry(busy,action.serverId,false)
       feedback = bridge.replaceEntry(feedback,action.serverId,message.ok ? (action.action === "upload_avatar" ? "Profile picture saved" : "Profile picture removed") : String((message.error || {}).message || "Could not save profile picture"))
       if (message.ok) { invalidate(); bridge.settingsSaved() }
+      saved(action.serverId,!!message.ok)
     }
   }
 }

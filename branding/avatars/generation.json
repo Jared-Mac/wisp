@@ -1,0 +1,155 @@
+{
+  "tool": "built-in image_gen",
+  "records": [
+    {
+      "id": "drift",
+      "name": "Drift",
+      "subject": "a cheerful little flame-shaped wisp spirit, two simple dark eyes, curling cyan tail",
+      "prompt": "Use case: stylized-concept. Asset type: one Wisp application default profile-picture avatar. Create ONE finished square 1024x1024 avatar, not a sheet. A cohesive original pixel-art character portrait for a privacy-focused chat app whose branding uses pixel lettering, cyan-to-lavender accents and soft graphite backgrounds. Style: polished chunky pixel art, deliberately crisp stair-step silhouettes, large readable shapes, limited color ramps, subtle pixel highlights, restrained shading, no vector smooth curves, no photorealism, no 3D render. The subject should feel calm, friendly and distinctive rather than babyish. Center a single large subject occupying about 70 percent of the square, fully within a circle-safe central 78 percent; strong silhouette legible as a 32-pixel circular avatar. Background: opaque uniform dark soft graphite #191f25 with only a few restrained square sparkles near the subject, no border or frame. No typography, letters, logos, labels, watermark, UI, or extra characters. Avoid clutter, blurry glow, fine detail, checkerboards and collage. Subject: a cheerful little flame-shaped wisp spirit, two simple dark eyes, curling cyan tail. Accent palette: icy cyan and pale blue.",
+      "file": "quickshell/app/assets/avatars/drift.png",
+      "width": 1254,
+      "height": 1254,
+      "sha256": "472dfc587b4cf9c47a8fc92716e9e560e25ae80647e7a887f7b9e8cff50c273d"
+    },
+    {
+      "id": "glitch",
+      "name": "Glitch",
+      "subject": "a compact friendly robot head, antenna and two luminous rectangular eyes",
+      "prompt": "Use case: stylized-concept. Asset type: one Wisp application default profile-picture avatar. Create ONE finished square 1024x1024 avatar, not a sheet. A cohesive original pixel-art character portrait for a privacy-focused chat app whose branding uses pixel lettering, cyan-to-lavender accents and soft graphite backgrounds. Style: polished chunky pixel art, deliberately crisp stair-step silhouettes, large readable shapes, limited color ramps, subtle pixel highlights, restrained shading, no vector smooth curves, no photorealism, no 3D render. The subject should feel calm, friendly and distinctive rather than babyish. Center a single large subject occupying about 70 percent of the square, fully within a circle-safe central 78 percent; strong silhouette legible as a 32-pixel circular avatar. Background: opaque uniform dark soft graphite #191f25 with only a few restrained square sparkles near the subject, no border or frame. No typography, letters, logos, labels, watermark, UI, or extra characters. Avoid clutter, blurry glow, fine detail, checkerboards and collage. Subject: a compact friendly robot head, antenna and two luminous rectangular eyes. Accent palette: periwinkle and cyan.",
+      "file": "quickshell/app/assets/avatars/glitch.png",
+      "width": 1254,
+      "height": 1254,
+      "sha256": "aaa521f0606faf443291653028135fd422ea71de1950a1e78f95ad84a7de4fae"
+    },
+    {
+      "id": "luna",
+      "name": "Luna",
+      "subject": "a sleepy cat head with a small crescent-shaped marking on its forehead",
+      "prompt": "Use case: stylized-concept. Asset type: one Wisp application default profile-picture avatar. Create ONE finished square 1024x1024 avatar, not a sheet. A cohesive original pixel-art character portrait for a privacy-focused chat app whose branding uses pixel lettering, cyan-to-lavender accents and soft graphite backgrounds. Style: polished chunky pixel art, deliberately crisp stair-step silhouettes, large readable shapes, limited color ramps, subtle pixel highlights, restrained shading, no vector smooth curves, no photorealism, no 3D render. The subject should feel calm, friendly and distinctive rather than babyish. Center a single large subject occupying about 70 percent of the square, fully within a circle-safe central 78 percent; strong silhouette legible as a 32-pixel circular avatar. Background: opaque uniform dark soft graphite #191f25 with only a few restrained square sparkles near the subject, no border or frame. No typography, letters, logos, labels, watermark, UI, or extra characters. Avoid clutter, blurry glow, fine detail, checkerboards and collage. Subject: a sleepy cat head with a small crescent-shaped marking on its forehead. Accent palette: lavender and soft lilac.",
+      "file": "quickshell/app/assets/avatars/luna.png",
+      "width": 1254,
+      "height": 1254,
+      "sha256": "5a2bf83d591793d8f06d315010ab91b3046c6a0d02f2fe4117132cd0edc0cb04"
+    },
+    {
+      "id": "echo",
+      "name": "Echo",
+      "subject": "a tiny luminous moth, broad symmetrical wings with simple geometric patches",
+      "prompt": "Use case: stylized-concept. Asset type: one Wisp application default profile-picture avatar. Create ONE finished square 1024x1024 avatar, not a sheet. A cohesive original pixel-art character portrait for a privacy-focused chat app whose branding uses pixel lettering, cyan-to-lavender accents and soft graphite backgrounds. Style: polished chunky pixel art, deliberately crisp stair-step silhouettes, large readable shapes, limited color ramps, subtle pixel highlights, restrained shading, no vector smooth curves, no photorealism, no 3D render. The subject should feel calm, friendly and distinctive rather than babyish. Center a single large subject occupying about 70 percent of the square, fully within a circle-safe central 78 percent; strong silhouette legible as a 32-pixel circular avatar. Background: opaque uniform dark soft graphite #191f25 with only a few restrained square sparkles near the subject, no border or frame. No typography, letters, logos, labels, watermark, UI, or extra characters. Avoid clutter, blurry glow, fine detail, checkerboards and collage. Subject: a tiny luminous moth, broad symmetrical wings with simple geometric patches. Accent palette: orchid pink and lavender.",
+      "file": "quickshell/app/assets/avatars/echo.png",
+      "width": 1254,
+      "height": 1254,
+      "sha256": "74120ac302485869df038f79a60d49fbfe554852251ce6b91d19acf6af496964"
+    },
+    {
+      "id": "orbit",
+      "name": "Orbit",
+      "subject": "a small round astronaut helmet with an opaque blue star-speckled visor, no human face",
+      "prompt": "Use case: stylized-concept. Asset type: one Wisp application default profile-picture avatar. Create ONE finished square 1024x1024 avatar, not a sheet. A cohesive original pixel-art character portrait for a privacy-focused chat app whose branding uses pixel lettering, cyan-to-lavender accents and soft graphite backgrounds. Style: polished chunky pixel art, deliberately crisp stair-step silhouettes, large readable shapes, limited color ramps, subtle pixel highlights, restrained shading, no vector smooth curves, no photorealism, no 3D render. The subject should feel calm, friendly and distinctive rather than babyish. Center a single large subject occupying about 70 percent of the square, fully within a circle-safe central 78 percent; strong silhouette legible as a 32-pixel circular avatar. Background: opaque uniform dark soft graphite #191f25 with only a few restrained square sparkles near the subject, no border or frame. No typography, letters, logos, labels, watermark, UI, or extra characters. Avoid clutter, blurry glow, fine detail, checkerboards and collage. Subject: a small round astronaut helmet with an opaque blue star-speckled visor, no human face. Accent palette: ice blue and silver.",
+      "file": "quickshell/app/assets/avatars/orbit.png",
+      "width": 1254,
+      "height": 1254,
+      "sha256": "398740e3dd39c0383e15fb779eb6ee8934ec712c5b1ce25babc1e23d4f51f290"
+    },
+    {
+      "id": "fern",
+      "name": "Fern",
+      "subject": "a friendly round frog head peeking over a small leaf",
+      "prompt": "Use case: stylized-concept. Asset type: one Wisp application default profile-picture avatar. Create ONE finished square avatar, not a sheet. A cohesive original pixel-art character portrait for a privacy-focused chat app whose branding uses pixel lettering, cyan-to-lavender accents and soft graphite backgrounds. Style: polished chunky pixel art, deliberately crisp stair-step silhouettes, large readable shapes, limited color ramps, subtle pixel highlights, restrained shading, no vector smooth curves, no photorealism, no 3D render. The subject should feel calm, friendly and distinctive rather than babyish. Center a single large subject occupying about 70 percent of the square, fully within a circle-safe central 78 percent; strong silhouette legible as a 32-pixel circular avatar. Background: opaque uniform dark soft graphite #191f25 with only a few restrained square sparkles near the subject, no border or frame. No typography, letters, logos, labels, watermark, UI, or extra characters. Avoid clutter, blurry glow, fine detail, checkerboards and collage. Subject: a friendly round frog head peeking over a small leaf. Accent palette: mint teal and blue.",
+      "file": "quickshell/app/assets/avatars/fern.png",
+      "width": 1254,
+      "height": 1254,
+      "sha256": "aa8df2075105e886e90d840c997eaae8f6d438730b1ebf6828f77e810b5b2e12"
+    },
+    {
+      "id": "nova",
+      "name": "Nova",
+      "subject": "a plump five-point star spirit with two tiny dark eyes and two small floating sparkles",
+      "prompt": "Use case: stylized-concept. Asset type: one Wisp application default profile-picture avatar. Create ONE finished square avatar, not a sheet. A cohesive original pixel-art character portrait for a privacy-focused chat app whose branding uses pixel lettering, cyan-to-lavender accents and soft graphite backgrounds. Style: polished chunky pixel art, deliberately crisp stair-step silhouettes, large readable shapes, limited color ramps, subtle pixel highlights, restrained shading, no vector smooth curves, no photorealism, no 3D render. The subject should feel calm, friendly and distinctive rather than babyish. Center a single large subject occupying about 70 percent of the square, fully within a circle-safe central 78 percent; strong silhouette legible as a 32-pixel circular avatar. Background: opaque uniform dark soft graphite #191f25 with only a few restrained square sparkles near the subject, no border or frame. No typography, letters, logos, labels, watermark, UI, or extra characters. Avoid clutter, blurry glow, fine detail, checkerboards and collage. Subject: a plump five-point star spirit with two tiny dark eyes and two small floating sparkles. Accent palette: pale lilac and cyan.",
+      "file": "quickshell/app/assets/avatars/nova.png",
+      "width": 1254,
+      "height": 1254,
+      "sha256": "9bcf1f29215228301f505cc2df1d07cfcf42aabad6f6aabe79346d181ee1614a"
+    },
+    {
+      "id": "tide",
+      "name": "Tide",
+      "subject": "a translucent stylized jellyfish with a rounded dome and four short flowing tentacles",
+      "prompt": "Use case: stylized-concept. Asset type: one Wisp application default profile-picture avatar. Create ONE finished square avatar, not a sheet. A cohesive original pixel-art character portrait for a privacy-focused chat app whose branding uses pixel lettering, cyan-to-lavender accents and soft graphite backgrounds. Style: polished chunky pixel art, deliberately crisp stair-step silhouettes, large readable shapes, limited color ramps, subtle pixel highlights, restrained shading, no vector smooth curves, no photorealism, no 3D render. The subject should feel calm, friendly and distinctive rather than babyish. Center a single large subject occupying about 70 percent of the square, fully within a circle-safe central 78 percent; strong silhouette legible as a 32-pixel circular avatar. Background: opaque uniform dark soft graphite #191f25 with only a few restrained square sparkles near the subject, no border or frame. No typography, letters, logos, labels, watermark, UI, or extra characters. Avoid clutter, blurry glow, fine detail, checkerboards and collage. Subject: a translucent stylized jellyfish with a rounded dome and four short flowing tentacles. Accent palette: cyan and violet.",
+      "file": "quickshell/app/assets/avatars/tide.png",
+      "width": 1254,
+      "height": 1254,
+      "sha256": "ff00704176196418fa1a17e5112f9448a9475a2e7fbf7cf12b33a1dc77ab34fd"
+    },
+    {
+      "id": "comet",
+      "name": "Comet",
+      "subject": "a friendly fox head with large triangular ears and a fluffy cheek silhouette",
+      "prompt": "Use case: stylized-concept. Asset type: one Wisp application default profile-picture avatar. Create ONE finished square avatar, not a sheet. A cohesive original pixel-art character portrait for a privacy-focused chat app whose branding uses pixel lettering, cyan-to-lavender accents and soft graphite backgrounds. Style: polished chunky pixel art, deliberately crisp stair-step silhouettes, large readable shapes, limited color ramps, subtle pixel highlights, restrained shading, no vector smooth curves, no photorealism, no 3D render. The subject should feel calm, friendly and distinctive rather than babyish. Center a single large subject occupying about 70 percent of the square, fully within a circle-safe central 78 percent; strong silhouette legible as a 32-pixel circular avatar. Background: opaque uniform dark soft graphite #191f25 with only a few restrained square sparkles near the subject, no border or frame. No typography, letters, logos, labels, watermark, UI, or extra characters. Avoid clutter, blurry glow, fine detail, checkerboards and collage. Subject: a friendly fox head with large triangular ears and a fluffy cheek silhouette. Accent palette: dusty coral and lavender.",
+      "file": "quickshell/app/assets/avatars/comet.png",
+      "width": 1254,
+      "height": 1254,
+      "sha256": "54a329d0bc354f9d02a778c9b5b8877469b1108c44d744c7d8c7d6e29d33726c"
+    },
+    {
+      "id": "pebble",
+      "name": "Pebble",
+      "subject": "a small rounded stone golem head with glowing eyes and a single crystal on top",
+      "prompt": "Use case: stylized-concept. Asset type: one Wisp application default profile-picture avatar. Create ONE finished square avatar, not a sheet. A cohesive original pixel-art character portrait for a privacy-focused chat app whose branding uses pixel lettering, cyan-to-lavender accents and soft graphite backgrounds. Style: polished chunky pixel art, deliberately crisp stair-step silhouettes, large readable shapes, limited color ramps, subtle pixel highlights, restrained shading, no vector smooth curves, no photorealism, no 3D render. The subject should feel calm, friendly and distinctive rather than babyish. Center a single large subject occupying about 70 percent of the square, fully within a circle-safe central 78 percent; strong silhouette legible as a 32-pixel circular avatar. Background: opaque uniform dark soft graphite #191f25 with only a few restrained square sparkles near the subject, no border or frame. No typography, letters, logos, labels, watermark, UI, or extra characters. Avoid clutter, blurry glow, fine detail, checkerboards and collage. Subject: a small rounded stone golem head with glowing eyes and a single crystal on top. Accent palette: slate blue and cyan.",
+      "file": "quickshell/app/assets/avatars/pebble.png",
+      "width": 1254,
+      "height": 1254,
+      "sha256": "8d07da75fc34f01da6e14c1e6d80349dc941353f5eadee40df1f5640ce407507"
+    },
+    {
+      "id": "pulse",
+      "name": "Pulse",
+      "subject": "a round owl head with large eyes and small pointed ear tufts",
+      "prompt": "Use case: stylized-concept. Asset type: one Wisp application default profile-picture avatar. Create ONE finished square 1024x1024 avatar, not a sheet. A cohesive original pixel-art character portrait for a privacy-focused chat app whose branding uses pixel lettering, cyan-to-lavender accents and soft graphite backgrounds. Style: polished chunky pixel art, deliberately crisp stair-step silhouettes, large readable shapes, limited color ramps, subtle pixel highlights, restrained shading, no vector smooth curves, no photorealism, no 3D render. The subject should feel calm, friendly and distinctive rather than babyish. Center a single large subject occupying about 70 percent of the square, fully within a circle-safe central 78 percent; strong silhouette legible as a 32-pixel circular avatar. Background: opaque uniform dark soft graphite #191f25 with only a few restrained square sparkles near the subject, no border or frame. No typography, letters, logos, labels, watermark, UI, or extra characters. Avoid clutter, blurry glow, fine detail, checkerboards and collage. Subject: a round owl head with large eyes and small pointed ear tufts. Accent palette: lilac and dusty blue.",
+      "file": "quickshell/app/assets/avatars/pulse.png",
+      "width": 1254,
+      "height": 1254,
+      "sha256": "4bb8e1a4963052dc05cbfd6617c4522f2c2ff8fe16015489d2c0648bd754676c"
+    },
+    {
+      "id": "bloom",
+      "name": "Bloom",
+      "subject": "a tiny mushroom spirit with two small eyes below a broad spotted cap",
+      "prompt": "Use case: stylized-concept. Asset type: one Wisp application default profile-picture avatar. Create ONE finished square 1024x1024 avatar, not a sheet. A cohesive original pixel-art character portrait for a privacy-focused chat app whose branding uses pixel lettering, cyan-to-lavender accents and soft graphite backgrounds. Style: polished chunky pixel art, deliberately crisp stair-step silhouettes, large readable shapes, limited color ramps, subtle pixel highlights, restrained shading, no vector smooth curves, no photorealism, no 3D render. The subject should feel calm, friendly and distinctive rather than babyish. Center a single large subject occupying about 70 percent of the square, fully within a circle-safe central 78 percent; strong silhouette legible as a 32-pixel circular avatar. Background: opaque uniform dark soft graphite #191f25 with only a few restrained square sparkles near the subject, no border or frame. No typography, letters, logos, labels, watermark, UI, or extra characters. Avoid clutter, blurry glow, fine detail, checkerboards and collage. Subject: a tiny mushroom spirit with two small eyes below a broad spotted cap. Accent palette: orchid pink and ice blue.",
+      "file": "quickshell/app/assets/avatars/bloom.png",
+      "width": 1254,
+      "height": 1254,
+      "sha256": "c6d1c46840c137283323928f42646341b3465d7382af773bff0b35072b1a5ba2"
+    },
+    {
+      "id": "aurora",
+      "name": "Aurora",
+      "subject": "a graceful single koi fish curled into a loose crescent, a simple flowing tail",
+      "prompt": "Use case: stylized-concept. Asset type: one Wisp application default profile-picture avatar. Create ONE finished square 1024x1024 avatar, not a sheet. A cohesive original pixel-art character portrait for a privacy-focused chat app whose branding uses pixel lettering, cyan-to-lavender accents and soft graphite backgrounds. Style: polished chunky pixel art, deliberately crisp stair-step silhouettes, large readable shapes, limited color ramps, subtle pixel highlights, restrained shading, no vector smooth curves, no photorealism, no 3D render. The subject should feel calm, friendly and distinctive rather than babyish. Center a single large subject occupying about 70 percent of the square, fully within a circle-safe central 78 percent; strong silhouette legible as a 32-pixel circular avatar. Background: opaque uniform dark soft graphite #191f25 with only a few restrained square sparkles near the subject, no border or frame. No typography, letters, logos, labels, watermark, UI, or extra characters. Avoid clutter, blurry glow, fine detail, checkerboards and collage. Subject: a graceful single koi fish curled into a loose crescent, a simple flowing tail. Accent palette: pearl white and cyan.",
+      "file": "quickshell/app/assets/avatars/aurora.png",
+      "width": 1254,
+      "height": 1254,
+      "sha256": "bd93f90775b6cd8f318aa6c8c750165ee6203d486687313acfd6989956904dd2"
+    },
+    {
+      "id": "relay",
+      "name": "Relay",
+      "subject": "a curious small raven head in three-quarter view with one clear bright eye",
+      "prompt": "Use case: stylized-concept. Asset type: one Wisp application default profile-picture avatar. Create ONE finished square 1024x1024 avatar, not a sheet. A cohesive original pixel-art character portrait for a privacy-focused chat app whose branding uses pixel lettering, cyan-to-lavender accents and soft graphite backgrounds. Style: polished chunky pixel art, deliberately crisp stair-step silhouettes, large readable shapes, limited color ramps, subtle pixel highlights, restrained shading, no vector smooth curves, no photorealism, no 3D render. The subject should feel calm, friendly and distinctive rather than babyish. Center a single large subject occupying about 70 percent of the square, fully within a circle-safe central 78 percent; strong silhouette legible as a 32-pixel circular avatar. Background: opaque uniform dark soft graphite #191f25 with only a few restrained square sparkles near the subject, no border or frame. No typography, letters, logos, labels, watermark, UI, or extra characters. Avoid clutter, blurry glow, fine detail, checkerboards and collage. Subject: a curious small raven head in three-quarter view with one clear bright eye. Accent palette: periwinkle and turquoise.",
+      "file": "quickshell/app/assets/avatars/relay.png",
+      "width": 1254,
+      "height": 1254,
+      "sha256": "65631f446f3f05649b30972fce122361a342a99c23cb38819754289ca91def4f"
+    },
+    {
+      "id": "halo",
+      "name": "Halo",
+      "subject": "a softly glowing small ringed planet with a simple diagonal ring and two tiny stars",
+      "prompt": "Use case: stylized-concept. Asset type: one Wisp application default profile-picture avatar. Create ONE finished square 1024x1024 avatar, not a sheet. A cohesive original pixel-art character portrait for a privacy-focused chat app whose branding uses pixel lettering, cyan-to-lavender accents and soft graphite backgrounds. Style: polished chunky pixel art, deliberately crisp stair-step silhouettes, large readable shapes, limited color ramps, subtle pixel highlights, restrained shading, no vector smooth curves, no photorealism, no 3D render. The subject should feel calm, friendly and distinctive rather than babyish. Center a single large subject occupying about 70 percent of the square, fully within a circle-safe central 78 percent; strong silhouette legible as a 32-pixel circular avatar. Background: opaque uniform dark soft graphite #191f25 with only a few restrained square sparkles near the subject, no border or frame. No typography, letters, logos, labels, watermark, UI, or extra characters. Avoid clutter, blurry glow, fine detail, checkerboards and collage. Subject: a softly glowing small ringed planet with a simple diagonal ring and two tiny stars. Accent palette: lavender and ice blue.",
+      "file": "quickshell/app/assets/avatars/halo.png",
+      "width": 1254,
+      "height": 1254,
+      "sha256": "fd75d74e868ffd9fcac601e93291c476c609016c6080ecf03733fbf32514e38c"
+    }
+  ]
+}
