@@ -34,7 +34,7 @@ ShellRoot {
     var self=Object.assign({},data.self,{id:"self",display_name:"Rowan",connection:"connected",hangout_id:"voice",media:Object.assign({},data.self.media,{livekit_connected:true})})
     var friend={id:"mira",display_name:"Mira",presence:"knock",online:true}
     data.servers=[server];data.selected_server_id="local";data.voice_server_id="local";data.self=self
-    data.server_states=[{server:server,self:self,conversations:[{id:"room",kind:"circle",label:"Lounge",server_channel:true,members:[self,friend]}],messages:[],friends:[friend],hangouts:[{id:"voice",label:"Lounge",members:[self,friend],sharing:[]}],spots:[],knocks:[],devices:[],room_invitations:[]}]
+    data.server_states=[{server:server,self:self,conversations:[{id:"room",kind:"circle",label:"Lounge",server_channel:true,members:[self,friend]}],messages:[],friends:[friend],hangouts:[{id:"voice",label:"Lounge",members:[self,friend],sharing:[]}],spots:[{id:"lounge",name:"Lounge",active_hangout_id:"voice",members:[self,friend]}],knocks:[],devices:[],room_invitations:[]}]
     bridge.applySnapshot(data);bridge.activeConversationId="local::room"
   }
   Timer{running:true;interval:500;onTriggered:{
@@ -52,6 +52,7 @@ ShellRoot {
     test.check(Tiles.leaves(tiles.tree).some(function(n){return n.id==="local::mira"}),"incoming DM opens a tile")
     test.check(tiles.activeKey===active && bridge.activeConversationId===current,"incoming tile preserves current chat")
     test.check(bridge.unreadConversations.length===1 && bridge.pendingCount("local::mira")===1,"inbox retains unread arrival")
+    test.check(!test.find(workspace,"participantUnread-self").visible && test.find(workspace,"participantUnread-mira").visible,"DM badge appears on the peer only, never yourself")
     var count=tiles.paneCount;test.incoming("mira");input.wait(70);test.check(tiles.paneCount===count,"second message never duplicates tile")
     bridge.workspaceLayout.incomingDmsAsTiles=false;test.incoming("river");input.wait(70)
     test.check(tiles.paneCount===count && bridge.unreadConversations.length===2,"disabled automatic tiles keep inbox notifications")

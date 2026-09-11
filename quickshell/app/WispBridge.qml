@@ -95,6 +95,7 @@ Item {
   function openPendingChat(id) { requestConversationTile(id, false) }
   function directFor(person) {
     var serverId=String(person.server_id || activeServer.id)
+    if (String(person.id)===String((participantServer(person).self || {}).id || "")) return null
     return conversations.filter(function(c) {
       return String(c.server_id)===serverId && c.kind==="direct"
         && (c.members || []).some(function(p) { return String(p.id)===String(person.id) })

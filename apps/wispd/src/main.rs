@@ -1497,7 +1497,7 @@ impl Daemon {
             };
             let started = std::time::Instant::now();
             api.client
-                .get(format!("{}/health", api.base_url.trim_end_matches('/')))
+                .get(format!("{}/healthz", api.base_url.trim_end_matches('/')))
                 .timeout(std::time::Duration::from_secs(4))
                 .send()
                 .await?
