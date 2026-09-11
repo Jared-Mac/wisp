@@ -18,17 +18,22 @@ Item {
 
   implicitHeight: root.theme.space(root.theme.friendly ? 44 : root.theme.comfortable ? 38 : root.theme.tui ? 28 : 32)
 
-  activeFocusOnTab: root.compactActions
+  activeFocusOnTab: true
   Accessible.role: Accessible.Button
-  Accessible.name: root.friend.display_name + " friend actions"
-  Keys.onReturnPressed: friendMenu.popup()
-  Keys.onSpacePressed: friendMenu.popup()
+  Accessible.name: "Message " + root.friend.display_name
+  Keys.onReturnPressed: root.bridge.openParticipantDirect(root.friend)
+  Keys.onSpacePressed: root.bridge.openParticipantDirect(root.friend)
+  Keys.onPressed: function(event) {
+    if (event.key === Qt.Key_Menu || event.key === Qt.Key_F10 && event.modifiers & Qt.ShiftModifier) {
+      friendMenu.popup(); event.accepted = true
+    }
+  }
   ToolTip.visible: rowHover.hovered && root.narrow
-  ToolTip.text: root.friend.display_name + " · " + (root.friend.online ? root.friend.presence : "offline")
+  ToolTip.text: "Message " + root.friend.display_name
   Menu {
     id: friendMenu; objectName: "friendActionsMenu"; width: root.theme.space(220)
     ThemeControlStyle { theme: root.theme; control: friendMenu; outline: true }
-    MenuItem { id: dm; text: "Message " + root.friend.display_name; onTriggered: root.bridge.openDirect(root.friend.display_name); ThemeControlStyle { theme: root.theme; control: dm } }
+    MenuItem { id: dm; text: "Message " + root.friend.display_name; onTriggered: root.bridge.openParticipantDirect(root.friend); ThemeControlStyle { theme: root.theme; control: dm } }
     MenuItem { id: call; text: root.friend.presence === "knock" ? "Knock" : "Join voice"; enabled: root.canRequest; onTriggered: root.bridge.joinFriend(root.friend.display_name); ThemeControlStyle { theme: root.theme; control: call } }
     MenuItem { id: star; text: root.favorite ? "Remove favorite" : "Add favorite"; onTriggered: root.bridge.friendPreferences.toggleFavorite(root.friend); ThemeControlStyle { theme: root.theme; control: star } }
     MenuItem { id: volume; text: "Participant volume"; onTriggered: volumeMenu.open(); ThemeControlStyle { theme: root.theme; control: volume } }
@@ -80,28 +85,32 @@ Item {
     elide: Text.ElideRight
   }
 
-  PresenceIcon {
+  Button {
     id: statusIcon
+    hoverEnabled: true
     objectName: "friendPresence-" + String(root.friend.id || root.friend.display_name)
-    z: 1
+    z: 2
     anchors.right: messageButton.left
-    anchors.rightMargin: root.theme.spacing.md
+    anchors.rightMargin: root.theme.spacing.xs
     anchors.verticalCenter: parent.verticalCenter
     visible: !!root.friend.online && !root.narrow
-    width: visible ? implicitWidth : 0
-    presence: String(root.friend.presence || "away")
-    theme: root.theme
+    width: visible ? root.theme.space(28) : 0; height: root.theme.space(30)
+    enabled: root.canRequest
+    Accessible.name: root.friend.presence === "knock" ? "Knock to request voice with " + root.friend.display_name : "Join voice with " + root.friend.display_name
+    ToolTip.visible: hovered || visualFocus; ToolTip.text: Accessible.name
+    onClicked: root.bridge.joinFriend(root.friend.display_name)
+    background: Rectangle { radius: root.theme.cornerRadius; color: statusIcon.hovered || statusIcon.visualFocus ? root.theme.alpha(root.theme.foreground,0.08) : "transparent" }
+    contentItem: Item {
+      PresenceIcon { anchors.centerIn: parent; presence: String(root.friend.presence || "away"); theme: root.theme; showTooltip: false }
+    }
   }
 
   MouseArea {
     id: mouse
     anchors.fill: parent
     hoverEnabled: true
-    cursorShape: root.canRequest ? Qt.PointingHandCursor : Qt.ArrowCursor
-    onClicked: if (root.narrow) friendMenu.popup(); else if (root.canRequest) {
-      root.bridge.joinFriend(root.friend.display_name)
-      // Keep the panel visible for the server's knock acknowledgment or error.
-    }
+    cursorShape: Qt.PointingHandCursor
+    onClicked: root.bridge.openParticipantDirect(root.friend)
   }
 
   Button {
@@ -134,12 +143,14 @@ Item {
 
   ChatButton {
     id: messageButton; objectName: "messageFriend-" + String(root.friend.id || root.friend.display_name); theme: root.theme; visible: !root.narrow
-    text: root.theme.tui ? "msg" : "Message"; iconName: "chat"; iconOnly: root.theme.friendly
-    width: root.theme.friendly ? root.theme.space(34) : implicitWidth
+    readonly property var conversation: root.bridge.directFor(root.friend)
+    readonly property int pending: conversation ? root.bridge.pendingCount(conversation.id) : 0
+    text: pending>0 ? String(pending) : root.theme.tui ? "msg" : "Message"; iconName: "chat"; iconOnly: root.theme.friendly && pending===0; primary: pending>0
+    width: pending>0 ? Math.max(root.theme.space(34),implicitWidth) : root.theme.friendly ? root.theme.space(34) : implicitWidth
     height: root.theme.space(30)
     anchors.right: parent.right; anchors.rightMargin: root.theme.spacing.sm; anchors.verticalCenter: parent.verticalCenter
     Accessible.name: "Message " + root.friend.display_name
     ToolTip.visible: hovered; ToolTip.text: Accessible.name
-    onClicked: root.bridge.openDirect(root.friend.display_name)
+    onClicked: pending>0 ? root.bridge.openPendingChat(conversation.id) : root.bridge.openParticipantDirect(root.friend)
   }
 }

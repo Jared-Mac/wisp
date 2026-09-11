@@ -7,8 +7,9 @@ pub(super) async fn queue_public_admissions(
 ) -> Result<(), ApiError> {
     // Keep signed membership intact. An existing authorized client completes
     // these admissions once the joining account has enrolled its public key.
-    sqlx::query("INSERT OR IGNORE INTO pending_room_admissions(conversation_id,user_id,invited_by,created_at,automatic) SELECT c.id,u.id,si.owner_user_id,?,1 FROM conversations c JOIN spots s ON s.id=c.spot_id CROSS JOIN users u CROSS JOIN server_identity si WHERE s.private=0 AND u.username IS NOT NULL AND NOT EXISTS(SELECT 1 FROM conversation_members cm WHERE cm.conversation_id=c.id AND cm.user_id=u.id)")
+    sqlx::query("INSERT OR IGNORE INTO pending_room_admissions(conversation_id,user_id,invited_by,created_at,automatic) SELECT c.id,u.id,si.owner_user_id,?,1 FROM conversations c JOIN spots s ON s.id=c.spot_id CROSS JOIN users u CROSS JOIN server_identity si WHERE s.private=0 AND u.username IS NOT NULL AND NOT EXISTS(SELECT 1 FROM accessible_conversation_members cm WHERE cm.conversation_id=c.id AND cm.user_id=u.id)")
         .bind(Utc::now().to_rfc3339()).execute(&mut *db).await.map_err(ApiError::internal)?;
+    super::channel_access::queue_admissions(db).await?;
     Ok(())
 }
 
@@ -17,7 +18,7 @@ pub(super) async fn ensure_voice_access(
     spot: &str,
     user: UserId,
 ) -> Result<(), ApiError> {
-    let allowed: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM spots s JOIN conversations c ON c.spot_id=s.id WHERE s.id=? AND (s.private=0 OR EXISTS(SELECT 1 FROM conversation_members cm WHERE cm.conversation_id=c.id AND cm.user_id=?)))")
+    let allowed: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM spots s JOIN conversations c ON c.spot_id=s.id WHERE s.id=? AND (s.private=0 OR EXISTS(SELECT 1 FROM accessible_conversation_members cm WHERE cm.conversation_id=c.id AND cm.user_id=?)))")
         .bind(spot).bind(user.to_string()).fetch_one(pool).await.map_err(ApiError::internal)?;
     if !allowed {
         return Err(ApiError::forbidden("This room is invite-only"));

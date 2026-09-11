@@ -12,8 +12,17 @@ ShellRoot {
       playNotificationSound("member_join")
       playNotificationSound("member_leave")
       playNotificationSound("self_leave")
+      playNotificationSound("screen_share_start")
+      playNotificationSound("screen_share_stop")
+      streamViewerSounds=false
+      if(notificationSoundCommand("stream_viewer_join").length || notificationSoundCommand("stream_viewer_leave").length)console.error("SOUND_TEST_FAILED viewer mute")
+      streamViewerSounds=true
+      screenShareSounds=false
+      if (notificationSoundCommand("screen_share_start").length || notificationSoundCommand("screen_share_stop").length) console.error("SOUND_TEST_FAILED screen-share mute")
+      screenShareSounds=true
     }
   }
+  Timer {interval:400;running:true;onTriggered:{bridge.playNotificationSound("stream_viewer_join");bridge.playNotificationSound("stream_viewer_leave")}}
   Timer {
     interval: 1200; running: true
     onTriggered: {

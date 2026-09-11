@@ -1,11 +1,10 @@
 use super::{
     ApiError, AppState, HeaderMap, Json, Row, State, Utc, Uuid, Value, authenticate_headers,
-    ensure_friendship, load_conversation,
+    load_conversation,
 };
 use axum::extract::Path;
 use serde_json::json;
 use sqlx::SqlitePool;
-use std::collections::BTreeSet;
 use wisp_protocol::{
     CreateServerCategoryRequest, CreateServerChannelRequest, RenameServerItemRequest,
     SetServerAdminRequest, UpdateServerChannelRequest, UpdateServerProfileRequest,
@@ -99,9 +98,9 @@ pub(super) async fn settings(
     let categories = sqlx::query("SELECT id,name,position FROM channel_categories ORDER BY position,name COLLATE NOCASE")
         .fetch_all(&state.pool).await.map_err(ApiError::internal)?
         .into_iter().map(|row| json!({"id":row.get::<String,_>("id"),"name":row.get::<String,_>("name"),"position":row.get::<i64,_>("position")})).collect::<Vec<_>>();
-    let channels = sqlx::query("SELECT sc.conversation_id,c.label,sc.category_id,sc.position FROM server_channels sc JOIN conversations c ON c.id=sc.conversation_id ORDER BY sc.position,c.label COLLATE NOCASE")
+    let channels = sqlx::query("SELECT sc.conversation_id,c.label,sc.category_id,sc.position,sc.visibility,(SELECT json_group_array(user_id) FROM channel_allowed_users WHERE conversation_id=sc.conversation_id) member_ids FROM server_channels sc JOIN conversations c ON c.id=sc.conversation_id ORDER BY sc.position,c.label COLLATE NOCASE")
         .fetch_all(&state.pool).await.map_err(ApiError::internal)?
-        .into_iter().map(|row| json!({"id":row.get::<String,_>("conversation_id"),"name":row.get::<String,_>("label"),"category_id":row.get::<Option<String>,_>("category_id"),"position":row.get::<i64,_>("position")})).collect::<Vec<_>>();
+        .into_iter().map(|row| json!({"id":row.get::<String,_>("conversation_id"),"name":row.get::<String,_>("label"),"category_id":row.get::<Option<String>,_>("category_id"),"position":row.get::<i64,_>("position"),"visibility":row.get::<String,_>("visibility"),"member_ids":serde_json::from_str::<Value>(&row.get::<String,_>("member_ids")).unwrap_or(json!([]))})).collect::<Vec<_>>();
     let rooms = sqlx::query("SELECT c.id,s.name,s.private,s.category_id,EXISTS(SELECT 1 FROM hangouts h WHERE h.spot_id=s.id AND h.ended_at IS NULL) active FROM spots s JOIN conversations c ON c.spot_id=s.id ORDER BY s.name COLLATE NOCASE")
         .fetch_all(&state.pool).await.map_err(ApiError::internal)?
         .into_iter().map(|row| json!({"id":row.get::<String,_>("id"),"name":row.get::<String,_>("name"),"category_id":row.get::<Option<String>,_>("category_id"),"private":row.get::<bool,_>("private"),"active":row.get::<bool,_>("active")})).collect::<Vec<_>>();
@@ -167,6 +166,10 @@ pub(super) async fn set_admin(
             .await
             .map_err(ApiError::internal)?;
     }
+    super::channel_access::queue_admissions(
+        &mut *state.pool.acquire().await.map_err(ApiError::internal)?,
+    )
+    .await?;
     state
         .emit("server_settings_changed", json!({"changed":true}))
         .await;
@@ -258,6 +261,35 @@ pub(super) async fn delete_category(
     Ok(Json(json!({"ok":true})))
 }
 
+async fn validate_channel_access(
+    pool: &SqlitePool,
+    visibility: &str,
+    members: &[Uuid],
+) -> Result<(), ApiError> {
+    if !["everyone", "admins", "members"].contains(&visibility) {
+        return Err(ApiError::bad_request(
+            "invalid_visibility",
+            "Choose everyone, admins, or selected members",
+        ));
+    }
+    for member in members {
+        let exists: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM users WHERE id=? AND username IS NOT NULL)",
+        )
+        .bind(member.to_string())
+        .fetch_one(pool)
+        .await
+        .map_err(ApiError::internal)?;
+        if !exists {
+            return Err(ApiError::bad_request(
+                "invalid_member",
+                "Choose an account on this server",
+            ));
+        }
+    }
+    Ok(())
+}
+
 pub(super) async fn create_channel(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -266,25 +298,26 @@ pub(super) async fn create_channel(
     let actor = require_manager(&state, &headers).await?;
     let name = valid_name(&request.name, 80)?;
     ensure_category(&state.pool, request.category_id.as_deref()).await?;
-    let members = request.member_ids.into_iter().collect::<BTreeSet<_>>();
-    for member in &members {
-        ensure_friendship(&state.pool, actor, *member).await?;
-    }
-    let mut required_identities = members.clone();
-    required_identities.insert(actor);
-    for member in &required_identities {
-        let configured: bool =
-            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM chat_identities WHERE user_id=?)")
-                .bind(member.to_string())
-                .fetch_one(&state.pool)
-                .await
-                .map_err(ApiError::internal)?;
-        if !configured {
-            return Err(ApiError::conflict(
-                "missing_identity",
-                "Every channel member must set up encrypted chat first",
-            ));
-        }
+    let visibility = request
+        .visibility
+        .as_deref()
+        .unwrap_or(if request.member_ids.is_empty() {
+            "everyone"
+        } else {
+            "members"
+        });
+    validate_channel_access(&state.pool, visibility, &request.member_ids).await?;
+    let actor_ready: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM chat_identities WHERE user_id=?)")
+            .bind(actor.to_string())
+            .fetch_one(&state.pool)
+            .await
+            .map_err(ApiError::internal)?;
+    if !actor_ready {
+        return Err(ApiError::conflict(
+            "missing_identity",
+            "Set up encrypted chat before creating a channel",
+        ));
     }
     let id = format!("channel:{}", Uuid::new_v4());
     let now = Utc::now().to_rfc3339();
@@ -301,17 +334,25 @@ pub(super) async fn create_channel(
             .fetch_one(&mut *tx)
             .await
             .map_err(ApiError::internal)?;
-    sqlx::query("INSERT INTO server_channels(conversation_id,category_id,position,created_by,created_at) VALUES (?,?,?,?,?)")
-        .bind(&id).bind(request.category_id).bind(position).bind(actor.to_string()).bind(&now).execute(&mut *tx).await.map_err(ApiError::internal)?;
+    sqlx::query("INSERT INTO server_channels(conversation_id,category_id,position,created_by,created_at,visibility) VALUES (?,?,?,?,?,?)")
+        .bind(&id).bind(request.category_id).bind(position).bind(actor.to_string()).bind(&now).bind(visibility).execute(&mut *tx).await.map_err(ApiError::internal)?;
     sqlx::query("INSERT INTO conversation_members(conversation_id,user_id,joined_at,role) VALUES (?,?,?,'admin')")
         .bind(&id).bind(actor.to_string()).bind(&now).execute(&mut *tx).await.map_err(ApiError::internal)?;
-    for member in members {
-        if member == actor {
-            continue;
-        }
-        sqlx::query("INSERT INTO conversation_members(conversation_id,user_id,joined_at,role) VALUES (?,?,?,'member')")
-            .bind(&id).bind(member.to_string()).bind(&now).execute(&mut *tx).await.map_err(ApiError::internal)?;
+    for member in &request.member_ids {
+        sqlx::query(
+            "INSERT OR IGNORE INTO channel_allowed_users(conversation_id,user_id) VALUES (?,?)",
+        )
+        .bind(&id)
+        .bind(member.to_string())
+        .execute(&mut *tx)
+        .await
+        .map_err(ApiError::internal)?;
     }
+    // Bootstrap with every enrolled, eligible account. Accounts without keys
+    // discover the channel immediately and join its signed roster after setup.
+    sqlx::query("INSERT OR IGNORE INTO conversation_members(conversation_id,user_id,joined_at,role) SELECT a.conversation_id,a.user_id,?,CASE WHEN EXISTS(SELECT 1 FROM server_identity si WHERE si.owner_user_id=a.user_id) OR EXISTS(SELECT 1 FROM server_admins sa WHERE sa.user_id=a.user_id) THEN 'admin' ELSE 'member' END FROM channel_access a JOIN chat_identities ci ON ci.user_id=a.user_id WHERE a.conversation_id=?")
+        .bind(&now).bind(&id).execute(&mut *tx).await.map_err(ApiError::internal)?;
+    super::channel_access::queue_admissions(&mut tx).await?;
     tx.commit().await.map_err(ApiError::internal)?;
     state
         .emit("server_settings_changed", json!({"changed":true}))
@@ -331,6 +372,14 @@ pub(super) async fn update_channel(
     require_manager(&state, &headers).await?;
     let name = valid_name(&request.name, 80)?;
     ensure_category(&state.pool, request.category_id.as_deref()).await?;
+    if let Some(visibility) = request.visibility.as_deref() {
+        validate_channel_access(
+            &state.pool,
+            visibility,
+            request.member_ids.as_deref().unwrap_or(&[]),
+        )
+        .await?;
+    }
     let mut tx = state.pool.begin().await.map_err(ApiError::internal)?;
     let changed = sqlx::query("UPDATE conversations SET label=? WHERE id=? AND EXISTS(SELECT 1 FROM server_channels WHERE conversation_id=?)")
         .bind(name).bind(&id).bind(&id).execute(&mut *tx).await.map_err(ApiError::internal)?;
@@ -343,6 +392,31 @@ pub(super) async fn update_channel(
         .execute(&mut *tx)
         .await
         .map_err(ApiError::internal)?;
+    if let Some(visibility) = request.visibility.as_deref() {
+        let members = request.member_ids.unwrap_or_default();
+        sqlx::query("UPDATE server_channels SET visibility=? WHERE conversation_id=?")
+            .bind(visibility)
+            .bind(&id)
+            .execute(&mut *tx)
+            .await
+            .map_err(ApiError::internal)?;
+        sqlx::query("DELETE FROM channel_allowed_users WHERE conversation_id=?")
+            .bind(&id)
+            .execute(&mut *tx)
+            .await
+            .map_err(ApiError::internal)?;
+        for member in members {
+            sqlx::query(
+                "INSERT OR IGNORE INTO channel_allowed_users(conversation_id,user_id) VALUES (?,?)",
+            )
+            .bind(&id)
+            .bind(member.to_string())
+            .execute(&mut *tx)
+            .await
+            .map_err(ApiError::internal)?;
+        }
+        super::channel_access::queue_admissions(&mut tx).await?;
+    }
     tx.commit().await.map_err(ApiError::internal)?;
     state
         .emit("server_settings_changed", json!({"changed":true}))

@@ -12,7 +12,7 @@ pub(super) async fn visible_message(
     user: UserId,
     id: Uuid,
 ) -> Result<Message, ApiError> {
-    let row = sqlx::query("SELECT m.*, u.display_name FROM messages m JOIN users u ON u.id=m.sender_id JOIN conversation_members cm ON cm.conversation_id=m.conversation_id WHERE m.id=? AND cm.user_id=? AND m.created_at>COALESCE(cm.history_cleared_at, '')")
+    let row = sqlx::query("SELECT m.*, u.display_name FROM messages m JOIN users u ON u.id=m.sender_id JOIN accessible_conversation_members cm ON cm.conversation_id=m.conversation_id WHERE m.id=? AND cm.user_id=? AND m.created_at>COALESCE(cm.history_cleared_at, '') AND (json_extract(m.payload,'$.recipient_ids') IS NULL OR EXISTS(SELECT 1 FROM json_each(m.payload,'$.recipient_ids') recipient WHERE recipient.value=cm.user_id))")
         .bind(id.to_string()).bind(user.to_string()).fetch_optional(&state.pool).await.map_err(ApiError::internal)?
         .ok_or_else(|| ApiError::not_found("Message is unavailable"))?;
     message_from_row(&row)
@@ -52,7 +52,7 @@ pub(super) async fn list(
 ) -> Result<Json<Value>, ApiError> {
     let user = authenticate_headers(&state, &headers).await?;
     let manager = can_manage(&state, user, &query.conversation_id).await?;
-    let rows = sqlx::query("SELECT m.*, u.display_name FROM message_pins p JOIN messages m ON m.id=p.message_id JOIN users u ON u.id=m.sender_id JOIN conversation_members cm ON cm.conversation_id=m.conversation_id WHERE p.conversation_id=? AND cm.user_id=? AND m.created_at>COALESCE(cm.history_cleared_at, '') ORDER BY p.pinned_at DESC, p.message_id")
+    let rows = sqlx::query("SELECT m.*, u.display_name FROM message_pins p JOIN messages m ON m.id=p.message_id JOIN users u ON u.id=m.sender_id JOIN accessible_conversation_members cm ON cm.conversation_id=m.conversation_id WHERE p.conversation_id=? AND cm.user_id=? AND m.created_at>COALESCE(cm.history_cleared_at, '') AND (json_extract(m.payload,'$.recipient_ids') IS NULL OR EXISTS(SELECT 1 FROM json_each(m.payload,'$.recipient_ids') recipient WHERE recipient.value=cm.user_id)) ORDER BY p.pinned_at DESC, p.message_id")
         .bind(&query.conversation_id).bind(user.to_string()).fetch_all(&state.pool).await.map_err(ApiError::internal)?;
     let messages: Vec<Message> = rows
         .iter()

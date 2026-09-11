@@ -114,7 +114,12 @@ Item {
       ThemeControlStyle { theme: root.theme; control: styledControl1 }
     }
     popup.width: Math.max(root.theme.space(220), selector.width)
-    ToolTip.visible: hovered; ToolTip.text: String(currentText || "Server")
+    readonly property var ping: root.bridge.serverPings[String(root.bridge.activeServer.id)] || ({})
+    onHoveredChanged: if(hovered && root.bridge.activeServer.connected) root.bridge.refreshServerPing(root.bridge.activeServer.id)
+    onCurrentIndexChanged: if(hovered && root.bridge.activeServer.connected) root.bridge.refreshServerPing(root.bridge.activeServer.id)
+    Timer {interval:10000;repeat:true;running:selector.hovered && !!root.bridge.activeServer.connected;onTriggered:root.bridge.refreshServerPing(root.bridge.activeServer.id)}
+    ToolTip.visible: hovered
+    ToolTip.text: String(currentText || "Server") + " · " + (!root.bridge.activeServer.connected ? "Offline" : ping.pending ? "Measuring ping…" : ping.ms!==null && ping.ms!==undefined ? Math.round(ping.ms)+" ms" : "Ping unavailable")
     popup.background: Rectangle {
       color: root.theme.surface
       border.width: 1

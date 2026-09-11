@@ -41,6 +41,10 @@ struct Setup {
 pub(super) struct Directory {
     pub network: Uuid,
     pub identities: BTreeMap<Uuid, PublicIdentity>,
+    #[serde(default)]
+    pub channel_identities: BTreeMap<Uuid, PublicIdentity>,
+    #[serde(default)]
+    pub channel_recipients: BTreeMap<String, BTreeSet<Uuid>>,
     pub rosters: BTreeMap<String, Vec<SignedRoster>>,
     #[serde(default)]
     pub profiles: BTreeMap<Uuid, SignedProfile>,
@@ -60,6 +64,7 @@ pub(super) struct Vault {
     pub account: Uuid,
     pub temporary: PathBuf,
     pub contacts: BTreeMap<Uuid, String>,
+    channel_recipients: RwLock<BTreeMap<String, BTreeSet<Uuid>>>,
 }
 
 pub(super) struct Privacy {
@@ -189,6 +194,7 @@ impl Privacy {
             account: setup.account,
             temporary,
             contacts: setup.contacts.clone(),
+            channel_recipients: RwLock::new(BTreeMap::new()),
         })
     }
 
@@ -455,7 +461,11 @@ impl Privacy {
         let mut attempted = BTreeSet::new();
         for pending in directory.pending_admissions {
             if !attempted.insert(pending.conversation_id.clone())
-                || !friend_ids.contains(&pending.user_id)
+                || (!friend_ids.contains(&pending.user_id)
+                    && !directory
+                        .channel_recipients
+                        .get(&pending.conversation_id)
+                        .is_some_and(|ids| ids.contains(&pending.user_id)))
                 || !directory.identities.contains_key(&pending.user_id)
             {
                 continue;
@@ -495,13 +505,32 @@ impl Privacy {
     }
 
     pub async fn directory(&self, api: &ServerApi, vault: &Vault) -> anyhow::Result<Directory> {
-        let directory: Directory = decode(
+        let mut directory: Directory = decode(
             api.request(reqwest::Method::GET, "/v1/e2ee/state")
                 .send()
                 .await?,
         )
         .await?;
         Self::verify_directory(vault, &directory)?;
+        // Server-channel membership is distinct from friendship. Pin eligible
+        // account keys on first use; key replacements still fail closed.
+        for (id, key) in &directory.channel_identities {
+            if *id == vault.account {
+                ensure!(
+                    key == &vault.ring.identity().public(),
+                    "Server changed your encryption identity"
+                );
+            } else {
+                vault.ring.trust_first_use(*id, key)?;
+            }
+        }
+        *vault
+            .channel_recipients
+            .write()
+            .expect("channel audience lock") = directory.channel_recipients.clone();
+        directory
+            .identities
+            .extend(directory.channel_identities.clone());
         self.sync_signed_profiles(vault, &directory)?;
         Ok(directory)
     }
@@ -737,6 +766,23 @@ impl Privacy {
                 .is_some_and(|member| &member.identity == key)),
             "Message recipients must belong to the current signed room"
         );
+        let audiences = vault
+            .channel_recipients
+            .read()
+            .expect("channel audience lock");
+        let recipients = recipients
+            .iter()
+            .filter(|(id, _)| {
+                audiences
+                    .get(&roster.roster.conversation)
+                    .is_none_or(|allowed| allowed.contains(id))
+            })
+            .map(|(id, key)| (*id, key.clone()))
+            .collect::<BTreeMap<_, _>>();
+        ensure!(
+            recipients.contains_key(&vault.account),
+            "You no longer have access to this channel"
+        );
         let binding = MessageContext {
             network: vault.network,
             conversation: roster.roster.conversation.clone(),
@@ -745,12 +791,13 @@ impl Privacy {
             roster: roster.hash()?,
         };
         Ok(EncryptedMessageRequest {
+            recipient_ids: Some(recipients.keys().copied().collect()),
             id,
             conversation_id: binding.conversation.clone(),
             roster_hash: binding.roster.clone(),
             ciphertext: STANDARD.encode(binding.seal(
                 vault.ring.identity(),
-                recipients,
+                &recipients,
                 content,
             )?),
         })

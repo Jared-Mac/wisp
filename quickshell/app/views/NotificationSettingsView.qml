@@ -112,12 +112,12 @@ Column {
     ThemeControlStyle { theme: root.theme; control: audioCues }
   }
   SettingsSection {
-    theme: root.theme; title: "Voice sounds"; summary: "Joins, leaves, mute, deafen, and custom recordings"
+    theme: root.theme; title: "Voice sounds"; summary: "Joins, leaves, screen shares, and audio controls"
     objectName: "roomSoundsSection"; expanded: false
     Text { objectName: "settingsRoomSounds"; text: "Room sounds"; color: root.theme.foreground; font.family: root.theme.font.family; font.pixelSize: root.theme.font.body; font.bold: true }
     Text {
       width: parent.width; wrapMode: Text.Wrap
-      text: "Choose sounds for invitations and people joining or leaving voice."
+      text: "Choose sounds for invitations, voice activity, and screen sharing."
       color: root.theme.muted; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
     }
     Flow {
@@ -131,8 +131,20 @@ Column {
         onClicked: root.bridge.selfRoomNotificationSounds = !root.bridge.selfRoomNotificationSounds
       }
     }
+    CheckBox {
+      id: shareCues; objectName:"screenShareSoundsSetting"; width:parent.width
+      text:"Screen-share start and stop sounds"; checked:root.bridge.screenShareSounds
+      onToggled:root.bridge.screenShareSounds=checked
+      ThemeControlStyle {theme:root.theme;control:shareCues}
+    }
+    CheckBox {
+      id: viewerCues; objectName:"streamViewerSoundsSetting"; width:parent.width
+      text:"Someone starts or stops watching my screen"; checked:root.bridge.streamViewerSounds
+      onToggled:root.bridge.streamViewerSounds=checked
+      ThemeControlStyle {theme:root.theme;control:viewerCues}
+    }
     Repeater {
-      model: [{id:"room_invite",label:"Voice room invitation"},{id:"member_join",label:"Someone joins your room"},{id:"member_leave",label:"Someone leaves your room"},{id:"self_join",label:"You join a room"},{id:"self_leave",label:"You leave a room"},{id:"audio_mute",label:"Microphone muted"},{id:"audio_unmute",label:"Microphone unmuted"},{id:"audio_deafen",label:"Deafened"},{id:"audio_undeafen",label:"Undeafened"}]
+      model: [{id:"room_invite",label:"Voice room invitation"},{id:"member_join",label:"Someone joins your room"},{id:"member_leave",label:"Someone leaves your room"},{id:"self_join",label:"You join a room"},{id:"self_leave",label:"You leave a room"},{id:"screen_share_start",label:"Screen share starts"},{id:"screen_share_stop",label:"Screen share ends"},{id:"stream_viewer_join",label:"Viewer starts watching"},{id:"stream_viewer_leave",label:"Viewer stops watching"},{id:"audio_mute",label:"Microphone muted"},{id:"audio_unmute",label:"Microphone unmuted"},{id:"audio_deafen",label:"Deafened"},{id:"audio_undeafen",label:"Undeafened"}]
       Column {
         id: eventSoundRow
         required property var modelData
@@ -148,7 +160,7 @@ Column {
           ChatButton { theme: root.theme; text: "Choose sound…"; onClicked: { root.selectedSoundEvent=eventSoundRow.modelData.id; soundPicker.title=eventSoundRow.modelData.label; soundPicker.open() } }
           ChatButton {
             theme: root.theme; text: "Test"
-            enabled: !root.bridge.notificationMuted && root.bridge.notificationVolume > 0 && (eventSoundRow.modelData.id.indexOf("audio_") === 0 ? root.bridge.audioControlSounds : eventSoundRow.modelData.id === "room_invite" || (eventSoundRow.modelData.id.indexOf("self_") === 0 ? root.bridge.selfRoomNotificationSounds : root.bridge.roomNotificationSounds))
+            enabled: root.bridge.notificationSoundCommand(eventSoundRow.modelData.id).length>0
             onClicked: root.bridge.playNotificationSound(eventSoundRow.modelData.id)
           }
           ChatButton { theme: root.theme; text: "Restore default"; onClicked: root.bridge.setEventSound(eventSoundRow.modelData.id, "") }
@@ -172,11 +184,23 @@ Column {
   }
 
   SettingsSection {
-    theme: root.theme; title: "Chat navigation"; summary: "Choose how rooms open in your workspace"
+    theme: root.theme; title: "Chat navigation"; summary: "Choose how rooms and incoming messages open"
     objectName: "chatNavigationSection"; expanded: false
     Text {
       text: "Channel navigation · this device"; color: root.theme.foreground
       font.family: root.theme.font.family; font.pixelSize: root.theme.font.body; font.bold: true
+    }
+    CheckBox {
+      id: incomingDmPreference; objectName: "incomingDmsAsTilesSetting"; width: parent.width
+      text: "Open incoming DMs in new tiles"
+      checked: root.bridge.workspaceLayout.incomingDmsAsTiles
+      onClicked: root.bridge.workspaceLayout.incomingDmsAsTiles=checked
+      ThemeControlStyle { theme: root.theme; control: incomingDmPreference }
+    }
+    Text {
+      width: parent.width; wrapMode: Text.Wrap
+      text: "Keeps your current chat focused. Pending messages also appear in the inbox."
+      color: root.theme.muted; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
     }
     CheckBox {
       id: channelTilePreference

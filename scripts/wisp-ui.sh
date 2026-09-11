@@ -101,7 +101,7 @@ call_or_start() {
   fi
 
   case "$action" in
-    open|openWindow|openTile|show|toggle|activate|anchor|reuseChannel)
+    open|openWindow|openTile|show|toggle|activate|anchor|reuseChannel|unread)
       lock_ui_start
       if call_ui "$endpoint" "$action" "$@" >/dev/null 2>&1; then
         return
@@ -129,7 +129,8 @@ case "$surface" in
     case "${2:-}" in
       tile) call_or_start dev.wisp.chat open "${3:?conversation required}" ;;
       reuse-channel) call_or_start dev.wisp.chat reuseChannel "${3:?conversation required}" ;;
-      *) echo "usage: wisp-ui chat {tile|reuse-channel} CONVERSATION" >&2; exit 2 ;;
+      unread) call_or_start dev.wisp.chat unread "${3:?conversation required}" ;;
+      *) echo "usage: wisp-ui chat {tile|reuse-channel|unread} CONVERSATION" >&2; exit 2 ;;
     esac
     ;;
   media)

@@ -17,10 +17,14 @@ Column {
   ServerPeopleDialog {id:directory;bridge:root.bridge;theme:root.theme}
   Row {
     width:parent.width;spacing:root.theme.space(2)
-    ChatButton {
-      id:heading;objectName:"members-collapse";theme:root.theme
+    Button {
+      id:heading;objectName:"members-collapse"
       visible:root.width>=root.theme.space(56);width:visible ? Math.max(0,parent.width-browse.width-parent.spacing) : 0;height:root.theme.space(30)
-      text:(root.theme.tui ? "/members · " : "Other members · ")+root.otherMembers.length;iconName:"people";iconOnly:width<root.theme.space(110);forceIcon:iconOnly;quiet:true;textAlignment:Text.AlignLeft
+      background:Rectangle {color:heading.hovered ? root.theme.alpha(root.theme.foreground,0.06) : "transparent";radius:root.theme.cornerRadius;border.width:heading.visualFocus ? 1 : 0;border.color:root.theme.focusBorder}
+      contentItem:Item {
+        Text {anchors.left:parent.left;anchors.right:arrow.left;anchors.verticalCenter:parent.verticalCenter;elide:Text.ElideRight;text:(root.theme.tui ? "/members · " : "Other members · ")+root.otherMembers.length;color:root.theme.friendSectionColor;font.family:root.theme.font.family;font.pixelSize:root.theme.font.caption;font.bold:true}
+        Text {id:arrow;anchors.right:parent.right;anchors.verticalCenter:parent.verticalCenter;text:root.bridge.friendPreferences.membersCollapsed ? "▸" : "▾";color:root.theme.muted;font.pixelSize:root.theme.font.body}
+      }
       Accessible.name:root.bridge.friendPreferences.membersCollapsed ? "Expand other members" : "Collapse other members"
       onClicked:root.bridge.friendPreferences.setMemberPreference("membersCollapsed",!root.bridge.friendPreferences.membersCollapsed)
     }
@@ -29,7 +33,8 @@ Column {
   ServerMemberList {
     id:members;objectName:"sidebarServerMembers";width:parent.width
     visible:!root.bridge.friendPreferences.membersCollapsed
-    height:visible ? Math.min(root.theme.space(240),contentHeight) : 0
+    height:visible ? contentHeight : 0
+    interactive:false
     people:root.visible ? root.otherMembers : [];bridge:root.bridge;theme:root.theme;compact:true
   }
   Text {

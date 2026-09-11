@@ -49,3 +49,31 @@ assert.deepEqual(tabs(logic.roomSoundEvents(room(['me']),room(['me','friend']),'
 assert.deepEqual(tabs(logic.roomSoundEvents(room(['me','friend']),room(['friend','me']),'server_state_changed')),[]);
 assert.deepEqual(tabs(logic.roomSoundEvents(outside,{...outside,hangouts:[{id:'other',members:[{id:'friend'}]}]},'server_state_changed')),[]);
 console.log('Four room sounds are distinct and restricted to actual membership transitions');
+
+const sharing = (ids, options={}) => ({voice_server_id:'home', selected_server_id:'home', self:{id:'me',hangout_id:'room',media:{livekit_connected:true}},
+  server_states:[{server:{id:'home',connected:true},hangouts:[{id:'room',sharing:ids.map(id=>({id}))}]}], ...options});
+const shareEvents = (a,b,event='server_state_changed') => tabs(logic.screenShareSoundEvents(a,b,event));
+assert.deepEqual(shareEvents(sharing([]),sharing(['friend'])),['screen_share_start']);
+assert.deepEqual(shareEvents(sharing(['friend']),sharing([])),['screen_share_stop']);
+assert.deepEqual(shareEvents(sharing([]),sharing(['me'])),['screen_share_start']);
+assert.deepEqual(shareEvents(sharing(['me']),sharing([])),['screen_share_stop']);
+assert.deepEqual(shareEvents(sharing([]),sharing(['first','second'])),['screen_share_start']);
+assert.deepEqual(shareEvents(sharing(['first','second']),sharing(['second','first'])),[]);
+assert.deepEqual(shareEvents(null,sharing(['friend']),'snapshot'),[]);
+assert.deepEqual(shareEvents(sharing([]),sharing(['friend']),'snapshot'),[]);
+assert.deepEqual(shareEvents(sharing([]),sharing(['friend']),'server_reconnected'),[]);
+assert.deepEqual(shareEvents(sharing([]),sharing(['friend'],{self:{hangout_id:'other',media:{livekit_connected:true}}})),[]);
+assert.deepEqual(shareEvents(sharing(['friend']),sharing([],{self:{hangout_id:'room',media:{livekit_connected:false}}})),[]);
+assert.deepEqual(shareEvents(sharing([]),sharing(['friend'],{voice_server_id:'elsewhere'})),[]);
+assert.deepEqual(shareEvents(sharing(['friend']),sharing(['friend'],{selected_server_id:'elsewhere'})),[]);
+assert.deepEqual(shareEvents(sharing([]),sharing([],{self:{hangout_id:'room',media:{livekit_connected:true,camera:{active:true}}}})),[]);
+console.log('Screen-share cues cover start/stop, deduplication, server scope, and reconnect/join/camera suppression');
+const viewerBefore={voice_server_id:'local',self:{hangout_id:'room',media:{livekit_connected:true,screen_share:{active:true,viewers:['River']}}}};
+const viewerAfter=structuredClone(viewerBefore);viewerAfter.self.media.screen_share.viewers=['Mira'];
+assert.deepEqual(tabs(logic.streamViewerSoundEvents(viewerBefore,viewerAfter,'video_viewers_changed')),['stream_viewer_join','stream_viewer_leave']);
+assert.deepEqual(tabs(logic.streamViewerSoundEvents(viewerAfter,viewerAfter,'video_viewers_changed')),[]);
+assert.deepEqual(tabs(logic.streamViewerSoundEvents(viewerBefore,viewerAfter,'server_reconnected')),[]);
+viewerAfter.self.media.screen_share.active=false;
+assert.deepEqual(tabs(logic.streamViewerSoundEvents(viewerBefore,viewerAfter,'video_viewers_changed')),[]);
+viewerAfter.self.media.screen_share.active=true;viewerAfter.self.media.livekit_connected=false;
+assert.deepEqual(tabs(logic.streamViewerSoundEvents(viewerBefore,viewerAfter,'video_viewers_changed')),[]);

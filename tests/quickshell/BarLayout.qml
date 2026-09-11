@@ -71,11 +71,11 @@ ShellRoot {
         test.check(chat.width>=size.width*0.42,"Chat receives the largest column")
         var footer=test.find(workspace,"sidebarAudioFooter")
         test.check(footer.y>=rooms.height && footer.y+footer.height<=workspace.height+1,"Audio toolbar sits below every column")
-        for (var name of ["muteControl","deafenControl","serverSoundboardButton","currentCallDisconnect","mediaAction-share","mediaAction-camera"]) {
+        for (var name of ["muteControl","deafenControl","audioSoundboardButton","currentCallDisconnect","mediaAction-share","mediaAction-camera"]) {
           var button=test.find(footer,name), pos=button.mapToItem(footer,0,0)
           test.check(button.visible && pos.x>=0 && pos.y>=0 && pos.x+button.width<=footer.width+1 && pos.y+button.height<=footer.height+1,"Toolbar keeps "+name+" reachable at "+size.width)
         }
-        test.check(!test.find(page,"headerSoundboardButton").visible,"Soundboard has one shortcut in the audio strip")
+        test.check(!test.find(page,"headerSoundboardButton"),"Soundboard has one shortcut in the audio strip")
         var editor=test.find(page,"trayComposerEditor")
         test.check(!!editor,"Chat composer remains available")
         if(editor) {
@@ -88,9 +88,9 @@ ShellRoot {
         if(screenshot) { page.grabToImage(function(result){result.saveToFile(screenshot+"/bar-"+size.width+".png")}); input.wait(100) }
       }
       var before=bridge.sent.length
-      var sound=test.find(page,"serverSoundboardButton")
+      var sound=test.find(test.find(page,"sidebarAudioFooter"),"audioSoundboardButton")
       input.mouseMove(sound,sound.width/2,sound.height/2); input.mouseClick(sound,sound.width/2,sound.height/2); input.wait(80)
-      var menu=input.findChild(sound,"soundboardPopup")
+      var menu=input.findChild(sound.parent,"soundboardPopup")
       test.check(menu && menu.opened,"Bottom shortcut opens the soundboard")
       if(menu)menu.close()
       test.check(bridge.sent.slice(before).every(function(c){return c.name==="soundboard_list" || c.name==="soundboard_status"}),"Opening the soundboard never joins or publishes")
@@ -101,7 +101,7 @@ ShellRoot {
       for(var server of disconnected.server_states || [])server.self.hangout_id=null
       bridge.applySnapshot(disconnected); input.wait(80)
       var idleFooter=test.find(page,"sidebarAudioFooter")
-      test.check(!test.find(idleFooter,"currentCallBar").visible && test.find(idleFooter,"muteControl").visible && test.find(idleFooter,"serverSoundboardButton").visible,"Audio strip remains available outside a voice room")
+      test.check(!idleFooter.inCall && test.find(idleFooter,"muteControl").visible && test.find(idleFooter,"audioSoundboardButton").visible,"Audio strip remains available outside a voice room")
       test.fixtureWidth=600; input.wait(100)
       test.check(!page.landscapePanel && !test.find(page,"barWorkspace"),"Small screens retain the compact layout")
       if(!test.failed)console.log("BAR_LAYOUT_OK")

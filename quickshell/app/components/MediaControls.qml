@@ -11,8 +11,11 @@ Column {
   property bool adaptive: false
   readonly property bool small: adaptive && width < theme.space(180)
   property bool showLeave: true
+  property string leaveObjectName: "mediaAction-leave"
   property bool showAudio: true
+  property bool showPublishing: true
   property bool showSoundboard: true
+  property bool showPushToTalk: true
   property bool showInvite: true
   property bool showRemoteStreams: true
   spacing: root.theme.spacing.sm
@@ -32,13 +35,13 @@ Column {
       ] : []).concat([
         {label:root.bridge.sharing ? "Stop share" : root.bridge.shareStarting ? "Choosing…" : "Share",action:"share",icon:root.bridge.sharing ? "screen-off" : "screen"},
         {label:root.bridge.cameraActive ? "Stop cam" : root.bridge.cameraStarting ? "Starting…" : "Camera",action:"camera",icon:root.bridge.cameraActive ? "camera-off" : "camera"},
-        {label:"Soundboard",action:"soundboard",icon:"volume"},
+        {label:"Soundboard",action:"soundboard",icon:"soundboard"},
         {label:"Invite",action:"invite",icon:"invite"},
         {label:"d/c",action:"leave",icon:"disconnect"}
-      ]).filter(function(action) {return (root.showSoundboard || action.action!=="soundboard") && (root.showLeave || action.action!=="leave") && (root.showInvite || action.action!=="invite")})
+      ]).filter(function(action) {return (root.showPublishing || ["share","camera"].indexOf(action.action)<0) && (root.showSoundboard || action.action!=="soundboard") && (root.showLeave || action.action!=="leave") && (root.showInvite || action.action!=="invite")})
       ChatButton {
         id: action; required property var modelData
-        objectName: "mediaAction-" + modelData.action
+        objectName: modelData.action === "leave" ? root.leaveObjectName : "mediaAction-" + modelData.action
         theme: root.theme; text: modelData.label; iconName: modelData.icon; forceIcon: root.small || modelData.action === "invite"
         readonly property bool publishing: modelData.action==="share" && root.bridge.sharing || modelData.action==="camera" && root.bridge.cameraActive
         readonly property bool controlEnabled: publishing || (modelData.action!=="share" || !root.bridge.shareStarting) && (modelData.action!=="camera" || !root.bridge.cameraStarting && root.bridge.cameraState.devices.length>0)
@@ -102,7 +105,7 @@ Column {
     }
   }
   ChatButton {
-    id:talk;theme:root.theme;visible:root.bridge.pushToTalkState.enabled;width:parent.width
+    id:talk;theme:root.theme;visible:root.showPushToTalk && root.bridge.pushToTalkState.enabled;width:parent.width
     text:root.bridge.selfState.muted ? "Unmute before talking" : root.bridge.pushToTalkState.active ? "Talking — release to stop" : "Hold to talk"
     iconName:"microphone";enabled:!root.bridge.selfState.muted;primary:!!root.bridge.pushToTalkState.active
     onPressed:root.bridge.pushToTalkPress()

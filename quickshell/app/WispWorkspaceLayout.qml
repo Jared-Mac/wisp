@@ -17,6 +17,7 @@ Item {
   property alias chatTiles: preferences.chatTiles
   property alias streamsAsTiles: preferences.streamsAsTiles
   property alias channelsAsTiles: preferences.channelsAsTiles
+  property alias incomingDmsAsTiles: preferences.incomingDmsAsTiles
   property alias selectedServerId: preferences.selectedServerId
   signal settingsSaved()
   signal settingsSaveFailed()
@@ -40,7 +41,18 @@ Item {
     blockLoading: true; blockWrites: true; atomicWrites: true; printErrors: false
     watchChanges: true; onFileChanged: reload()
     onLoaded: Qt.callLater(function() { root.ready = true })
-    onLoadFailed: Qt.callLater(function() { root.ready = true })
+    onLoadFailed: function(error) {
+      Qt.callLater(function() {
+        var firstLoad = !root.ready
+        root.ready = true
+        // Only a missing first-run file gets the wider starting sidebar.
+        // Existing automatic sizing and explicitly saved widths stay intact.
+        if (firstLoad && error === FileViewError.FileNotFound && root.activityWidth === 0) {
+          root.activityWidth = 280
+          saveDelay.restart()
+        }
+      })
+    }
     onAdapterUpdated: { root.error = ""; if (root.ready) saveDelay.restart() }
     onSaved: {
       root.settingsSaved()
@@ -61,6 +73,7 @@ Item {
       property string chatTiles: "" // Main-window split tree; no message content.
       property bool streamsAsTiles: false
       property bool channelsAsTiles: true
+      property bool incomingDmsAsTiles: true
       property string selectedServerId: ""
     }
   }

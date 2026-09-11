@@ -5,6 +5,44 @@ use crate::{
 };
 
 #[tokio::test]
+async fn invitation_messages_reject_reactions_without_disclosing_private_messages() {
+    let state = AppState::new(test_config()).await.unwrap();
+    let conversation = find_or_create_direct(
+        &state.pool,
+        TEST_OWNER_ID.parse().unwrap(),
+        TEST_MEMBER_A_ID.parse().unwrap(),
+    )
+    .await
+    .unwrap();
+    let target = Uuid::new_v4();
+    sqlx::query("INSERT INTO messages(id,conversation_id,sender_id,created_at,content_type,payload) VALUES (?,?,?,?,'application/vnd.wisp.room-invitation+json','{}')")
+        .bind(target.to_string()).bind(&conversation).bind(TEST_OWNER_ID)
+        .bind(Utc::now().to_rfc3339()).execute(&state.pool).await.unwrap();
+    let app = router(state.clone());
+    let path = format!("/v1/messages/{target}/reactions");
+    for (user, expected) in [
+        (TEST_OWNER_ID, StatusCode::BAD_REQUEST),
+        (TEST_MEMBER_A_ID, StatusCode::BAD_REQUEST),
+        (TEST_MEMBER_B_ID, StatusCode::NOT_FOUND),
+    ] {
+        let response = request(
+            &app,
+            "PUT",
+            &path,
+            user,
+            json!({"id":Uuid::new_v4(),"emoji":"🔥"}),
+        )
+        .await;
+        assert_eq!(response.status(), expected);
+    }
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM message_reactions")
+        .fetch_one(&state.pool)
+        .await
+        .unwrap();
+    assert_eq!(count, 0);
+}
+
+#[tokio::test]
 #[allow(clippy::too_many_lines)] // One library lifecycle includes authorization, paging and historical images.
 async fn emoji_libraries_enforce_ownership_paginate_and_preserve_history_images() {
     let state = AppState::new(test_config()).await.unwrap();
@@ -158,7 +196,7 @@ async fn reactions_are_visible_only_with_the_message_and_only_the_sender_can_rem
         .await
         .unwrap();
     assert_eq!(
-        chat_extras::load_reactions(&state.pool, &messages)
+        chat_extras::load_reactions(&state.pool, &messages, TEST_OWNER_ID.parse().unwrap())
             .await
             .unwrap()
             .len(),
@@ -172,7 +210,7 @@ async fn reactions_are_visible_only_with_the_message_and_only_the_sender_can_rem
         StatusCode::OK
     );
     assert_eq!(
-        chat_extras::load_reactions(&state.pool, &messages)
+        chat_extras::load_reactions(&state.pool, &messages, TEST_OWNER_ID.parse().unwrap())
             .await
             .unwrap()
             .len(),
@@ -185,7 +223,7 @@ async fn reactions_are_visible_only_with_the_message_and_only_the_sender_can_rem
         StatusCode::OK
     );
     assert!(
-        chat_extras::load_reactions(&state.pool, &messages)
+        chat_extras::load_reactions(&state.pool, &messages, TEST_OWNER_ID.parse().unwrap())
             .await
             .unwrap()
             .is_empty()

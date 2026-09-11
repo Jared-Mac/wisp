@@ -141,6 +141,10 @@ async fn toggle_reaction(
         .iter()
         .find(|m| m.id == target)
         .context("Message is no longer available")?;
+    ensure!(
+        message.content_type != "application/vnd.wisp.room-invitation+json",
+        "Invitations do not support reactions"
+    );
     let id = Uuid::new_v4();
     let request = if let Some(vault) = privacy.active()? {
         let conversation = raw

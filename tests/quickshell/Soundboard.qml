@@ -178,19 +178,20 @@ ShellRoot {
 
       board.reset();board.catalogs={a:[{id:"sidebar",name:"Ping",duration_ms:1000}]}
       bridge.currentVoiceRoom={id:"room"};library.visible=false;audioFooter.visible=true;wait(50)
-      var sidebarButton=test.find(audioFooter,"serverSoundboardButton")
+      var sidebarButton=test.find(audioFooter,"audioSoundboardButton")
       test.check(sidebarButton && sidebarButton.visible && sidebarButton.width<=theme.space(32),"Audio footer has a small soundboard button")
       var beforeOpen=bridge.sent.length
       mouseMove(sidebarButton,sidebarButton.width/2,sidebarButton.height/2)
       mouseClick(sidebarButton,sidebarButton.width/2,sidebarButton.height/2);wait(50)
-      var sidebarMenu=findChild(sidebarButton,"soundboardPopup")
+      var sidebarMenu=findChild(sidebarButton.parent,"soundboardPopup")
       var sidebarPad=sidebarMenu ? test.find(sidebarMenu.contentItem,"soundboardQuickPlay-sidebar") : null
       test.check(sidebarMenu && sidebarMenu.opened && sidebarPad && sidebarPad.visible,"Audio footer button opens the sound menu")
       test.check(bridge.sent.slice(beforeOpen).every(function(c){return c.name==="soundboard_list" || c.name==="soundboard_status"}),"Opening the sidebar menu never plays or changes the voice room")
       if (sidebarMenu) sidebarMenu.close();wait(50)
       audioFooter.width=28;wait(50)
       var audio=test.find(audioFooter,"globalAudioControls")
-      test.check(sidebarButton.mapToItem(audioFooter,0,0).y>=audio.mapToItem(audioFooter,0,0).y+audio.height,"Narrow audio footer stacks soundboard below the microphone controls")
+      var deafen=test.find(audio,"deafenControl")
+      test.check(sidebarButton.mapToItem(audioFooter,0,0).y>=deafen.mapToItem(audioFooter,0,0).y+deafen.height,"Narrow audio footer stacks soundboard below the microphone controls")
       bridge.currentVoiceRoom=null;audioFooter.width=180;wait(50)
       test.check(sidebarButton.visible && test.find(audioFooter,"muteControl").visible,"Audio and soundboard controls remain available outside a call")
 

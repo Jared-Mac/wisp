@@ -78,6 +78,7 @@ Item {
     ScrollBar.vertical: ScrollBar {}
     Column {
       id: people; width: parent.width; spacing: root.theme.spacing.lg
+      InboxButton { width: parent.width; bridge: root.bridge; theme: root.theme }
       FriendsView { width: parent.width; bridge: root.bridge; theme: root.theme; adaptive: true }
       ServerMembersView { width: parent.width; bridge: root.bridge; theme: root.theme }
     }

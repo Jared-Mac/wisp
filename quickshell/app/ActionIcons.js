@@ -2,6 +2,7 @@
 
 // Wisp-owned, 24px outline symbols. No font glyph dependency or remote assets.
 var paths = {
+  inbox: '<path d="M3 4h18v16H3zM3 13h5l2 3h4l2-3h5"/>',
   image: '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8" cy="8" r="2"/><path d="m3 18 6-6 4 4 4-7 4 5"/>',
   add: '<path d="M12 5v14M5 12h14"/>',
   close: '<path d="m6 6 12 12M18 6 6 18"/>',

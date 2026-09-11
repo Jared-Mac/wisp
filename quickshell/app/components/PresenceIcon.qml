@@ -6,6 +6,7 @@ Item {
   id: root
   required property string presence
   required property var theme
+  property bool showTooltip: true
   readonly property string label: presence === "open" ? "Open" : presence === "knock" ? "Knock" : presence === "closed" ? "Closed" : "Away"
   readonly property color iconColor: presence === "open" ? theme.onlineIndicator : presence === "knock" ? theme.warning : presence === "closed" ? theme.danger : theme.muted
   // Lucide door-open, bell-dot, lock-keyhole and moon. See assets/PRESENCE-ICONS-LICENSE.txt.
@@ -30,6 +31,6 @@ Item {
   Accessible.name: label
   Accessible.description: PresenceText.description(presence, false)
   HoverHandler { id: hover }
-  ToolTip.visible: hover.hovered
+  ToolTip.visible: showTooltip && hover.hovered
   ToolTip.text: Accessible.description
 }

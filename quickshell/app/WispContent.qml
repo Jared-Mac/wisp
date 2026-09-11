@@ -266,7 +266,6 @@ FocusScope {
       id: accessControls
       objectName: "alwaysVisibleControls"
       audioFallback: root.presentation === "app"
-      showSoundboardShortcut: root.presentation !== "app" && !root.landscapePanel
       compactPresence: root.landscapePanel
       showAudioControls: !(root.landscapePanel && root.showingChats) && !(root.presentation === "app" && root.showingChats && dashboardLoader.item && dashboardLoader.item.audioInSidebar)
       showActivityToggle: root.presentation === "app" && root.showingChats
@@ -523,17 +522,18 @@ FocusScope {
         theme: root.theme
         onSelected: root.maybeDismiss()
       }
-      ServerMembersView {
-        width: parent.width
-        bridge: root.bridge
-        theme: root.theme
-      }
+      InboxButton { width: parent.width; bridge: root.bridge; theme: root.theme }
       FriendsView {
         collapsible: true
         width: parent.width
         bridge: root.bridge
         theme: root.theme
         onSelected: root.maybeDismiss()
+      }
+      ServerMembersView {
+        width: parent.width
+        bridge: root.bridge
+        theme: root.theme
       }
 
       MessagesView {

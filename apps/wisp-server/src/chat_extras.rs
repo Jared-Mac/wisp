@@ -184,8 +184,15 @@ pub(super) async fn react(
         .execute(&mut *tx)
         .await
         .map_err(ApiError::internal)?;
-    let conversation: String = sqlx::query_scalar("SELECT m.conversation_id FROM messages m JOIN conversation_members cm ON cm.conversation_id=m.conversation_id AND cm.user_id=? WHERE m.id=? AND m.created_at>COALESCE(cm.history_cleared_at,'')")
+    let message = sqlx::query("SELECT m.conversation_id,m.content_type FROM messages m JOIN accessible_conversation_members cm ON cm.conversation_id=m.conversation_id AND cm.user_id=? WHERE m.id=? AND m.created_at>COALESCE(cm.history_cleared_at,'') AND (json_extract(m.payload,'$.recipient_ids') IS NULL OR EXISTS(SELECT 1 FROM json_each(m.payload,'$.recipient_ids') recipient WHERE recipient.value=cm.user_id))")
         .bind(user.to_string()).bind(target.to_string()).fetch_optional(&mut *tx).await.map_err(ApiError::internal)?.ok_or_else(|| ApiError::not_found("Message unavailable"))?;
+    if message.get::<String, _>("content_type") == "application/vnd.wisp.room-invitation+json" {
+        return Err(ApiError::bad_request(
+            "invalid_reaction_target",
+            "Invitations do not support reactions",
+        ));
+    }
+    let conversation: String = message.get("conversation_id");
     let (kind, payload, version) = if let Some(encrypted) = request.encrypted {
         if encrypted.id != request.id
             || encrypted.conversation_id != conversation
@@ -197,8 +204,14 @@ pub(super) async fn react(
             ));
         }
         super::privacy::validate(&encrypted)?;
-        super::privacy::validate_roster(&mut tx, &conversation, user, &encrypted.roster_hash)
-            .await?;
+        super::privacy::validate_roster(
+            &mut tx,
+            &conversation,
+            user,
+            &encrypted.roster_hash,
+            encrypted.recipient_ids.as_deref(),
+        )
+        .await?;
         let stored = super::privacy::stored(encrypted);
         (stored.content_type, stored.payload, 1)
     } else {
@@ -262,6 +275,7 @@ pub(super) async fn unreact(
 pub(super) async fn load_reactions(
     pool: &sqlx::SqlitePool,
     messages: &[Message],
+    user: Uuid,
 ) -> Result<Vec<MessageReaction>, ApiError> {
     if messages.is_empty() {
         return Ok(Vec::new());
@@ -273,7 +287,9 @@ pub(super) async fn load_reactions(
     for message in messages {
         ids.push_bind(message.id.to_string());
     }
-    query.push(") ORDER BY r.created_at,r.id");
+    query.push(") AND (json_extract(r.payload,'$.recipient_ids') IS NULL OR EXISTS(SELECT 1 FROM json_each(r.payload,'$.recipient_ids') recipient WHERE recipient.value=");
+    query.push_bind(user.to_string());
+    query.push(")) ORDER BY r.created_at,r.id");
     query
         .build()
         .fetch_all(pool)

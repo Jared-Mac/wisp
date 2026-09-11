@@ -100,6 +100,16 @@ async fn member_directory_commands_use_the_selected_server_account() {
         }),
     );
     for (server, account) in [("primary", owner), ("linked", member)] {
+        let ping = daemon
+            .run_command(&CommandEnvelope::new(
+                "ping-fixture",
+                "server_ping",
+                json!({"server_id":server}),
+            ))
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(ping["ping_ms"].as_u64().is_some());
         let result = daemon
             .run_command(&CommandEnvelope::new(
                 "fixture",

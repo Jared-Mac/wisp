@@ -92,7 +92,7 @@ ShellRoot {
     id: bridge
     property var sent: []
     property var delegatedChats: []
-    onDesktopConversationTileRequested: function(id, reuseChannel) { delegatedChats.push({id:id,reuseChannel:reuseChannel}) }
+    onDesktopConversationTileRequested: function(id, reuseChannel, revealUnread) { delegatedChats.push({id:id,reuseChannel:reuseChannel,revealUnread:revealUnread}) }
     function send(name, args) { sent.push({name:name,args:args}); requestId++; return "test-" + requestId }
     function localPreviewUrl(stem, revision) { return String(Qt.resolvedUrl("app/assets/waveform.svg")) }
   }
@@ -170,7 +170,7 @@ ShellRoot {
         {id:"morgan",display_name:"Morgan",online:true,presence:"away"},
         {id:"member_b",display_name:"MemberB",online:false,presence:"closed"}
       ]
-      bridge.workspaceLayout.activityRatio = 0.2
+      bridge.workspaceLayout.activityWidth = 320
     }
     if (test.mode === "traycollapse") data.spots = [{id:"test_room",name:"TestRoom",members:[]}, {id:"games",name:"Games",members:[]}]
     if (Quickshell.env("WISP_TEST_STRESS")) {
@@ -396,6 +396,8 @@ ShellRoot {
       bridge.delegateConversationsToDesktop=true
       label.clicked();tile.clicked()
       test.check(bridge.delegatedChats.length===2 && bridge.delegatedChats[0].id==="local::channel:builds" && bridge.delegatedChats[0].reuseChannel && !bridge.delegatedChats[1].reuseChannel,"panel delegation preserves reuse versus explicit new-tile intent")
+      bridge.openPendingChat("local::dm")
+      test.check(bridge.delegatedChats.length===3 && bridge.delegatedChats[2].id==="local::dm" && bridge.delegatedChats[2].revealUnread && !bridge.delegatedChats[0].revealUnread,"panel unread navigation reaches the desktop without changing ordinary navigation")
       bridge.delegateConversationsToDesktop=false
       bridge.workspaceLayout.setChannelsAsTiles(true)
       bridge.lastError = ""
@@ -1620,7 +1622,7 @@ ShellRoot {
         var audio=test.findItem(footer,"globalAudioControls")
         var headerAudio=test.findItem(test.findItem(surface,"alwaysVisibleControls"),"globalAudioControls")
         test.check(footer && audio && !headerAudio,"audio controls live only in the sidebar when expanded")
-        for (var name of ["muteControl","deafenControl"]) {
+        for (var name of ["muteControl","deafenControl","audioSoundboardButton"]) {
           var button=test.findItem(footer,name), bp=button.mapToItem(footer,0,0)
           test.check(bp.x>=0 && bp.y>=0 && bp.x+button.width<=footer.width+1 && bp.y+button.height<=footer.height+1,"footer keeps "+name+" in bounds")
         }
@@ -1635,8 +1637,11 @@ ShellRoot {
                    "friend status badge stays attached to the avatar bottom-right")
         if (avatar && avatar.parent.tiny) test.check(Math.abs(avatar.x+avatar.width/2-avatar.parent.width/2)<1,"rail friend avatar is centered")
         if (dot.parent.compactActions) {
+          var beforeKeyboard=bridge.sent.length
           dot.parent.forceActiveFocus()
           keyDriver.keyClick(Qt.Key_Space)
+          test.check(bridge.sent.slice(beforeKeyboard).some(function(c){return c.name==="open_direct"}) && !bridge.sent.slice(beforeKeyboard).some(function(c){return c.name==="join_friend"}),"compact friend keyboard activation opens text only")
+          keyDriver.keyClick(Qt.Key_Menu)
           var friendActions=test.findObject(dot.parent,"friendActionsMenu",[])
           test.check(friendActions && friendActions.opened,"compact friend actions remain accessible from the keyboard")
           if (friendActions) friendActions.close()
@@ -1655,16 +1660,15 @@ ShellRoot {
           test.check(mic.width>0 && mic.x+mic.width<=mic.parent.width+1,"microphone control fits the rail")
           test.check(Math.abs(mic.parent.x+mic.parent.width/2-mic.parent.parent.width/2)<1,"media grid is centered")
         }
-        var sound=test.findItem(footer,"serverSoundboardButton")
         var bar=test.findItem(activity,"currentCallBar")
-        var soundPosition=sound.mapToItem(footer,0,0)
-        test.check(soundPosition.y+sound.height<=footer.height,"soundboard button remains fully visible in the audio footer")
+        test.check(!test.findItem(bar,"mediaAction-soundboard"),"sidebar soundboard is not duplicated in the call rail")
         test.check(!bridge.sent.some(function(c){return ["join_spot","join_hangout","share","camera"].indexOf(c.name)>=0}),"resizing does not join or publish media")
       }
       if (test.mode === "presence" || test.mode === "panelpresence") {
         for (var entry of [{id:"owner",label:"Open"},{id:"member_c",label:"Knock"},{id:"member_a",label:"Closed"},{id:"morgan",label:"Away"}]) {
           var icon = test.findItem(surface, "friendPresence-" + entry.id)
-          test.check(icon && icon.imageStatus === Image.Ready && icon.label === entry.label && icon.width === theme.space(16), "presence icon renders with accessible status: " + entry.label)
+          var glyph=icon ? icon.contentItem.children[0] : null
+          test.check(glyph && glyph.imageStatus === Image.Ready && glyph.label === entry.label && glyph.width === theme.space(16), "presence icon renders with accessible status: " + entry.label)
           var favorite = test.findItem(surface, "favorite-" + entry.id)
           test.check(!!favorite, "friend row available for icon verification: " + entry.id)
           if (!favorite) continue
@@ -1766,6 +1770,14 @@ ShellRoot {
         test.findObject(surface,"serverCategoriesSection",[]).expanded=true
         test.findObject(surface,"serverChannelsSection",[]).expanded=true
         test.check(!!test.findItem(surface, "newServerCategoryName") && !!test.findItem(surface, "createServerChannel"), "Server settings expose category and dedicated-channel creation")
+        var visibility=test.findItem(surface,"channelVisibility")
+        test.check(visibility && visibility.currentIndex===0,"New channels default to everyone")
+        var editAccess=test.findObject(surface,"saveChannel-channel:builds",[]).parent.parent.children.filter(function(item){return item.objectName==="channelAccessEditor"})[0]
+        test.check(editAccess && editAccess.visibility==="members","Existing explicit channel audience is preserved")
+        editAccess.visibility="admins"
+        test.findObject(surface,"saveChannel-channel:builds",[]).clicked()
+        test.check(bridge.sent.some(function(command){return command.name==="update_server_channel" && command.args.visibility==="admins" && command.args.id==="channel:builds"}),"Channel visibility can be edited")
+        bridge.serverSettingsBusy=false
         var serverNameField = test.findItem(surface, "serverNameField")
         var saveServerName = test.findItem(surface, "saveServerName")
         test.check(!!serverNameField && serverNameField.text === "Northstar" && !!saveServerName, "Server settings expose the shared display name")

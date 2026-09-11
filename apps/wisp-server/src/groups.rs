@@ -12,7 +12,7 @@ async fn group_role(
     conversation_id: &str,
     user_id: uuid::Uuid,
 ) -> Result<String, ApiError> {
-    sqlx::query_scalar("SELECT cm.role FROM conversation_members cm JOIN conversations c ON c.id=cm.conversation_id LEFT JOIN server_channels sc ON sc.conversation_id=c.id WHERE cm.conversation_id=? AND cm.user_id=? AND c.kind='circle' AND c.spot_id IS NULL AND sc.conversation_id IS NULL")
+    sqlx::query_scalar("SELECT cm.role FROM accessible_conversation_members cm JOIN conversations c ON c.id=cm.conversation_id LEFT JOIN server_channels sc ON sc.conversation_id=c.id WHERE cm.conversation_id=? AND cm.user_id=? AND c.kind='circle' AND c.spot_id IS NULL AND sc.conversation_id IS NULL")
         .bind(conversation_id)
         .bind(user_id.to_string())
         .fetch_optional(&state.pool)
@@ -132,11 +132,11 @@ pub(super) async fn create(
     }
     members.push(actor);
     members.sort_unstable();
-    let existing = sqlx::query("SELECT c.label, cm.role FROM conversations c LEFT JOIN conversation_members cm ON cm.conversation_id = c.id AND cm.user_id = ? WHERE c.id = ?")
+    let existing = sqlx::query("SELECT c.label, cm.role FROM conversations c LEFT JOIN accessible_conversation_members cm ON cm.conversation_id = c.id AND cm.user_id = ? WHERE c.id = ?")
         .bind(actor.to_string()).bind(&id).fetch_optional(&mut *tx).await.map_err(ApiError::internal)?;
     if let Some(row) = existing {
         let stored: Vec<String> = sqlx::query_scalar(
-            "SELECT user_id FROM conversation_members WHERE conversation_id = ? ORDER BY user_id",
+            "SELECT user_id FROM accessible_conversation_members WHERE conversation_id = ? ORDER BY user_id",
         )
         .bind(&id)
         .fetch_all(&mut *tx)

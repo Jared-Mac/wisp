@@ -220,7 +220,7 @@ pub(super) async fn download(
     id: Uuid,
 ) -> Result<Option<Response>, ApiError> {
     let user = authenticate_headers(state, headers).await?;
-    let row = sqlx::query("SELECT cf.upload_id, m.payload FROM chat_files cf JOIN messages m ON m.id = cf.message_id JOIN conversation_members cm ON cm.conversation_id = m.conversation_id WHERE m.id = ? AND cm.user_id = ? AND m.created_at > COALESCE(cm.history_cleared_at, '')")
+    let row = sqlx::query("SELECT cf.upload_id, m.payload FROM chat_files cf JOIN messages m ON m.id = cf.message_id JOIN accessible_conversation_members cm ON cm.conversation_id = m.conversation_id WHERE m.id = ? AND cm.user_id = ? AND m.created_at > COALESCE(cm.history_cleared_at, '') AND (json_extract(m.payload,'$.recipient_ids') IS NULL OR EXISTS(SELECT 1 FROM json_each(m.payload,'$.recipient_ids') recipient WHERE recipient.value=cm.user_id))")
         .bind(id.to_string()).bind(user.to_string()).fetch_optional(&state.pool).await.map_err(ApiError::internal)?
         .ok_or_else(|| ApiError::not_found("File is unavailable or expired"))?;
     let payload: Value =
@@ -285,7 +285,7 @@ pub(super) async fn retention(
         .execute(&mut *tx)
         .await
         .map_err(ApiError::internal)?;
-    let row = sqlx::query("SELECT m.payload, m.created_at FROM messages m JOIN conversation_members cm ON cm.conversation_id = m.conversation_id JOIN chat_files cf ON cf.message_id = m.id WHERE m.id = ? AND cm.user_id = ? AND m.created_at > COALESCE(cm.history_cleared_at, '')")
+    let row = sqlx::query("SELECT m.payload, m.created_at FROM messages m JOIN accessible_conversation_members cm ON cm.conversation_id = m.conversation_id JOIN chat_files cf ON cf.message_id = m.id WHERE m.id = ? AND cm.user_id = ? AND m.created_at > COALESCE(cm.history_cleared_at, '') AND (json_extract(m.payload,'$.recipient_ids') IS NULL OR EXISTS(SELECT 1 FROM json_each(m.payload,'$.recipient_ids') recipient WHERE recipient.value=cm.user_id))")
         .bind(id.to_string()).bind(user.to_string()).fetch_optional(&mut *tx).await.map_err(ApiError::internal)?
         .ok_or_else(|| ApiError::not_found("File unavailable"))?;
     let payload: Value =

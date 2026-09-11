@@ -228,7 +228,7 @@ Column {
 
     Text {
       width: parent.width; wrapMode: Text.WordWrap
-      text: "Choose friends who should receive the channel. Chat contents remain end-to-end encrypted."
+      text: "Channels are visible to everyone by default. You can change their audience at any time."
       color: root.theme.muted
       font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
     }
@@ -252,21 +252,8 @@ Column {
         ThemeControlStyle { theme: root.theme; control: newChannelCategory; outline: true }
       }
     }
-    Flow {
-      width: parent.width; spacing: root.theme.spacing.xs
-      Repeater {
-        model: root.bridge.friends || []
-        CheckDelegate {
-          id: friendChoice
-          required property var modelData
-          height: root.theme.space(30)
-          text: String(modelData.display_name)
-          checked: root.selectedMemberIds.indexOf(String(modelData.id)) >= 0
-          onClicked: root.toggleMember(String(modelData.id))
-          font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
-          ThemeControlStyle { theme: root.theme; control: friendChoice }
-        }
-      }
+    ChannelAccessEditor {
+      id:newChannelAccess;width:parent.width;theme:root.theme;people:root.bridge.serverSettings.members || []
     }
     ChatButton {
       objectName: "createServerChannel"
@@ -274,8 +261,8 @@ Column {
       enabled: !!newChannelName.text.trim() && !root.bridge.serverSettingsBusy
       onClicked: {
         var category = root.categories[newChannelCategory.currentIndex]
-        if (root.bridge.serverMutation("create_server_channel", {name:newChannelName.text.trim(),category_id:category && category.id ? String(category.id) : null,member_ids:root.selectedMemberIds})) {
-          newChannelName.text = ""; root.selectedMemberIds = []
+        if (root.bridge.serverMutation("create_server_channel", {name:newChannelName.text.trim(),category_id:category && category.id ? String(category.id) : null,visibility:newChannelAccess.visibility,member_ids:newChannelAccess.selectedIds})) {
+          newChannelName.text = ""; newChannelAccess.selectedIds = []
         }
       }
     }
@@ -310,16 +297,22 @@ Column {
               ThemeControlStyle { theme: root.theme; control: channelCategory; outline: true }
             }
           }
+          ChannelAccessEditor {
+            id:channelAccess;width:parent.width;theme:root.theme;people:root.bridge.serverSettings.members || []
+            visibility:String(modelData.visibility || "members");selectedIds:modelData.member_ids || []
+          }
           Row {
             anchors.right: parent.right; spacing: root.theme.spacing.sm
             ChatButton {
-              id: saveChannel; theme: root.theme; text: "save"; height: root.theme.space(30)
+              id: saveChannel; objectName:"saveChannel-"+String(modelData.id); theme: root.theme; text: "save"; height: root.theme.space(30)
               enabled: !root.bridge.serverSettingsBusy && !!channelName.text.trim()
                 && (channelName.text.trim() !== String(modelData.name)
-                  || String((root.categories[channelCategory.currentIndex] || {}).id || "") !== String(modelData.category_id || ""))
+                  || String((root.categories[channelCategory.currentIndex] || {}).id || "") !== String(modelData.category_id || "")
+                  || channelAccess.visibility!==String(modelData.visibility || "members")
+                  || JSON.stringify(channelAccess.selectedIds.slice().sort())!==JSON.stringify((modelData.member_ids || []).slice().sort()))
               onClicked: {
                 var category = root.categories[channelCategory.currentIndex]
-                root.bridge.serverMutation("update_server_channel", {id:String(modelData.id),name:channelName.text.trim(),category_id:category && category.id ? String(category.id) : null})
+                root.bridge.serverMutation("update_server_channel", {id:String(modelData.id),name:channelName.text.trim(),category_id:category && category.id ? String(category.id) : null,visibility:channelAccess.visibility,member_ids:channelAccess.selectedIds})
               }
             }
             ChatButton {
