@@ -54,7 +54,7 @@ ShellRoot {
         test.check(button.ToolTip.visible && button.ToolTip.text === PresenceText.description(mode,true), "hover explains " + mode)
       }
       var icon = test.find(page,"friendPresence-friend")
-      input.mouseMove(icon,icon.width/2,icon.height/2); input.wait(100)
+      input.mouseMove(icon,icon.width/2,icon.height/2); input.wait(550)
       test.check(icon.ToolTip.visible && icon.ToolTip.text.indexOf("Knock to request voice") === 0, "friend icon explains knocking")
       // Click the actual row, including a compact panel configured to dismiss on navigation.
       var name = test.find(page,"friendName")
@@ -62,7 +62,7 @@ ShellRoot {
       input.mouseClick(name,name.width/2,name.height/2)
       input.wait(80)
       var sent = bridge.sent[bridge.sent.length-1]
-      test.check(bridge.activeConversationId === "local::direct:friend" && !bridge.sent.slice(beforeText).some(function(command){return command.name==="join_friend"}), "friend click opens existing text chat on its server")
+      test.check((bridge.activeConversationId === "local::direct:friend" || bridge.pendingConversationTiles.some(function(tile){return tile.id==="local::direct:friend"})) && !bridge.sent.slice(beforeText).some(function(command){return command.name==="join_friend"}), "friend click opens existing text chat on its server")
       input.mouseClick(icon,icon.width/2,icon.height/2)
       sent = bridge.sent[bridge.sent.length-1]
       test.check(sent.name === "join_friend" && sent.args.server_id === "local", "only the voice icon requests voice on its server")

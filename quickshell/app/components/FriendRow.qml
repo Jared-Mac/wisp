@@ -87,6 +87,7 @@ Item {
 
   Button {
     id: statusIcon
+    hoverEnabled: true
     objectName: "friendPresence-" + String(root.friend.id || root.friend.display_name)
     z: 2
     anchors.right: messageButton.left
