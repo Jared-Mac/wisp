@@ -18,6 +18,8 @@ Column {
   Component.onCompleted: { focusKey = "tray-" + (++bridge.chatFocusSerial); updateChatFocus() }
   Component.onDestruction: bridge.setChatFocus(focusKey, "")
 
+  TapHandler { onPressedChanged: if (pressed) feed.engageReader() }
+
   function conversationLabel(c) { return c.label === "Hangout" ? "Room" : c.label }
   readonly property color chatColor: root.theme.chatHeadingsColored ? root.bridge.chatColors.colorFor(root.bridge.activeConversationId, root.theme.muted) : root.theme.muted
   Item {
@@ -190,6 +192,8 @@ Column {
       width: parent.width
       spacing: root.theme.spacing.sm
       MessageFeed {
+        id: feed
+        readerFocused: root.chatHasFocus
         onReplyRequested: composer.focusEditor()
         width: parent.width
         height: root.availableHeight > 0
@@ -199,6 +203,7 @@ Column {
       }
       ChatComposer {
         id: composer
+        onEditorFocused: feed.engageReader()
         width: parent.width
         bridge: root.bridge; theme: root.theme; conversationId: root.bridge.activeConversationId
       }

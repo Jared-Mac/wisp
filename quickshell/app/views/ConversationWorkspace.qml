@@ -52,7 +52,7 @@ Rectangle {
   }
 
   function choose(id) { if (tiled) conversationChosen(id); else bridge.selectConversation(id) }
-  TapHandler { onPressedChanged: if (pressed) root.activated() }
+  TapHandler { onPressedChanged: if (pressed) { root.activated(); feed.engageReader() } }
 
   MouseArea {
     objectName: "chatPaneCtrlDrag"
@@ -146,6 +146,13 @@ Rectangle {
       id: toolbarActions
       anchors.right: parent.right
       spacing: root.theme.spacing.xs
+      ChatButton {
+        objectName: "chatNewMessagesButton"; theme: root.theme; iconName: ""; primary: true
+        visible: root.bridge.unreadMarkers.pending(root.currentId)
+        text: "New"; Accessible.name: "Go to new messages in " + root.label(root.current)
+        onClicked: { root.activated(); feed.engageReader(); feed.revealMessage(root.bridge.unreadMarkers.boundary(root.currentId).firstId) }
+        ToolTip.visible: hovered; ToolTip.text: "Go to the first new message"
+      }
       ConversationVoiceAction { bridge: root.bridge; theme: root.theme; conversationId: root.currentId }
       PinsButton { bridge: root.bridge; theme: root.theme; conversationId: root.currentId }
       ChatButton { id: optionsButton; objectName: "chatOptionsButton"; theme: root.theme; text: "⋯"; implicitWidth: root.theme.space(34); visible: !!root.current; Accessible.name: "Chat options"; onClicked: optionsMenu.open() }
@@ -269,6 +276,8 @@ Rectangle {
        text: "Clear Chat History…"; onTriggered: confirmClear.confirm(root.currentId) }
   }
   MessageFeed {
+    id: feed
+    readerFocused: root.chatHasFocus
     onReplyRequested: composer.focusEditor()
     anchors.left: parent.left; anchors.right: parent.right
     anchors.top: heading.bottom; anchors.bottom: composerPane.top
@@ -293,7 +302,7 @@ Rectangle {
       bridge: root.bridge; theme: root.theme; conversationId: root.currentId
       spacious: true
       autoGrow: true
-      onEditorFocused: root.activated()
+      onEditorFocused: { root.activated(); feed.engageReader() }
       maximumEditorHeight: Math.max(root.theme.space(40), Math.min(root.theme.space(160), composerPane.available * 0.30))
     }
   }

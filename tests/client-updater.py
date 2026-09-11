@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tarfile
 import tempfile
 import unittest
@@ -91,6 +92,32 @@ class UpdaterTests(unittest.TestCase):
                 u.extract(archive, self.root / "extract")
         self.assertFalse((self.root / "escape").exists())
 
+    def preflight_package(self, account_body):
+        package = self.root / "preflight"
+        (package / "bin").mkdir(parents=True)
+        for name in ["wispd", "wispctl", "wisp-account"]:
+            executable = package / "bin" / name
+            body = account_body if name == "wisp-account" else "import sys; assert sys.argv[1:] == ['--help']"
+            executable.write_text(f"#!{sys.executable}\n{body}\n")
+            executable.chmod(0o755)
+        return package
+
+    def test_preflight_accepts_legacy_json_account_helper(self):
+        package = self.preflight_package("""import sys
+assert sys.stdin.read() == ''
+sys.stderr.write('Error: parse account request\\n\\nCaused by:\\n    EOF while parsing a value at line 1 column 0\\n')
+sys.exit(1)""")
+        u.preflight(package)
+
+    def test_preflight_accepts_account_help(self):
+        package = self.preflight_package("import sys; assert sys.argv[1:] == ['--help']; print('JSON request on stdin')")
+        u.preflight(package)
+
+    def test_preflight_rejects_broken_account_helper(self):
+        package = self.preflight_package("import sys; sys.stderr.write('error while loading shared libraries'); sys.exit(127)")
+        with self.assertRaises(RuntimeError):
+            u.preflight(package)
+
     def package(self):
         folder = self.root / "wisp-main-linux-x86_64"
         for relative in ["bin/wispd", "bin/wispctl", "bin/wisp-account", "install.sh", "quickshell/app/shell.qml", "quickshell/onboarding/shell.qml"]:
@@ -108,7 +135,7 @@ class UpdaterTests(unittest.TestCase):
         u.state(phase="available", available=True, release=self.release)
         return archive
 
-    def worker_run(self, *, failure=False, activity=False, optout=False, corrupt=False):
+    def worker_run(self, *, failure=False, activity=False, optout=False, corrupt=False, startup_failure=False):
         archive=self.package()
         if corrupt: u.state(release=dict(self.release,sha256="0"*64))
         calls=[]
@@ -119,6 +146,8 @@ class UpdaterTests(unittest.TestCase):
             return archive.stat().st_size
         def run(args, **kwargs):
             args=[str(x) for x in args];calls.append(args)
+            if startup_failure and args[0].endswith("wisp-account") and "--help" in args:
+                return subprocess.CompletedProcess(args,127,"","fixture startup failure")
             if args[0].endswith("install.sh"):
                 self.assertEqual(kwargs["environment"]["WISP_CLIENT_ONLY"],"1")
                 for name in ["wispd","wispctl","wisp-account"]:
@@ -163,6 +192,13 @@ class UpdaterTests(unittest.TestCase):
         result,calls=self.worker_run(corrupt=True)
         self.assertEqual(result["phase"],"error")
         self.assertFalse(any("stop" in c or "install.sh" in c[0] for c in calls))
+
+    def test_startup_failure_preserves_running_client(self):
+        result,calls=self.worker_run(startup_failure=True)
+        self.assertEqual(result["phase"],"error")
+        self.assertFalse(any("stop" in c or "quit" in c or "install.sh" in c[0] for c in calls))
+        self.assertEqual((self.paths[2] / "wisp-account").read_text(),"previous wisp-account")
+        self.assertEqual(u.read(self.paths[0] / "installed-release.json"),self.old)
 
     def test_dead_worker_unfreezes_ui(self):
         u.state(phase="preparing",worker_pid=os.getpid(),worker_start="old",request="token")

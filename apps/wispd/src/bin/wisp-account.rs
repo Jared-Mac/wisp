@@ -1,5 +1,6 @@
 use anyhow::{Context, bail};
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+use clap::Parser;
 use serde::Deserialize;
 use std::{
     fs::{self, OpenOptions},
@@ -15,6 +16,10 @@ use wisp_protocol::{
 
 #[path = "../accounts.rs"]
 mod accounts;
+
+/// Manage a Wisp account using one JSON request on stdin.
+#[derive(Parser)]
+struct Args {}
 
 #[derive(Clone, Copy, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -157,6 +162,7 @@ fn save_account(
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    Args::parse();
     let mut input = String::new();
     io::stdin()
         .lock()

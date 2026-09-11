@@ -11,6 +11,8 @@ Item {
   readonly property alias updates: updates
   WispUpdates { id: updates; bridge: root }
   property string clientName: "quickshell"
+  readonly property alias unreadMarkers: unreadMarkers
+  WispUnreadMessages { id: unreadMarkers; bridge: root }
   readonly property alias messageActions: messageActions
   WispMessageActions { id: messageActions; bridge: root }
   readonly property alias friendships: friendships
@@ -916,6 +918,7 @@ Item {
     var newInvite = receivedSnapshot && nextFlat.room_invitations.some(function(i) {
       return Date.parse(i.expires_at) > Date.now() && knownInvites.indexOf(String(i.server_id)+":"+String(i.id)) < 0
     })
+    unreadMarkers.observe(previousFlat, nextFlat, eventName, next)
     snapshot = next
     Qt.callLater(function() { friendships.sync(eventName || "") })
     privacySnapshotReady = true
@@ -957,7 +960,7 @@ Item {
           activeConversationId = String(nextConversations[i].id)
           pendingDirectName = ""
           pendingDirectServerId = ""
-          send("mark_conversation_read", withConversationScope(activeConversationId))
+          markVisibleConversationRead(activeConversationId)
           break
         }
       }
@@ -965,10 +968,12 @@ Item {
     markVisibleConversationRead()
   }
 
-  function markVisibleConversationRead() {
-    var c = conversationById(focusedConversationId)
+  function markVisibleConversationRead(conversationId) {
+    var target = conversationId || focusedConversationId
+    if (!unreadMarkers.isReading(target)) return
+    var c = conversationById(target)
     if (!c || !c.last_message || !c.unread_count) return
-    var id = String(c.last_message.id)
+    var id = String(c.id) + "::" + String(c.last_message.id)
     if (lastReadMessageId === id) return
     lastReadMessageId = id
     send("mark_conversation_read", withConversationScope(c.id))
@@ -1381,7 +1386,7 @@ Item {
     activeConversationId = c ? String(c.id) : String(id)
     if (c && c.pending_access) return
     if (c && c.tab_closed) send("set_conversation_tab", withConversationScope(id, {closed:false}))
-    send("mark_conversation_read", withConversationScope(activeConversationId))
+    markVisibleConversationRead(activeConversationId)
   }
   function exitConversation(id) {
     if ((conversationById(id) || {}).pending_access) { closeConversation(); return }

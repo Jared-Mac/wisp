@@ -168,11 +168,23 @@ def check(force=False):
             return state(phase="error", last_checked=time.time(), error="Couldn't check for updates. Try again later.")
 
 
-def run(args, *, timeout=30, check=True, environment=None):
-    result = subprocess.run([str(x) for x in args], capture_output=True, text=True, timeout=timeout, env=environment)
+def run(args, *, timeout=30, check=True, environment=None, input=None):
+    result = subprocess.run([str(x) for x in args], capture_output=True, text=True, timeout=timeout, env=environment, input=input)
     if check and result.returncode:
         raise RuntimeError("An update step failed. Your previous installation is backed up.")
     return result
+
+
+def preflight(package):
+    for name in ["wispd", "wispctl"]:
+        run([package / "bin" / name, "--help"], input="")
+    result = run([package / "bin/wisp-account", "--help"], input="", check=False)
+    # Older account helpers ignore --help and expect a JSON request on stdin.
+    # This exact EOF response proves they started without executing any request.
+    legacy_eof = (result.returncode == 1 and not result.stdout and result.stderr.strip() ==
+                  "Error: parse account request\n\nCaused by:\n    EOF while parsing a value at line 1 column 0")
+    if result.returncode and not legacy_eof:
+        raise RuntimeError("The downloaded account helper could not start")
 
 
 def digest(path):
@@ -305,8 +317,7 @@ def worker(automatic):
                 package = extract(archive, folder / "unpacked")
                 if read(package / "release.json").get("commit") != release["commit"]:
                     raise ValueError("The release changed during download")
-                for name in ["wispd", "wispctl", "wisp-account"]:
-                    run([package / "bin" / name, "--help"])
+                preflight(package)
                 if automatic and not preferences()["automatic"]:
                     return state(phase="available", attempted_commit="")
                 request = str(uuid.uuid4())

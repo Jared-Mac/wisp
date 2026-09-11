@@ -9,6 +9,25 @@ Rectangle {
   required property var theme
   required property string conversationId
   signal replyRequested()
+  property bool readerFocused: false
+  property bool readerEngaged: false
+  property string readerKey: ""
+  readonly property var unreadBoundary: bridge.unreadMarkers.boundary(conversationId)
+  function engageReader() { readerEngaged = true; scheduleRead() }
+  function scheduleRead() {
+    if (!readerKey) return
+    bridge.unreadMarkers.report(readerKey, conversationId, readerFocused, false)
+    readTimer.restart()
+  }
+  onReaderFocusedChanged: { if (!readerFocused) readerEngaged=false; scheduleRead() }
+  onAwayFromLatestChanged: scheduleRead()
+  Timer {
+    id: readTimer; interval: 700
+    onTriggered: if (root.readerFocused && root.readerEngaged && !root.awayFromLatest)
+      root.bridge.unreadMarkers.report(root.readerKey,root.conversationId,true,true)
+  }
+  Component.onDestruction: if (readerKey) bridge.unreadMarkers.report(readerKey,"",false,false)
+
   property string highlightedId: ""
   function revealMessage(id) {
     for (var i=0;i<stableMessages.count;i++) if (String(stableMessages.get(i).modelData.id)===String(id)) {
@@ -40,12 +59,13 @@ Rectangle {
     }
     if(stableMessages.count>incoming.length)stableMessages.remove(incoming.length,stableMessages.count-incoming.length)
   }
-  onIncomingMessagesChanged:syncMessages()
-  Component.onCompleted:syncMessages()
+  onIncomingMessagesChanged: { syncMessages(); scheduleRead() }
+  Component.onCompleted: { readerKey="feed-"+(++bridge.unreadMarkers.serial); syncMessages(); scheduleRead() }
   readonly property bool editOpen: editDialog.opened
   readonly property bool awayFromLatest: messages.count > 0 && !messages.atYEnd
     && messages.contentHeight + messages.originY - messages.contentY - messages.height > theme.space(4)
   function scrollToLatest() {
+    engageReader()
     messages.cancelFlick()
     messages.followBottom = true
     messages.positionViewAtEnd()
@@ -69,7 +89,7 @@ Rectangle {
   border.width: theme.tui ? 0 : theme.terminal ? 1 : 0
   border.color: theme.separator
   color: theme.friendly ? "transparent" : theme.tui ? (theme.cleanTui ? "transparent" : theme.background) : theme.alpha(theme.foreground, 0.025)
-  onConversationIdChanged: { messages.followBottom = true; Qt.callLater(messages.followLatest) }
+  onConversationIdChanged: { readerEngaged=false; scheduleRead(); messages.followBottom = true; Qt.callLater(messages.followLatest) }
   ListView {
     id: messages
     objectName: "messageList"
@@ -80,7 +100,7 @@ Rectangle {
     model: stableMessages
     property bool followBottom: true
     function followLatest() { if (followBottom && !moving && !messageScrollBar.pressed) positionViewAtEnd() }
-    onMovementStarted: followBottom = false
+    onMovementStarted: { followBottom = false; root.engageReader() }
     onMovementEnded: followBottom = !root.awayFromLatest
     onCountChanged: if (followBottom) Qt.callLater(followLatest)
     onContentHeightChanged: if (followBottom) Qt.callLater(followLatest)
@@ -91,7 +111,8 @@ Rectangle {
     }
     delegate: Item {
       id: message
-      implicitHeight: transcript.implicitHeight
+      implicitHeight: transcript.implicitHeight + newMessagesDivider.height
+      readonly property bool startsUnread: !!root.unreadBoundary && root.unreadBoundary.firstId===String(modelData.id)
       required property var modelData
       readonly property bool isImage: modelData.content_type === "image/png"
       readonly property bool isFile: modelData.content_type === "application/octet-stream"
@@ -105,12 +126,31 @@ Rectangle {
       HoverHandler { id: messageHover }
       Component.onCompleted: { if (isImage) root.bridge.loadChatImage(String(modelData.id));root.bridge.chatExtras.loadText(serverId,copyText) }
       onCopyTextChanged:root.bridge.chatExtras.loadText(serverId,copyText)
+      Item {
+        id: newMessagesDivider
+        objectName: "newMessagesDivider-" + String(message.modelData.id)
+        width: messages.width; height: message.startsUnread ? root.theme.space(28) : 0
+        visible: message.startsUnread
+        Accessible.role: Accessible.StaticText
+        Accessible.name: "New messages start here"
+        Rectangle {
+          anchors.left: parent.left; anchors.right: newMessagesLabel.left; anchors.rightMargin: root.theme.space(8)
+          anchors.verticalCenter: newMessagesLabel.verticalCenter; height: 1; color: root.theme.accent
+        }
+        Text {
+          id: newMessagesLabel; anchors.right: parent.right
+          text: "New messages"; color: root.theme.accent
+          font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption; font.bold: true
+        }
+      }
       WispAvatar {
+        y: newMessagesDivider.height
         TapHandler { onTapped: authorMenu.showPerson(Object.assign({},message.modelData.sender,{server_id:message.serverId}),parent) }
         HoverHandler { cursorShape:Qt.PointingHandCursor }
         bridge: root.bridge; userId: String(message.modelData.sender.id); serverId: message.serverId; theme: root.theme; name: message.modelData.sender.display_name || ""; visible: root.theme.friendly && root.theme.showAvatars; width: root.theme.space(32); height: width }
       Column {
         id: transcript
+        y: newMessagesDivider.height
         x: root.theme.friendly && root.theme.showAvatars ? root.theme.space(44) : 0
         width: parent.width-x
         spacing: root.theme.comfortable ? root.theme.space(6) : root.theme.tui ? root.theme.space(2) : root.theme.spacing.md

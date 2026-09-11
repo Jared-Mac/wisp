@@ -48,9 +48,15 @@ ShellRoot {
   }
   Timer {running:true;interval:500;onTriggered:{
     test.ackLists();input.wait(40)
+    test.check(!bridge.friendPreferences.membersCollapsed,"server member section is expanded by default")
     test.check(bridge.friendships.state("local").people.length===4,"directory includes nonfriends and self")
     var before=bridge.sent.length;bridge.friendships.sync("presence_changed");test.check(bridge.sent.length===before,"ordinary presence updates do not refetch directory")
     test.check(test.find(serverPeople,"sidebarServerMembers").visible && test.find(trayPeople,"sidebarServerMembers").visible,"People lists are visible in server sections")
+    test.check(test.find(serverPeople,"sidebarServerMembers").count===2 && test.find(trayPeople,"sidebarServerMembers").count===2,"sidebar excludes self and existing friends in main and tray")
+    test.check(serverPeople.otherMembers.every(function(p){return p.id!=="self" && p.id!=="friend"}),"Friends are not duplicated in Other members")
+    var liveFriends=JSON.parse(JSON.stringify(bridge.snapshot));liveFriends.server_states[0].friends.push({id:"river",display_name:"River",online:true,presence:"open"});bridge.applySnapshot(liveFriends);input.wait(20)
+    test.check(serverPeople.otherMembers.length===1,"snapshot friendship removes a duplicate even before the directory refresh")
+    liveFriends.server_states[0].friends.pop();bridge.applySnapshot(liveFriends);input.wait(20)
     test.find(serverPeople,"browseMembers").clicked();input.wait(30);test.ackLists();input.wait(20)
     var dialog=test.find(serverPeople,"serverPeopleDialog"),list=test.find(dialog,"serverPeopleList"),search=test.find(dialog,"memberSearch")
     test.check(dialog.opened && list.count===4,"server directory accessible from People")
@@ -70,6 +76,8 @@ ShellRoot {
     var incomingMenu=test.find(test.find(dialog,"serverMember-sage").parent,"participantMenu");test.find(incomingMenu,"addFriend").clicked()
     test.check(test.last().name==="accept_friend_request","incoming request requires acceptance")
     test.catalog=test.catalog.map(function(p){return Object.assign({},p,p.id==="sage" ? {relationship:"friend"} : {})});test.ack(test.last().id,true);incomingMenu.close();only.checked=false
+    input.wait(20);test.check(serverPeople.otherMembers.length===1 && trayPeople.otherMembers.length===1,"accepted requests leave both inline member lists")
+    test.check(list.count===4,"full directory retains friends, other members and self")
     dialog.close();input.wait(30)
     bridge.friendPreferences.toggleCollapsed();input.wait(20)
     test.check(test.find(serverPeople,"sidebarServerMembers").visible,"collapsing Friends does not hide People")
