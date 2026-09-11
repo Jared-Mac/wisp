@@ -23,6 +23,11 @@ Item {
   Accessible.name: "Message " + root.friend.display_name
   Keys.onReturnPressed: root.bridge.openParticipantDirect(root.friend)
   Keys.onSpacePressed: root.bridge.openParticipantDirect(root.friend)
+  Keys.onPressed: function(event) {
+    if (event.key === Qt.Key_Menu || event.key === Qt.Key_F10 && event.modifiers & Qt.ShiftModifier) {
+      friendMenu.popup(); event.accepted = true
+    }
+  }
   ToolTip.visible: rowHover.hovered && root.narrow
   ToolTip.text: "Message " + root.friend.display_name
   Menu {

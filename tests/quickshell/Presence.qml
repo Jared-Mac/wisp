@@ -15,14 +15,14 @@ ShellRoot {
     for (var child of item.children || []) { var found = find(child, name); if (found) return found }
     return null
   }
-  Wisp.WispTheme { id: theme; profile: "performative" }
+  Wisp.WispTheme { id: theme; profile: "legacy"; tuiTreatment: true }
   Wisp.WispBridge {
     id: bridge
     property var sent: []
     function send(name, args) { sent.push({name:name,args:args}); requestId++; return "test-" + requestId }
   }
   FloatingWindow {
-    id: window; visible: true; implicitWidth: 460; implicitHeight: 780; color: theme.background
+    id: window; visible: true; implicitWidth: Quickshell.env("WISP_TEST_PRESENTATION") === "panel" ? 460 : 840; implicitHeight: 780; color: theme.background
     Wisp.WispContent {
       id: page; anchors.fill: parent; theme: theme; bridge: bridge
       logoSource: Qt.resolvedUrl("app/assets/wisp-icon.svg")
@@ -33,6 +33,7 @@ ShellRoot {
   }
   TestCase { id: input; parent: window.contentItem; when: false }
   Component.onCompleted: {
+    bridge.workspaceLayout.activityWidth = 300
     var data = JSON.parse(JSON.stringify(bridge.snapshot))
     data.self.id = "self"; data.self.display_name = "Me"; data.self.presence = "closed"
     data.self.hangout_id = null; data.self.connection = "available"
@@ -54,12 +55,17 @@ ShellRoot {
       }
       var icon = test.find(page,"friendPresence-friend")
       input.mouseMove(icon,icon.width/2,icon.height/2); input.wait(100)
-      test.check(icon.ToolTip.visible && icon.ToolTip.text.indexOf("wait for them to accept") >= 0, "friend icon explains knocking")
+      test.check(icon.ToolTip.visible && icon.ToolTip.text.indexOf("Knock to request voice") === 0, "friend icon explains knocking")
       // Click the actual row, including a compact panel configured to dismiss on navigation.
       var name = test.find(page,"friendName")
+      var beforeText=bridge.sent.length
       input.mouseClick(name,name.width/2,name.height/2)
+      input.wait(80)
       var sent = bridge.sent[bridge.sent.length-1]
-      test.check(sent.name === "join_friend" && sent.args.server_id === "local", "friend click requests voice on its server")
+      test.check(bridge.activeConversationId === "local::direct:friend" && !bridge.sent.slice(beforeText).some(function(command){return command.name==="join_friend"}), "friend click opens existing text chat on its server")
+      input.mouseClick(icon,icon.width/2,icon.height/2)
+      sent = bridge.sent[bridge.sent.length-1]
+      test.check(sent.name === "join_friend" && sent.args.server_id === "local", "only the voice icon requests voice on its server")
       test.check(bridge.knockFeedback === "", "no success confirmation before server reply")
       bridge.handleLine(JSON.stringify({type:"result",id:"test-" + bridge.requestId,ok:true,value:{status:"knock_sent",knock_id:"fixture"}}))
       input.wait(60)

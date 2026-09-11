@@ -170,7 +170,7 @@ ShellRoot {
         {id:"morgan",display_name:"Morgan",online:true,presence:"away"},
         {id:"member_b",display_name:"MemberB",online:false,presence:"closed"}
       ]
-      bridge.workspaceLayout.activityRatio = 0.2
+      bridge.workspaceLayout.activityWidth = 320
     }
     if (test.mode === "traycollapse") data.spots = [{id:"test_room",name:"TestRoom",members:[]}, {id:"games",name:"Games",members:[]}]
     if (Quickshell.env("WISP_TEST_STRESS")) {
@@ -1635,8 +1635,11 @@ ShellRoot {
                    "friend status badge stays attached to the avatar bottom-right")
         if (avatar && avatar.parent.tiny) test.check(Math.abs(avatar.x+avatar.width/2-avatar.parent.width/2)<1,"rail friend avatar is centered")
         if (dot.parent.compactActions) {
+          var beforeKeyboard=bridge.sent.length
           dot.parent.forceActiveFocus()
           keyDriver.keyClick(Qt.Key_Space)
+          test.check(bridge.sent.slice(beforeKeyboard).some(function(c){return c.name==="open_direct"}) && !bridge.sent.slice(beforeKeyboard).some(function(c){return c.name==="join_friend"}),"compact friend keyboard activation opens text only")
+          keyDriver.keyClick(Qt.Key_Menu)
           var friendActions=test.findObject(dot.parent,"friendActionsMenu",[])
           test.check(friendActions && friendActions.opened,"compact friend actions remain accessible from the keyboard")
           if (friendActions) friendActions.close()
@@ -1655,16 +1658,15 @@ ShellRoot {
           test.check(mic.width>0 && mic.x+mic.width<=mic.parent.width+1,"microphone control fits the rail")
           test.check(Math.abs(mic.parent.x+mic.parent.width/2-mic.parent.parent.width/2)<1,"media grid is centered")
         }
-        var sound=test.findItem(activity,"mediaAction-soundboard")
         var bar=test.findItem(activity,"currentCallBar")
-        var soundPosition=sound.mapToItem(bar,0,0)
-        test.check(soundPosition.y+sound.height<=bar.height,"soundboard button remains fully visible in the call rail")
+        test.check(!test.findItem(bar,"mediaAction-soundboard"),"sidebar soundboard is not duplicated in the call rail")
         test.check(!bridge.sent.some(function(c){return ["join_spot","join_hangout","share","camera"].indexOf(c.name)>=0}),"resizing does not join or publish media")
       }
       if (test.mode === "presence" || test.mode === "panelpresence") {
         for (var entry of [{id:"owner",label:"Open"},{id:"member_c",label:"Knock"},{id:"member_a",label:"Closed"},{id:"morgan",label:"Away"}]) {
           var icon = test.findItem(surface, "friendPresence-" + entry.id)
-          test.check(icon && icon.imageStatus === Image.Ready && icon.label === entry.label && icon.width === theme.space(16), "presence icon renders with accessible status: " + entry.label)
+          var glyph=icon ? icon.contentItem.children[0] : null
+          test.check(glyph && glyph.imageStatus === Image.Ready && glyph.label === entry.label && glyph.width === theme.space(16), "presence icon renders with accessible status: " + entry.label)
           var favorite = test.findItem(surface, "favorite-" + entry.id)
           test.check(!!favorite, "friend row available for icon verification: " + entry.id)
           if (!favorite) continue
