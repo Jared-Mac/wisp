@@ -63,6 +63,7 @@ Column {
       friend: modelData
       bridge: root.bridge
       theme: root.theme; adaptive: root.adaptive
+      dense: root.presentation === "panel"
       onSelected: root.selected()
     }
   }

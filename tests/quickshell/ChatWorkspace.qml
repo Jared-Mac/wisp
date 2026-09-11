@@ -828,7 +828,7 @@ ShellRoot {
       if (star) {
         var label = test.findItem(star.parent, "friendName")
         test.check(!!label && star.x >= label.x + label.width, "star is to the right of the name")
-        test.check(star.parent.height === theme.space(theme.friendly ? 44 : theme.comfortable ? 38 : theme.tui ? 28 : 32), "friends use compact rows")
+        test.check(star.parent.height === theme.space(theme.friendly ? 36 : theme.comfortable ? 32 : theme.tui ? 28 : 32), "friends use compact rows")
         test.check(star.opacity === 0, "favorite star hidden without hover or focus")
         star.forceActiveFocus(Qt.TabFocusReason)
         test.check(star.opacity === 1, "keyboard focus reveals favorite action")
@@ -1724,8 +1724,11 @@ ShellRoot {
         }
       }
       if (test.mode === "media" || test.mode === "panelmedia") {
-        var room = test.findItem(surface, "roomCard")
-        test.check(!!room && room.height >= theme.space(theme.tui ? 42 : 48), "occupied room cards grow to fit their members")
+        if(test.mode==="panelmedia")test.check(!!test.findItem(surface,"trayAudioFooter"),"tray voice controls stay in the fixed footer")
+        else {
+          var room = test.findItem(surface, "roomCard")
+          test.check(!!room && room.height >= theme.space(theme.tui ? 42 : 48), "occupied room cards grow to fit their members")
+        }
       }
       if (test.mode === "cleantui") {
         var cleanWorkspace = test.findObject(surface, "mainWorkspace", [])

@@ -105,15 +105,62 @@ Item {
     delegate: ItemDelegate {
     id: styledControl1
       required property var modelData
+      required property int index
+      objectName:"serverOption-"+modelData.id
       width: selector.popup.width
-      height: root.theme.space(32)
+      height: root.theme.space(36)
       text: String(modelData.name) + (modelData.connected === false ? " · offline" : "")
       highlighted: String(modelData.id)===String(root.bridge.activeServer.id)
       font.family: root.theme.font.family
       font.pixelSize: root.theme.font.caption
+      contentItem:Item {
+        Item {
+          id:grip;objectName:"dragServer-"+styledControl1.modelData.id;width:root.theme.space(20);height:parent.height
+          WispIcon {theme:root.theme;name:"grip";anchors.centerIn:parent;opacity:dragMouse.pressed ? 1 : 0.5}
+          MouseArea {
+            id:dragMouse;anchors.fill:parent;hoverEnabled:true;preventStealing:true
+            property real startY:0
+            cursorShape:pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor
+            onPressed:function(mouse){startY=mapToItem(selector.popup.contentItem,0,mouse.y).y}
+            onReleased:function(mouse) {
+              var end=mapToItem(selector.popup.contentItem,0,mouse.y).y
+              root.bridge.serverPreferences.moveBy(styledControl1.modelData.id,Math.round((end-startY)/styledControl1.height))
+            }
+          }
+          ToolTip.visible:dragMouse.containsMouse && !dragMouse.pressed;ToolTip.text:"Drag to reorder within this group"
+        }
+        Text {
+          anchors.left:grip.right;anchors.leftMargin:root.theme.space(4);anchors.right:serverActions.left;anchors.rightMargin:root.theme.space(4);anchors.verticalCenter:parent.verticalCenter
+          text:styledControl1.text;textFormat:Text.PlainText;elide:Text.ElideRight;color:root.theme.foreground;font:selector.font
+        }
+        Row {
+          id:serverActions;anchors.right:parent.right;anchors.verticalCenter:parent.verticalCenter;spacing:root.theme.space(2)
+          ChatButton {
+            objectName:"homeServer-"+styledControl1.modelData.id
+            theme:root.theme;text:"Home server";iconName:"home";iconOnly:true;forceIcon:true;width:root.theme.space(24);height:width
+            readonly property bool home:root.bridge.serverPreferences.isHome(styledControl1.modelData.id)
+            primary:home;enabled:!home || root.bridge.serverPreferences.homeIds.length>1
+            ToolTip.visible:hovered || visualFocus;ToolTip.text:home ? "Home server" : "Set as a home server"
+            onClicked:root.bridge.serverPreferences.setHome(styledControl1.modelData.id,!home)
+          }
+          Repeater {
+            model:[-1,1]
+            ChatButton {
+              required property int modelData
+              objectName:(modelData<0 ? "moveServerUp-" : "moveServerDown-")+styledControl1.modelData.id
+              theme:root.theme;text:modelData<0 ? "Move server up" : "Move server down";iconName:"chevron";iconOnly:true;forceIcon:true
+              contentItem:WispIcon {theme:root.theme;name:"chevron";rotation:parent.modelData<0 ? 180 : 0;ink:root.theme.foreground}
+              width:root.theme.space(24);height:width
+              enabled:root.bridge.serverPreferences.canMove(styledControl1.modelData.id,modelData)
+              ToolTip.visible:hovered || visualFocus;ToolTip.text:text
+              onClicked:root.bridge.serverPreferences.moveBy(styledControl1.modelData.id,modelData)
+            }
+          }
+        }
+      }
       ThemeControlStyle { theme: root.theme; control: styledControl1 }
     }
-    popup.width: Math.max(root.theme.space(220), selector.width)
+    popup.width: Math.min(Math.max(root.theme.space(300), selector.width),root.Window.window ? root.Window.window.width-root.theme.space(24) : root.theme.space(300))
     readonly property var ping: root.bridge.serverPings[String(root.bridge.activeServer.id)] || ({})
     onHoveredChanged: if(hovered && root.bridge.activeServer.connected) root.bridge.refreshServerPing(root.bridge.activeServer.id)
     onCurrentIndexChanged: if(hovered && root.bridge.activeServer.connected) root.bridge.refreshServerPing(root.bridge.activeServer.id)

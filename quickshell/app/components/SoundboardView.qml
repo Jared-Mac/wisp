@@ -144,7 +144,7 @@ Column {
     height: visible ? Math.min(Math.ceil(root.sounds.length/columns)*cellHeight, root.maximumListHeight) : 0
     model: root.playOnly ? root.filteredSounds : []
     clip: true; boundsBehavior: Flickable.StopAtBounds
-    ScrollBar.vertical: ScrollBar {}
+    ScrollBar.vertical: ScrollBar {policy:parent.contentHeight>parent.height+1 ? ScrollBar.AlwaysOn : ScrollBar.AlwaysOff}
     function focusPad(index) {
       currentIndex = Math.max(0, Math.min(count-1,index))
       positionViewAtIndex(currentIndex, GridView.Contain)
@@ -189,7 +189,7 @@ Column {
     visible: !root.playOnly
     height: visible ? Math.min(contentHeight,root.theme.space(320)) : 0; clip: true; spacing: root.theme.spacing.sm
     model: root.playOnly ? [] : root.filteredSounds
-    ScrollBar.vertical: ScrollBar {}
+    ScrollBar.vertical: ScrollBar {policy:parent.contentHeight>parent.height+1 ? ScrollBar.AlwaysOn : ScrollBar.AlwaysOff}
     delegate: Rectangle {
       id: entry; required property var modelData; width: soundList.width; height: row.implicitHeight + root.theme.spacing.md*2
       color: root.theme.alpha(root.theme.foreground,0.035); radius: root.theme.cornerRadius

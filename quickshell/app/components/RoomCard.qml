@@ -10,6 +10,7 @@ Column {
   readonly property bool narrow: adaptive && width < theme.space(200)
   readonly property bool tiny: adaptive && width < theme.space(80)
   property bool mainApp: false
+  property bool showConnectedInvite: mainApp
   objectName: "savedRoom-" + room.id
   readonly property var people: (room.members || []).map(function(person) { return root.bridge.scopedParticipant(Object.assign({},person,{server_id:String(root.room.server_id || root.bridge.activeServer.id)})) })
   readonly property string conversationId: bridge.roomConversationId(room, true)
@@ -65,7 +66,7 @@ Column {
           height: wrapActions ? joinAction.height + spacing + moreAction.height : Math.max(joinAction.visible ? joinAction.height : 0, moreAction.height)
           ChatButton {
             id: joinAction; objectName: "joinRoom-" + root.room.id
-            visible: !root.current || root.mainApp; enabled: root.bridge.activeServer.connected !== false
+            visible: !root.current || root.showConnectedInvite; enabled: root.bridge.activeServer.connected !== false
             theme: root.theme; text: root.current ? "inv" : "join"
             iconName: root.current ? "invite" : root.narrow ? "phone" : ""; iconOnly: root.current || root.narrow; forceIcon: root.current || root.narrow
             width: root.narrow ? Math.min(body.width,root.theme.space(28)) : root.current ? root.theme.space(32) : implicitWidth

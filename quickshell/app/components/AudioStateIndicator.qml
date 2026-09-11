@@ -9,10 +9,12 @@ Grid {
   property bool muted: false
   property bool deafened: false
   property bool adaptive: false
+  property real compactButtonSize:0
+  property bool forceIcons:false
   property real availableWidth: 100000
   property bool tooltipAbove: false
   readonly property bool compactSymbols: adaptive && availableWidth < theme.space(260)
-  readonly property real buttonHeight: theme.space(theme.comfortable ? 36 : 32)
+  readonly property real buttonHeight: compactButtonSize>0 ? compactButtonSize : theme.space(theme.comfortable ? 36 : 32)
   columns: !adaptive || availableWidth >= mutedIcon.width + deafenedIcon.width + soundboardButton.width + spacing * 2
     ? 3 : availableWidth >= Math.max(mutedIcon.width, deafenedIcon.width, soundboardButton.width) * 2 + spacing ? 2 : 1
 
@@ -29,8 +31,8 @@ Grid {
     Accessible.name: root.muted ? "Unmute microphone" : "Mute microphone"
     Keys.onSpacePressed: root.bridge.toggleMuted()
     Keys.onReturnPressed: root.bridge.toggleMuted()
-    width: Math.min(root.availableWidth,root.theme.space(root.theme.comfortable && !root.compactSymbols ? 92 : 32))
-    height: root.theme.space(root.theme.comfortable ? 36 : 32)
+    width: Math.min(root.availableWidth,root.compactButtonSize>0 ? root.compactButtonSize : root.theme.space(root.theme.comfortable && !root.compactSymbols ? 92 : 32))
+    height: root.buttonHeight
     radius: root.theme.cornerRadius
     color: root.theme.tui && !root.theme.comfortable ? "transparent" : root.muted
       ? root.theme.alpha(root.theme.warning, mutedMouse.containsMouse ? 0.3 : 0.18)
@@ -39,7 +41,7 @@ Grid {
     border.width: root.theme.tui && !root.theme.comfortable && !activeFocus ? 0 : 1
 
     Image {
-      visible: !root.theme.tui && !root.theme.comfortable && !root.theme.friendly && !root.compactSymbols
+      visible: !root.forceIcons && !root.theme.tui && !root.theme.comfortable && !root.theme.friendly && !root.compactSymbols
       anchors.centerIn: parent
       width: root.theme.space(20)
       height: width
@@ -48,9 +50,9 @@ Grid {
         : "../assets/microphone.svg")
       fillMode: Image.PreserveAspectFit
     }
-    WispIcon { anchors.centerIn: parent; theme: root.theme; name: root.muted ? "microphone-off" : "microphone"; ink: root.muted ? root.theme.warning : root.theme.foreground; visible: root.theme.friendly || root.compactSymbols && !root.theme.tui }
+    WispIcon { anchors.centerIn: parent; theme: root.theme; name: root.muted ? "microphone-off" : "microphone"; ink: root.muted ? root.theme.warning : root.theme.foreground; visible: root.forceIcons || root.theme.friendly || root.compactSymbols && !root.theme.tui }
     Text {
-      anchors.centerIn: parent; visible: root.theme.tui || root.theme.comfortable && !root.compactSymbols
+      anchors.centerIn: parent; visible: !root.forceIcons && (root.theme.tui || root.theme.comfortable && !root.compactSymbols)
       text: root.theme.comfortable ? (root.muted ? "Unmute" : "Mute") : "[M]"; color: root.muted ? root.theme.warning : root.theme.foreground
       font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
     }
@@ -99,8 +101,8 @@ Grid {
     Accessible.name: root.deafened ? "Undeafen" : "Deafen"
     Keys.onSpacePressed: root.bridge.toggleDeafened()
     Keys.onReturnPressed: root.bridge.toggleDeafened()
-    width: Math.min(root.availableWidth,root.theme.space(root.theme.comfortable && !root.compactSymbols ? 102 : 32))
-    height: root.theme.space(root.theme.comfortable ? 36 : 32)
+    width: Math.min(root.availableWidth,root.compactButtonSize>0 ? root.compactButtonSize : root.theme.space(root.theme.comfortable && !root.compactSymbols ? 102 : 32))
+    height: root.buttonHeight
     radius: root.theme.cornerRadius
     color: root.theme.tui && !root.theme.comfortable ? "transparent" : root.deafened
       ? root.theme.alpha(root.theme.danger, deafenedMouse.containsMouse ? 0.32 : 0.2)
@@ -109,7 +111,7 @@ Grid {
     border.width: root.theme.tui && !root.theme.comfortable && !activeFocus ? 0 : 1
 
     Image {
-      visible: !root.theme.tui && !root.theme.comfortable && !root.theme.friendly && !root.compactSymbols
+      visible: !root.forceIcons && !root.theme.tui && !root.theme.comfortable && !root.theme.friendly && !root.compactSymbols
       anchors.centerIn: parent
       width: root.theme.space(20)
       height: width
@@ -118,9 +120,9 @@ Grid {
         : "../assets/headphones.svg")
       fillMode: Image.PreserveAspectFit
     }
-    WispIcon { anchors.centerIn: parent; theme: root.theme; name: root.deafened ? "headphones-off" : "headphones"; ink: root.deafened ? root.theme.danger : root.theme.foreground; visible: root.theme.friendly || root.compactSymbols && !root.theme.tui }
+    WispIcon { anchors.centerIn: parent; theme: root.theme; name: root.deafened ? "headphones-off" : "headphones"; ink: root.deafened ? root.theme.danger : root.theme.foreground; visible: root.forceIcons || root.theme.friendly || root.compactSymbols && !root.theme.tui }
     Text {
-      anchors.centerIn: parent; visible: root.theme.tui || root.theme.comfortable && !root.compactSymbols
+      anchors.centerIn: parent; visible: !root.forceIcons && (root.theme.tui || root.theme.comfortable && !root.compactSymbols)
       text: root.theme.comfortable ? (root.deafened ? "Undeafen" : "Deafen") : "[D]"; color: root.deafened ? root.theme.danger : root.theme.foreground
       font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
     }
@@ -163,7 +165,7 @@ Grid {
     id: soundboardButton
     objectName: "audioSoundboardButton"
     theme: root.theme; text: "Soundboard"; iconName: "soundboard"; iconOnly: true; forceIcon: true
-    width: Math.min(root.availableWidth, root.theme.space(32)); height: root.buttonHeight
+    width: Math.min(root.availableWidth, root.compactButtonSize>0 ? root.compactButtonSize : root.theme.space(32)); height: root.buttonHeight
     Accessible.name: "Open soundboard"
     ToolTip.visible: (hovered || visualFocus) && !soundboardMenu.visible; ToolTip.text: "Soundboard"
     HoverHandler { id: soundboardPointer }

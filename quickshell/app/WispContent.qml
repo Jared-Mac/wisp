@@ -16,7 +16,7 @@ FocusScope {
   property bool horizontalPanel: false
   readonly property bool landscapePanel: horizontalPanel && presentation === "panel" && width >= theme.space(680)
   property var anchorController: null
-  property int contentPadding: trayChatFocused ? theme.space(8) : theme.comfortable ? theme.space(18) : theme.cleanTui ? theme.space(14) : theme.tui ? theme.space(10) : theme.spacing.huge
+  property int contentPadding: trayChatFocused ? theme.space(8) : presentation === "panel" ? theme.space(12) : theme.comfortable ? theme.space(18) : theme.cleanTui ? theme.space(14) : theme.tui ? theme.space(10) : theme.spacing.huge
   property bool dismissOnNavigate: false
   property bool showAppButton: false
   property bool showCloseButton: false
@@ -42,7 +42,7 @@ FocusScope {
     ? theme.space(960) : theme.space(horizontalPanel ? 960 : 390) + contentPadding * 2
   implicitHeight: presentation === "app"
     ? theme.space(840)
-    : landscapePanel ? theme.space(560) : trayChatFocused ? theme.space(800) : Math.min(theme.space(800), fixedHeader.height + panelColumn.implicitHeight + contentPadding * 2 + theme.spacing.lg)
+    : landscapePanel ? theme.space(560) : trayChatFocused ? theme.space(800) : Math.min(theme.space(800), fixedHeader.height + panelColumn.implicitHeight + contentPadding * 2 + theme.spacing.lg + trayAudioDock.height)
   focus: true
 
   function maybeDismiss() {
@@ -183,7 +183,7 @@ FocusScope {
     x: Math.max(root.contentPadding, Math.round((root.width - width) / 2))
     y: root.contentPadding
     width: root.contentWidthLimit > 0 ? Math.min(root.width - root.contentPadding * 2, root.contentWidthLimit) : root.width - root.contentPadding * 2
-    spacing: root.theme.spacing.lg
+    spacing: root.presentation === "panel" ? root.theme.space(6) : root.theme.spacing.lg
 
     Item {
       id: topBar
@@ -271,7 +271,7 @@ FocusScope {
       objectName: "alwaysVisibleControls"
       audioFallback: root.presentation === "app"
       compactPresence: root.landscapePanel || root.trayChatFocused
-      showAudioControls: !((root.landscapePanel || root.trayChatFocused) && root.showingChats) && !(root.presentation === "app" && root.showingChats && dashboardLoader.item && dashboardLoader.item.audioInSidebar)
+      showAudioControls: !(root.presentation === "panel" && root.showingChats) && !(root.presentation === "app" && root.showingChats && dashboardLoader.item && dashboardLoader.item.audioInSidebar)
       showActivityToggle: root.presentation === "app" && root.showingChats
       activityStacked: !root.wideLayout
       navigationDrawer: !!dashboardLoader.item && !!dashboardLoader.item.drawerMode
@@ -316,8 +316,8 @@ FocusScope {
   Flickable {
     id: scrollView
     objectName: "dashboardScroll"
-    anchors { left: parent.left; right: parent.right; bottom: parent.bottom; top: fixedHeader.bottom; topMargin: root.trayChatFocused ? root.theme.space(6) : root.theme.spacing.lg }
-    anchors.bottomMargin: terminalStatus.visible ? terminalStatus.height : 0
+    anchors { left: parent.left; right: parent.right; bottom: parent.bottom; top: fixedHeader.bottom; topMargin: root.presentation === "panel" ? root.theme.space(6) : root.theme.spacing.lg }
+    anchors.bottomMargin: (terminalStatus.visible ? terminalStatus.height : 0) + (trayAudioDock.active ? trayAudioDock.height+root.contentPadding+root.theme.space(6) : 0)
     contentWidth: width
     contentHeight: panelColumn.implicitHeight + root.contentPadding * 2
     clip: true
@@ -430,6 +430,22 @@ FocusScope {
     }
   }
 
+  Loader {
+    id:trayAudioDock
+    active:root.presentation === "panel" && root.showingChats
+    visible:active
+    anchors.left:parent.left;anchors.right:parent.right;anchors.bottom:parent.bottom
+    anchors.leftMargin:root.contentPadding;anchors.rightMargin:root.contentPadding
+    anchors.bottomMargin:root.contentPadding+(terminalStatus.visible ? terminalStatus.height : 0)
+    height:active ? implicitHeight : 0
+    sourceComponent:TrayAudioControls {
+      bridge:root.bridge;theme:root.theme;navigationPeeks:root.trayChatFocused
+      onCameraRequested:root.requestCamera()
+      onServerSettingsRequested:root.openServerSettings()
+      onCreateRoomRequested:identityRoomManager.createRoom()
+    }
+  }
+
   Rectangle {
     id: terminalStatus
     objectName: "terminalStatusLine"
@@ -472,7 +488,7 @@ FocusScope {
   LocalBroadcastPreviews {
     objectName: "localBroadcastPreviews"
     anchors.fill: parent
-    anchors.bottomMargin: terminalStatus.visible ? terminalStatus.height : 0
+    anchors.bottomMargin: (terminalStatus.visible ? terminalStatus.height : 0)+(trayAudioDock.active ? trayAudioDock.height+root.contentPadding+root.theme.space(6) : 0)
     z: 100
     bridge: root.bridge
     theme: root.theme
@@ -485,7 +501,7 @@ FocusScope {
 
     Column {
       id: compactDashboard
-      spacing: root.theme.spacing.lg
+      spacing: root.theme.space(8)
 
       ServerSelector {
         width: parent.width
@@ -513,12 +529,6 @@ FocusScope {
         bridge: root.bridge
         theme: root.theme
         onCreateRoomRequested: identityRoomManager.createRoom()
-      }
-      CurrentCallBar {
-        compact: true
-        width: parent.width; height: visible ? implicitHeight : 0
-        bridge: root.bridge; theme: root.theme
-        onCameraRequested: root.requestCamera()
       }
       ServerChannelsView {
         width: parent.width
@@ -556,9 +566,6 @@ FocusScope {
     id:focusedTrayComponent
     TrayChatWorkspace {
       bridge:root.bridge;theme:root.theme
-      onCameraRequested:root.requestCamera()
-      onServerSettingsRequested:root.openServerSettings()
-      onCreateRoomRequested:identityRoomManager.createRoom()
     }
   }
 

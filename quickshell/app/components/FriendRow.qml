@@ -7,6 +7,7 @@ Item {
   required property var bridge
   required property var theme
   property bool adaptive: false
+  property bool dense: false
   readonly property bool narrow: adaptive && width < theme.space(140)
   readonly property bool tiny: adaptive && width < theme.space(80)
   readonly property bool compactActions: adaptive && width < theme.space(220)
@@ -16,7 +17,7 @@ Item {
   readonly property bool canRequest: root.friend.online &&
     (root.friend.presence === "open" || root.friend.presence === "knock")
 
-  implicitHeight: root.theme.space(root.theme.friendly ? 44 : root.theme.comfortable ? 38 : root.theme.tui ? 28 : 32)
+  implicitHeight: root.theme.space(root.theme.friendly ? (dense ? 36 : 44) : root.theme.comfortable ? (dense ? 32 : 38) : root.theme.tui ? 28 : 32)
 
   activeFocusOnTab: true
   Accessible.role: Accessible.Button

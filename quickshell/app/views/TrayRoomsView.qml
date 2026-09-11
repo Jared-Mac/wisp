@@ -14,5 +14,5 @@ Column {
     onToggled: root.bridge.workspaceLayout.trayRoomsCollapsed = !root.collapsed
     onCreateRequested: root.createRoomRequested()
   }
-  SpotsView { width: parent.width; visible: !root.collapsed; bridge: root.bridge; theme: root.theme }
+  SpotsView { width: parent.width; visible: !root.collapsed; bridge: root.bridge; theme: root.theme; showConnectedInvite:true }
 }

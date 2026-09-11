@@ -13,7 +13,7 @@ Item {
   readonly property real gap: theme.space(14)
   readonly property real roomsWidth: Math.min(theme.space(224), width*0.25)
   readonly property real friendsWidth: Math.min(theme.space(184), width*0.20)
-  readonly property real bodyHeight: Math.max(1, height-audio.height-gap)
+  readonly property real bodyHeight: Math.max(1, height)
 
   Item {
     id: rooms
@@ -77,18 +77,10 @@ Item {
     clip: true; boundsBehavior: Flickable.StopAtBounds
     ScrollBar.vertical: ScrollBar {}
     Column {
-      id: people; width: parent.width; spacing: root.theme.spacing.lg
+      id: people; width: parent.width; spacing: root.theme.space(8)
       InboxButton { width: parent.width; bridge: root.bridge; theme: root.theme }
       FriendsView { width: parent.width; bridge: root.bridge; theme: root.theme; adaptive: true; collapsible: true; presentation: "panel" }
       ServerMembersView { width: parent.width; bridge: root.bridge; theme: root.theme; presentation: "panel" }
     }
-  }
-  SidebarAudioControls {
-    id: audio
-    anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
-    bridge: root.bridge; theme: root.theme; horizontal: true
-    maximumCallHeight: root.theme.space(100)
-    roomInvitesInHeader: true
-    onCameraRequested: root.cameraRequested()
   }
 }

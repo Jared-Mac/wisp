@@ -98,6 +98,9 @@ jobs:
       - name: Test Discord patch-note formatting
         run: python3 -m unittest discover -s tests -p 'test_discord_patch_notes.py'
 
+      - name: Test home-room notification rules
+        run: node scripts/test-room-activity.cjs
+
       - name: Run Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
 

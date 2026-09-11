@@ -128,6 +128,14 @@ ShellRoot {
       bridge.reply(played.id,true,{playing:true})
       board.stop();bridge.reply(String(bridge.serial),true,{playing:false})
       bridge.effectiveMuted=true;wait(30);test.check(!quickPlay.enabled,"Muted call cannot send sounds")
+      var preview=test.find(popup.contentItem,"soundboardQuickPreview-one")
+      mouseMove(quickPlay,quickPlay.width/2,quickPlay.height/2);wait(30)
+      test.check(preview.opacity===1 && preview.enabled,"Hover reveals a local preview even when broadcasting is disabled")
+      var previewStart=bridge.sent.length
+      mouseClick(preview,preview.width/2,preview.height/2);wait(30)
+      var localPreview=bridge.sent[bridge.sent.length-1]
+      test.check(localPreview.name==="soundboard_preview" && bridge.sent.slice(previewStart).every(function(c){return c.name!=="soundboard_play"}),"Preview never broadcasts into voice")
+      bridge.reply(localPreview.id,true,{previewing:true});board.stop();bridge.reply(String(bridge.serial),true,{previewing:false})
       bridge.effectiveMuted=false;bridge.selfState={deafened:true};wait(30)
       test.check(!quickPlay.enabled,"Deafened call cannot send sounds")
       bridge.selfState={deafened:false};wait(30)
@@ -144,6 +152,13 @@ ShellRoot {
       var pads=test.find(popup.contentItem,"soundboardPads")
       test.check(popup.width<=theme.space(258) && popup.height<=theme.space(150),"Eight sounds fit a small buttons-only popup")
       test.check(pads.columns===2 && pads.count===8,"Sounds use two columns")
+      board.catalogs={a:Array.from({length:18},function(_,i){return {id:String(i),name:"Sound "+i,owner_id:"a-me",owner_name:"Me",duration_ms:1300}})};wait(80)
+      var more=test.find(popup.contentItem,"soundboardOverflowHint"),scrollbar=test.find(popup.contentItem,"soundboardScrollBar")
+      test.check(more.visible && scrollbar.visible,"Overflow always shows a scrollbar and more-sounds hint")
+      var beforeScroll=pads.contentY;more.clicked();wait(50)
+      test.check(pads.contentY>beforeScroll,"More sounds control reveals the lower rows")
+      if(screenshot){popup.contentItem.grabToImage(function(result){result.saveToFile(screenshot.replace(".png","-overflow.png"))});wait(100)}
+      board.catalogs={a:defaults.map(function(n,i){return {id:String(i),name:n,owner_id:"a-me",owner_name:"Me",duration_ms:1300}})};wait(50)
       popup.close();popup.openAt(surface,Qt.point(window.width-2,window.height-2));wait(50)
       test.check(popup.x>=0 && popup.y>=0 && popup.x+popup.width<=window.width && popup.y+popup.height<=window.height,"Pointer popup stays inside the bottom/right edges")
       if(screenshot) {popup.contentItem.grabToImage(function(result){result.saveToFile(screenshot.replace(".png","-popup.png"))});wait(200)}

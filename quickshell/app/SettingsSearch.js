@@ -32,6 +32,8 @@ var entries = [
   {section:"notifications", target:"incomingDmsAsTilesSetting", label:"Open incoming DMs in new tiles", keywords:"inbox unread messages automatic pending chat navigation"},
   {section:"notifications", target:"channelsAsTilesSetting", label:"Open channels and rooms in new tiles", keywords:"chat navigation default reuse pane window"},
   {section:"notifications", target:"settingsNotifications", label:"Message notification sounds", keywords:"chat mute sound alerts focus background policy"},
+  {section:"notifications",target:"friendRoomNotificationsSetting",label:"Friends joining rooms · desktop alerts",keywords:"pc notification voice activity friends join rooms popup banner"},
+  {section:"notifications",target:"friendRoomTimingSetting",label:"Room activity timing and home servers",keywords:"desktop notification cooldown home servers multiple first joined sound empty background"},
   {section:"notifications", target:"mentionsOnlySetting", label:"Only messages that @mention me", keywords:"mentions names ping notification filter sounds"},
   {section:"notifications", target:"settingsNotificationVolume", label:"Notification volume and custom sound", keywords:"chat alert chime test file"},
   {section:"notifications", target:"audioControlSoundsSetting",label:"Mute and deafen sounds",keywords:"mic microphone unmute undeafen audio cues"},

@@ -28,6 +28,59 @@ Column {
     text: root.bridge.notificationMuted ? "Sound muted · Enable" : "Sound enabled · Mute"
     onClicked: root.bridge.notificationMuted = !root.bridge.notificationMuted
   }
+  CheckBox {
+    id:friendRoomAlerts;objectName:"friendRoomNotificationsSetting";width:parent.width
+    text:"Desktop alerts when friends join rooms";checked:root.bridge.friendRoomNotifications
+    onToggled:root.bridge.friendRoomNotifications=checked
+    ThemeControlStyle {theme:root.theme;control:friendRoomAlerts}
+  }
+  SettingsSection {
+    objectName:"roomActivitySection";theme:root.theme;title:"Room activity alerts";summary:"Home servers, timing, cooldown, and sound"
+    Column {
+      width:parent.width;spacing:root.theme.spacing.sm;enabled:root.bridge.friendRoomNotifications
+      Text {text:"Notify me";color:root.theme.foreground;font.family:root.theme.font.family;font.pixelSize:root.theme.font.caption}
+      ComboBox {
+        id:activityTiming;objectName:"friendRoomTimingSetting";width:parent.width;textRole:"label";valueRole:"id"
+        model:[{id:"not_in_voice",label:"When I'm not in voice"},{id:"background",label:"When Wisp is in the background"},{id:"always",label:"Even while I'm using Wisp"}]
+        currentIndex:Math.max(0,model.findIndex(function(o){return o.id===root.bridge.friendRoomNotificationTiming}))
+        onActivated:root.bridge.friendRoomNotificationTiming=currentValue
+        ThemeControlStyle {theme:root.theme;control:activityTiming}
+      }
+      Text {width:parent.width;wrapMode:Text.Wrap;text:"Your current voice room is excluded. Clicking an alert opens the room's chat.";color:root.theme.muted;font.family:root.theme.font.family;font.pixelSize:root.theme.font.caption}
+      CheckBox {
+        id:emptyRoom;objectName:"friendRoomOnlyEmptySetting";width:parent.width;text:"Only when an empty room becomes active"
+        checked:root.bridge.friendRoomOnlyEmpty;onToggled:root.bridge.friendRoomOnlyEmpty=checked
+        ThemeControlStyle {theme:root.theme;control:emptyRoom}
+      }
+      CheckBox {
+        id:activitySound;objectName:"friendRoomSoundSetting";width:parent.width;text:"Play a sound with the alert"
+        checked:root.bridge.friendRoomNotificationSound;onToggled:root.bridge.friendRoomNotificationSound=checked
+        ThemeControlStyle {theme:root.theme;control:activitySound}
+      }
+      Text {text:"Cooldown per room (minutes)";color:root.theme.foreground;font.family:root.theme.font.family;font.pixelSize:root.theme.font.caption}
+      SpinBox {
+        id:activityCooldown;objectName:"friendRoomCooldownSetting";from:0;to:120;editable:true
+        value:root.bridge.friendRoomCooldown;onValueModified:root.bridge.friendRoomCooldown=value
+        Accessible.name:"Minutes between room activity alerts; zero disables the cooldown"
+        ThemeControlStyle {theme:root.theme;control:activityCooldown}
+      }
+      Text {text:"Home servers";color:root.theme.foreground;font.family:root.theme.font.family;font.pixelSize:root.theme.font.caption}
+      Text {width:parent.width;wrapMode:Text.Wrap;text:"Alerts cover all accessible rooms on these servers. Your first server is home by default.";color:root.theme.muted;font.family:root.theme.font.family;font.pixelSize:root.theme.font.caption}
+      Repeater {
+        model:root.bridge.servers
+        CheckBox {
+          id:homeChoice;required property var modelData;width:parent.width;text:modelData.name
+          checked:root.bridge.serverPreferences.isHome(modelData.id)
+          enabled:!checked || root.bridge.serverPreferences.homeIds.length>1
+          onToggled:root.bridge.serverPreferences.setHome(modelData.id,checked)
+          ThemeControlStyle {theme:root.theme;control:homeChoice}
+        }
+      }
+      Text {width:parent.width;wrapMode:Text.Wrap;visible:!!root.bridge.serverPreferences.error;text:root.bridge.serverPreferences.error;color:root.theme.danger;font.family:root.theme.font.family;font.pixelSize:root.theme.font.caption}
+    }
+    ChatButton {theme:root.theme;text:"Test desktop notification";onClicked:root.bridge.roomActivity.testNotification()}
+    Text {width:parent.width;wrapMode:Text.Wrap;visible:!!root.bridge.roomActivity.error;text:root.bridge.roomActivity.error;color:root.theme.danger;font.family:root.theme.font.family;font.pixelSize:root.theme.font.caption}
+  }
   Text { text: "Play sounds for"; color: root.theme.foreground; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption }
   CheckBox {
     id: mentionsOnly; objectName: "mentionsOnlySetting"; width: parent.width
@@ -155,7 +208,7 @@ Column {
       ThemeControlStyle {theme:root.theme;control:viewerCues}
     }
     Repeater {
-      model: [{id:"room_invite",label:"Voice room invitation"},{id:"member_join",label:"Someone joins your room"},{id:"member_leave",label:"Someone leaves your room"},{id:"self_join",label:"You join a room"},{id:"self_leave",label:"You leave a room"},{id:"screen_share_start",label:"Screen share starts"},{id:"screen_share_stop",label:"Screen share ends"},{id:"stream_viewer_join",label:"Viewer starts watching"},{id:"stream_viewer_leave",label:"Viewer stops watching"},{id:"audio_mute",label:"Microphone muted"},{id:"audio_unmute",label:"Microphone unmuted"},{id:"audio_deafen",label:"Deafened"},{id:"audio_undeafen",label:"Undeafened"}]
+      model: [{id:"room_invite",label:"Voice room invitation"},{id:"friend_room_join",label:"Friend joins another room"},{id:"member_join",label:"Someone joins your room"},{id:"member_leave",label:"Someone leaves your room"},{id:"self_join",label:"You join a room"},{id:"self_leave",label:"You leave a room"},{id:"screen_share_start",label:"Screen share starts"},{id:"screen_share_stop",label:"Screen share ends"},{id:"stream_viewer_join",label:"Viewer starts watching"},{id:"stream_viewer_leave",label:"Viewer stops watching"},{id:"audio_mute",label:"Microphone muted"},{id:"audio_unmute",label:"Microphone unmuted"},{id:"audio_deafen",label:"Deafened"},{id:"audio_undeafen",label:"Undeafened"}]
       Column {
         id: eventSoundRow
         required property var modelData

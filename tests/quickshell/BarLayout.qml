@@ -83,8 +83,8 @@ ShellRoot {
         test.check(!!workspace && page.landscapePanel,"Wide popup uses the horizontal workspace")
         test.check(rooms.y===chat.y && chat.y===friends.y && rooms.x+rooms.width<chat.x && chat.x+chat.width<friends.x,"Rooms, chat and friends occupy separate columns")
         test.check(chat.width>=size.width*0.42,"Chat receives the largest column")
-        var footer=test.find(workspace,"sidebarAudioFooter")
-        test.check(footer.y>=rooms.height && footer.y+footer.height<=workspace.height+1,"Audio toolbar sits below every column")
+        var footer=test.find(page,"trayAudioFooter"),footerAt=footer.mapToItem(workspace,0,0)
+        test.check(footerAt.y>=rooms.height && footer.mapToItem(page,0,0).y+footer.height<=page.height,"Audio toolbar sits below every column")
         for (var name of ["muteControl","deafenControl","audioSoundboardButton","currentCallDisconnect","mediaAction-share","mediaAction-camera"]) {
           var button=test.find(footer,name), pos=button.mapToItem(footer,0,0)
           test.check(button.visible && pos.x>=0 && pos.y>=0 && pos.x+button.width<=footer.width+1 && pos.y+button.height<=footer.height+1,"Toolbar keeps "+name+" reachable at "+size.width)
@@ -102,6 +102,21 @@ ShellRoot {
         if(screenshot) { page.grabToImage(function(result){result.saveToFile(screenshot+"/bar-"+size.width+".png")}); input.wait(100) }
       }
       test.fixtureWidth=960;test.fixtureHeight=560;input.wait(80)
+      for(var compactSize of [Qt.size(460,800),Qt.size(320,600)]) {
+        test.fixtureWidth=compactSize.width;test.fixtureHeight=compactSize.height;input.wait(100)
+        var footer=test.find(page,"trayAudioFooter"),scroller=test.find(page,"dashboardScroll"),footerPosition=footer.mapToItem(page,0,0)
+        test.check(footerPosition.y+footer.height<=page.height && footerPosition.y>page.height-theme.space(50),"default tray audio is anchored to the bottom")
+        for(var controlName of ["muteControl","deafenControl","audioSoundboardButton","mediaAction-share","mediaAction-camera","currentCallDisconnect"]) {
+          var control=test.find(footer,controlName),location=control.mapToItem(footer,0,0)
+          test.check(location.y===0 && location.x+control.width<=footer.width+1,"default tray controls fit one row")
+        }
+        scroller.contentY=100;input.wait(20)
+        test.check(footer.mapToItem(page,0,0).y===footerPosition.y,"tray audio does not scroll with the room list")
+        scroller.contentY=0
+        var screenshot=Quickshell.env("WISP_BAR_SCREENSHOTS")
+        if(screenshot){page.grabToImage(function(result){result.saveToFile(screenshot+"/default-"+compactSize.width+".png")});input.wait(100)}
+      }
+      test.fixtureWidth=960;test.fixtureHeight=560;input.wait(80)
       var savedFriends=bridge.friendPreferences.trayCollapsed,savedMembers=bridge.friendPreferences.trayMembersCollapsed
       test.find(page,"trayChatFocusToggle").clicked();input.wait(120)
       test.check(page.trayChatFocused && !desktop.trayChatFocused && !test.find(desktop,"trayChatFocusToggle"),"chat focus is tray-only")
@@ -109,10 +124,10 @@ ShellRoot {
       test.check(test.find(page,"trayComposerEditor").text==="Draft survives popup resizing","focus toggle preserves the chat draft")
       for(var focusSize of [Qt.size(960,560),Qt.size(460,700),Qt.size(320,600)]) {
         test.fixtureWidth=focusSize.width;test.fixtureHeight=focusSize.height;input.wait(120)
-        var focused=test.find(page,"trayFocusedWorkspace"),focusChat=test.find(page,"focusedTrayChat"),audioRow=test.find(page,"focusedTrayControls")
+        var focused=test.find(page,"trayFocusedWorkspace"),focusChat=focused,audioRow=test.find(page,"trayAudioRow")
         test.check(focusChat.width===focused.width && focusChat.height>focused.height*0.85,"chat fills the focused tray at "+focusSize.width)
-        for(var action of ["mute","deafen","soundboard","share","camera","leave"]) {
-          var control=test.find(page,"focusedAudio-"+action),at=control.mapToItem(audioRow,0,0)
+        for(var action of ["muteControl","deafenControl","audioSoundboardButton","mediaAction-share","mediaAction-camera","currentCallDisconnect"]) {
+          var control=test.find(audioRow,action),at=control.mapToItem(audioRow,0,0)
           test.check(at.y===0 && at.x>=0 && at.x+control.width<=audioRow.width+1,"all audio buttons fit one row at "+focusSize.width)
         }
         var focusButton=test.find(page,"trayChatFocusToggle"),pin=test.find(page,"chatPinsButton")
@@ -142,7 +157,7 @@ ShellRoot {
       test.check(!!test.find(page,"barWorkspace") && test.find(page,"trayComposerEditor").text==="Draft survives popup resizing","leaving focus restores the layout and draft")
       test.check(bridge.friendPreferences.trayCollapsed===savedFriends && bridge.friendPreferences.trayMembersCollapsed===savedMembers,"focus mode preserves section choices")
       var before=bridge.sent.length
-      var sound=test.find(test.find(page,"sidebarAudioFooter"),"audioSoundboardButton")
+      var sound=test.find(test.find(page,"trayAudioFooter"),"audioSoundboardButton")
       input.mouseMove(sound,sound.width/2,sound.height/2); input.mouseClick(sound,sound.width/2,sound.height/2); input.wait(80)
       var menu=input.findChild(sound.parent,"soundboardPopup")
       test.check(menu && menu.opened,"Bottom shortcut opens the soundboard")
@@ -154,8 +169,8 @@ ShellRoot {
       disconnected.self.hangout_id=null
       for(var server of disconnected.server_states || [])server.self.hangout_id=null
       bridge.applySnapshot(disconnected); input.wait(80)
-      var idleFooter=test.find(page,"sidebarAudioFooter")
-      test.check(!idleFooter.inCall && test.find(idleFooter,"muteControl").visible && test.find(idleFooter,"audioSoundboardButton").visible,"Audio strip remains available outside a voice room")
+      var idleFooter=test.find(page,"trayAudioFooter")
+      test.check(!idleFooter.inVoice && test.find(idleFooter,"muteControl").visible && test.find(idleFooter,"audioSoundboardButton").visible,"Audio strip remains available outside a voice room")
       test.fixtureWidth=600; input.wait(100)
       test.check(!page.landscapePanel && !test.find(page,"barWorkspace"),"Small screens retain the compact layout")
       if(!test.failed)console.log("BAR_LAYOUT_OK")

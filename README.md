@@ -515,6 +515,11 @@ mute, volume, and a custom local sound file; these settings live only on this
 device in `~/.config/wisp/notifications.json`. Playback uses PipeWire's `pw-play`.
 The explicit **Test sound** button works while Settings is focused.
 
+Friends joining rooms on your home servers can also trigger desktop alerts.
+Choose homes and reorder them in the server dropdown; adjust alert timing,
+cooldown, and sound in Notifications. See [home servers and room activity](docs/room-activity-notifications.md)
+for defaults and the Linux notification dependency.
+
 Invite friends into your current call with **Invite** below the room list or the
 friend's right-click menu. An invitation card appears in your DM; **Accept & Join
 Voice** joins the named room using the recipient's existing mute/deafen settings,

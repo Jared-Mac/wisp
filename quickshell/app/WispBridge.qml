@@ -14,6 +14,10 @@ Item {
   property string clientName: "quickshell"
   readonly property alias unreadMarkers: unreadMarkers
   WispUnreadMessages { id: unreadMarkers; bridge: root }
+  readonly property alias roomActivity:roomActivity
+  WispRoomActivity {id:roomActivity;bridge:root}
+  readonly property alias serverPreferences:serverPreferences
+  WispServerPreferences {id:serverPreferences;bridge:root}
   readonly property alias messageActions: messageActions
   WispMessageActions { id: messageActions; bridge: root }
   readonly property alias friendships: friendships
@@ -153,6 +157,11 @@ Item {
   property alias streamViewerSounds: notificationSettings.streamViewerSounds
   property alias screenShareSounds: notificationSettings.screenShareSounds
   property alias selfRoomNotificationSounds: notificationSettings.selfRoomSounds
+  property alias friendRoomNotifications:notificationSettings.friendRoomNotifications
+  property alias friendRoomNotificationTiming:notificationSettings.friendRoomTiming
+  property alias friendRoomOnlyEmpty:notificationSettings.friendRoomOnlyEmpty
+  property alias friendRoomCooldown:notificationSettings.friendRoomCooldown
+  property alias friendRoomNotificationSound:notificationSettings.friendRoomSound
   readonly property var eventSoundPaths: notificationSettings.eventSounds
   property var soundQueue: []
   property bool soundPlaybackBusy: false
@@ -438,7 +447,8 @@ Item {
     var fallback = (snapshot.servers || [])[0] || ({id:"local",name:"Wisp server",connected:daemonConnected})
     return [{server:fallback,self:snapshot.self,voice_moderation:snapshot.voice_moderation || {},friends:snapshot.friends || [],hangouts:snapshot.hangouts || [],knocks:snapshot.knocks || [],room_invitations:snapshot.room_invitations || [],conversations:snapshot.conversations || [],messages:snapshot.messages || [],spots:snapshot.spots || [],devices:snapshot.devices || []}]
   }
-  readonly property var servers: {
+  readonly property var servers:serverPreferences.sorted
+  readonly property var serverCatalog: {
     var values = (snapshot.servers || []).slice()
     if (!values.length) values = serverStates.map(function(state) { return state.server })
     return values
@@ -797,6 +807,11 @@ Item {
       property bool audioControlSounds: true
       property bool streamViewerSounds: true
       property bool screenShareSounds: true
+      property bool friendRoomNotifications:true
+      property string friendRoomTiming:"not_in_voice"
+      property bool friendRoomOnlyEmpty:false
+      property int friendRoomCooldown:5
+      property bool friendRoomSound:false
       property var eventSounds: ({})
     }
   }
@@ -831,7 +846,7 @@ Item {
     if (kind.indexOf("self_") === 0 && !selfRoomNotificationSounds) return []
     if (kind.indexOf("member_") === 0 && !roomNotificationSounds) return []
     var soundDirectory = Quickshell.env("WISP_SOUND_DIR") || configHome + "/quickshell/wisp/assets"
-    var path = String((kind === "message" ? notificationSoundPath : eventSoundPaths[kind]) || soundDirectory + "/" + kind + ".wav")
+    var path = String((kind === "message" ? notificationSoundPath : eventSoundPaths[kind]) || soundDirectory + "/" + (kind === "friend_room_join" ? "member_join" : kind) + ".wav")
     if (path.indexOf("file://") === 0) path = decodeURIComponent(path.slice(7))
     if (path.charAt(0) !== "/") { notificationError = "Choose an absolute path to a local audio file."; return [] }
     return ["pw-play", "--volume", String(Math.max(0, Math.min(100, notificationVolume)) / 100), path]
@@ -949,6 +964,7 @@ Item {
     if (!next) return
     var audioCue = AudioControlSounds.event(receivedSnapshot ? snapshot.self : null, next.self, eventName)
     var previousFlat=receivedSnapshot ? flattenedSnapshot(snapshot) : null
+    roomActivity.observe(receivedSnapshot ? snapshot : null,next,eventName)
     var nextFlat=flattenedSnapshot(next)
     var incoming = ChatLogic.incomingConversationIds(previousFlat, nextFlat, eventName)
     var roomEvents = roomEventsForSnapshots(receivedSnapshot ? snapshot : null,next,eventName)
