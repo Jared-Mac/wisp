@@ -9,6 +9,8 @@ Rectangle {
   property bool horizontal: false
   property bool adaptive: false
   property bool showAudio: true
+  property bool showSoundboard: true
+  property bool embedded: false
   readonly property real inset: adaptive ? Math.min(theme.spacing.md, Math.max(0,(width-theme.space(20))/8)) : theme.spacing.md
   readonly property bool narrow: adaptive && width < theme.space(140)
   property real maximumHeight: theme.space(210)
@@ -21,9 +23,9 @@ Rectangle {
   visible: inCall
   implicitHeight: !inCall ? 0 : horizontal ? root.inset * 2 + Math.max(header.height, Math.min(controls.implicitHeight, maximumHeight - root.inset * 2)) : header.height + root.inset * 2 + (theme.friendly ? theme.space(4) : 0)
     + Math.min(controls.implicitHeight, Math.max(root.theme.space(40), maximumHeight - header.height - root.inset * 2 - (theme.friendly ? theme.space(4) : 0)))
-  color: theme.friendly ? theme.alpha(theme.accent,0.045) : theme.surface
+  color: embedded ? "transparent" : theme.friendly ? theme.alpha(theme.accent,0.045) : theme.surface
   radius: theme.cornerRadius
-  Rectangle { width: parent.width; height: 1; color: root.theme.separator }
+  Rectangle { visible: !root.embedded; width: parent.width; height: 1; color: root.theme.separator }
   Item {
     id: header
     x: root.inset; y: root.inset
@@ -76,6 +78,7 @@ Rectangle {
       id: controls; width: parent.width; bridge: root.bridge; theme: root.theme; compact: root.compact; adaptive: root.adaptive; showLeave: false
       showInvite: !root.inviteInRoomHeader
       showAudio: root.showAudio
+      showSoundboard: root.showSoundboard
       showRemoteStreams: !root.inviteInRoomHeader
       onCameraRequested: root.cameraRequested()
     }

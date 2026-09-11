@@ -24,6 +24,18 @@ ShellRoot {
     property bool effectiveMuted: false
     property var selfState: ({deafened:false})
     property bool admin: false
+    property string currentVoiceLabel: "Lounge"
+    property var spots: []
+    property var mediaState: ({livekit_connected:true})
+    property bool sharing: false
+    property bool shareStarting: false
+    property bool cameraActive: false
+    property bool cameraStarting: false
+    property var cameraState: ({devices:[]})
+    property var remoteVideos: []
+    property var pushToTalkState: ({enabled:false})
+    property var availableFriends: []
+    property var friends: []
     property int roomCount: 2
     property var ownModeration: ({})
     function participantServer(person) {return {server:{id:person.server_id,name:person.server_id === "a" ? "Friends" : "Gaming"},self:{id:person.server_id+"-me",server_admin:admin}}}
@@ -38,7 +50,7 @@ ShellRoot {
       id: surface; anchors.fill:parent; color:theme.background
       Components.SoundboardPopup {id:popup;bridge:bridge;theme:theme;hostItem:surface}
       Components.SoundboardView {id:library;anchors.fill:parent;anchors.margins:20;bridge:bridge;theme:theme;serverId:"a"}
-      Components.RoomsHeader {id:roomsHeader;x:20;y:20;width:180;visible:false;bridge:bridge;theme:theme;adaptive:true;showSoundboard:true}
+      Components.SidebarAudioControls {id:audioFooter;x:20;y:window.height-height-20;width:180;visible:false;bridge:bridge;theme:theme}
     }
   }
   function find(item,name) {
@@ -165,20 +177,22 @@ ShellRoot {
       test.check(!board.busy.a && bridge.sent.length===beforePack,"Full libraries retain existing sounds")
 
       board.reset();board.catalogs={a:[{id:"sidebar",name:"Ping",duration_ms:1000}]}
-      bridge.currentVoiceRoom={id:"room"};library.visible=false;roomsHeader.visible=true;wait(50)
-      var sidebarButton=test.find(roomsHeader,"serverSoundboardButton")
-      test.check(sidebarButton && sidebarButton.visible && sidebarButton.width<=theme.space(28),"Server sidebar has a small soundboard button")
+      bridge.currentVoiceRoom={id:"room"};library.visible=false;audioFooter.visible=true;wait(50)
+      var sidebarButton=test.find(audioFooter,"serverSoundboardButton")
+      test.check(sidebarButton && sidebarButton.visible && sidebarButton.width<=theme.space(32),"Audio footer has a small soundboard button")
       var beforeOpen=bridge.sent.length
       mouseMove(sidebarButton,sidebarButton.width/2,sidebarButton.height/2)
       mouseClick(sidebarButton,sidebarButton.width/2,sidebarButton.height/2);wait(50)
-      var sidebarMenu=findChild(roomsHeader,"soundboardPopup")
+      var sidebarMenu=findChild(sidebarButton,"soundboardPopup")
       var sidebarPad=sidebarMenu ? test.find(sidebarMenu.contentItem,"soundboardQuickPlay-sidebar") : null
-      test.check(sidebarMenu && sidebarMenu.opened && sidebarPad && sidebarPad.visible,"Server sidebar button opens the sound menu")
+      test.check(sidebarMenu && sidebarMenu.opened && sidebarPad && sidebarPad.visible,"Audio footer button opens the sound menu")
       test.check(bridge.sent.slice(beforeOpen).every(function(c){return c.name==="soundboard_list" || c.name==="soundboard_status"}),"Opening the sidebar menu never plays or changes the voice room")
       if (sidebarMenu) sidebarMenu.close();wait(50)
-      roomsHeader.width=28;wait(50)
-      var create=test.find(roomsHeader,"createRoomButton")
-      test.check(sidebarButton.mapToItem(roomsHeader,0,0).y+sidebarButton.height<=create.y,"Narrow sidebar stacks its soundboard and create controls without overlap")
+      audioFooter.width=28;wait(50)
+      var audio=test.find(audioFooter,"globalAudioControls")
+      test.check(sidebarButton.mapToItem(audioFooter,0,0).y>=audio.mapToItem(audioFooter,0,0).y+audio.height,"Narrow audio footer stacks soundboard below the microphone controls")
+      bridge.currentVoiceRoom=null;audioFooter.width=180;wait(50)
+      test.check(sidebarButton.visible && test.find(audioFooter,"muteControl").visible,"Audio and soundboard controls remain available outside a call")
 
     }
   }

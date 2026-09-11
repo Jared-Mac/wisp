@@ -1,7 +1,7 @@
 # Server soundboards
 
 Open **Soundboard ▾**, the Soundboard button in call controls, or the small
-four-pad button beside **Rooms +** in the full app's server sidebar. Each opens
+four-pad button in the bottom **Audio** card in the full app's server sidebar. Each opens
 the same small grid of sound buttons beside your pointer, kept within the screen
 edges. Click a sound's name to play into voice. The menu follows your voice server
 during a call, or the selected server outside a call.

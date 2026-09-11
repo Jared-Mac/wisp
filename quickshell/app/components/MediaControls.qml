@@ -12,6 +12,7 @@ Column {
   readonly property bool small: adaptive && width < theme.space(180)
   property bool showLeave: true
   property bool showAudio: true
+  property bool showSoundboard: true
   property bool showInvite: true
   property bool showRemoteStreams: true
   spacing: root.theme.spacing.sm
@@ -34,7 +35,7 @@ Column {
         {label:"Soundboard",action:"soundboard",icon:"volume"},
         {label:"Invite",action:"invite",icon:"invite"},
         {label:"d/c",action:"leave",icon:"disconnect"}
-      ]).filter(function(action) {return (root.showLeave || action.action!=="leave") && (root.showInvite || action.action!=="invite")})
+      ]).filter(function(action) {return (root.showSoundboard || action.action!=="soundboard") && (root.showLeave || action.action!=="leave") && (root.showInvite || action.action!=="invite")})
       ChatButton {
         id: action; required property var modelData
         objectName: "mediaAction-" + modelData.action

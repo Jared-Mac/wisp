@@ -15,6 +15,7 @@ Column {
   property bool showAddChat: false
   property bool canAddChat: false
   property bool showAudioControls: true
+  property bool showSoundboardShortcut: true
   property bool audioFallback: false
   signal addChatRequested(string conversationId)
   function closeMenus() { presenceMenu.close(); addChatPicker.close(); soundboardMenu.close() }
@@ -106,6 +107,7 @@ Column {
     ChatButton {
       id: soundboardButton
       objectName: "headerSoundboardButton"
+      visible: root.showSoundboardShortcut
       theme: root.theme; text: "Soundboard ▾"
       height: root.theme.space(root.theme.comfortable ? 36 : 30)
       Accessible.name: "Open soundboard"

@@ -75,7 +75,7 @@ ShellRoot {
           var serverPeople = test.find(rooms,"serverPeopleSection")
           test.check(!!serverPeople && !!test.find(serverPeople,"sidebarServerMembers"), "People list lives in the server pane at " + style + "/" + w)
           var pos = bar.mapToItem(page,0,0), friendPos = friends.mapToItem(page,0,0)
-          test.check(bar.visible && pos.y + bar.height <= friendPos.y, "voice controls remain above friends at " + style + "/" + w)
+          test.check(bar.visible && pos.y >= friendPos.y + friends.height, "voice controls share the footer below friends at " + style + "/" + w)
           var mute = test.find(test.find(page,"sidebarAudioFooter"),"muteControl"), camera = test.find(bar,"mediaAction-camera")
           test.check(mute.visible && mute.width >= 32 && camera.mapToItem(bar,0,0).y + camera.height <= bar.height, "all voice controls fit at " + style + "/" + w)
           var watch = test.find(page,"roomParticipants")

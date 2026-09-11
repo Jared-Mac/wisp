@@ -71,10 +71,12 @@ ShellRoot {
   Timer {
     interval: 550; running: true
     onTriggered: {
-      var soundboardButton=test.find(page,"headerSoundboardButton")
+      var headerSoundboard=test.find(page,"headerSoundboardButton")
+      test.check(headerSoundboard.visible===test.compact,"The soundboard header shortcut is reserved for the compact panel")
+      var soundboardButton=test.compact ? headerSoundboard : test.find(page,"serverSoundboardButton")
       test.check(soundboardButton && soundboardButton.visible,"Soundboard is reachable before joining a call")
       input.mouseClick(soundboardButton,soundboardButton.width/2,soundboardButton.height/2);input.wait(80)
-      var sounds=test.object(test.find(page,"alwaysVisibleControls"),"soundboardPopup",[])
+      var sounds=test.object(test.compact ? test.find(page,"alwaysVisibleControls") : soundboardButton,"soundboardPopup",[])
       test.check(sounds && sounds.opened && !sounds.managing && sounds.serverId==="local","Main soundboard button opens selected server's playback menu")
       test.screenshot("soundboard",page);input.wait(100)
       if(sounds)sounds.close();input.wait(80)

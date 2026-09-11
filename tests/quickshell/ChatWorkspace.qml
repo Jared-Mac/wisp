@@ -1655,10 +1655,10 @@ ShellRoot {
           test.check(mic.width>0 && mic.x+mic.width<=mic.parent.width+1,"microphone control fits the rail")
           test.check(Math.abs(mic.parent.x+mic.parent.width/2-mic.parent.parent.width/2)<1,"media grid is centered")
         }
-        var sound=test.findItem(activity,"mediaAction-soundboard")
+        var sound=test.findItem(footer,"serverSoundboardButton")
         var bar=test.findItem(activity,"currentCallBar")
-        var soundPosition=sound.mapToItem(bar,0,0)
-        test.check(soundPosition.y+sound.height<=bar.height,"soundboard button remains fully visible in the call rail")
+        var soundPosition=sound.mapToItem(footer,0,0)
+        test.check(soundPosition.y+sound.height<=footer.height,"soundboard button remains fully visible in the audio footer")
         test.check(!bridge.sent.some(function(c){return ["join_spot","join_hangout","share","camera"].indexOf(c.name)>=0}),"resizing does not join or publish media")
       }
       if (test.mode === "presence" || test.mode === "panelpresence") {
