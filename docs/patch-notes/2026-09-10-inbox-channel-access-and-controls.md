@@ -3,5 +3,5 @@
 - Friend names open text chat; voice requests use the dedicated presence icon. Other members now appear below Friends.
 - New text channels are visible to everyone by default. Admins can edit access for all members, admins, or selected accounts.
 - New-message indicators clear after reading and interaction, pressing New, or replying.
-- Compacted share, camera, and disconnect into the room header. Soundboard now sits beside mute/deafen, with the compact menu and no redundant top button.
+- Kept share, camera, and disconnect compact in the bottom Audio card. Soundboard sits beside mute/deafen, with the compact menu and no redundant top button.
 - Added stream-viewer sounds and ping in the server-name tooltip. Avatar visibility remains adjustable in Appearance.

@@ -165,7 +165,7 @@ Grid {
     theme: root.theme; text: "Soundboard"; iconName: "soundboard"; iconOnly: true; forceIcon: true
     width: Math.min(root.availableWidth, root.theme.space(32)); height: root.buttonHeight
     Accessible.name: "Open soundboard"
-    ToolTip.visible: hovered || visualFocus; ToolTip.text: "Soundboard"
+    ToolTip.visible: (hovered || visualFocus) && !soundboardMenu.visible; ToolTip.text: "Soundboard"
     HoverHandler { id: soundboardPointer }
     onClicked: soundboardMenu.openAt(soundboardButton, soundboardPointer.hovered ? soundboardPointer.point.position : Qt.point(width/2, height))
   }
