@@ -78,6 +78,8 @@ ShellRoot {
     test.check(soundboard!==null && Math.abs(soundboard.mapToItem(canvas,0,0).y-mute.mapToItem(canvas,0,0).y)<2,"soundboard sits beside mute and deafen")
     var disconnect=test.find(workspace,"currentCallDisconnect"),share=test.find(workspace,"mediaAction-share"),camera=test.find(workspace,"mediaAction-camera")
     test.check(Math.abs(disconnect.mapToItem(canvas,0,0).y-share.mapToItem(canvas,0,0).y)<2 && Math.abs(camera.mapToItem(canvas,0,0).y-share.mapToItem(canvas,0,0).y)<2,"share camera and disconnect align on one row")
+    test.check(Math.abs(mute.mapToItem(canvas,0,0).y-share.mapToItem(canvas,0,0).y)<2,"all six audio controls share one compact row")
+    test.check(test.find(workspace,"currentCallLocation").text==="Community" && test.find(workspace,"currentCallConnection").text==="· connected","compact status identifies the voice server")
     appearance.setShowAvatars(false);input.wait(40);test.check(!test.find(workspace,"friendAvatar").visible,"hide avatars applies to friends");appearance.setShowAvatars(true)
     input.wait(40)
     var screenshot=Quickshell.env("WISP_INBOX_SCREENSHOT")

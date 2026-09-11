@@ -12,61 +12,74 @@ Rectangle {
   signal cameraRequested()
   readonly property bool inCall: !!bridge.currentVoiceRoom
   readonly property real inset: Math.min(theme.space(8), Math.max(0, (width-theme.space(20))/8))
-  readonly property bool inlineControls: horizontal && width >= theme.space(480)
   readonly property real controlsWidth: Math.max(1, width-inset*2)
-  implicitHeight: inlineControls ? Math.max(call.height, audioRow.height+inset*2)
-    : (inCall ? call.height : 0) + audioRow.height + inset*2
+  readonly property real groupWidth: Math.min(controlsWidth, theme.space(96)+theme.spacing.sm*2)
+  readonly property bool inviteInRoomHeader: roomInvitesInHeader
+    && bridge.voiceServerId === String(bridge.activeServer.id)
+    && (bridge.spots || []).some(function(room) { return !!room.active_hangout_id && room.active_hangout_id === root.bridge.selfState.hangout_id })
+  readonly property var voiceServer: (bridge.servers || []).filter(function(server) { return String(server.id) === root.bridge.voiceServerId })[0] || ({})
+  readonly property string serverName: inCall ? String(bridge.currentVoiceRoom.server_name || voiceServer.name || "Voice") : ""
+  implicitHeight: content.implicitHeight+inset*2
   height: implicitHeight
   color: theme.friendly ? theme.alpha(theme.accent, 0.045) : theme.surface
   radius: theme.cornerRadius
   border.width: 1
   border.color: theme.separator
 
-  CurrentCallBar {
-    id: call
-    visible: root.inCall
-    width: root.inlineControls ? root.width-audioRow.width-root.inset*2 : root.width
-    height: visible ? implicitHeight : 0
-    bridge: root.bridge; theme: root.theme
-    compact: true; adaptive: true; horizontal: root.inlineControls
-    embedded: true; showAudio: false; showSoundboard: false
-    maximumHeight: root.maximumCallHeight
-    roomInvitesInHeader: root.roomInvitesInHeader
-    onCameraRequested: root.cameraRequested()
-  }
-
-  Rectangle {
-    visible: root.inCall && !root.inlineControls
-    x: root.inset; y: call.height; width: root.controlsWidth; height: 1
-    color: root.theme.separator
-  }
-  Row {
-    id: audioRow
-    x: root.inlineControls ? root.width-width-root.inset : root.inset
-    y: root.inlineControls ? (root.height-height)/2 : call.height+root.inset
-    spacing: root.theme.spacing.sm
-    Text {
-      visible: !root.inCall && root.controlsWidth >= controls.width+implicitWidth+audioRow.spacing
-      width: visible ? root.controlsWidth-controls.width-audioRow.spacing : 0
-      height: controls.height
-      text: root.theme.tui ? "/audio" : "Audio"
-      verticalAlignment: Text.AlignVCenter
-      color: root.theme.muted; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
+  Column {
+    id: content; objectName: "currentCallBar"
+    x: root.inset; y: root.inset; width: root.controlsWidth
+    spacing: root.theme.space(4)
+    Row {
+      id: status
+      visible: root.controlsWidth >= root.theme.space(80)
+      width: parent.width; spacing: root.theme.spacing.xs
+      Text {
+        id: location; objectName: "currentCallLocation"
+        width: Math.min(implicitWidth, Math.max(1,status.width-(connection.visible ? connection.width+status.spacing : 0)))
+        text: root.inCall ? root.serverName : "Audio"
+        elide: Text.ElideRight
+        color: root.inCall ? root.theme.accent : root.theme.muted
+        font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
+      }
+      Text {
+        id: connection; objectName: "currentCallConnection"
+        visible: root.inCall
+        text: root.bridge.mediaState.livekit_connected ? "· connected" : "· connecting…"
+        color: root.theme.muted
+        font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
+      }
+      HoverHandler { id: statusHover }
+      ToolTip.visible: statusHover.hovered
+      ToolTip.text: root.inCall ? root.serverName + " " + connection.text + " · " + root.bridge.currentVoiceLabel : "Audio"
     }
     Flow {
-      id: controls
-      readonly property real gap: root.theme.spacing.sm
-      readonly property real cell: root.theme.space(32)
-      width: Math.min(root.controlsWidth, cell*3+gap*2)
-      spacing: gap
+      width: parent.width; spacing: root.theme.spacing.sm
       AudioStateIndicator {
         id: audio; objectName: "globalAudioControls"
         bridge: root.bridge; theme: root.theme
-        adaptive: true; availableWidth: controls.width
+        adaptive: true; availableWidth: root.groupWidth
         tooltipAbove: true
         muted: !!root.bridge.selfState.muted || !!root.bridge.selfState.deafened
         deafened: !!root.bridge.selfState.deafened
       }
+      MediaControls {
+        visible: root.inCall; width: root.groupWidth
+        bridge: root.bridge; theme: root.theme; compact: true; adaptive: true
+        leaveObjectName: "currentCallDisconnect"
+        showAudio: false; showSoundboard: false; showInvite: false
+        showRemoteStreams: false; showPushToTalk: false
+        onCameraRequested: root.cameraRequested()
+      }
+    }
+    MediaControls {
+      width: parent.width
+      bridge: root.bridge; theme: root.theme; compact: true; adaptive: true
+      visible: implicitHeight > 0
+      showAudio: false; showPublishing: false; showSoundboard: false; showLeave: false
+      showInvite: root.inCall && !root.inviteInRoomHeader
+      showRemoteStreams: root.inCall && !root.inviteInRoomHeader
+      showPushToTalk: root.inCall
     }
   }
 }

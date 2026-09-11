@@ -11,6 +11,7 @@ Column {
   property bool adaptive: false
   readonly property bool small: adaptive && width < theme.space(180)
   property bool showLeave: true
+  property string leaveObjectName: "mediaAction-leave"
   property bool showAudio: true
   property bool showPublishing: true
   property bool showSoundboard: true
@@ -40,7 +41,7 @@ Column {
       ]).filter(function(action) {return (root.showPublishing || ["share","camera"].indexOf(action.action)<0) && (root.showSoundboard || action.action!=="soundboard") && (root.showLeave || action.action!=="leave") && (root.showInvite || action.action!=="invite")})
       ChatButton {
         id: action; required property var modelData
-        objectName: "mediaAction-" + modelData.action
+        objectName: modelData.action === "leave" ? root.leaveObjectName : "mediaAction-" + modelData.action
         theme: root.theme; text: modelData.label; iconName: modelData.icon; forceIcon: root.small || modelData.action === "invite"
         readonly property bool publishing: modelData.action==="share" && root.bridge.sharing || modelData.action==="camera" && root.bridge.cameraActive
         readonly property bool controlEnabled: publishing || (modelData.action!=="share" || !root.bridge.shareStarting) && (modelData.action!=="camera" || !root.bridge.cameraStarting && root.bridge.cameraState.devices.length>0)

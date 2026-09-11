@@ -6,6 +6,6 @@ The inbox lists pending chats on the selected server. Friends, channel names, ro
 
 Focused chats become read after interaction at the latest message. Clicking New jumps to the unread boundary and acknowledges the chat immediately; replying also acknowledges it. Background tiles remain unread. Counts clear locally while the server confirms, and recover if that request fails.
 
-The bottom Audio card keeps share, camera, and disconnect in one compact row. The soundboard sits beside mute and deafen, with the compact menu from the soundboard release. The redundant top soundboard button is removed. Stream start/stop cues include your own screen; separate viewer cues indicate arrivals and departures from your stream. Each category can be muted or assigned custom sounds in Notifications.
+The bottom Audio card keeps all six controls in a compact row below the connected server name. The row wraps in narrow sidebars. The soundboard sits beside mute and deafen, with the compact menu from the soundboard release. The redundant top soundboard button is removed. Stream start/stop cues include your own screen; separate viewer cues indicate arrivals and departures from your stream. Each category can be muted or assigned custom sounds in Notifications.
 
 Hovering the server selector measures an HTTP round trip to its health endpoint, cached for ten seconds while hovering. Nothing polls for ping while the pointer is elsewhere. Settings → Appearance → Show user avatars applies to the updated lists and defaults on.
