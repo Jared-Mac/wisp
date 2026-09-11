@@ -4,6 +4,30 @@ Web links in message text and attachment captions open in the default browser.
 Chat remains plain text on the wire; clients escape markup before displaying
 links and emoji images. Pasted HTML never becomes executable content.
 
+## Mentions
+
+Type `@` in any chat composer to search that conversation's members. Use Up/Down
+and Enter or Tab to select a person, or click a suggestion. Escape dismisses the
+suggestions without changing the draft. Selecting a mention does not send it.
+Names with spaces or other special characters use quotes, such as `@"Mira Moon"`.
+Known mentions appear in the chat's accent color.
+
+Mentions match the recipient's current display name, case-insensitively, within
+the receiving server. Display names are unique per server. They remain ordinary
+message text inside the existing encrypted payload, including attachment captions;
+there is no new server-visible mention metadata. Older clients can read the text.
+Renaming an account changes which name should be used for future mentions.
+
+In Settings → Notifications, **Only messages that @mention me** filters message
+sounds on this device. Existing focus rules and mute settings still apply; other
+messages retain unread badges. Voice sounds keep their separate settings. Own
+messages, forwarded quotations, emails, web links, and history/reconnect loads do
+not trigger mention sounds. There are no `@everyone` or `@here` broadcast mentions.
+
+Run `scripts/test-mentions.sh` for autocomplete, rendering, and notification checks.
+
+## Emoji and reactions
+
 The composer’s smile button opens a searchable picker containing standard
 Unicode emojis, twelve bundled Wisp emojis, the account library and server
 emojis. Click the reaction button below a message to add a reaction; click a

@@ -29,6 +29,17 @@ Column {
     onClicked: root.bridge.notificationMuted = !root.bridge.notificationMuted
   }
   Text { text: "Play sounds for"; color: root.theme.foreground; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption }
+  CheckBox {
+    id: mentionsOnly; objectName: "mentionsOnlySetting"; width: parent.width
+    text: "Only messages that @mention me"; checked: root.bridge.notificationMentionsOnly
+    onToggled: root.bridge.notificationMentionsOnly=checked
+    ThemeControlStyle { theme: root.theme; control: mentionsOnly }
+  }
+  Text {
+    width: parent.width; wrapMode: Text.Wrap
+    text: "Other messages still show unread badges. Muted chats stay silent; voice sounds keep their own settings."
+    color: root.theme.muted; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
+  }
   Repeater {
     model: [{id:"other_chats",label:"Other chats, even while Wisp is focused"},{id:"unfocused",label:"Messages only while Wisp is unfocused"},{id:"always",label:"All incoming messages"}]
     RadioButton {

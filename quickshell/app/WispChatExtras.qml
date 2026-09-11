@@ -44,7 +44,12 @@ Item {
     request("emoji_image",{server_id:server,emoji_id:id},{action:"image",serverId:server,key:k})
   }
   function loadText(server,text) { Markup.parts(text).forEach(function(p){if(p.emoji) root.load(server,p.emoji)}) }
-  function richText(server,text,size,color) { var changed=images; return Markup.richText(text,function(e){return root.url(server,e)},size,color) }
+  function richText(server,text,size,color,conversationId) {
+    var changed=images, people=bridge.mentionPeople(conversationId)
+    return Markup.richText(text,function(e){return root.url(server,e)},size,color,function(name) {
+      return people.some(function(p) { return String(p.display_name).toLowerCase()===name.toLowerCase() })
+    })
+  }
   function groups(server,target) {
     var state=bridge.participantServer({server_id:server}), grouped={}
     ;(state.reactions || []).forEach(function(r){

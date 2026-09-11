@@ -387,7 +387,7 @@ Rectangle {
         y: root.theme.hearth ? root.theme.space(8) : 0
         objectName:"messageBody-"+String(message.modelData.id)
         width: Math.max(1,parent.width-x*2)
-        text: root.bridge.chatExtras.richText(message.serverId,message.copyText,Math.round(root.theme.font.body*1.5),root.theme.accent)
+        text: root.bridge.chatExtras.richText(message.serverId,message.copyText,Math.round(root.theme.font.body*1.5),root.theme.accent,root.conversationId)
         visible: !message.isInvitation && text !== ""
         color: root.theme.foreground
         readOnly: true; selectByMouse: true

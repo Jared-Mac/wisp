@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Dialogs
+import "../MentionLogic.js" as Mentions
 
 Column {
   id: root
@@ -10,6 +11,33 @@ Column {
   property bool spacious: false
   property bool autoGrow: false
   readonly property alias emojiPicker: composerEmojiPicker
+  readonly property alias mentionPicker: mentionPicker
+  readonly property var mentionQuery: Mentions.query(editor.text,editor.cursorPosition)
+  readonly property var mentionChoices: Mentions.suggestions(bridge.mentionPeople(conversationId),mentionQuery)
+  property int mentionSelection: 0
+  property string dismissedMention: ""
+  readonly property string mentionSignature: conversationId+":"+editor.cursorPosition+":"+editor.text
+  onMentionSignatureChanged: dismissedMention=""
+  onMentionQueryChanged: mentionSelection=0
+  function chooseMention(index) {
+    if (!mentionQuery || !mentionChoices[index] || busy || pendingAccess) return
+    var query=mentionQuery, value=Mentions.token(mentionChoices[index].display_name)+" "
+    editor.remove(query.start,query.end)
+    editor.insert(query.start,value)
+    editor.cursorPosition=query.start+value.length
+    editor.forceActiveFocus()
+  }
+  function handleMentionKey(event) {
+    if (!mentionPicker.visible || editor.inputMethodComposing || event.modifiers!==Qt.NoModifier) return false
+    if (event.key===Qt.Key_Down || event.key===Qt.Key_Up) {
+      mentionSelection=(mentionSelection+(event.key===Qt.Key_Down ? 1 : mentionChoices.length-1))%mentionChoices.length
+      mentionList.positionViewAtIndex(mentionSelection,ListView.Contain)
+    } else if (event.key===Qt.Key_Return || event.key===Qt.Key_Enter || event.key===Qt.Key_Tab) {
+      if (!event.isAutoRepeat) chooseMention(mentionSelection)
+    } else if (event.key===Qt.Key_Escape) dismissedMention=mentionSignature
+    else return false
+    event.accepted=true; return true
+  }
   signal editorFocused()
   property real maximumEditorHeight: theme.space(160)
   readonly property real naturalEditorHeight: Math.max(theme.space(40), editor.contentHeight + editor.topPadding + editor.bottomPadding + (theme.tui ? theme.spacing.sm : theme.spacing.lg) * 2)
@@ -119,6 +147,7 @@ Column {
   }
 
   Rectangle {
+    id: messageBox
     objectName: "composerMessageBox"
     width: parent.width
     height: root.autoGrow ? Math.min(root.maximumEditorHeight, root.naturalEditorHeight) : root.editorHeight
@@ -168,6 +197,7 @@ Column {
         Binding { target: editor; property: "cursorDelegate"; value: terminalCaret; when: root.theme.tui; restoreMode: Binding.RestoreBindingOrValue }
         Keys.onPressed: function(event) {
           if (root.pendingAccess) return
+          if (root.handleMentionKey(event)) return
           if (event.key === Qt.Key_Escape && root.replyingTo && !root.busy) {
             root.bridge.messageActions.cancelReply(root.conversationId); event.accepted=true
           } else if (event.matches(StandardKey.Paste)) {
@@ -179,6 +209,41 @@ Column {
             if (!event.isAutoRepeat && !root.busy)
               root.bridge.sendComposedMessage(root.conversationId)
             event.accepted = true
+          }
+        }
+      }
+    }
+    Popup {
+      id: mentionPicker; objectName: "mentionPicker"
+      parent: messageBox
+      y: -height-root.theme.spacing.xs
+      width: Math.min(root.width,root.theme.space(340))
+      implicitHeight: Math.min(root.mentionChoices.length,5)*root.theme.space(36)+padding*2
+      padding: root.theme.spacing.xs
+      visible: root.visible && editor.activeFocus && !editor.inputMethodComposing
+        && !root.busy && !root.pendingAccess && !!root.mentionQuery && root.mentionChoices.length>0
+        && root.dismissedMention!==root.mentionSignature
+      focus: false; closePolicy: Popup.NoAutoClose
+      background: Rectangle { color: root.theme.surface; radius: root.theme.cornerRadius; border.width: 1; border.color: root.theme.accent }
+      contentItem: ListView {
+        id: mentionList; clip:true
+        model: root.mentionChoices
+        boundsBehavior: Flickable.StopAtBounds
+        ScrollBar.vertical: ScrollBar {}
+        delegate: ItemDelegate {
+          id: mentionChoice
+          required property var modelData
+          required property int index
+          objectName: "mentionChoice-"+modelData.id
+          width: mentionList.width; height: root.theme.space(36)
+          focusPolicy: Qt.NoFocus
+          Accessible.name: "Mention "+modelData.display_name
+          onClicked: root.chooseMention(index)
+          background: Rectangle { color: mentionChoice.hovered || mentionChoice.index===root.mentionSelection ? root.theme.alpha(root.theme.accent,0.18) : "transparent"; radius: root.theme.cornerRadius }
+          contentItem: Text {
+            text: "@"+mentionChoice.modelData.display_name; textFormat: Text.PlainText; elide: Text.ElideRight
+            color: root.theme.foreground; font.family: root.theme.font.family; font.pixelSize: root.theme.font.body
+            verticalAlignment: Text.AlignVCenter
           }
         }
       }

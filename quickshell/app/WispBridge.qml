@@ -4,6 +4,7 @@ import Quickshell
 import Quickshell.Io
 import "ChatLogic.js" as ChatLogic
 import "FriendLogic.js" as FriendLogic
+import "ChatMarkup.js" as ChatMarkup
 
 Item {
   id: root
@@ -142,6 +143,7 @@ Item {
   property alias notificationVolume: notificationSettings.volume
   property alias notificationSoundPath: notificationSettings.soundPath
   property alias notificationPolicy: notificationSettings.policy
+  property alias notificationMentionsOnly: notificationSettings.mentionsOnly
   property alias roomNotificationSounds: notificationSettings.roomSounds
   property alias audioControlSounds: notificationSettings.audioControlSounds
   property alias streamViewerSounds: notificationSettings.streamViewerSounds
@@ -784,6 +786,7 @@ Item {
       property int volume: 50
       property string soundPath: ""
       property string policy: "other_chats"
+      property bool mentionsOnly: false
       property var mutedChats: []
       property bool roomSounds: true
       property bool selfRoomSounds: true
@@ -982,7 +985,8 @@ Item {
     if (notificationSoundsEnabled) roomEvents.forEach(function(kind) { if (kind.indexOf("audio_") === 0 && !audioControlSounds) return []
     if (kind.indexOf("self_") !== 0) root.playNotificationSound(kind) })
     voiceRecovery.observe(next, eventName)
-    if (notificationSoundsEnabled && incoming.some(function(id) {
+    var mentionChats=notificationMentionsOnly ? incomingMentionChats(previousFlat,nextFlat,eventName,next) : []
+    if (notificationSoundsEnabled && (notificationMentionsOnly ? mentionChats : incoming).some(function(id) {
       return ChatLogic.shouldNotifyChat(id, root.focusedConversationId, root.appFocused,
         root.notificationPolicy, root.mutedNotificationChats, root.notificationMuted, root.notificationVolume)
     })) playNotificationSound()
@@ -1048,6 +1052,29 @@ Item {
     var canonical=conversation ? String(conversation.id) : String(id)
     for (var i = 0; i < messages.length; i++)
       if (String(messages[i].conversation_id) === canonical) result.push(messages[i])
+    return result
+  }
+
+  function mentionPeople(id) {
+    var conversation=conversationById(id)
+    return conversation && !conversation.pending_access ? conversation.members || [] : []
+  }
+  function messageMentions(message, self) {
+    if (!self || !self.id || !message.sender || String(message.sender.id)===String(self.id)
+        || (message.context || {}).forwarded_from) return false
+    var text=message.content_type==="text/plain" ? String(message.payload || "")
+      : ["image/png","application/octet-stream"].indexOf(message.content_type)>=0 ? String((message.payload || {}).caption || "") : ""
+    return ChatMarkup.mentions(text,self.display_name)
+  }
+  function incomingMentionChats(previous, next, eventName, snapshot) {
+    if (!previous || eventName!=="message_created") return []
+    var known={}, identities={}, result=[]
+    previous.messages.forEach(function(m) { known[String(m.server_id)+"::"+String(m.id)]=true })
+    ;(snapshot.server_states || []).forEach(function(s) { identities[String(s.server.id)]=s.self })
+    next.messages.forEach(function(m) {
+      if (!known[String(m.server_id)+"::"+String(m.id)] && root.messageMentions(m,identities[String(m.server_id)] || snapshot.self)
+          && result.indexOf(String(m.conversation_id))<0) result.push(String(m.conversation_id))
+    })
     return result
   }
 
