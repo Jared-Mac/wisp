@@ -45,6 +45,8 @@ Rectangle {
   property bool savingEdit: false
   property string editError: ""
   readonly property var incomingMessages: bridge.messagesFor(conversationId)
+  readonly property string latestMessageId: incomingMessages.length ? String(incomingMessages[incomingMessages.length-1].id) : ""
+  onLatestMessageIdChanged: scheduleRead()
   // Preserve delegates (including a playing embed) across unrelated snapshots.
   ListModel {id:stableMessages;dynamicRoles:true}
   function syncMessages() {
@@ -60,7 +62,9 @@ Rectangle {
     }
     if(stableMessages.count>incoming.length)stableMessages.remove(incoming.length,stableMessages.count-incoming.length)
   }
-  onIncomingMessagesChanged: { syncMessages(); scheduleRead() }
+  // Status snapshots rebuild the array even when the chat is unchanged. Only
+  // new messages or reader/scroll changes should reset the read dwell timer.
+  onIncomingMessagesChanged: syncMessages()
   Component.onCompleted: { readerKey="feed-"+(++bridge.unreadMarkers.serial); syncMessages(); scheduleRead() }
   readonly property bool editOpen: editDialog.opened
   readonly property bool awayFromLatest: messages.count > 0 && !messages.atYEnd

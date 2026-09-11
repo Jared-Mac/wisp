@@ -33,6 +33,10 @@ ShellRoot {
     bridge.applySnapshot(s,"conversation_read")
   }
   function reads() { return bridge.sent.filter(function(c) { return c.name==="mark_conversation_read" }) }
+  Timer {
+    id: statusUpdates; interval:100; repeat:true
+    onTriggered: bridge.applySnapshot(JSON.parse(JSON.stringify(bridge.snapshot)), "media_state")
+  }
   Wisp.WispTheme { id:theme; profile:Quickshell.env("WISP_TEST_THEME") || "soft_graphite" }
   Wisp.WispBridge { id:bridge; property var sent:[]; function send(name,args) { sent.push({name:name,args:args}); return "fixture-"+(++requestId) } }
   FloatingWindow {
@@ -65,7 +69,9 @@ ShellRoot {
       test.focused="chat";input.wait(850)
       test.check(test.reads().length===0 && bridge.unreadMarkers.pending("local::chat"),"alt-tab alone does not acknowledge")
       test.check(test.find(first,"newMessagesDivider-offline").visible && test.find(first,"chatNewMessagesButton").visible,"divider and tile indicator visible")
+      statusUpdates.start()
       feed.engageReader();input.wait(850)
+      statusUpdates.stop()
       test.check(test.reads().length===1 && test.reads()[0].args.server_id==="local" && test.reads()[0].args.conversation_id==="chat","focused reader at latest acknowledges scoped conversation")
       test.ackRead("chat");input.wait(80)
       test.check(!!bridge.unreadMarkers.boundary("local::chat"),"read snapshot preserves divider during visit")
@@ -103,6 +109,8 @@ ShellRoot {
       var foreign=test.message("remote-own","chat",true);foreign.sender.id="remote-self"
       changed.server_states.push({server:duplicate,self:{id:"remote-self"},messages:[foreign],conversations:[{id:"chat",kind:"direct",label:"Other Mira",unread_count:0,last_message:foreign}],friends:[],hangouts:[],spots:[],knocks:[],devices:[],room_invitations:[]});bridge.applySnapshot(changed,"message_created");input.wait(60)
       test.check(!bridge.unreadMarkers.boundary("remote::chat") && bridge.unreadMarkers.pending("local::chat"),"server identities and chat boundaries stay separate")
+      test.ackRead("chat");input.wait(60)
+      test.check(bridge.pendingCount("local::chat")===0,"Reading in another frontend clears the local unread badge")
       test.check(!bridge.sent.some(function(c){return /^(join|share|camera|watch_video)/.test(c.name)}),"no media starts")
       var screenshot=Quickshell.env("WISP_UNREAD_SCREENSHOT")
       if(screenshot)scene.grabToImage(function(im){im.saveToFile(screenshot);console.log(test.failed?"UNREAD_FAILED":"UNREAD_OK");Qt.quit()})

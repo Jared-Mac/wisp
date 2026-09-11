@@ -20,6 +20,21 @@ Column {
 
   TapHandler { onPressedChanged: if (pressed) feed.engageReader() }
 
+  function openUnread(id) {
+    bridge.selectConversation(id)
+    var target=String(bridge.activeConversationId)
+    Qt.callLater(function() {
+      if (!root.visible || String(root.bridge.activeConversationId)!==target) return
+      var boundary=root.bridge.unreadMarkers.boundary(target)
+      var messageId=boundary ? boundary.firstId : String((root.bridge.activeConversation.last_message || {}).id || "")
+      if (messageId && feed.revealMessage(messageId)) {
+        feed.engageReader()
+        root.bridge.acknowledgeConversation(target,true)
+        Qt.callLater(function() { if (String(root.bridge.activeConversationId)===target) feed.revealMessage(messageId) })
+      }
+    })
+  }
+
   function conversationLabel(c) { return c.label === "Hangout" ? "Room" : c.label }
   readonly property color chatColor: root.theme.chatHeadingsColored ? root.bridge.chatColors.colorFor(root.bridge.activeConversationId, root.theme.muted) : root.theme.muted
   Item {
@@ -126,7 +141,7 @@ Column {
         width: Math.min(implicitWidth, navigation.width)
         text: String(modelData.unread_count) + " • " + root.conversationLabel(modelData)
         Accessible.name: modelData.unread_count + " unread messages in " + root.conversationLabel(modelData)
-        onClicked: root.bridge.selectConversation(modelData.id)
+        onClicked: root.openUnread(modelData.id)
       }
     }
   }

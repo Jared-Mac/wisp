@@ -55,12 +55,22 @@ ShellRoot {
         {id:"two",conversation_id:"spot:lounge",sender:people[0],created_at:"2026-09-09T20:11:00Z",content_type:"text/plain",payload:"I'm in! Give me a minute to grab some tea."},
         {id:"three",conversation_id:"dm:riley",sender:people[1],created_at:"2026-09-09T20:12:00Z",content_type:"text/plain",payload:"I saved you a spot. Come say hello whenever you're ready."}],
       knocks:[],devices:[],room_invitations:[]}]
+    conversations[0].unread_count=1; conversations[0].last_message=data.server_states[0].messages[1]
+    conversations[2].unread_count=1; conversations[2].last_message=data.server_states[0].messages[2]
     bridge.applySnapshot(data)
     bridge.selectConversation("local::spot:lounge")
   }
   Timer {
     interval:500; running:true
     onTriggered: {
+      var unread=test.find(page,"unreadChat-local::dm:riley")
+      test.check(!!unread && unread.visible,"Popup offers unread conversation navigation")
+      if(unread)input.mouseClick(unread,unread.width/2,unread.height/2)
+      input.wait(150)
+      test.check(bridge.activeConversationId==="local::dm:riley","Unread button opens the requested conversation")
+      test.check(bridge.sent.some(function(c){return c.name==="mark_conversation_read" && c.args.server_id==="local" && c.args.conversation_id==="dm:riley"}),"Popup unread button acknowledges the displayed messages")
+      test.check(bridge.pendingCount("local::dm:riley")===0 && bridge.pendingCount("local::spot:lounge")===1,"Opening one unread chat clears only its own badge")
+      bridge.selectConversation("local::spot:lounge"); input.wait(100)
       for (var size of [Qt.size(960,560),Qt.size(800,560),Qt.size(680,460)]) {
         test.fixtureWidth=size.width; test.fixtureHeight=size.height; input.wait(100)
         test.check(page.width===size.width,"Fixture resized to "+size.width)

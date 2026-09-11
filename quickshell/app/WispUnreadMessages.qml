@@ -56,6 +56,12 @@ Item {
         var following=remote.filter(function(m) { return String(m.created_at)>b.createdAt || (String(m.created_at)===b.createdAt && String(m.id)>b.firstId) })
         b=following.length ? Object.assign({},b,{firstId:String(following[0].id),createdAt:String(following[0].created_at)}) : null
       }
+      // A read from another frontend/device must clear this frontend's badge,
+      // while retaining the divider if someone is still visiting this chat.
+      if (b && Number(c.unread_count)===0 && previous && previous.conversations.some(function(old) { return String(old.id)===id && Number(old.unread_count)>0 })) {
+        var visiting=Object.keys(readers).some(function(key) { return readers[key].id===id && readers[key].focused })
+        b=visiting ? Object.assign({},b,{seen:true}) : null
+      }
       if (b) updated[id]=b; else delete updated[id]
     })
     Object.keys(updated).forEach(function(id) { if (!available[id]) delete updated[id] })
