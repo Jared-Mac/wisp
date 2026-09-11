@@ -29,7 +29,7 @@ ShellRoot {
   }
   TestCase{id:input;parent:window.contentItem;when:false}
   Component.onCompleted:{
-    bridge.workspaceLayout.chatTiles=JSON.stringify({key:"room",id:"local::room"});bridge.workspaceLayout.activityWidth=275
+    bridge.workspaceLayout.chatTiles=JSON.stringify({key:"room",id:"local::room"})
     var data=JSON.parse(JSON.stringify(bridge.snapshot)),server={id:"local",name:"Community",connected:true}
     var self=Object.assign({},data.self,{id:"self",display_name:"Rowan",connection:"connected",hangout_id:"voice",media:Object.assign({},data.self.media,{livekit_connected:true})})
     var friend={id:"mira",display_name:"Mira",presence:"knock",online:true}
@@ -42,6 +42,7 @@ ShellRoot {
     bridge.friendships.put("local",{people:[{id:"river",display_name:"River",server_id:"local",relationship:"none"}],ready:true,loading:false})
     input.wait(50)
     test.check(bridge.workspaceLayout.incomingDmsAsTiles,"incoming DMs default on")
+    test.check(bridge.workspaceLayout.activityWidth===280,"first launch chooses a sidebar wide enough for six controls")
     test.check(test.find(workspace,"serverPeopleSection").mapToItem(canvas,0,0).y>test.find(workspace,"friends-collapse").mapToItem(canvas,0,0).y,"other members below friends")
     var start=bridge.sent.length;input.mouseClick(friend,2,friend.height/2);input.wait(40)
     test.check(bridge.sent.slice(start).some(function(c){return c.name==="open_direct"}) && !bridge.sent.slice(start).some(function(c){return c.name==="join_friend"}),"friend name opens text only")
@@ -58,11 +59,25 @@ ShellRoot {
     test.check(tiles.paneCount===count && bridge.unreadConversations.length===2,"disabled automatic tiles keep inbox notifications")
     bridge.workspaceLayout.incomingDmsAsTiles=true;test.incoming("history","server_reconnected");input.wait(70)
     test.check(tiles.paneCount===count,"reconnect history never opens tiles")
-    bridge.openPendingChat("local::mira");input.wait(70)
-    test.check(bridge.activeConversationId==="local::mira","inbox navigation activates the matching tile")
-    var newButton=test.find(workspace,"chatNewMessagesButton");
-    // The focused pane has the pending marker; use its feed's parent workspace.
+    var firstUnread=bridge.unreadMarkers.boundary("local::mira").firstId
+    var badge=test.find(workspace,"participantUnread-mira")
+    input.mouseClick(badge,badge.width/2,badge.height/2);input.wait(90)
+    test.check(bridge.activeConversationId==="local::mira","participant badge activates the matching tile")
     var focused=Tiles.leaves(tiles.tree).filter(function(n){return n.id==="local::mira"})[0]
+    var activeFeed=test.find(test.find(workspace,"chatTile-"+focused.key),"messageFeed")
+    test.check(activeFeed.highlightedId===firstUnread && bridge.pendingCount("local::mira")===0 && !badge.visible,"participant badge highlights first unread and clears the notification")
+    firstUnread=bridge.unreadMarkers.boundary("local::river").firstId
+    var inboxButton=test.find(workspace,"chatInbox")
+    inboxButton.clicked();input.wait(50)
+    var inboxPopup=input.findChild(inboxButton,"chatInboxPopup")
+    var inboxEntry=inboxPopup ? test.find(inboxPopup.contentItem,"inboxChat-local::river") : null
+    test.check(!!inboxEntry,"inbox entry is available")
+    if(inboxEntry)inboxEntry.clicked();input.wait(90)
+    focused=Tiles.leaves(tiles.tree).filter(function(n){return n.id==="local::river"})[0]
+    activeFeed=focused ? test.find(test.find(workspace,"chatTile-"+focused.key),"messageFeed") : null
+    test.check(activeFeed && activeFeed.highlightedId===firstUnread && bridge.pendingCount("local::river")===0 && tiles.paneCount===count+1,"inbox opens a missing tile, highlights unread and clears its notification")
+    test.incoming("mira");bridge.openChannel("local::mira",true);input.wait(60)
+    // Ordinary chat navigation leaves New available; it uses the same action.
     var pendingButtons=[]
     function collect(item){if(item.objectName==="chatNewMessagesButton" && item.visible)pendingButtons.push(item);(item.children || []).forEach(collect)}
     collect(workspace);test.check(pendingButtons.length>0,"new message control is available")
@@ -71,6 +86,9 @@ ShellRoot {
     bridge.applySnapshot(JSON.parse(JSON.stringify(bridge.snapshot)),"snapshot");input.wait(30)
     test.check(!bridge.unreadMarkers.pending("local::mira"),"stale server count does not resurrect marker")
     test.incoming("mira");input.wait(40);test.check(bridge.pendingCount("local::mira")>0,"later messages can become unread again")
+    firstUnread=bridge.unreadMarkers.boundary("local::mira").firstId
+    test.find(workspace,"messageFriend-mira").clicked();input.wait(70)
+    test.check(bridge.pendingCount("local::mira")===0,"friend unread badge clears the same notification")
     var selector=test.find(workspace,"activeServerSelector");start=bridge.sent.length
     input.mouseMove(selector,8,8);input.wait(30);bridge.refreshServerPing("local")
     var pings=bridge.sent.slice(start).filter(function(c){return c.name==="server_ping"});test.check(pings.length===1,"hover ping is scoped and cached")
@@ -79,7 +97,7 @@ ShellRoot {
     var disconnect=test.find(workspace,"currentCallDisconnect"),share=test.find(workspace,"mediaAction-share"),camera=test.find(workspace,"mediaAction-camera")
     test.check(Math.abs(disconnect.mapToItem(canvas,0,0).y-share.mapToItem(canvas,0,0).y)<2 && Math.abs(camera.mapToItem(canvas,0,0).y-share.mapToItem(canvas,0,0).y)<2,"share camera and disconnect align on one row")
     test.check(Math.abs(mute.mapToItem(canvas,0,0).y-share.mapToItem(canvas,0,0).y)<2,"all six audio controls share one compact row")
-    test.check(test.find(workspace,"currentCallLocation").text==="Community" && test.find(workspace,"currentCallConnection").text==="· connected","compact status identifies the voice server")
+    test.check(test.find(workspace,"currentCallLocation").text==="Lounge" && test.find(workspace,"currentCallConnection").text==="- connected","compact status identifies the connected room")
     appearance.setShowAvatars(false);input.wait(40);test.check(!test.find(workspace,"friendAvatar").visible,"hide avatars applies to friends");appearance.setShowAvatars(true)
     input.wait(40)
     var screenshot=Quickshell.env("WISP_INBOX_SCREENSHOT")

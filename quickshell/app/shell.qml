@@ -186,6 +186,7 @@ ShellRoot {
     target: "dev.wisp.chat"
     function open(id: string): void { bridge.openChannel(id, true) }
     function reuseChannel(id: string): void { bridge.requestConversationTile(id, true) }
+    function unread(id: string): void { bridge.openPendingChat(id) }
   }
   IpcHandler {
     target: "dev.wisp.media"

@@ -17,8 +17,7 @@ Rectangle {
   readonly property bool inviteInRoomHeader: roomInvitesInHeader
     && bridge.voiceServerId === String(bridge.activeServer.id)
     && (bridge.spots || []).some(function(room) { return !!room.active_hangout_id && room.active_hangout_id === root.bridge.selfState.hangout_id })
-  readonly property var voiceServer: (bridge.servers || []).filter(function(server) { return String(server.id) === root.bridge.voiceServerId })[0] || ({})
-  readonly property string serverName: inCall ? String(bridge.currentVoiceRoom.server_name || voiceServer.name || "Voice") : ""
+  readonly property string roomName: inCall ? String(bridge.currentVoiceLabel || bridge.currentVoiceRoom.label || "Voice") : ""
   implicitHeight: content.implicitHeight+inset*2
   height: implicitHeight
   color: theme.friendly ? theme.alpha(theme.accent, 0.045) : theme.surface
@@ -37,7 +36,7 @@ Rectangle {
       Text {
         id: location; objectName: "currentCallLocation"
         width: Math.min(implicitWidth, Math.max(1,status.width-(connection.visible ? connection.width+status.spacing : 0)))
-        text: root.inCall ? root.serverName : "Audio"
+        text: root.inCall ? root.roomName : "Audio"
         elide: Text.ElideRight
         color: root.inCall ? root.theme.accent : root.theme.muted
         font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
@@ -45,13 +44,13 @@ Rectangle {
       Text {
         id: connection; objectName: "currentCallConnection"
         visible: root.inCall
-        text: root.bridge.mediaState.livekit_connected ? "· connected" : "· connecting…"
+        text: root.bridge.mediaState.livekit_connected ? "- connected" : "- connecting…"
         color: root.theme.muted
         font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
       }
       HoverHandler { id: statusHover }
       ToolTip.visible: statusHover.hovered
-      ToolTip.text: root.inCall ? root.serverName + " " + connection.text + " · " + root.bridge.currentVoiceLabel : "Audio"
+      ToolTip.text: root.inCall ? root.roomName + " " + connection.text : "Audio"
     }
     Flow {
       width: parent.width; spacing: root.theme.spacing.sm

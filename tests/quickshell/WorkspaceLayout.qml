@@ -8,6 +8,7 @@ ShellRoot {
     interval: 100; running: true
     onTriggered: {
       if (Quickshell.env("WISP_LAYOUT_RELOAD") !== "1") {
+        if (layout.activityWidth !== 280) console.error("LAYOUT_FAILED first launch sidebar width")
         if (layout.streamsAsTiles) console.error("LAYOUT_FAILED streams should open windows by default")
         layout.setStreamsAsTiles(true)
         if (!layout.channelsAsTiles) console.error("LAYOUT_FAILED channels should open new tiles by default")

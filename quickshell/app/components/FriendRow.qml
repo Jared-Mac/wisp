@@ -151,6 +151,6 @@ Item {
     anchors.right: parent.right; anchors.rightMargin: root.theme.spacing.sm; anchors.verticalCenter: parent.verticalCenter
     Accessible.name: "Message " + root.friend.display_name
     ToolTip.visible: hovered; ToolTip.text: Accessible.name
-    onClicked: root.bridge.openParticipantDirect(root.friend)
+    onClicked: pending>0 ? root.bridge.openPendingChat(conversation.id) : root.bridge.openParticipantDirect(root.friend)
   }
 }

@@ -51,7 +51,8 @@ Item {
     iconName:root.relationship==="friend" ? "chat" : root.relationship==="outgoing" ? "check" : "invite"
     enabled:!root.state.loading && !root.state.action && root.bridge.friendships.connected(root.person.server_id)
     onClicked: {
-      if(root.pending>0 || root.relationship==="friend") root.bridge.openParticipantDirect(root.person)
+      if(root.pending>0) root.bridge.openPendingChat(root.conversation.id)
+      else if(root.relationship==="friend") root.bridge.openParticipantDirect(root.person)
       else if(root.relationship==="none") root.bridge.friendships.act(root.person,"send")
       else menu.showPerson(root.person,quick)
     }

@@ -79,8 +79,9 @@ Item {
   property bool delegateMediaToDesktop: false
   signal desktopWatchRequested(string participant, string source, bool open, string presentation)
   property bool delegateConversationsToDesktop: false
-  signal desktopConversationTileRequested(string id, bool reuseChannel)
+  signal desktopConversationTileRequested(string id, bool reuseChannel, bool revealUnread)
   property var pendingConversationTiles: []
+  property var unreadNavigation: null
   property var serverPings: ({})
   function refreshServerPing(id) {
     id=String(id)
@@ -92,7 +93,7 @@ Item {
       requests[request]={kind:"serverPing",serverId:id}
     }
   }
-  function openPendingChat(id) { requestConversationTile(id, false) }
+  function openPendingChat(id) { requestConversationTile(id, false, true) }
   function directFor(person) {
     var serverId=String(person.server_id || activeServer.id)
     if (String(person.id)===String((participantServer(person).self || {}).id || "")) return null
@@ -108,9 +109,9 @@ Item {
   function openChannel(id, forceNewTile) {
     requestConversationTile(id, !forceNewTile && !workspaceLayout.channelsAsTiles)
   }
-  function requestConversationTile(id, reuseChannel) {
-    if (delegateConversationsToDesktop) { desktopConversationTileRequested(String(id), !!reuseChannel); return }
-    pendingConversationTiles = pendingConversationTiles.concat([{id:String(id), reuseChannel:!!reuseChannel}])
+  function requestConversationTile(id, reuseChannel, revealUnread) {
+    if (delegateConversationsToDesktop) { desktopConversationTileRequested(String(id), !!reuseChannel, !!revealUnread); return }
+    pendingConversationTiles = pendingConversationTiles.concat([{id:String(id), reuseChannel:!!reuseChannel, revealUnread:!!revealUnread}])
   }
   function isChannelConversation(id) {
     var conversation = conversationById(id)

@@ -31,8 +31,9 @@ Rectangle {
   property string highlightedId: ""
   function revealMessage(id) {
     for (var i=0;i<stableMessages.count;i++) if (String(stableMessages.get(i).modelData.id)===String(id)) {
-      messages.followBottom=false; messages.positionViewAtIndex(i,ListView.Center); highlightedId=String(id); highlightTimer.restart(); return
+      messages.followBottom=false; messages.positionViewAtIndex(i,ListView.Center); highlightedId=String(id); highlightTimer.restart(); return true
     }
+    return false
   }
   Timer { id: highlightTimer; interval: 2500; onTriggered: root.highlightedId="" }
   Connections { target: root.bridge.messageActions; function onMessageLocated(conversationId,messageId) { if (root.bridge.messageActions.canonical(root.conversationId)===conversationId) Qt.callLater(function(){root.revealMessage(messageId)}) } }

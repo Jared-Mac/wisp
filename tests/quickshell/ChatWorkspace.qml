@@ -92,7 +92,7 @@ ShellRoot {
     id: bridge
     property var sent: []
     property var delegatedChats: []
-    onDesktopConversationTileRequested: function(id, reuseChannel) { delegatedChats.push({id:id,reuseChannel:reuseChannel}) }
+    onDesktopConversationTileRequested: function(id, reuseChannel, revealUnread) { delegatedChats.push({id:id,reuseChannel:reuseChannel,revealUnread:revealUnread}) }
     function send(name, args) { sent.push({name:name,args:args}); requestId++; return "test-" + requestId }
     function localPreviewUrl(stem, revision) { return String(Qt.resolvedUrl("app/assets/waveform.svg")) }
   }
@@ -396,6 +396,8 @@ ShellRoot {
       bridge.delegateConversationsToDesktop=true
       label.clicked();tile.clicked()
       test.check(bridge.delegatedChats.length===2 && bridge.delegatedChats[0].id==="local::channel:builds" && bridge.delegatedChats[0].reuseChannel && !bridge.delegatedChats[1].reuseChannel,"panel delegation preserves reuse versus explicit new-tile intent")
+      bridge.openPendingChat("local::dm")
+      test.check(bridge.delegatedChats.length===3 && bridge.delegatedChats[2].id==="local::dm" && bridge.delegatedChats[2].revealUnread && !bridge.delegatedChats[0].revealUnread,"panel unread navigation reaches the desktop without changing ordinary navigation")
       bridge.delegateConversationsToDesktop=false
       bridge.workspaceLayout.setChannelsAsTiles(true)
       bridge.lastError = ""

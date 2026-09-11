@@ -31,8 +31,34 @@ Rectangle {
   property string focusKey: ""
   readonly property bool chatHasFocus: visible && !!root.Window.active && (!tiled || paneActive) && !!current
   function updateChatFocus() { if (focusKey) bridge.setChatFocus(focusKey, chatHasFocus ? currentId : "") }
-  onChatHasFocusChanged: updateChatFocus()
-  onCurrentIdChanged: updateChatFocus()
+  onChatHasFocusChanged: { updateChatFocus(); Qt.callLater(consumeUnreadNavigation) }
+  onCurrentIdChanged: { updateChatFocus(); Qt.callLater(consumeUnreadNavigation) }
+  onPaneActiveChanged: Qt.callLater(consumeUnreadNavigation)
+  function showNewMessages(messageId) {
+    var boundary=bridge.unreadMarkers.boundary(currentId)
+    messageId=messageId || (boundary ? boundary.firstId : String((current && current.last_message || {}).id || ""))
+    if (!messageId || !feed.revealMessage(messageId)) return false
+    root.activated(); feed.engageReader()
+    bridge.acknowledgeConversation(currentId,true)
+    var target=currentId
+    // Removing the unread divider changes row heights; center the highlight
+    // again after the layout settles.
+    Qt.callLater(function() { if (root.currentId===target) feed.revealMessage(messageId) })
+    return true
+  }
+  function consumeUnreadNavigation() {
+    var request=bridge.unreadNavigation
+    if (!request || request.id!==currentId || !visible || tiled && !paneActive || feed.height<=0) return
+    if (showNewMessages(request.messageId)) bridge.unreadNavigation=null
+  }
+  Connections {
+    target: root.bridge
+    function onUnreadNavigationChanged() { Qt.callLater(root.consumeUnreadNavigation) }
+  }
+  Connections {
+    target: feed
+    function onIncomingMessagesChanged() { Qt.callLater(root.consumeUnreadNavigation) }
+  }
   Component.onDestruction: bridge.setChatFocus(focusKey, "")
   readonly property color chatBorderColor: theme.chatBordersColored ? bridge.chatColors.colorFor(currentId, theme.conversationBorder) : theme.surfaceBorder
   readonly property color chatHeadingColor: theme.chatHeadingsColored ? bridge.chatColors.colorFor(currentId, theme.muted) : theme.muted
@@ -90,8 +116,8 @@ Rectangle {
       bridge.selectConversation(tabIds[0])
     else if (current && current.tab_closed && tabIds.length === 0) bridge.closeConversation()
   }
-  Component.onCompleted: { focusKey = "tile-" + (++bridge.chatFocusSerial); syncTabs(); updateChatFocus() }
-  onVisibleChanged: if (visible) syncTabs()
+  Component.onCompleted: { focusKey = "tile-" + (++bridge.chatFocusSerial); syncTabs(); updateChatFocus(); Qt.callLater(consumeUnreadNavigation) }
+  onVisibleChanged: if (visible) { syncTabs(); Qt.callLater(consumeUnreadNavigation) }
   Connections { target: root.bridge; function onConversationsChanged() { root.syncTabs() } }
 
   Item {
@@ -150,7 +176,7 @@ Rectangle {
         objectName: "chatNewMessagesButton"; theme: root.theme; iconName: ""; primary: true
         visible: root.bridge.unreadMarkers.pending(root.currentId)
         text: "New"; Accessible.name: "Go to new messages in " + root.label(root.current)
-        onClicked: { root.activated(); feed.engageReader(); feed.revealMessage(root.bridge.unreadMarkers.boundary(root.currentId).firstId); root.bridge.acknowledgeConversation(root.currentId,true) }
+        onClicked: root.showNewMessages("")
         ToolTip.visible: hovered; ToolTip.text: "Go to the first new message"
       }
       ConversationVoiceAction { bridge: root.bridge; theme: root.theme; conversationId: root.currentId }

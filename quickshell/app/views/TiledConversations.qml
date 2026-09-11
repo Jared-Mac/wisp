@@ -142,6 +142,10 @@ Item {
         root.commit(next)
         return
       }
+      if (request.revealUnread && (existing || root.paneCount<8 || leaves.some(function(n) { return !n.id }))) {
+        var boundary=root.bridge.unreadMarkers.boundary(id)
+        root.bridge.unreadNavigation={id:id,messageId:boundary ? boundary.firstId : ""}
+      }
       if (existing) {
         root.activate(existing.key)
         root.route(id)

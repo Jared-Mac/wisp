@@ -49,8 +49,8 @@ Panel {
     appFocused: root.opened
     delegateMediaToDesktop: true
     delegateConversationsToDesktop: true
-    onDesktopConversationTileRequested: function(id, reuseChannel) {
-      var launcher = chatLauncher.createObject(root, {command:["env","WISP_INTEGRATION=omarchy","wisp-ui","chat",reuseChannel ? "reuse-channel" : "tile",id]})
+    onDesktopConversationTileRequested: function(id, reuseChannel, revealUnread) {
+      var launcher = chatLauncher.createObject(root, {command:["env","WISP_INTEGRATION=omarchy","wisp-ui","chat",revealUnread ? "unread" : reuseChannel ? "reuse-channel" : "tile",id]})
       launcher.running = true
     }
     onDesktopWatchRequested: function(participant, source, open, presentation) {
