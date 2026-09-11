@@ -105,6 +105,7 @@ Item {
         RoomsHeader {
           width: parent.width; bridge: root.bridge; theme: root.theme
           adaptive: true
+          showSoundboard: true
           onCreateRequested: root.createRoomRequested()
         }
         SpotsView { width: parent.width; bridge: root.bridge; theme: root.theme; mainApp: true; adaptive: true; horizontal: root.stacked }
