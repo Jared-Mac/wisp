@@ -18,7 +18,7 @@ Column {
   property bool showInvite: true
   property bool showRemoteStreams: true
   spacing: root.theme.spacing.sm
-  SoundboardPopup { id: soundboardPopup; bridge: root.bridge; theme: root.theme }
+  SoundboardPopup { id: soundboardPopup; bridge: root.bridge; theme: root.theme; hostItem: root }
   RoomInvitePicker { id: invitePicker; bridge: root.bridge; theme: root.theme }
   Flow {
     id: controls
@@ -53,10 +53,11 @@ Column {
         height: root.theme.space(root.theme.friendly || root.small ? (root.compact ? 32 : 40) : root.theme.tui ? 28 : 34)
         Accessible.name: modelData.action==="share" ? (publishing ? "Stop sharing screen" : "Share screen") : modelData.action==="camera" ? (publishing ? "Stop camera" : "Start camera") : modelData.action==="leave" ? "Disconnect from voice" : modelData.label
         ToolTip.visible: hovered || visualFocus; ToolTip.text: Accessible.name
+        HoverHandler { id: actionPointer }
         onClicked: {
           if(modelData.action==="share") root.bridge.toggleShare()
           else if(modelData.action==="camera") root.cameraRequested()
-          else if(modelData.action==="soundboard") soundboardPopup.open()
+          else if(modelData.action==="soundboard") soundboardPopup.openAt(action, actionPointer.hovered ? actionPointer.point.position : Qt.point(width/2, height))
           else if(modelData.action==="invite") invitePicker.open()
           else if(modelData.action==="mute") root.bridge.toggleMuted()
           else if(modelData.action==="deafen") root.bridge.toggleDeafened()

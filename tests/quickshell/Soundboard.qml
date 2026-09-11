@@ -24,6 +24,7 @@ ShellRoot {
     property bool effectiveMuted: false
     property var selfState: ({deafened:false})
     property bool admin: false
+    property int roomCount: 2
     property var ownModeration: ({})
     function participantServer(person) {return {server:{id:person.server_id,name:person.server_id === "a" ? "Friends" : "Gaming"},self:{id:person.server_id+"-me",server_admin:admin}}}
     function replaceEntry(map,key,value) {var copy=Object.assign({},map);copy[key]=value;return copy}
@@ -35,8 +36,9 @@ ShellRoot {
     id: window; visible:true; implicitWidth:Number(Quickshell.env("WISP_TEST_WIDTH")) || 440;implicitHeight:Number(Quickshell.env("WISP_TEST_HEIGHT")) || 760
     Rectangle {
       id: surface; anchors.fill:parent; color:theme.background
-      Components.SoundboardPopup {id:popup;bridge:bridge;theme:theme}
+      Components.SoundboardPopup {id:popup;bridge:bridge;theme:theme;hostItem:surface}
       Components.SoundboardView {id:library;anchors.fill:parent;anchors.margins:20;bridge:bridge;theme:theme;serverId:"a"}
+      Components.RoomsHeader {id:roomsHeader;x:20;y:20;width:180;visible:false;bridge:bridge;theme:theme;adaptive:true;showSoundboard:true}
     }
   }
   function find(item,name) {
@@ -88,12 +90,25 @@ ShellRoot {
       wait(100)
       var screenshot=Quickshell.env("WISP_SOUNDBOARD_SCREENSHOT")
       if(screenshot) {surface.grabToImage(function(result){result.saveToFile(screenshot)});wait(200)}
-      bridge.currentVoiceRoom={id:"room"};popup.open();wait(100)
-      test.check(popup.visible && popup.width<=window.width && popup.height<=window.height,"Call popup fits its window")
-      var callLibrary=test.find(popup.contentItem,"settingsSoundboard")
-      test.check(!!callLibrary && callLibrary.serverId===bridge.voiceServerId,"Call popup follows the voice server")
-      test.check(callLibrary.playOnly && !test.find(callLibrary,"soundboardUpload").visible,"Playback menu keeps upload forms in Manage sounds")
-      var quickPlay=test.find(callLibrary,"soundboardQuickPlay-one")
+      if (Quickshell.env("WISP_TEST_PANEL") === "1") {
+        // Bar panels discard their backing window while closed. A popup must
+        // resolve the new window's overlay each time the user reopens the bar.
+        for (var cycle=0; cycle<3; cycle++) {
+          popup.open();wait(50)
+          test.check(popup.opened,"Soundboard opens before closing the panel")
+          popup.close();window.visible=false;wait(200)
+          window.visible=true;wait(200)
+          popup.open();wait(50)
+          test.check(popup.opened && popup.parent && popup.parent.width>0,"Soundboard reattaches after reopening the panel")
+          popup.close()
+        }
+      }
+      bridge.currentVoiceRoom={id:"room"};popup.openAt(surface,Qt.point(60,100));wait(100)
+      test.check(popup.opened && popup.width<=window.width && popup.height<=window.height,"Call popup fits its window")
+      test.equal(popup.serverId,bridge.voiceServerId)
+      test.check(Math.abs(popup.x-60-theme.space(6))<1 && Math.abs(popup.y-100-theme.space(6))<1,"Popup opens beside the pointer")
+      test.check(!test.find(popup.contentItem,"soundboardManageButton") && !test.find(popup.contentItem,"soundboardVolume") && !test.find(popup.contentItem,"soundboardSearch"),"Quick popup contains only sound pads")
+      var quickPlay=test.find(popup.contentItem,"soundboardQuickPlay-one")
       test.check(quickPlay && quickPlay.visible && quickPlay.enabled,"Sound name is a direct playback control")
       mouseClick(quickPlay,quickPlay.width/2,quickPlay.height/2)
       var played=bridge.sent[bridge.sent.length-1]
@@ -101,44 +116,29 @@ ShellRoot {
       bridge.reply(played.id,true,{playing:true})
       board.stop();bridge.reply(String(bridge.serial),true,{playing:false})
       bridge.effectiveMuted=true;wait(30);test.check(!quickPlay.enabled,"Muted call cannot send sounds")
-      var previewToggle=test.find(callLibrary,"soundboardPreviewMode")
-      mouseClick(previewToggle,previewToggle.width/2,previewToggle.height/2);wait(30)
-      test.check(callLibrary.previewMode && quickPlay.enabled,"Muted microphone permits explicitly selected private preview")
-      mouseClick(quickPlay,quickPlay.width/2,quickPlay.height/2)
-      var preview=bridge.sent[bridge.sent.length-1]
-      test.check(preview.name==="soundboard_preview" && preview.args.sound_id==="one","Preview pad never broadcasts to the room")
-      bridge.reply(preview.id,true,{previewing:true});board.stop();bridge.reply(String(bridge.serial),true,{previewing:false})
-      bridge.effectiveMuted=false;wait(30)
-      test.check(!quickPlay.enabled && callLibrary.previewMode,"Unmuting never silently changes a preview into room playback")
-      mouseClick(previewToggle,previewToggle.width/2,previewToggle.height/2);wait(30)
+      bridge.effectiveMuted=false;bridge.selfState={deafened:true};wait(30)
+      test.check(!quickPlay.enabled,"Deafened call cannot send sounds")
+      bridge.selfState={deafened:false};wait(30)
       quickPlay.forceActiveFocus();keyClick(Qt.Key_Right);wait(30)
-      var second=test.find(callLibrary,"soundboardQuickPlay-two")
+      var second=test.find(popup.contentItem,"soundboardQuickPlay-two")
       test.check(second.activeFocus,"Arrow keys move between sound pads")
       keyClick(Qt.Key_Space);wait(30)
       var keyboardPlay=bridge.sent[bridge.sent.length-1]
       test.check(keyboardPlay.name==="soundboard_play" && keyboardPlay.args.sound_id==="two","Space plays the focused sound")
       bridge.reply(keyboardPlay.id,true,{playing:false})
-      var manage=test.find(popup.contentItem,"soundboardManageButton")
-      mouseClick(manage,manage.width/2,manage.height/2);wait(30)
-      test.check(!callLibrary.playOnly && test.find(callLibrary,"soundboardUpload").visible,"Manage sounds exposes uploads")
-      mouseClick(manage,manage.width/2,manage.height/2);wait(30)
       var defaults=["Air Horn","Applause","Boing","Drum Roll","Level Up","Ping","Rimshot","Sad Trombone"]
       board.catalogs={a:defaults.map(function(n,i){return {id:String(i),name:n,owner_id:"a-me",owner_name:"Me",duration_ms:1300}})}
       wait(50)
-      var pads=test.find(callLibrary,"soundboardPads")
-      test.check(popup.width<=theme.space(420) && popup.height<theme.space(480),"Eight sounds fit a compact popup")
-      test.check(pads.columns>=2 && pads.count===8,"Sounds use a responsive grid")
-      test.find(callLibrary,"soundboardSearch").text="trombone";wait(30)
-      test.equal(pads.count,1)
-      test.find(callLibrary,"soundboardSearch").text="";wait(30)
-      var stopButton=test.find(callLibrary,"soundboardStop")
-      var stopPosition=stopButton.mapToItem(popup.contentItem,0,0)
-      test.check(stopPosition.y>=0 && stopPosition.y+stopButton.height<=popup.contentItem.height,"Stop remains reachable above the scrolling sounds")
+      var pads=test.find(popup.contentItem,"soundboardPads")
+      test.check(popup.width<=theme.space(258) && popup.height<=theme.space(150),"Eight sounds fit a small buttons-only popup")
+      test.check(pads.columns===2 && pads.count===8,"Sounds use two columns")
+      popup.close();popup.openAt(surface,Qt.point(window.width-2,window.height-2));wait(50)
+      test.check(popup.x>=0 && popup.y>=0 && popup.x+popup.width<=window.width && popup.y+popup.height<=window.height,"Pointer popup stays inside the bottom/right edges")
       if(screenshot) {popup.contentItem.grabToImage(function(result){result.saveToFile(screenshot.replace(".png","-popup.png"))});wait(200)}
       bridge.currentVoiceRoom=null;wait(50);test.check(!popup.visible,"Leaving closes call popup")
       popup.open();wait(50)
-      test.equal(test.find(popup.contentItem,"settingsSoundboard").serverId,"b")
-      test.check(!test.find(popup.contentItem,"settingsSoundboard").canPlay,"Outside a call, selected server is browse/preview only")
+      test.equal(popup.serverId,"b")
+      test.check(!popup.canPlay,"Outside a call, the quick popup never broadcasts")
       popup.close()
       board.reset();board.catalogs={a:[{name:"PING",id:"existing",owner_id:"someone"}]}
       board.loading=({});library.serverId="a";wait(30);board.loading=({})
@@ -163,6 +163,22 @@ ShellRoot {
       board.reset();var full=[];for(var n=0;n<64;n++)full.push({name:"Custom "+n})
       board.catalogs={a:full};var beforePack=bridge.sent.length;board.addDefaults("a")
       test.check(!board.busy.a && bridge.sent.length===beforePack,"Full libraries retain existing sounds")
+
+      board.reset();board.catalogs={a:[{id:"sidebar",name:"Ping",duration_ms:1000}]}
+      bridge.currentVoiceRoom={id:"room"};library.visible=false;roomsHeader.visible=true;wait(50)
+      var sidebarButton=test.find(roomsHeader,"serverSoundboardButton")
+      test.check(sidebarButton && sidebarButton.visible && sidebarButton.width<=theme.space(28),"Server sidebar has a small soundboard button")
+      var beforeOpen=bridge.sent.length
+      mouseMove(sidebarButton,sidebarButton.width/2,sidebarButton.height/2)
+      mouseClick(sidebarButton,sidebarButton.width/2,sidebarButton.height/2);wait(50)
+      var sidebarMenu=findChild(roomsHeader,"soundboardPopup")
+      var sidebarPad=sidebarMenu ? test.find(sidebarMenu.contentItem,"soundboardQuickPlay-sidebar") : null
+      test.check(sidebarMenu && sidebarMenu.opened && sidebarPad && sidebarPad.visible,"Server sidebar button opens the sound menu")
+      test.check(bridge.sent.slice(beforeOpen).every(function(c){return c.name==="soundboard_list" || c.name==="soundboard_status"}),"Opening the sidebar menu never plays or changes the voice room")
+      if (sidebarMenu) sidebarMenu.close();wait(50)
+      roomsHeader.width=28;wait(50)
+      var create=test.find(roomsHeader,"createRoomButton")
+      test.check(sidebarButton.mapToItem(roomsHeader,0,0).y+sidebarButton.height<=create.y,"Narrow sidebar stacks its soundboard and create controls without overlap")
 
     }
   }

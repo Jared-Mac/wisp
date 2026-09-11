@@ -104,12 +104,14 @@ Column {
       }
     }
     ChatButton {
+      id: soundboardButton
       objectName: "headerSoundboardButton"
       theme: root.theme; text: "Soundboard ▾"
       height: root.theme.space(root.theme.comfortable ? 36 : 30)
       Accessible.name: "Open soundboard"
-      ToolTip.visible: hovered; ToolTip.text: "Play sounds or manage this server's library"
-      onClicked: soundboardMenu.open()
+      ToolTip.visible: hovered; ToolTip.text: "Play a sound"
+      HoverHandler { id: soundboardPointer }
+      onClicked: soundboardMenu.openAt(soundboardButton, soundboardPointer.hovered ? soundboardPointer.point.position : Qt.point(width/2, height))
     }
     Item { width: root.theme.spacing.sm; height: root.theme.space(30) }
     Row {
@@ -141,7 +143,7 @@ Column {
       }
     }
   }
-  SoundboardPopup { id: soundboardMenu; bridge: root.bridge; theme: root.theme }
+  SoundboardPopup { id: soundboardMenu; bridge: root.bridge; theme: root.theme; hostItem: root }
   NewChatDialog {
     id: newChatDialog; objectName: "headerNewChatDialog"
     bridge: root.bridge; theme: root.theme
