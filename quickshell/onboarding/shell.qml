@@ -182,7 +182,7 @@ ShellRoot {
             color:"#8d96a8";font.pixelSize:12
           }
           Text { visible: window.acceptingInvite && !!window.invitation && window.invitation.legacy; Layout.fillWidth:true; wrapMode:Text.Wrap; text:"Legacy invitation: joining also adds the inviter as a friend."; color:"#8d96a8"; font.pixelSize:12 }
-          Text { visible: window.acceptingInvite && !!window.invitation && !window.invitation.legacy; Layout.fillWidth:true; wrapMode:Text.Wrap; text:"Invited by " + String((window.invitation || {}).inviter || "a server member") + " · Expires " + new Date((window.invitation || {}).expires_at).toLocaleTimeString(); color:"#8d96a8"; font.pixelSize:12 }
+          Text { visible: window.acceptingInvite && !!window.invitation && !window.invitation.legacy; Layout.fillWidth:true; wrapMode:Text.Wrap; textFormat:Text.PlainText; text:"Invited by " + String((window.invitation || {}).inviter || "a server member") + " · Expires " + new Date((window.invitation || {}).expires_at).toLocaleTimeString(); color:"#8d96a8"; font.pixelSize:12 }
           Text { visible: !window.acceptingInvite && (window.advanced || window.mode === "bootstrap"); text: "server"; color: "#8d96a8"; font.family: "Hack"; font.pixelSize: 12 }
           TextField {
             id: server

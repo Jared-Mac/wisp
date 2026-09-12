@@ -282,12 +282,8 @@ async fn handles_friend_requests_and_dms_work_without_a_server() {
         .await
         .unwrap();
     let message = json!({"conversation_id":chat,"content_type":"text/plain","payload":"A message before blocking","encryption_version":0});
-    assert_eq!(
-        request(&app, "POST", "/v1/messages", &alice, message.clone())
-            .await
-            .status(),
-        StatusCode::OK
-    );
+    let sent = value(request(&app, "POST", "/v1/messages", &alice, message.clone()).await).await;
+    assert!(sent["id"].is_string());
     assert_eq!(
         request(
             &app,
@@ -299,6 +295,18 @@ async fn handles_friend_requests_and_dms_work_without_a_server() {
         .await
         .status(),
         StatusCode::OK
+    );
+    assert_eq!(
+        request(
+            &app,
+            "PUT",
+            &format!("/v1/messages/{}/reactions", sent["id"].as_str().unwrap()),
+            &bob,
+            json!({"id":Uuid::new_v4(),"emoji":"test"})
+        )
+        .await
+        .status(),
+        StatusCode::FORBIDDEN
     );
     assert_eq!(
         request(&app, "POST", "/v1/messages", &alice, message.clone())

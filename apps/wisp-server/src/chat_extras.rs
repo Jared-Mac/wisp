@@ -193,6 +193,7 @@ pub(super) async fn react(
         ));
     }
     let conversation: String = message.get("conversation_id");
+    super::account_membership::require_unblocked_chat_tx(&mut tx, user, &conversation).await?;
     let (kind, payload, version) = if let Some(encrypted) = request.encrypted {
         if encrypted.id != request.id
             || encrypted.conversation_id != conversation

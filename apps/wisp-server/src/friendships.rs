@@ -60,7 +60,7 @@ pub(super) async fn send(
     let result = sqlx::query(
         "INSERT OR IGNORE INTO friend_requests(sender_id,recipient_id,created_at)
         SELECT ?1,?2,?3 WHERE NOT EXISTS(SELECT 1 FROM friendships WHERE
-        (first_user_id=?1 AND second_user_id=?2) OR (first_user_id=?2 AND second_user_id=?1))",
+        (first_user_id=?1 AND second_user_id=?2) OR (first_user_id=?2 AND second_user_id=?1)) AND NOT EXISTS(SELECT 1 FROM account_blocks WHERE (user_id=?1 AND blocked_id=?2) OR (user_id=?2 AND blocked_id=?1))",
     )
     .bind(user.to_string())
     .bind(other.to_string())

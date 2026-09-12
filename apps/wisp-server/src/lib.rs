@@ -1896,6 +1896,8 @@ async fn persist_message(
         .bind(message.created_at.to_rfc3339()).bind(&message.content_type)
         .bind(serde_json::to_string(&message.payload).map_err(ApiError::internal)?)
         .bind(message.encryption_version).bind(serde_json::to_string(&message.context).map_err(ApiError::internal)?).execute(&mut *tx).await.map_err(ApiError::internal)?;
+    account_membership::require_unblocked_chat_tx(&mut tx, sender_id, &message.conversation_id)
+        .await?;
     if inserted.rows_affected() == 0 {
         let existing = sqlx::query("SELECT m.*, u.display_name FROM messages m JOIN users u ON u.id=m.sender_id WHERE m.id=?")
             .bind(message.id.to_string()).fetch_one(&mut *tx).await.map_err(ApiError::internal)?;

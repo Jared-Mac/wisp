@@ -484,8 +484,17 @@ pub(super) async fn require_unblocked_chat(
     user: UserId,
     conversation: &str,
 ) -> Result<(), ApiError> {
+    let mut connection = pool.acquire().await.map_err(ApiError::internal)?;
+    require_unblocked_chat_tx(&mut connection, user, conversation).await
+}
+
+pub(super) async fn require_unblocked_chat_tx(
+    connection: &mut sqlx::SqliteConnection,
+    user: UserId,
+    conversation: &str,
+) -> Result<(), ApiError> {
     let blocked:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM conversations c JOIN conversation_members cm ON cm.conversation_id=c.id JOIN account_blocks b ON (b.user_id=?1 AND b.blocked_id=cm.user_id) OR (b.blocked_id=?1 AND b.user_id=cm.user_id) WHERE c.id=?2 AND c.kind='direct' AND cm.user_id!=?1)")
-        .bind(user.to_string()).bind(conversation).fetch_one(pool).await.map_err(ApiError::internal)?;
+        .bind(user.to_string()).bind(conversation).fetch_one(connection).await.map_err(ApiError::internal)?;
     if blocked {
         return Err(ApiError::forbidden(
             "This conversation is unavailable for new messages",
