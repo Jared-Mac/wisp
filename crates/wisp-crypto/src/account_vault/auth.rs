@@ -80,6 +80,14 @@ pub(super) fn validate_registration_transcript(
     Ok(())
 }
 
+/// Hash the canonical padded-base64 UTF-8 request text for signed signup start.
+pub fn registration_request_digest(request: &str) -> anyhow::Result<String> {
+    use sha2::Digest;
+    RegistrationRequest::<WispSuite>::deserialize(&wire(request)?)
+        .map_err(|_| anyhow::anyhow!("Invalid secure registration request"))?;
+    Ok(format!("{:x}", sha2::Sha256::digest(request.as_bytes())))
+}
+
 fn password_allowed(password: &SecretString) -> anyhow::Result<()> {
     let value = password.expose_secret();
     ensure!(

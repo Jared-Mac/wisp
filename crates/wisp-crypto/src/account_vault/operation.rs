@@ -125,6 +125,71 @@ impl SignupMetadata {
         Ok(())
     }
 }
+
+/// Authorizes a pending signup before a password file/vault effect exists.
+/// Replacement is a compare-and-swap against the entire previous binding.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct SignupStartBinding {
+    pub format: u32,
+    pub scope: Scope,
+    pub id: Uuid,
+    pub generation: Uuid,
+    pub signup: SignupMetadata,
+    pub device: DeviceBinding,
+    pub identity: PublicIdentity,
+    pub request_sha256: String,
+    pub previous_binding_sha256: Option<String>,
+}
+
+impl SignupStartBinding {
+    pub fn validate(&self) -> anyhow::Result<()> {
+        self.scope.validate()?;
+        self.signup.validate()?;
+        self.device.validate()?;
+        ensure!(
+            self.format == 1
+                && !self.id.is_nil()
+                && !self.generation.is_nil()
+                && matches!(self.device, DeviceBinding::Prospective { .. })
+                && is_digest(&self.request_sha256)
+                && self
+                    .previous_binding_sha256
+                    .as_deref()
+                    .is_none_or(is_digest)
+                && self.identity.encryption.len() <= 128
+                && self.identity.signing.len() <= 64,
+            "Invalid signup reservation binding"
+        );
+        self.identity.validate()
+    }
+
+    fn statement(&self) -> anyhow::Result<Vec<u8>> {
+        self.validate()?;
+        Ok(serde_json::to_vec(&("wisp-signup-reservation-v1", self))?)
+    }
+
+    pub fn digest(&self) -> anyhow::Result<String> {
+        Ok(format!("{:x}", Sha256::digest(self.statement()?)))
+    }
+
+    pub fn sign(&self, identity: &Identity) -> anyhow::Result<String> {
+        ensure!(
+            identity.public() == self.identity,
+            "Signup identity differs from staged identity"
+        );
+        Ok(identity.sign_statement("wisp-signup-reservation-v1", &self.statement()?))
+    }
+
+    pub fn verify(&self, signature: &str) -> anyhow::Result<()> {
+        ensure!(
+            signature.len() <= 128,
+            "Invalid signup reservation signature"
+        );
+        self.identity
+            .verify_statement("wisp-signup-reservation-v1", &self.statement()?, signature)
+    }
+}
 impl Operation {
     pub fn validate(&self) -> anyhow::Result<()> {
         ensure!(
@@ -307,6 +372,72 @@ impl ResetEffect {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn signup_reservation_requires_identity_and_binds_every_field() {
+        let identity = Identity::generate().unwrap();
+        let (_, request) = super::super::auth::Registration::start(crate::SecretString::from(
+            "synthetic signup password".to_owned(),
+        ))
+        .unwrap();
+        let binding = SignupStartBinding {
+            format: 1,
+            scope: Scope {
+                origin: "https://example.invalid".into(),
+                network: Uuid::new_v4(),
+                account: Uuid::new_v4(),
+            },
+            id: Uuid::new_v4(),
+            generation: Uuid::new_v4(),
+            signup: SignupMetadata {
+                username: "synthetic".into(),
+                display_name: "Example".into(),
+                device_name: "Test".into(),
+            },
+            device: DeviceBinding::Prospective {
+                id: Uuid::new_v4(),
+                token_sha256: "a".repeat(64),
+            },
+            identity: identity.public(),
+            request_sha256: super::super::auth::registration_request_digest(&request).unwrap(),
+            previous_binding_sha256: None,
+        };
+        let signature = binding.sign(&identity).unwrap();
+        binding.verify(&signature).unwrap();
+        assert!(binding.sign(&Identity::generate().unwrap()).is_err());
+        for field in 0..13 {
+            let mut altered = binding.clone();
+            match field {
+                0 => altered.scope.account = Uuid::new_v4(),
+                1 => altered.scope.network = Uuid::new_v4(),
+                2 => altered.scope.origin = "https://other.invalid".into(),
+                3 => altered.id = Uuid::new_v4(),
+                4 => altered.generation = Uuid::new_v4(),
+                5 => altered.signup.username = "someoneelse".into(),
+                6 => altered.signup.display_name = "Other name".into(),
+                7 => altered.signup.device_name = "Other device".into(),
+                8 => {
+                    altered.device = DeviceBinding::Prospective {
+                        id: Uuid::new_v4(),
+                        token_sha256: "a".repeat(64),
+                    }
+                }
+                9 => {
+                    altered.device = DeviceBinding::Prospective {
+                        id: binding.device.id(),
+                        token_sha256: "b".repeat(64),
+                    }
+                }
+                10 => altered.identity = Identity::generate().unwrap().public(),
+                11 => altered.request_sha256 = "c".repeat(64),
+                _ => altered.previous_binding_sha256 = Some(binding.digest().unwrap()),
+            }
+            assert!(altered.verify(&signature).is_err(), "field {field}");
+            assert_ne!(binding.digest().unwrap(), altered.digest().unwrap());
+        }
+        assert!(super::super::auth::registration_request_digest("not base64").is_err());
+        assert!(super::super::auth::registration_request_digest(&format!("{request} ")).is_err());
+    }
+
     #[test]
     fn proofs_bind_account_device_generation_preconditions_and_exact_change() {
         let identity = Identity::generate().unwrap();

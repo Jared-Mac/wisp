@@ -23,7 +23,7 @@ serialized durably; minimize UI copies with best-effort cleanup.
 Sign-in username is trimmed ASCII lowercase, matching existing SQL NOCASE lookup.
 
 `Scope`, `AccountContext`, `LoginContext`, `Intent`, `DeviceBinding`, `Precondition`,
-`Operation`, `RegistrationTranscript`, `ResetEffect`, `KeyEnvelope`, `Envelope`, `SignedManifest`
+`Operation`, `SignupStartBinding`, `RegistrationTranscript`, `ResetEffect`, `KeyEnvelope`, `Envelope`, `SignedManifest`
 and `Checkpoint` mean their exact shared Rust serialization. Signatures/digests
 are computed by the shared functions, not ad-hoc client JSON ordering.
 
@@ -96,14 +96,30 @@ serialized. Expensive crypto/network work happens outside the repository lock.
 New signup stages an identity, vault key, proposed account UUID, generation UUID,
 prospective credential and operation UUID before registration. It needs no server
 membership or invite. `POST /auth/register/start`:
-`{operation_id,scope,generation,username,display_name,device,device_name,request}`.
+`{operation_id,scope,generation,username,display_name,device,device_name,request,identity,signature,previous_binding_sha256}`.
 All names/IDs must be free; the scope origin/network must match this server.
 This reserves registration without creating a user or authorized device.
+The signature is `SignupStartBinding::sign()` by the proposed identity. The server
+constructs that shared binding from these fields, format1, id=operation_id,
+metadata in signup and `auth::registration_request_digest(request)` (lowercase
+hex SHA-256 of validated canonical padded-base64 request UTF-8 **text**).
+Initial previous_binding_sha256 is null. Public IDs and token hashes alone cannot
+create or replace a reservation for that identity. A pre-commit replacement
+requires the same identity, scope, operation, generation, metadata and device,
+with previous_binding_sha256 equal to the current whole binding digest. Exact
+current-binding retries are idempotent; delayed older bindings and competing
+replacements fail. Clients stage the signed binding before start and never
+replace it after a finish may have been dispatched.
 
 Started response:
 `{operation_id,account:AccountContext,scope,generation,expected:Precondition,response,authorization,expires_at}`.
-Authorization is random and hashed at rest, bound to the complete immutable start
-request. The server's OPAQUE response for the same setup/credential identifier/
+Authorization is an unpredictable HMAC-SHA256 ticket, hashed at rest, using a
+private server key and a versioned domain-separated encoding of the complete
+start binding digest and exact stored integer expiry. An active exact retry,
+including after server restart, returns the same authorization/expiry/response;
+it never rotates an in-flight authorization. Expired uncommitted renewals can
+choose a new expiry after checking uniqueness, committed state and binding.
+No plaintext ticket, password or private identity is stored in pending JSON. The server's OPAQUE response for the same setup/credential identifier/
 registration request is deterministic. Client identity/key/scope remain fixed.
 
 `POST /auth/register/finish` body:
