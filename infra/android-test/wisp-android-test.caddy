@@ -1,0 +1,29 @@
+# Import inside the owner-managed wisp.you site. Artifacts are deployed separately.
+(wisp_android_test) {
+    @wispAndroidAssociation {
+        host wisp.you
+        path /.well-known/assetlinks.json
+    }
+    handle @wispAndroidAssociation {
+        root * /var/www/wisp/android-links
+        header Content-Type application/json
+        header Cache-Control "public, max-age=300"
+        file_server
+    }
+    @wispAndroidTest {
+        host wisp.you
+        path /android-test /android-test/*
+    }
+    handle @wispAndroidTest {
+        uri strip_prefix /android-test
+        root * /var/www/wisp/android-test
+        header {
+            X-Robots-Tag "noindex, nofollow, noarchive"
+            Referrer-Policy "no-referrer"
+            X-Content-Type-Options "nosniff"
+            Cache-Control "no-store"
+            Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
+        }
+        file_server
+    }
+}

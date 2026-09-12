@@ -281,7 +281,8 @@ async fn failed_rtc_join_releases_resources_without_growth() {
 }
 
 #[tokio::test]
-async fn startup_clears_stale_room_before_returning_a_snapshot() {
+#[allow(clippy::too_many_lines)] // Exercise one account across startup, refresh, and explicit actions.
+async fn startup_and_activity_refresh_preserve_another_devices_room_without_adopting_it() {
     let (url, server) = isolated_server().await;
     let auth = || AuthMethod::Development {
         profile: "Owner".into(),
@@ -307,8 +308,8 @@ async fn startup_clears_stale_room_before_returning_a_snapshot() {
             .hangout_id
             .is_some()
     );
-    // Simulate a fresh daemon authenticating after its predecessor vanished.
-    let (_, restarted) = ServerApi::connect_with_auth(url.clone(), auth())
+    // This account may still be using its phone; desktop startup is local-only.
+    let (desktop_api, restarted) = ServerApi::connect_with_auth(url.clone(), auth())
         .await
         .unwrap();
     assert!(restarted.self_state.hangout_id.is_none());
@@ -318,12 +319,89 @@ async fn startup_clears_stale_room_before_returning_a_snapshot() {
             .unwrap()
             .self_state
             .hangout_id
-            .is_none()
+            .is_some()
     );
     assert!(!restarted.self_state.media.microphone_published);
     assert!(!restarted.self_state.media.camera.active);
     assert!(!restarted.self_state.media.screen_share.active);
-    // A second fresh login with no stale room is harmless.
+    let view = ServerView {
+        id: "fixture".into(),
+        name: "Fixture".into(),
+        url: url.clone(),
+        connected: true,
+    };
+    let (media, _) = MediaManager::new(false, None);
+    let daemon = Daemon::new(
+        "Owner".into(),
+        view.clone(),
+        vec![view],
+        desktop_api,
+        restarted,
+        None,
+        media,
+        false,
+        Duration::from_secs(30),
+        ShortcutManager::from_environment(),
+    );
+    for state in [
+        activity::Activity::Active,
+        activity::Activity::Idle,
+        activity::Activity::Unknown,
+    ] {
+        daemon.report_activity(state).await;
+        daemon.refresh("notification_policy_changed").await.unwrap();
+        daemon.reconcile_media().await.unwrap();
+        assert!(daemon.state.read().await.self_state.hangout_id.is_none());
+        assert!(
+            !daemon
+                .state
+                .read()
+                .await
+                .self_state
+                .media
+                .microphone_published
+        );
+        assert!(
+            api.snapshot()
+                .await
+                .unwrap()
+                .self_state
+                .hangout_id
+                .is_some()
+        );
+    }
+    let failed = daemon
+        .run_command(&CommandEnvelope {
+            v: 1,
+            kind: "command".into(),
+            id: "invalid-join".into(),
+            name: "join_hangout".into(),
+            args: json!({"hangout_id":uuid::Uuid::new_v4()}),
+        })
+        .await;
+    assert!(failed.is_err());
+    assert!(daemon.local_voice_left.load(Ordering::Acquire));
+    daemon.refresh("presence_changed").await.unwrap();
+    daemon.report_activity(activity::Activity::Offline).await;
+    daemon
+        .run_command(&CommandEnvelope {
+            v: 1,
+            kind: "command".into(),
+            id: "leave-local".into(),
+            name: "leave".into(),
+            args: json!({}),
+        })
+        .await
+        .unwrap();
+    assert!(
+        api.snapshot()
+            .await
+            .unwrap()
+            .self_state
+            .hangout_id
+            .is_some()
+    );
+    // Further logins also leave the account's voice membership untouched.
     let (_, again) = ServerApi::connect_with_auth(url, auth()).await.unwrap();
     assert!(again.self_state.hangout_id.is_none());
     server.abort();
@@ -363,6 +441,11 @@ async fn failed_media_is_latched_until_explicit_join_or_leave() {
         Duration::from_secs(30),
         ShortcutManager::from_environment(),
     );
+    // This fixture represents a room explicitly joined by this desktop.
+    daemon.local_voice_left.store(false, Ordering::Release);
+    daemon
+        .voice_recovery_blocked
+        .store(false, Ordering::Release);
     assert!(daemon.reconcile_media().await.is_err());
     assert_eq!(*daemon.failed_media_room.lock().await, Some(room));
     for _ in 0..1000 {
@@ -439,6 +522,11 @@ async fn outage_suspends_publication_and_passive_refresh_cannot_rejoin() {
         Duration::from_secs(30),
         ShortcutManager::from_environment(),
     );
+    // This fixture represents a room explicitly joined by this desktop.
+    daemon.local_voice_left.store(false, Ordering::Release);
+    daemon
+        .voice_recovery_blocked
+        .store(false, Ordering::Release);
     daemon.suspend_voice("another-server").await;
     assert!(
         daemon.state.read().await.self_state.media.livekit_connected,
@@ -474,6 +562,71 @@ async fn outage_suspends_publication_and_passive_refresh_cannot_rejoin() {
             && outdated.server_states[0].self_state.hangout_id.is_none(),
         "stale snapshots cannot undo an offline manual disconnect"
     );
+    server.abort();
+}
+
+#[tokio::test]
+async fn another_device_taking_rtc_identity_cancels_local_recovery_without_leaving_its_room() {
+    let (url, server) = isolated_server().await;
+    let (api, _) = ServerApi::connect_with_auth(
+        url.clone(),
+        AuthMethod::Development {
+            profile: "Owner".into(),
+        },
+    )
+    .await
+    .unwrap();
+    let room: wisp_protocol::ConversationView = decode(
+        api.request(reqwest::Method::POST, "/v1/rooms")
+            .json(&json!({"name":"Device transfer"}))
+            .send()
+            .await
+            .unwrap(),
+    )
+    .await
+    .unwrap();
+    api.join_spot(room.spot_id.unwrap()).await.unwrap();
+    let snapshot = api.snapshot().await.unwrap();
+    let hangout = snapshot.self_state.hangout_id;
+    let view = ServerView {
+        id: "fixture".into(),
+        name: "Fixture".into(),
+        url,
+        connected: true,
+    };
+    let (media, _) = MediaManager::new(false, None);
+    let generation = media.generation();
+    let daemon = Arc::new(Daemon::new(
+        "Owner".into(),
+        view.clone(),
+        vec![view],
+        api.clone(),
+        snapshot,
+        None,
+        media,
+        false,
+        Duration::from_secs(30),
+        ShortcutManager::from_environment(),
+    ));
+    daemon.local_voice_left.store(false, Ordering::Release);
+    daemon
+        .voice_recovery_blocked
+        .store(false, Ordering::Release);
+    let (tx, rx) = mpsc::unbounded_channel();
+    tx.send(MediaEvent::Disconnected {
+        generation,
+        reason: livekit::DisconnectReason::DuplicateIdentity,
+    })
+    .unwrap();
+    tx.send(MediaEvent::Reconnected { generation }).unwrap();
+    drop(tx);
+    synchronize_media_events(daemon.clone(), rx).await;
+    daemon.refresh("notification_policy_changed").await.unwrap();
+    daemon.reconcile_media().await.unwrap();
+    assert!(daemon.local_voice_left.load(Ordering::Acquire));
+    assert!(daemon.voice_recovery_blocked.load(Ordering::Acquire));
+    assert!(daemon.state.read().await.self_state.hangout_id.is_none());
+    assert_eq!(api.snapshot().await.unwrap().self_state.hangout_id, hangout);
     server.abort();
 }
 

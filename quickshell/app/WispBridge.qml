@@ -60,6 +60,7 @@ Item {
     avatars.reconnect()
     lastAppliedVolumes = ""
     if (daemonConnected) applyParticipantVolumes()
+    if (daemonConnected) refreshDesktopActivity()
     else { voiceRecovery.daemonLost(); privacySnapshotReady = false; privacyRequestId = ""; privacyBusy = false; profileBusy = false; profileReady = false; profileRequestId = "" }
   }
   onVoiceFriendsChanged: applyParticipantVolumes()
@@ -148,6 +149,19 @@ Item {
   function setChatFocus(key, id) { focusedChats = replaceEntry(focusedChats, key, id || undefined) }
   onFocusedConversationIdChanged: markVisibleConversationRead()
   property bool receivedSnapshot: false
+  property var desktopActivity: ({auto_away:true,idle_minutes:30,state:"unknown",source:"starting"})
+  property bool desktopActivityBusy: false
+  property string desktopActivityError: ""
+  function refreshDesktopActivity() {
+    var id=send("desktop_activity",{})
+    if(id) requests[id]={kind:"desktopActivity"}
+  }
+  function configureDesktopActivity(patch) {
+    if(desktopActivityBusy) return
+    var options=Object.assign({auto_away:desktopActivity.auto_away,idle_minutes:desktopActivity.idle_minutes},patch)
+    var id=send("configure_desktop_activity",options)
+    if(id) { requests[id]={kind:"desktopActivity",save:true};desktopActivityBusy=true;desktopActivityError="" }
+  }
   property string lastReadMessageId: ""
   property alias notificationMuted: notificationSettings.muted
   property alias notificationVolume: notificationSettings.volume
@@ -1115,6 +1129,10 @@ Item {
       lastError = "Invalid response from wispd"
       return
     }
+    if (message.type === "event" && message.name === "desktop_activity_changed") {
+      desktopActivity=message.payload || desktopActivity
+      return
+    }
     if (message.type === "event" && message.name === "file_transfer_progress") {
       var progress = message.payload || ({})
       transferProgress = replaceEntry(transferProgress, progress.direction + ":" + progress.id, progress)
@@ -1288,6 +1306,12 @@ Item {
     delete requests[message.id]
     var value = message.value || ({})
     var conversationId = action.conversationId
+    if (action.kind === "desktopActivity") {
+      desktopActivityBusy=false
+      if(message.ok) { desktopActivity=value;desktopActivityError="";if(action.save)settingsSaved() }
+      else { desktopActivityError="Activity settings are unavailable";if(action.save)settingsSaveFailed() }
+      return
+    }
     if (action.kind === "readChat") {
       if (!message.ok) {unreadMarkers.acknowledged=replaceEntry(unreadMarkers.acknowledged,action.conversationId,undefined);if(action.boundary)unreadMarkers.boundaries=replaceEntry(unreadMarkers.boundaries,action.conversationId,action.boundary)}
       return

@@ -1,6 +1,6 @@
 {
   "repository": "TLT26-churn/wisp-android",
-  "last_announced_commit": null,
-  "pending_commit": "caed9ddc1fe0fb7cf514d6ea7ce494c740d71781",
-  "pending_note": "docs/patch-notes/2026-09-12-friends-and-readable-invites.md"
+  "last_announced_commit": "caed9ddc1fe0fb7cf514d6ea7ce494c740d71781",
+  "pending_commit": "5138701b49fd588f89688bf0f4865fa38a80da97",
+  "pending_note": "docs/patch-notes/2026-09-12-phone-alerts-and-android-test.md"
 }

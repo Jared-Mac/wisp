@@ -9,6 +9,7 @@ mod chat_extras;
 #[cfg(test)]
 mod chat_extras_tests;
 mod chat_identity;
+mod device_activity;
 mod friendships;
 #[cfg(test)]
 mod friendships_tests;
@@ -127,6 +128,7 @@ pub struct AppState {
 #[derive(Debug, Default)]
 struct RuntimeState {
     users: HashMap<UserId, RuntimeUser>,
+    activity: device_activity::Leases,
     seq: u64,
     connected_clients: usize,
     knocks: HashMap<KnockId, PendingKnock>,
@@ -314,10 +316,16 @@ impl AppState {
         let mut self_user = None;
         for row in users {
             let id = parse_uuid(&row.get::<String, _>("id"))?;
-            let presence = row
+            let manual_presence = row
                 .get::<String, _>("presence")
                 .parse()
                 .map_err(ApiError::internal)?;
+            let presence = device_activity::effective_presence(
+                &runtime.activity,
+                id,
+                manual_presence,
+                Instant::now(),
+            );
             let user = UserSummary {
                 id,
                 display_name: row.get("display_name"),
@@ -596,6 +604,11 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/snapshot", get(snapshot))
         .route("/v1/events", get(events))
         .route("/v1/presence", post(set_presence))
+        .route("/v2/devices/me/activity", post(device_activity::heartbeat))
+        .route(
+            "/v2/accounts/me/notification-policy",
+            get(device_activity::get_policy),
+        )
         .route("/v1/hangouts/join-friend", post(join_friend))
         .route("/v1/hangouts/join", post(join_hangout))
         .route("/v1/knocks/respond", post(respond_knock))
@@ -1466,6 +1479,7 @@ async fn revoke_device(
         .map_err(ApiError::internal)?;
     tx.commit().await.map_err(ApiError::internal)?;
     info!(%device_id, user_id = %user_id, "device revoked");
+    state.remove_device_activity(user_id, device_id).await;
     Ok(Json(json!({"ok": true})))
 }
 
@@ -1485,6 +1499,7 @@ async fn set_presence(
     let user_id = authenticate_headers(&state, &headers).await?;
     // Presence is an account preference, not transient connection state. Store
     // it before acknowledging the change so reconnects and restarts agree.
+    let mut runtime = state.runtime.write().await;
     sqlx::query("UPDATE users SET presence = ?, last_seen_at = ? WHERE id = ?")
         .bind(request.presence.to_string())
         .bind(Utc::now().to_rfc3339())
@@ -1492,12 +1507,9 @@ async fn set_presence(
         .execute(&state.pool)
         .await
         .map_err(ApiError::internal)?;
-    state
-        .emit(
-            "presence_changed",
-            json!({"user_id": user_id, "presence": request.presence}),
-        )
-        .await;
+    device_activity::cancel_auto_away(&mut runtime.activity, user_id);
+    drop(runtime);
+    state.publish_activity(user_id).await?;
     Ok(Json(json!({"ok": true})))
 }
 
@@ -1533,10 +1545,13 @@ async fn join_friend(
         .fetch_one(&state.pool)
         .await
         .map_err(ApiError::internal)?;
-    match join_policy(
+    let presence = device_activity::effective_presence(
+        &state.runtime.read().await.activity,
+        friend.id,
         presence.parse().map_err(ApiError::internal)?,
-        friend_runtime.connections > 0,
-    ) {
+        Instant::now(),
+    );
+    match join_policy(presence, friend_runtime.connections > 0) {
         JoinPolicy::Unavailable => {
             return Err(ApiError::bad_request(
                 "friend_unavailable",
@@ -2483,7 +2498,8 @@ async fn event_socket(state: AppState, user_id: UserId, socket: WebSocket) {
         tokio::select! {
             event = events.recv() => match event {
                 Ok(event) => {
-                    let event = if account_membership::is_member(&state.pool,user_id).await.unwrap_or(false) { event } else {
+                    if !device_activity::event_visible(&event, user_id) { continue; }
+                    let event = if event.name == "notification_policy_changed" || account_membership::is_member(&state.pool,user_id).await.unwrap_or(false) { event } else {
                         ServerEvent { name: "account_changed".into(), payload: json!({"changed":true}), ..event }
                     };
                     let Ok(text) = serde_json::to_string(&event) else { continue };

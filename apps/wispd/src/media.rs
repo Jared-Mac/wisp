@@ -93,7 +93,7 @@ pub(crate) enum MediaEvent {
     },
     Disconnected {
         generation: u64,
-        reason: String,
+        reason: livekit::DisconnectReason,
     },
     AudioFailed {
         generation: u64,
@@ -2079,7 +2079,7 @@ async fn run_room_events(
                 context.connected.store(false, Ordering::Release);
                 let _ = context.event_tx.send(MediaEvent::Disconnected {
                     generation: context.generation,
-                    reason: format!("{reason:?}"),
+                    reason,
                 });
                 break;
             }

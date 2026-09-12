@@ -28,6 +28,40 @@ Column {
     text: root.bridge.notificationMuted ? "Sound muted · Enable" : "Sound enabled · Mute"
     onClicked: root.bridge.notificationMuted = !root.bridge.notificationMuted
   }
+  SettingsSection {
+    objectName:"desktopActivitySection";theme:root.theme;title:"Presence and phone alerts"
+    summary:"PC inactivity and automatic Away";expanded:false
+    Column {
+      width:parent.width;spacing:root.theme.spacing.sm
+      enabled:!root.bridge.desktopActivityBusy
+      CheckBox {
+        id:autoAway;objectName:"autoAwaySetting";width:parent.width
+        text:"Show Away when this PC is inactive"
+        checked:(root.bridge.desktopActivity || {}).auto_away !== false
+        onClicked:root.bridge.configureDesktopActivity({auto_away:checked})
+        ThemeControlStyle {theme:root.theme;control:autoAway}
+      }
+      Text {text:"Inactivity time (minutes)";color:root.theme.foreground;font.family:root.theme.font.family;font.pixelSize:root.theme.font.caption}
+      SpinBox {
+        id:idleTime;objectName:"idleThresholdSetting";from:1;to:1440;editable:true
+        value:Number((root.bridge.desktopActivity || {}).idle_minutes || 30)
+        onValueModified:root.bridge.configureDesktopActivity({idle_minutes:value})
+        Accessible.name:"Minutes of PC inactivity before automatic Away and phone alerts"
+        ThemeControlStyle {theme:root.theme;control:idleTime}
+      }
+      Text {
+        width:parent.width;wrapMode:Text.Wrap
+        text:"Phone alerts pause while this PC is active, even when automatic Away is off."
+        color:root.theme.muted;font.family:root.theme.font.family;font.pixelSize:root.theme.font.caption
+      }
+      Text {
+        objectName:"desktopActivityStatus";width:parent.width;wrapMode:Text.Wrap
+        text:({active:"PC activity detected",idle:"PC inactive · phone alerts enabled",unknown:"Activity detection unavailable · phone alerts enabled"})[(root.bridge.desktopActivity || {}).state] || "Checking PC activity…"
+        color:root.theme.muted;font.family:root.theme.font.family;font.pixelSize:root.theme.font.caption
+      }
+      Text {width:parent.width;wrapMode:Text.Wrap;visible:!!root.bridge.desktopActivityError;text:root.bridge.desktopActivityError || "";color:root.theme.danger;font.family:root.theme.font.family;font.pixelSize:root.theme.font.caption}
+    }
+  }
   CheckBox {
     id:friendRoomAlerts;objectName:"friendRoomNotificationsSetting";width:parent.width
     text:"Desktop alerts when friends join rooms";checked:root.bridge.friendRoomNotifications

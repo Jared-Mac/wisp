@@ -40,6 +40,11 @@ wisp-protocol.workspace = true
 wisp-crypto = { path = "../../crates/wisp-crypto" }
 sha2.workspace = true
 tempfile = "3"
+wayland-client = "=0.31.15"
+wayland-protocols = { version = "=0.32.13", features = ["client", "staging"] }
+x11rb = { version = "=0.13.2", features = ["screensaver"] }
+zbus = { version = "=5.19.0", default-features = false, features = ["tokio"] }
+rustix = { version = "=1.1.4", features = ["time", "event", "process"] }
 
 [dev-dependencies]
 sqlx.workspace = true

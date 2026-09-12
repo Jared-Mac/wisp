@@ -1,0 +1,14 @@
+[
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "dev.wisp.android",
+      "sha256_cert_fingerprints": [
+        "C1:AC:4E:6F:6E:5A:5B:B5:30:2D:59:DE:80:6E:81:A7:79:47:71:84:7C:77:C8:33:48:7E:CD:44:F9:82:3E:3E"
+      ]
+    }
+  }
+]

@@ -1,5 +1,7 @@
 // Index labels and aliases only; never search account fields or private content.
 var entries = [
+  {section:"notifications",target:"autoAwaySetting",label:"Automatic Away",keywords:"presence idle inactive pc activity computer desktop mobile phone notifications thirty minutes"},
+  {section:"notifications",target:"idleThresholdSetting",label:"PC inactivity time",keywords:"away phone mobile alerts gaming controller keyboard mouse threshold minutes"},
   {section:"updates",target:"checkForUpdates",label:"Check for updates",keywords:"release version download manual update"},
   {section:"updates",target:"update-automatic",label:"Automatic updates",keywords:"install disable enable update"},
   {section:"updates",target:"update-check_on_launch",label:"Check for updates at launch",keywords:"startup restart update"},

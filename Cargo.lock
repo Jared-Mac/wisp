@@ -7677,6 +7677,7 @@ dependencies = [
  "pollster",
  "qrcode",
  "reqwest",
+ "rustix 1.1.4",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -7688,11 +7689,15 @@ dependencies = [
  "tracing-subscriber",
  "url",
  "uuid",
+ "wayland-client",
+ "wayland-protocols",
  "wgpu",
  "winit",
  "wisp-crypto",
  "wisp-protocol",
  "wisp-server",
+ "x11rb",
+ "zbus",
 ]
 
 [[package]]

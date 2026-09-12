@@ -1,6 +1,9 @@
 mod account_membership;
 mod account_profile;
 mod accounts;
+mod activity;
+mod activity_os;
+mod activity_wayland;
 mod audio;
 #[cfg(test)]
 #[path = "../../../third_party/livekit/src/platform_audio/device_count.rs"]
@@ -157,19 +160,12 @@ impl ServerApi {
             auth,
         };
         let mut snapshot = api.snapshot().await?;
-        // A new daemon/session must not silently resume voice after a crash or
-        // restart. Do this before exposing snapshots or initializing media,
-        // for primary and linked accounts alike. Failure keeps startup offline.
-        if snapshot.self_state.hangout_id.is_some() {
-            let audio = (snapshot.self_state.muted, snapshot.self_state.deafened);
-            api.leave().await.context("clear previous voice session")?;
-            snapshot = api.snapshot().await?;
-            ensure!(
-                snapshot.self_state.hangout_id.is_none(),
-                "Previous voice session is still active; refusing automatic rejoin"
-            );
-            (snapshot.self_state.muted, snapshot.self_state.deafened) = audio;
-        }
+        // The account may be in voice on another device. A fresh desktop has
+        // no local voice ownership and must neither adopt nor remove that room.
+        snapshot.self_state.hangout_id = None;
+        snapshot.self_state.connection = ConnectionState::Available;
+        snapshot.self_state.sharing = false;
+        snapshot.self_state.media = MediaState::default();
         Ok((api, snapshot))
     }
 
@@ -521,6 +517,7 @@ struct LinkedServer {
 }
 
 struct Daemon {
+    activity: activity::DesktopActivity,
     privacy: privacy::Privacy,
     chat_images: chat_images::ImageStore,
     profile: String,
@@ -568,6 +565,7 @@ impl Daemon {
         let (ptt_lease_tx, _) = watch::channel::<Option<Instant>>(None);
         Self {
             privacy: privacy::Privacy::new(&api.base_url, snapshot.self_state.user.id),
+            activity: activity::DesktopActivity::default(),
             chat_images: chat_images::ImageStore::default(),
             profile,
             selected_server_id: RwLock::new(primary_server.id.clone()),
@@ -583,8 +581,8 @@ impl Daemon {
             media,
             media_reconcile: Mutex::new(()),
             primary_connected: AtomicBool::new(true),
-            voice_recovery_blocked: AtomicBool::new(false),
-            local_voice_left: AtomicBool::new(false),
+            voice_recovery_blocked: AtomicBool::new(true),
+            local_voice_left: AtomicBool::new(true),
             failed_media_room: Mutex::new(None),
             ptt_operation: Mutex::new(()),
             ptt_lease_tx,
@@ -807,13 +805,6 @@ impl Daemon {
 
     async fn refresh(&self, event_name: &str) -> anyhow::Result<()> {
         let mut snapshot = self.api.snapshot().await?;
-        if *self.voice_server_id.read().await == self.primary_server.id
-            && self.local_voice_left.load(Ordering::Acquire)
-            && snapshot.self_state.hangout_id.is_some()
-        {
-            self.api.leave().await?;
-            snapshot = self.api.snapshot().await?;
-        }
         if self
             .privacy
             .reconcile_pending_admissions(&self.api, &snapshot)
@@ -831,13 +822,6 @@ impl Daemon {
         event_name: &str,
     ) -> anyhow::Result<()> {
         let mut snapshot = server.api.snapshot().await?;
-        if *self.voice_server_id.read().await == server.view.id
-            && self.local_voice_left.load(Ordering::Acquire)
-            && snapshot.self_state.hangout_id.is_some()
-        {
-            server.api.leave().await?;
-            snapshot = server.api.snapshot().await?;
-        }
         prepare_private_account(&server.api, &server.privacy, &mut snapshot).await;
         if server
             .privacy
@@ -898,6 +882,8 @@ impl Daemon {
     async fn switch_voice_server(&self, server_id: &str) -> anyhow::Result<()> {
         let current = self.voice_server_id.read().await.clone();
         if current == server_id {
+            self.local_voice_left.store(false, Ordering::Release);
+            self.voice_recovery_blocked.store(false, Ordering::Release);
             return Ok(());
         }
         let target_exists = server_id == self.primary_server.id
@@ -911,7 +897,7 @@ impl Daemon {
             self.camera_command(&json!({"enabled":false})).await?;
         }
         let (api, hangout, _, _, _) = self.voice_context().await?;
-        if hangout.is_some() {
+        if hangout.is_some() && !self.local_voice_left.load(Ordering::Acquire) {
             api.leave().await?;
         }
         self.media.disconnect().await;
@@ -923,6 +909,8 @@ impl Daemon {
         } else if let Some(server) = self.linked_servers.read().await.get(&current).cloned() {
             self.refresh_linked(&server, "hangout_changed").await?;
         }
+        self.local_voice_left.store(false, Ordering::Release);
+        self.voice_recovery_blocked.store(false, Ordering::Release);
         Ok(())
     }
 
@@ -976,6 +964,9 @@ impl Daemon {
         let reconcile = self.media_reconcile.lock().await;
         let (voice_api, hangout_id, encryption_required, privacy_active, media_key) =
             self.voice_context().await?;
+        if hangout_id.is_some() && self.voice_recovery_blocked.load(Ordering::Acquire) {
+            return Ok(());
+        }
         if hangout_id.is_some() && voice_api.base_url.starts_with("https://") && media_key.is_none()
         {
             drop(reconcile);
@@ -984,9 +975,6 @@ impl Daemon {
             anyhow::bail!("Restore this device's media encryption key before joining voice");
         }
         self.media.set_encryption_key(media_key);
-        if hangout_id.is_some() && self.voice_recovery_blocked.load(Ordering::Acquire) {
-            return Ok(());
-        }
         if !self.media_enabled {
             let connection = if hangout_id.is_some() {
                 ConnectionState::Connected
@@ -1495,6 +1483,16 @@ impl Daemon {
 
     #[allow(clippy::too_many_lines)]
     async fn run_command(&self, command: &CommandEnvelope) -> anyhow::Result<Option<Value>> {
+        let previously_left = self.local_voice_left.load(Ordering::Acquire);
+        let result = self.execute_command(command).await;
+        if result.is_err() && previously_left && wants_local_voice(command) {
+            self.leave_voice_locally().await;
+        }
+        result
+    }
+
+    #[allow(clippy::too_many_lines)]
+    async fn execute_command(&self, command: &CommandEnvelope) -> anyhow::Result<Option<Value>> {
         if command.name == "server_ping" {
             let id = command.args["server_id"]
                 .as_str()
@@ -1580,13 +1578,13 @@ impl Daemon {
             }
             return Ok(Some(value));
         }
-        if matches!(
-            command.name.as_str(),
-            "join_spot" | "join_hangout" | "join_friend" | "respond_knock"
-        ) || (command.name == "respond_room_invitation" && command.args["accept"] == true)
-        {
-            self.local_voice_left.store(false, Ordering::Release);
-            self.voice_recovery_blocked.store(false, Ordering::Release);
+        if command.name == "desktop_activity" {
+            return Ok(Some(self.activity.status().await));
+        }
+        if command.name == "configure_desktop_activity" {
+            let value = self.activity.configure(&command.args).await?;
+            self.emit("desktop_activity_changed", value.clone(), self.next_seq(0));
+            return Ok(Some(value));
         }
         if let Some(server_id) = command.args.get("server_id").and_then(Value::as_str)
             && !server_id.is_empty()
@@ -2332,7 +2330,9 @@ impl Daemon {
                 Ok(None)
             }
             "respond_knock" => {
-                self.switch_voice_server(&self.primary_server.id).await?;
+                if wants_local_voice(command) {
+                    self.switch_voice_server(&self.primary_server.id).await?;
+                }
                 self.respond_knock_command(&command.args).await
             }
             "join_hangout" => {
@@ -2345,9 +2345,13 @@ impl Daemon {
                 Ok(None)
             }
             "leave" => {
+                let owned_voice = !self.local_voice_left.load(Ordering::Acquire);
                 let server_id = self.voice_server_id.read().await.clone();
                 let (api, _, _, _, _) = self.voice_context().await?;
                 self.leave_voice_locally().await;
+                if !owned_voice {
+                    return Ok(None);
+                }
                 if let Err(error) = api.leave().await {
                     warn!(%error, "left voice locally while coordination server is unavailable");
                     return Ok(None);
@@ -2961,13 +2965,15 @@ impl Daemon {
                 None
             }
             "respond_knock" => {
-                self.switch_voice_server(&server.view.id).await?;
                 let knock_id = string_arg(&args, "knock_id")?.parse()?;
                 let response = serde_json::from_value(
                     args.get("response")
                         .cloned()
                         .context("response is required")?,
                 )?;
+                if matches!(response, KnockResponse::Accept) {
+                    self.switch_voice_server(&server.view.id).await?;
+                }
                 let result = server.api.respond_knock(knock_id, response).await?;
                 self.refresh_linked(server, "knock_responded").await?;
                 if matches!(result, RespondKnockResult::Accepted { .. }) {
@@ -3407,6 +3413,14 @@ impl Daemon {
         };
         self.emit(event_name, json!({"snapshot": snapshot}), snapshot.seq);
     }
+}
+
+fn wants_local_voice(command: &CommandEnvelope) -> bool {
+    matches!(
+        command.name.as_str(),
+        "join_spot" | "join_hangout" | "join_friend"
+    ) || (command.name == "respond_knock" && command.args["response"] == "accept")
+        || (command.name == "respond_room_invitation" && command.args["accept"] == true)
 }
 
 fn boolean_arg(args: &Value, name: &str) -> anyhow::Result<bool> {
@@ -3936,9 +3950,15 @@ async fn synchronize_media_events(
                     .await;
             }
             MediaEvent::Disconnected { reason, .. } => {
-                warn!(%reason, "LiveKit media disconnected");
-                let server_id = daemon.voice_server_id.read().await.clone();
-                daemon.suspend_voice(&server_id).await;
+                warn!(?reason, "LiveKit media disconnected");
+                if reason == livekit::DisconnectReason::DuplicateIdentity {
+                    // Another device took over the account's RTC identity. Cancel
+                    // this device's recovery without sending an account-wide leave.
+                    daemon.leave_voice_locally().await;
+                } else {
+                    let server_id = daemon.voice_server_id.read().await.clone();
+                    daemon.suspend_voice(&server_id).await;
+                }
             }
         }
     }
@@ -5119,6 +5139,8 @@ async fn main() -> anyhow::Result<()> {
     }
     info!(socket = %socket_path.display(), "wispd ready");
 
+    let activity_task = tokio::spawn(activity::run(daemon.clone()));
+    let power_task = tokio::spawn(activity::watch_sleep(daemon.clone()));
     let shutdown = shutdown_signal();
     tokio::pin!(shutdown);
     loop {
@@ -5144,6 +5166,10 @@ async fn main() -> anyhow::Result<()> {
             }
         }
     }
+    activity_task.abort();
+    power_task.abort();
+    let _ = activity_task.await;
+    daemon.report_activity(activity::Activity::Offline).await;
     daemon.leave_voice_locally().await;
     quit_all_ui_instances(&socket_path).await;
     daemon.media.disconnect().await;
