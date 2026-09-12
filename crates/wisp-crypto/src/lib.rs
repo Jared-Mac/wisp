@@ -2,6 +2,7 @@
 //! public signatures, but must never receive private identities/recovery keys.
 //! Recipient trust is established locally; encryption alone cannot detect a
 //! malicious key directory at first contact.
+pub mod account_vault;
 pub mod attachment;
 pub mod keyring;
 pub mod message;

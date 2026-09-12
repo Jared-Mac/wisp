@@ -55,6 +55,14 @@ impl Roster {
 }
 
 impl SignedRoster {
+    /// Check a previously authenticated checkpoint's signature. This alone does
+    /// not establish its author's authority or authorize current membership;
+    /// callers still require a connecting signed chain for use or advancement.
+    pub fn verify_checkpoint_signature(&self, signer: &PublicIdentity) -> anyhow::Result<()> {
+        self.validate_members()?;
+        signer.verify_statement(DOMAIN, &serde_json::to_vec(&self.roster)?, &self.signature)
+    }
+
     pub fn hash(&self) -> anyhow::Result<String> {
         Ok(format!("{:x}", Sha256::digest(serde_json::to_vec(self)?)))
     }

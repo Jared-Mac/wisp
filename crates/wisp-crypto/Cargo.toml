@@ -6,7 +6,11 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-aes-gcm = "0.10.3"
+aes-gcm = { version = "0.10.3", features = ["zeroize"] }
+# aes-gcm's own flag does not enable its backend cleanup features.
+aes = { version = "0.8.4", features = ["zeroize"] }
+ghash = { version = "0.5.1", features = ["zeroize"] }
+polyval = { version = "0.6.2", features = ["zeroize"] }
 argon2.workspace = true
 hkdf = "0.12.4"
 url.workspace = true
@@ -24,6 +28,8 @@ sha2.workspace = true
 zeroize = { version = "1.8", features = ["derive"] }
 uuid.workspace = true
 tempfile = "3"
+opaque-ke = { version = "=4.0.1", features = ["argon2"] }
+rand = "0.8"
 
 
 [lints]
