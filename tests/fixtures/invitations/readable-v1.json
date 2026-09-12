@@ -1,6 +1,6 @@
 {
   "url": "https://wisp.invalid/tea123456781234",
-  "lookup_id": "yqtlJ4ONlcP8OA6XvVHZHIMhicHI5HcKO-uxZ0Vas6Y",
+  "lookup_id": "bP3nYG2Rs36WSOVfApLsFwFXOmLXBcREKNlowjgypUo",
   "argon2": {
     "type": "argon2id",
     "version": 19,
@@ -12,7 +12,7 @@
   },
   "encryption_key": "jsoyNoSQp1bZoPi9doIDYGwFsdcxSY8le8cA22gAT8Y",
   "nonce": "AAECAwQFBgcICQoL",
-  "aad": "wisp-short-invite-v1\nhttps://wisp.invalid\nyqtlJ4ONlcP8OA6XvVHZHIMhicHI5HcKO-uxZ0Vas6Y",
+  "aad": "wisp-short-invite-v1\nhttps://wisp.invalid\nbP3nYG2Rs36WSOVfApLsFwFXOmLXBcREKNlowjgypUo",
   "plaintext": "https://wisp.invalid/join/#v2.AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
-  "envelope": "AAECAwQFBgcICQoLkgvMYlxbaadwwD_R3-YC2TZFlZYIoEDXJuY2U43aZE0hz1_FmUJStp8EKP1va8uCovabux1BgjikdIctZsl3Kx3_KEuzrlJ3ixhDyZf2rTlj9PyJAcQEIw0"
+  "envelope": "AAECAwQFBgcICQoLkgvMYlxbaadwwD_R3-YC2TZFlZYIoEDXJuY2U43aZE0hz1_FmUJStp8EKP1va8uCovabux1BgjikdIctZsl3Kx3_KEuzrlJ3i7KGsACXFoQ1W3RrvqjV8q8"
 }

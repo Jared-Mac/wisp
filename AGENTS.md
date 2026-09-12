@@ -29,3 +29,11 @@
   `docs/patch-notes/*.md` file. The Discord patch-notes workflow sends them through
   the `WISP_DISCORD_PATCH_NOTES` repository secret. Never put the webhook URL in
   source or logs. Verify the workflow's delivery result after pushing.
+
+- Coordinated push/pull/server-update notes also cover appropriate released Android
+  changes from the private `TLT26-churn/wisp-android` repository. Inspect that
+  repository's published commits/releases and coordinate with its task; do not
+  announce unfinished work as available. Record the Android commit covered by
+  each note in `docs/release-tracking/android.json`, and verify Discord delivery
+  before marking it reported. See `docs/discord-patch-notes.md`. Keep Android
+  source in its separate repository; never merge the old Android worktree here.

@@ -36,11 +36,12 @@ history. Used/revoked aliases stop resolving immediately and are cleaned up too.
 
 - Code: lower-case curated label, optionally hyphen-separated words, then exactly
   12 digits. The complete code is case-sensitive; no query string or fragment.
-- Lookup ID: base64url without padding of SHA-256 of UTF-8
-  `wisp-short-invite-v1\n{code}`.
 - Key: Argon2id version 19, memory 19456 KiB, iterations 2, parallelism 1,
   output 32 bytes. Password is UTF-8 code; salt is UTF-8
   `wisp-short-invite-v1`.
+- Lookup ID: base64url without padding of SHA-256 of UTF-8
+  `wisp-short-invite-v1\n` followed by the raw 32-byte Argon2 key. Do not hash
+  the code directly: that would allow fast offline guessing of stored hashes.
 - Cipher: AES-256-GCM, fresh random 12-byte nonce and 16-byte tag.
 - AAD: UTF-8 `wisp-short-invite-v1\n{short_origin}\n{lookup_id}` (no final newline).
 - Plaintext: full existing v2 HTTPS link, including its fragment secret.

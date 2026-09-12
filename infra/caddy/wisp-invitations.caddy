@@ -8,12 +8,12 @@
     }
     handle @wispInviteCode {
         rewrite * /join/
-        reverse_proxy {args[0]}
+        reverse_proxy {args.0}
     }
     @wispInviteAssets path /join/invite.js /join/invite.css /v2/short-invitations/*
     handle @wispInviteAssets {
         header Cache-Control "no-store"
         header Referrer-Policy "no-referrer"
-        reverse_proxy {args[0]}
+        reverse_proxy {args.0}
     }
 }

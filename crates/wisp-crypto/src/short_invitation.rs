@@ -109,7 +109,7 @@ impl ShortLink {
     pub fn lookup_id(&self) -> String {
         let mut hash = Sha256::new();
         hash.update(b"wisp-short-invite-v1\n");
-        hash.update(self.code.as_bytes());
+        hash.update(*self.key);
         URL_SAFE_NO_PAD.encode(hash.finalize())
     }
     fn aad(&self) -> String {
