@@ -69,6 +69,7 @@ ShellRoot {
       window.selectMode("register")
       invite.text = "wisp-invite:" + encoded
       check(window.acceptingInvite, "valid invitation is recognized")
+      check(test.findChild(window,"invitationAccountService").text.indexOf("friends.example.com")>=0,"invitation login identifies the account service before requesting a password")
       check(!invite.visible && !test.findChild(window, "accountServer").visible, "connection fields are hidden")
       name.text = "Alex Example"
       check(test.findChild(window, "accountUsername").text === "alex_example", "username follows chosen name")
