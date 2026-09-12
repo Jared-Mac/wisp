@@ -39,5 +39,6 @@ Pulling a release whose notes were already delivered does not send them again.
 For a server update without a main push, prepare the combined note for the next
 normal authorized main push; the existing repository-secret workflow delivers it.
 No cross-repository token or additional Discord webhook is placed in source.
-The initial Android repository has no published source commit yet, so the initial
-tracking revision is null and no Android release is claimed.
+The last-announced revision stays null until the first Android note has confirmed
+Discord delivery. Pending fields identify prepared notes that have not yet been
+confirmed as delivered.
