@@ -7,7 +7,7 @@ pub(super) async fn queue_public_admissions(
 ) -> Result<(), ApiError> {
     // Keep signed membership intact. An existing authorized client completes
     // these admissions once the joining account has enrolled its public key.
-    sqlx::query("INSERT OR IGNORE INTO pending_room_admissions(conversation_id,user_id,invited_by,created_at,automatic) SELECT c.id,u.id,si.owner_user_id,?,1 FROM conversations c JOIN spots s ON s.id=c.spot_id CROSS JOIN users u CROSS JOIN server_identity si WHERE s.private=0 AND u.username IS NOT NULL AND NOT EXISTS(SELECT 1 FROM accessible_conversation_members cm WHERE cm.conversation_id=c.id AND cm.user_id=u.id)")
+    sqlx::query("INSERT OR IGNORE INTO pending_room_admissions(conversation_id,user_id,invited_by,created_at,automatic) SELECT c.id,u.id,si.owner_user_id,?,1 FROM conversations c JOIN spots s ON s.id=c.spot_id CROSS JOIN users u CROSS JOIN server_identity si WHERE s.private=0 AND u.server_member=1 AND u.username IS NOT NULL AND NOT EXISTS(SELECT 1 FROM accessible_conversation_members cm WHERE cm.conversation_id=c.id AND cm.user_id=u.id)")
         .bind(Utc::now().to_rfc3339()).execute(&mut *db).await.map_err(ApiError::internal)?;
     super::channel_access::queue_admissions(db).await?;
     Ok(())
@@ -18,6 +18,7 @@ pub(super) async fn ensure_voice_access(
     spot: &str,
     user: UserId,
 ) -> Result<(), ApiError> {
+    super::account_membership::require_member(pool, user).await?;
     let allowed: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM spots s JOIN conversations c ON c.spot_id=s.id WHERE s.id=? AND (s.private=0 OR EXISTS(SELECT 1 FROM accessible_conversation_members cm WHERE cm.conversation_id=c.id AND cm.user_id=?)))")
         .bind(spot).bind(user.to_string()).fetch_one(pool).await.map_err(ApiError::internal)?;
     if !allowed {
@@ -29,7 +30,11 @@ pub(super) async fn ensure_voice_access(
 pub(super) async fn preview(
     pool: &SqlitePool,
     conversation: &str,
+    user: UserId,
 ) -> Result<Option<ConversationView>, ApiError> {
+    if !super::account_membership::is_member(pool, user).await? {
+        return Ok(None);
+    }
     let row = sqlx::query("SELECT c.id,c.label,s.id spot_id,s.category_id,cc.name category_name FROM conversations c JOIN spots s ON s.id=c.spot_id LEFT JOIN channel_categories cc ON cc.id=s.category_id WHERE c.id=? AND s.private=0")
         .bind(conversation).fetch_optional(pool).await.map_err(ApiError::internal)?;
     Ok(row.map(|row| ConversationView {

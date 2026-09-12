@@ -138,7 +138,9 @@ jobs:
         run: cargo build --workspace --release --locked
 
       - name: Test invitation server discovery
-        run: python3 scripts/test-invite-discovery.py
+        run: |
+          python3 scripts/test-invite-discovery.py
+          python3 scripts/test-account-membership.py
 
       - name: Package Linux release
         run: |

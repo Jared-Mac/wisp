@@ -13,6 +13,8 @@ Item {
   property bool horizontal: false
   property bool showInvite: true
   readonly property bool inlineInvite: showInvite && !narrow && (horizontal || width >= theme.space(200))
+  readonly property bool member: bridge.serverMember !== false
+  readonly property var account: bridge.accountActions ? bridge.accountActions.state(bridge.activeServer.id) : ({busy:false,invitation:null,error:"",feedback:"",invites:[]})
   signal settingsRequested()
   implicitHeight: selector.height + (narrow && settingsButton.visible ? settingsButton.height + root.theme.spacing.xs : 0) + (root.showInvite && !inlineInvite ? inviteButton.height + root.theme.spacing.xs : 0)
   TextMetrics { id: serverMetrics; font: selector.font; text: serverLabel.text }
@@ -67,8 +69,8 @@ Item {
       id: serverLabel
       verticalAlignment: Text.AlignVCenter
       horizontalAlignment: root.tiny ? Text.AlignHCenter : Text.AlignLeft
-      text: root.tiny ? String(selector.currentText || "S").slice(0,1).toUpperCase() : (root.theme.tui ? "@ " : "") + String(selector.currentText || "Server")
-        + (root.bridge.activeServer.connected === false ? " · offline" : "")
+      text: root.tiny ? String(selector.currentText || "S").slice(0,1).toUpperCase() : (root.theme.tui ? "@ " : "") + String(selector.currentText || "No servers yet")
+        + (root.bridge.servers.length && root.bridge.activeServer.connected === false ? " · offline" : "")
       elide: Text.ElideRight
       color: root.bridge.activeServer.connected === false ? root.theme.muted : root.theme.foreground
       font: selector.font
@@ -181,19 +183,18 @@ Item {
     y: root.inlineInvite ? 1 : selector.height + (root.narrow && settingsButton.visible ? settingsButton.height + root.theme.spacing.xs : 0) + root.theme.spacing.xs
     x: root.inlineInvite ? (settingsButton.visible ? settingsButton.x - root.theme.spacing.sm : parent.width) - width : root.narrow ? (parent.width-width)/2 : parent.width-width
     width: Math.min(parent.width,root.theme.space(36)); height: root.inlineInvite ? selector.height - 2 : root.theme.space(28)
-    text: "Invite friend"; iconName: "invite"; iconOnly: true; forceIcon: true
-    ToolTip.visible: hovered; ToolTip.text: "Invite a friend to this server"
+    text: root.member ? "Invite to server" : "Join a server"; iconName: "invite"; iconOnly: true; forceIcon: true
+    ToolTip.visible: hovered; ToolTip.text: text
     visible: root.showInvite
     enabled: root.bridge.activeServer.connected !== false
     font.family: root.theme.font.family
     font.pixelSize: root.theme.font.caption
     ThemeControlStyle { theme: root.theme; control: inviteButton }
     onClicked: {
-      root.bridge.lastAccountInvite = null
-      root.bridge.lastError = ""
-      invitePopup.copied = false
+      if(!root.member) {root.bridge.accountActions.joinServer();return}
+      invitePopup.copied=false
       invitePopup.open()
-      root.bridge.createAccountInvite("friend", "", 30)
+      root.bridge.accountActions.act("create_server_invite",{expires_in_minutes:30})
     }
   }
   // Status snapshots replace the server object; only a selection change dismisses the invite.
@@ -202,50 +203,53 @@ Item {
   Popup {
     id: invitePopup
     objectName: "serverInvitePopup"
-    property bool copied: false
-    width: root.theme.space(300)
-    y: root.height
-    padding: root.theme.spacing.md
-    closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
-    background: Rectangle { color: root.theme.surface; border.color: root.theme.muted; radius: root.theme.cornerRadius }
-    contentItem: Column {
-      spacing: root.theme.spacing.sm
-      Text {
-        width: parent.width
-        text: "Invite a friend"
-        color: root.theme.foreground
-        font.family: root.theme.font.family
-        font.pixelSize: root.theme.font.body
-      }
-      Text {
-        width: parent.width
-        wrapMode: Text.Wrap
-        textFormat: Text.PlainText
-        text: root.bridge.lastAccountInvite ? "Send this one-use link to your friend. It expires in 30 minutes. Open it with Wisp installed, or paste it into Create account." : root.bridge.lastError || "Creating invitation…"
-        color: root.theme.muted
-        font.family: root.theme.font.family
-        font.pixelSize: root.theme.font.caption
-      }
-      TextField {
-        id: inviteLink
-        objectName: "serverInviteLink"
-        width: parent.width
-        visible: !!root.bridge.lastAccountInvite
-        readOnly: true
-        selectByMouse: true
-        text: root.bridge.lastAccountInvite ? String(root.bridge.lastAccountInvite.uri || root.bridge.lastAccountInvite.code) : ""
-        ThemeControlStyle { theme: root.theme; control: inviteLink }
-      }
-      ChatButton {
-    id: styledControl2
-        theme: root.theme
-        width: parent.width
-        text: invitePopup.copied ? "Copied!" : "Copy invite link"
-        enabled: !!root.bridge.lastAccountInvite
-        ThemeControlStyle { theme: root.theme; control: styledControl2 }
-        onClicked: { inviteLink.selectAll(); inviteLink.copy(); inviteLink.deselect(); invitePopup.copied = true }
+    property bool copied:false
+    property bool showQr:false
+    property bool confirmLeave:false
+    onClosed:confirmLeave=false
+    width:Math.min(root.theme.space(340),root.Window.window ? root.Window.window.width-root.theme.space(24) : root.theme.space(340))
+    height:Math.min(inviteContent.implicitHeight+padding*2,root.Window.window ? root.Window.window.height-root.theme.space(40) : root.theme.space(600))
+    parent:Overlay.overlay
+    onAboutToShow:{
+      var point=root.mapToItem(parent,0,root.height)
+      x=Math.max(root.theme.space(8),Math.min(point.x,parent.width-width-root.theme.space(8)))
+      y=Math.max(root.theme.space(8),Math.min(point.y,parent.height-height-root.theme.space(8)))
+    }
+    padding:root.theme.spacing.md
+    closePolicy:Popup.CloseOnEscape | Popup.CloseOnPressOutside
+    background:Rectangle {color:root.theme.surface;border.color:root.theme.muted;radius:root.theme.cornerRadius}
+    contentItem:ScrollView {
+      clip:true
+      Column {
+        id:inviteContent;width:invitePopup.availableWidth;spacing:root.theme.spacing.sm
+        Text {text:"Invite to server";color:root.theme.foreground;font.family:root.theme.font.family;font.pixelSize:root.theme.font.body;font.bold:true}
+        Text {width:parent.width;wrapMode:Text.Wrap;text:"A one-use invitation to "+String(root.bridge.activeServer.name)+". Adding friends is separate.";textFormat:Text.PlainText;color:root.theme.muted;font.family:root.theme.font.family;font.pixelSize:root.theme.font.caption}
+        Text {width:parent.width;wrapMode:Text.Wrap;text:root.account.error || root.account.feedback || (root.account.busy ? "Working…" : root.account.invitation ? "Expires "+new Date(root.account.invitation.expires_at).toLocaleString() : "");textFormat:Text.PlainText;color:root.account.error ? root.theme.danger : root.theme.muted;font.family:root.theme.font.family;font.pixelSize:root.theme.font.caption;visible:!!text}
+        TextField {id:inviteLink;objectName:"serverInviteLink";width:parent.width;visible:!!root.account.invitation;readOnly:true;selectByMouse:true;text:root.account.invitation ? root.account.invitation.uri : "";ThemeControlStyle {theme:root.theme;control:inviteLink}}
+        ChatButton {theme:root.theme;objectName:"copyServerInvitation";text:invitePopup.copied ? "Copied!" : "Copy invitation";enabled:!!root.account.invitation;onClicked:{root.bridge.copyChatText(inviteLink.text);invitePopup.copied=true}}
+        ChatButton {theme:root.theme;text:invitePopup.showQr ? "Hide QR code" : "Show QR code";enabled:!!root.account.invitation;onClicked:invitePopup.showQr=!invitePopup.showQr}
+        Image {width:Math.min(parent.width,root.theme.space(224));height:visible ? width : 0;visible:invitePopup.showQr && !!root.account.invitation;source:root.account.invitation && invitePopup.showQr ? root.account.invitation.qr : "";fillMode:Image.PreserveAspectFit;Accessible.name:"Server invitation QR code"}
+        Row {
+          spacing:root.theme.spacing.xs
+          WispComboBox {id:expiry;theme:root.theme;model:["30 minutes","24 hours"];width:root.theme.space(130)}
+          ChatButton {theme:root.theme;text:"New link";enabled:!root.account.busy;onClicked:{invitePopup.copied=false;root.bridge.accountActions.act("create_server_invite",{expires_in_minutes:expiry.currentIndex===0 ? 30 : 1440})}}
+        }
+        ChatButton {theme:root.theme;text:"Revoke this invitation";visible:!!root.account.invitation;enabled:!root.account.busy;onClicked:root.bridge.accountActions.act("revoke_server_invite",{invite_id:root.account.invitation.id})}
+        ChatButton {theme:root.theme;text:"Manage active invitations";enabled:!root.account.busy;onClicked:root.bridge.accountActions.act("list_server_invites",{})}
+        Repeater {
+          model:root.account.invites
+          Row {
+            required property var modelData
+            width:inviteContent.width;spacing:root.theme.spacing.xs
+            Text {width:Math.max(0,parent.width-revoke.width-parent.spacing);text:"Expires "+new Date(parent.modelData.expires_at).toLocaleString();elide:Text.ElideRight;color:root.theme.muted;font.family:root.theme.font.family;font.pixelSize:root.theme.font.caption}
+            ChatButton {id:revoke;theme:root.theme;text:"Revoke";enabled:!root.account.busy;onClicked:root.bridge.accountActions.act("revoke_server_invite",{invite_id:parent.modelData.id})}
+          }
+        }
+        ChatButton {theme:root.theme;text:"Join another server";onClicked:{invitePopup.close();root.bridge.accountActions.joinServer()}}
+        Text {width:parent.width;visible:invitePopup.confirmLeave;wrapMode:Text.Wrap;text:"Leave this server? Your account, friends and DMs stay available.";color:root.theme.muted;font.family:root.theme.font.family;font.pixelSize:root.theme.font.caption}
+        ChatButton {theme:root.theme;text:invitePopup.confirmLeave ? "Confirm leave server" : "Leave server";visible:!(root.bridge.selfState || {}).server_owner;enabled:!root.account.busy;onClicked:{if(!invitePopup.confirmLeave){invitePopup.confirmLeave=true;return}if(root.bridge.accountActions.act("leave_server",{}))invitePopup.close()}}
+
       }
     }
   }
-
 }

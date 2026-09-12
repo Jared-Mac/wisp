@@ -27,20 +27,26 @@ enum Action {
     Bootstrap,
     Register,
     Login,
+    PreviewInvite,
+    AcceptInvite,
 }
 
 #[derive(Deserialize)]
 struct Request {
     action: Action,
+    #[serde(default)]
     server_url: String,
+    #[serde(default)]
     username: String,
     #[serde(default)]
     display_name: String,
+    #[serde(default)]
     password: String,
     #[serde(default)]
     invite_code: String,
     #[serde(default)]
     bootstrap_token: String,
+    #[serde(default)]
     device_name: String,
     #[serde(default)]
     media_key: Option<String>,
@@ -98,6 +104,8 @@ fn save_account(
     credential: &DeviceCredential,
     media_key: Option<&str>,
 ) -> anyhow::Result<()> {
+    let retained = saved_account(server.as_str())?.and_then(|account| account.media_key);
+    let media_key = media_key.or(retained.as_deref());
     let path = config_path()?;
     let parent = path.parent().context("account config has no parent")?;
     fs::create_dir_all(parent).context("create Wisp config directory")?;
@@ -160,7 +168,179 @@ fn save_account(
     Ok(())
 }
 
+fn saved_account(server: &str) -> anyhow::Result<Option<accounts::ServerAccount>> {
+    let path = registry_path()?;
+    if !path.exists() {
+        return Ok(None);
+    }
+    let registry = accounts::AccountRegistry::load(&path)?;
+    Ok(registry
+        .servers
+        .into_iter()
+        .find(|a| a.server_url.trim_end_matches('/') == server.trim_end_matches('/')))
+}
+
+async fn response_value(response: reqwest::Response) -> anyhow::Result<serde_json::Value> {
+    let status = response.status();
+    let bytes = response
+        .bytes()
+        .await
+        .context("Could not read Wisp response")?;
+    if bytes.len() > 32_768 {
+        bail!("Wisp response is too large");
+    }
+    let value: serde_json::Value =
+        serde_json::from_slice(&bytes).context("Invalid Wisp response")?;
+    if !status.is_success() {
+        bail!(
+            "{}",
+            value["message"]
+                .as_str()
+                .unwrap_or("Wisp could not complete this request")
+        );
+    }
+    Ok(value)
+}
+
+async fn default_server(client: &reqwest::Client) -> anyhow::Result<String> {
+    if let Ok(value) = std::env::var("WISP_ACCOUNT_SERVER") {
+        return wisp_crypto::invitation::origin(&value);
+    }
+    let response = client
+        .get("https://wisp.you/.well-known/wisp-account.json")
+        .send()
+        .await
+        .context("Could not reach Wisp account setup. Try again shortly.")?;
+    let value = response_value(response).await?;
+    wisp_crypto::invitation::origin(
+        value["server"]
+            .as_str()
+            .context("Wisp account service is unavailable")?,
+    )
+}
+
+enum Resolved {
+    Modern(wisp_crypto::invitation::Invitation),
+    Legacy(InvitePayload),
+}
+impl Resolved {
+    fn server(&self) -> &str {
+        match self {
+            Self::Modern(i) => &i.server,
+            Self::Legacy(i) => &i.server,
+        }
+    }
+    fn media_key(&self) -> Option<&str> {
+        match self {
+            Self::Modern(i) => i.media_key.as_deref(),
+            Self::Legacy(i) => i.media_key.as_deref(),
+        }
+    }
+}
+
+async fn resolve(client: &reqwest::Client, value: &str) -> anyhow::Result<Resolved> {
+    if value.len() > 16384 {
+        bail!("Invitation is too large");
+    }
+    let unwrapped;
+    let value = if let Some(encoded) = value.strip_prefix("wisp-invite:v2.") {
+        unwrapped = String::from_utf8(
+            URL_SAFE_NO_PAD
+                .decode(encoded)
+                .context("Invalid Wisp invitation")?,
+        )
+        .context("Invalid Wisp invitation")?;
+        unwrapped.as_str()
+    } else {
+        value
+    };
+    if value.starts_with("https://") || value.starts_with("http://") {
+        let link = wisp_crypto::invitation::Link::parse(value)?;
+        let response = client
+            .get(format!(
+                "{}/v2/invitations/{}",
+                link.origin,
+                link.lookup_id()
+            ))
+            .send()
+            .await
+            .context("Could not open invitation")?;
+        let value = response_value(response).await?;
+        let invite = link.open(
+            value["envelope"]
+                .as_str()
+                .context("Invalid encrypted invitation")?,
+        )?;
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_secs();
+        anyhow::ensure!(
+            invite.expires_at.timestamp() > i64::try_from(now)?,
+            "This invitation has expired. Ask for a new one."
+        );
+        return Ok(Resolved::Modern(invite));
+    }
+    let encoded = value
+        .strip_prefix("wisp-invite:")
+        .context("Paste a Wisp invitation link")?;
+    let decoded = URL_SAFE_NO_PAD
+        .decode(encoded)
+        .context("Invalid Wisp invitation")?;
+    let mut invite: InvitePayload =
+        serde_json::from_slice(&decoded).context("Invalid Wisp invitation")?;
+    anyhow::ensure!(
+        invite.v == 1 && !invite.token.is_empty() && invite.token.len() <= 256,
+        "This invitation requires a newer Wisp version"
+    );
+    let origin = wisp_crypto::invitation::origin(&invite.server)?;
+    anyhow::ensure!(
+        origin == invite.server.trim_end_matches('/'),
+        "Invalid invitation issuer"
+    );
+    anyhow::ensure!(
+        invite
+            .media_key
+            .as_ref()
+            .is_none_or(|key| (16..=1024).contains(&key.len()) && !key.contains(['\n', '\r'])),
+        "Invalid invitation media key"
+    );
+    invite.server = origin;
+    Ok(Resolved::Legacy(invite))
+}
+
+async fn session(
+    client: &reqwest::Client,
+    server: &str,
+    credential: &DeviceCredential,
+) -> anyhow::Result<String> {
+    let response=client.post(format!("{server}/v1/sessions")).json(&serde_json::json!({"device_id":credential.device_id,"device_token":credential.device_token,"protocol_version":PROTOCOL_VERSION})).send().await?;
+    let value = response_value(response).await?;
+    Ok(value["token"]
+        .as_str()
+        .context("Invalid account session")?
+        .to_owned())
+}
+
+async fn accept(
+    client: &reqwest::Client,
+    invite: &wisp_crypto::invitation::Invitation,
+    credential: &DeviceCredential,
+) -> anyhow::Result<()> {
+    let token = session(client, &invite.server, credential).await?;
+    response_value(
+        client
+            .post(format!("{}/v2/server/join", invite.server))
+            .bearer_auth(token)
+            .json(&serde_json::json!({"code":invite.code}))
+            .send()
+            .await?,
+    )
+    .await?;
+    Ok(())
+}
+
 #[tokio::main]
+#[allow(clippy::too_many_lines)] // One CLI action owns preview, credential preservation, and acceptance.
 async fn main() -> anyhow::Result<()> {
     Args::parse();
     let mut input = String::new();
@@ -168,36 +348,69 @@ async fn main() -> anyhow::Result<()> {
         .lock()
         .read_line(&mut input)
         .context("read account request")?;
+    anyhow::ensure!(input.len() <= 32768, "Account request is too large");
     let mut request: Request = serde_json::from_str(&input).context("parse account request")?;
-    if matches!(request.action, Action::Register | Action::Login)
-        && let Some(encoded) = request.invite_code.strip_prefix("wisp-invite:")
-    {
-        let decoded = URL_SAFE_NO_PAD
-            .decode(encoded)
-            .context("invalid Wisp invitation")?;
-        let invite: InvitePayload =
-            serde_json::from_slice(&decoded).context("invalid Wisp invitation")?;
-        if invite.v != 1 {
-            bail!("this invitation requires a newer Wisp version");
-        }
-        request.server_url = invite.server;
-        request.invite_code = invite.token;
-        request.media_key = invite.media_key;
-    }
-    let mut server = Url::parse(request.server_url.trim()).context("invalid server URL")?;
-    if server.scheme() != "https"
-        && !server
-            .host_str()
-            .is_some_and(|host| matches!(host, "localhost" | "127.0.0.1" | "::1"))
-    {
-        bail!("public Wisp servers must use https");
-    }
-    server.set_path("");
-    server.set_query(None);
-    server.set_fragment(None);
     let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
         .timeout(std::time::Duration::from_secs(20))
         .build()?;
+    let resolved = if request.invite_code.starts_with("wisp-invite:")
+        || request.invite_code.starts_with("https://")
+        || request.invite_code.starts_with("http://")
+    {
+        Some(resolve(&client, request.invite_code.trim()).await?)
+    } else {
+        None
+    };
+    if matches!(request.action, Action::PreviewInvite) {
+        let invite = resolved.context("Paste a Wisp invitation link")?;
+        let saved = saved_account(invite.server())?;
+        let value = match &invite {
+            Resolved::Modern(i) => {
+                serde_json::json!({"server":i.server,"server_name":i.server_name,"inviter":i.inviter.display_name,"expires_at":i.expires_at,"legacy":false,"saved_account":saved.is_some(),"account_name":saved.as_ref().map(|a|&a.profile)})
+            }
+            Resolved::Legacy(i) => {
+                serde_json::json!({"server":i.server,"server_name":Url::parse(&i.server)?.host_str(),"legacy":true,"saved_account":false})
+            }
+        };
+        println!("{value}");
+        return Ok(());
+    }
+    if matches!(request.action, Action::AcceptInvite) {
+        let Resolved::Modern(invite) = resolved.context("Paste a Wisp invitation link")? else {
+            bail!("Sign in to accept a legacy invitation");
+        };
+        let saved = saved_account(&invite.server)?.context("Sign in to accept this invitation")?;
+        let token_credential = DeviceCredential {
+            device_id: saved.device_id,
+            device_token: saved.device_token,
+            user: wisp_protocol::UserSummary {
+                id: uuid::Uuid::nil(),
+                display_name: saved.profile,
+            },
+        };
+        accept(&client, &invite, &token_credential).await?;
+        save_account(
+            &Url::parse(&invite.server)?,
+            &token_credential,
+            invite.media_key.as_deref(),
+        )?;
+        println!("{}", serde_json::json!({"ok":true,"joined":true}));
+        return Ok(());
+    }
+    if let Some(invite) = &resolved {
+        request.server_url = invite.server().into();
+    }
+    if request.server_url.trim().is_empty() {
+        request.server_url = default_server(&client).await?;
+    }
+    let canonical = wisp_crypto::invitation::origin(request.server_url.trim())?;
+    let server = Url::parse(&canonical)?;
+    let legacy_code = match &resolved {
+        Some(Resolved::Legacy(i)) => i.token.clone(),
+        Some(Resolved::Modern(_)) => String::new(),
+        None => request.invite_code.clone(),
+    };
     let (path, body) = match request.action {
         Action::Bootstrap => (
             "/v1/devices/bootstrap",
@@ -210,16 +423,20 @@ async fn main() -> anyhow::Result<()> {
                 protocol_version: PROTOCOL_VERSION,
             })?,
         ),
-        Action::Register => (
+        Action::Register if !legacy_code.is_empty() => (
             "/v1/accounts/register",
             serde_json::to_value(RegisterAccountRequest {
-                invite_code: request.invite_code,
+                invite_code: legacy_code,
                 username: request.username,
                 display_name: request.display_name,
                 password: request.password,
                 device_name: request.device_name,
                 protocol_version: PROTOCOL_VERSION,
             })?,
+        ),
+        Action::Register => (
+            "/v2/accounts/register",
+            serde_json::json!({"username":request.username,"display_name":request.display_name,"password":request.password,"device_name":request.device_name,"protocol_version":PROTOCOL_VERSION}),
         ),
         Action::Login => (
             "/v1/accounts/login",
@@ -228,32 +445,38 @@ async fn main() -> anyhow::Result<()> {
                 password: request.password,
                 device_name: request.device_name,
                 protocol_version: PROTOCOL_VERSION,
-                invite_code: (!request.invite_code.is_empty()).then_some(request.invite_code),
+                invite_code: (!legacy_code.is_empty()).then_some(legacy_code),
             })?,
         ),
+        Action::PreviewInvite | Action::AcceptInvite => unreachable!(),
     };
-    let endpoint = server.join(path)?;
-    let response = client.post(endpoint).json(&body).send().await?;
-    if !response.status().is_success() {
-        let status = response.status();
-        let detail = response
-            .json::<serde_json::Value>()
-            .await
-            .ok()
-            .and_then(|value| {
-                value
-                    .get("message")
-                    .and_then(|value| value.as_str())
-                    .map(str::to_owned)
-            })
-            .unwrap_or_else(|| format!("server returned {status}"));
-        bail!("{detail}");
-    }
-    let credential: DeviceCredential = response.json().await?;
+    let value = response_value(client.post(server.join(path)?).json(&body).send().await?).await?;
+    let credential: DeviceCredential =
+        serde_json::from_value(value).context("Invalid account credential")?;
+    // Save successful authentication even if the invite expires during signup.
+    // Never force someone to create the account a second time after that race.
     save_account(&server, &credential, request.media_key.as_deref())?;
+    let mut joined = false;
+    let mut warning = None;
+    if let Some(Resolved::Modern(invite)) = &resolved {
+        match accept(&client, invite, &credential).await {
+            Ok(()) => {
+                save_account(&server, &credential, invite.media_key.as_deref())?;
+                joined = true;
+            }
+            Err(_) => {
+                warning = Some(
+                    "Your account is saved, but the invitation could not be accepted. Open Wisp and try a new invitation.",
+                );
+            }
+        }
+    } else if let Some(invite) = &resolved {
+        save_account(&server, &credential, invite.media_key())?;
+        joined = true;
+    }
     println!(
         "{}",
-        serde_json::json!({"ok":true,"display_name":credential.user.display_name})
+        serde_json::json!({"ok":true,"display_name":credential.user.display_name,"joined":joined,"warning":warning})
     );
     Ok(())
 }

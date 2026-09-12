@@ -18,7 +18,7 @@ pub(super) async fn people(
          WHEN EXISTS(SELECT 1 FROM friend_requests r WHERE r.sender_id=u.id AND r.recipient_id=?1) THEN 'incoming'
          WHEN EXISTS(SELECT 1 FROM friend_requests r WHERE r.sender_id=?1 AND r.recipient_id=u.id) THEN 'outgoing'
          ELSE 'none' END AS relationship
-         FROM users u ORDER BY u.display_name COLLATE NOCASE,u.id",
+         FROM users u WHERE u.id=?1 OR (u.server_member=1 AND EXISTS(SELECT 1 FROM users actor WHERE actor.id=?1 AND actor.server_member=1)) OR EXISTS(SELECT 1 FROM friendships f WHERE (f.first_user_id=?1 AND f.second_user_id=u.id) OR (f.second_user_id=?1 AND f.first_user_id=u.id)) OR EXISTS(SELECT 1 FROM friend_requests r WHERE (r.sender_id=?1 AND r.recipient_id=u.id) OR (r.recipient_id=?1 AND r.sender_id=u.id)) ORDER BY u.display_name COLLATE NOCASE,u.id",
     ).bind(&user).fetch_all(&state.pool).await.map_err(ApiError::internal)?;
     Ok(Json(json!({"people": rows.into_iter().map(|row| json!({
         "id":row.get::<String,_>("id"),
@@ -39,7 +39,10 @@ async fn member(state: &AppState, user: UserId, other: UserId) -> Result<(), Api
         .fetch_one(&state.pool)
         .await
         .map_err(ApiError::internal)?;
-    if !exists {
+    if !exists
+        || super::account_membership::blocked(&state.pool, user, other).await?
+        || !super::account_membership::can_view_person(&state.pool, user, other).await?
+    {
         return Err(ApiError::not_found("Server member not found"));
     }
     Ok(())
@@ -52,6 +55,7 @@ pub(super) async fn send(
 ) -> Result<Json<Value>, ApiError> {
     let user = authenticate_headers(&state, &headers).await?;
     member(&state, user, other).await?;
+    super::account_membership::rate(&state, format!("friend-request:{user}"), 60).await?;
     // A single write serializes duplicate/crossed requests and acceptance.
     let result = sqlx::query(
         "INSERT OR IGNORE INTO friend_requests(sender_id,recipient_id,created_at)

@@ -476,6 +476,8 @@ pub struct ServerView {
 /// as the durable local identity.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ServerStateView {
+    #[serde(default = "legacy_server_member")]
+    pub server_member: bool,
     #[serde(default)]
     pub reactions: Vec<MessageReaction>,
     #[serde(default)]
@@ -592,6 +594,10 @@ pub struct ModerateVoiceRequest {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Snapshot {
+    /// Account authentication does not imply community membership. Older
+    /// servers predate public signup and every authenticated account is a member.
+    #[serde(default = "legacy_server_member")]
+    pub server_member: bool,
     #[serde(default)]
     pub reactions: Vec<MessageReaction>,
     #[serde(default)]
@@ -662,6 +668,10 @@ impl Snapshot {
     pub fn connected(&self) -> bool {
         self.self_state.hangout_id.is_some()
     }
+}
+
+const fn legacy_server_member() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

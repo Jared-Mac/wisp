@@ -1,3 +1,4 @@
+mod account_membership;
 mod account_profile;
 mod accounts;
 mod audio;
@@ -603,6 +604,7 @@ impl Daemon {
 
     fn scoped_state(server: ServerView, snapshot: &Snapshot) -> ServerStateView {
         ServerStateView {
+            server_member: snapshot.server_member,
             reactions: snapshot.reactions.clone(),
             voice_moderation: snapshot.voice_moderation.clone(),
             server: Self::server_view_for_snapshot(server, snapshot),
@@ -656,6 +658,12 @@ impl Daemon {
                 server.name.clone_from(&current.server.name);
             }
         }
+        servers.retain(|server| {
+            states
+                .iter()
+                .find(|state| state.server.id == server.id)
+                .is_none_or(|state| state.server_member)
+        });
         snapshot.servers = servers;
         snapshot
             .selected_server_id
@@ -867,7 +875,7 @@ impl Daemon {
                 state.self_state.hangout_id,
                 state.chat_encryption_required,
                 self.privacy.active()?.is_some(),
-                self.primary_media_key.clone(),
+                account_membership::media_key(&self.api.base_url, self.primary_media_key.clone()),
             ));
         }
         let server = self
@@ -883,7 +891,7 @@ impl Daemon {
             state.self_state.hangout_id,
             state.chat_encryption_required,
             server.privacy.active()?.is_some(),
-            server.media_key.clone(),
+            account_membership::media_key(&server.api.base_url, server.media_key.clone()),
         ))
     }
 
@@ -965,9 +973,16 @@ impl Daemon {
 
     #[allow(clippy::too_many_lines)]
     async fn reconcile_media(&self) -> anyhow::Result<()> {
-        let _reconcile = self.media_reconcile.lock().await;
+        let reconcile = self.media_reconcile.lock().await;
         let (voice_api, hangout_id, encryption_required, privacy_active, media_key) =
             self.voice_context().await?;
+        if hangout_id.is_some() && voice_api.base_url.starts_with("https://") && media_key.is_none()
+        {
+            drop(reconcile);
+            self.leave_voice_locally().await;
+            let _ = voice_api.leave().await;
+            anyhow::bail!("Restore this device's media encryption key before joining voice");
+        }
         self.media.set_encryption_key(media_key);
         if hangout_id.is_some() && self.voice_recovery_blocked.load(Ordering::Acquire) {
             return Ok(());
@@ -1505,6 +1520,9 @@ impl Daemon {
                 .bytes()
                 .await?;
             return Ok(Some(json!({"ping_ms":started.elapsed().as_millis()})));
+        }
+        if account_membership::handles(&command.name) {
+            return self.membership_command(command).await.map(Some);
         }
         if matches!(
             command.name.as_str(),
@@ -4969,16 +4987,7 @@ async fn main() -> anyhow::Result<()> {
                 .collect()
         },
     );
-    if !args.disable_media
-        && (primary_account.is_some() || std::env::var_os("WISP_DEVICE_ID").is_some())
-        && primary_account
-            .as_ref()
-            .and_then(|account| account.media_key.as_ref())
-            .is_none()
-        && std::env::var_os("WISP_E2EE_KEY").is_none()
-    {
-        bail!("WISP_E2EE_KEY is required for device-authenticated media");
-    }
+    // Account/chat access works without a media key; explicit voice joins check it.
     let socket_path = args.socket.clone().unwrap_or_else(runtime_socket_path);
     let listener = bind_socket(&socket_path).await?;
     let mut connecting_audio_state = (false, false);

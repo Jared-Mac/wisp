@@ -18,7 +18,7 @@ pub(super) async fn emojis(
     Query(query): Query<EmojiQuery>,
 ) -> Result<Json<Value>, ApiError> {
     let user = super::authenticate_headers(&state, &headers).await?;
-    let rows = sqlx::query("SELECT id,name,scope,owner_id FROM custom_emojis WHERE removed_at IS NULL AND (scope='server' OR owner_id=?) AND id>? ORDER BY id LIMIT 101")
+    let rows = sqlx::query("SELECT id,name,scope,owner_id FROM custom_emojis WHERE removed_at IS NULL AND ((scope='server' AND EXISTS(SELECT 1 FROM users WHERE id=?1 AND server_member=1)) OR owner_id=?1) AND id>?2 ORDER BY id LIMIT 101")
         .bind(user.to_string()).bind(query.after).fetch_all(&state.pool).await.map_err(ApiError::internal)?;
     let entries: Vec<_> = rows.iter().take(100).map(|r| json!({"id":r.get::<String,_>("id"),"name":r.get::<String,_>("name"),"scope":r.get::<String,_>("scope"),"owner_id":r.get::<String,_>("owner_id")})).collect();
     let next = if rows.len() > 100 {

@@ -5,6 +5,7 @@ Column {
   id: root
   required property var bridge
   required property var theme
+  visible: bridge.serverMember !== false
   signal createRoomRequested()
   readonly property bool collapsed: bridge.workspaceLayout.trayRoomsCollapsed
   spacing: theme.spacing.xs

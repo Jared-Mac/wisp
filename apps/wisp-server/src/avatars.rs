@@ -86,7 +86,10 @@ pub(super) async fn image(
     headers: HeaderMap,
     Path(id): Path<Uuid>,
 ) -> Result<Response, ApiError> {
-    authenticate_headers(&state, &headers).await?;
+    let actor = authenticate_headers(&state, &headers).await?;
+    if !super::account_membership::can_view_person(&state.pool, actor, id).await? {
+        return Err(ApiError::not_found("No profile picture"));
+    }
     let png: Option<Vec<u8>> =
         sqlx::query_scalar("SELECT png FROM account_avatars WHERE user_id=?")
             .bind(id.to_string())

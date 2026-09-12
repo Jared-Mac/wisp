@@ -11,7 +11,7 @@ use wisp_protocol::{
     UpdateServerRoomRequest,
 };
 
-async fn is_owner(pool: &SqlitePool, user: Uuid) -> Result<bool, ApiError> {
+pub(super) async fn is_owner(pool: &SqlitePool, user: Uuid) -> Result<bool, ApiError> {
     sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM server_identity WHERE owner_user_id=?)")
         .bind(user.to_string())
         .fetch_one(pool)
@@ -92,7 +92,7 @@ pub(super) async fn settings(
         .fetch_one(&state.pool)
         .await
         .map_err(ApiError::internal)?;
-    let members = sqlx::query("SELECT u.id,u.display_name,CASE WHEN si.owner_user_id IS NOT NULL THEN 'owner' WHEN sa.user_id IS NOT NULL THEN 'admin' ELSE 'member' END role FROM users u LEFT JOIN server_identity si ON si.owner_user_id=u.id LEFT JOIN server_admins sa ON sa.user_id=u.id WHERE u.username IS NOT NULL ORDER BY CASE role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END,u.display_name COLLATE NOCASE")
+    let members = sqlx::query("SELECT u.id,u.display_name,CASE WHEN si.owner_user_id IS NOT NULL THEN 'owner' WHEN sa.user_id IS NOT NULL THEN 'admin' ELSE 'member' END role FROM users u LEFT JOIN server_identity si ON si.owner_user_id=u.id LEFT JOIN server_admins sa ON sa.user_id=u.id WHERE u.server_member=1 AND u.username IS NOT NULL ORDER BY CASE role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END,u.display_name COLLATE NOCASE")
         .fetch_all(&state.pool).await.map_err(ApiError::internal)?
         .into_iter().map(|row| json!({"id":row.get::<String,_>("id"),"display_name":row.get::<String,_>("display_name"),"role":row.get::<String,_>("role")})).collect::<Vec<_>>();
     let categories = sqlx::query("SELECT id,name,position FROM channel_categories ORDER BY position,name COLLATE NOCASE")
@@ -148,7 +148,7 @@ pub(super) async fn set_admin(
     }
     if request.admin {
         let exists: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM users WHERE id=? AND username IS NOT NULL)",
+            "SELECT EXISTS(SELECT 1 FROM users WHERE id=? AND server_member=1 AND username IS NOT NULL)",
         )
         .bind(request.user_id.to_string())
         .fetch_one(&state.pool)
@@ -274,7 +274,7 @@ async fn validate_channel_access(
     }
     for member in members {
         let exists: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM users WHERE id=? AND username IS NOT NULL)",
+            "SELECT EXISTS(SELECT 1 FROM users WHERE id=? AND server_member=1 AND username IS NOT NULL)",
         )
         .bind(member.to_string())
         .fetch_one(pool)

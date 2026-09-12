@@ -11,14 +11,23 @@ ShellRoot {
     id: bridge
     property var activeServer: ({id:"test", name:"Friends", connected:true})
     property var servers: [activeServer]
+    property bool serverMember:true
+    property var serverPreferences: ({homeIds:["test"],isHome:function(id){return true},canMove:function(id,dir){return false}})
+    property var serverPings: ({})
+    function refreshServerPing(id) {}
+    property var accountActions: actions
     property var lastAccountInvite: null
     property string lastError: ""
     property int requests: 0
     property bool canManageServer: true
-    function createAccountInvite(kind, conversation, minutes) {
-      if (kind !== "friend" || conversation !== "" || minutes !== 30) throw new Error("wrong invitation request")
-      requests++
-    }
+
+  }
+  QtObject {
+    id:actions
+    property var invitation:null
+    function state(id) {return {invitation:invitation,error:"",feedback:"",busy:false,invites:[]}}
+    function act(command,args) {if(command!=="create_server_invite" || args.expires_in_minutes!==30)throw new Error("wrong invite request");bridge.requests++}
+    function joinServer() {bridge.requests++}
   }
   FloatingWindow {
     id: window
@@ -62,11 +71,11 @@ ShellRoot {
     bridge.activeServer = {id:"test", name:"Friends", connected:true}
     input.wait(50)
     if (!popup.opened) throw new Error("A status refresh must not dismiss the pending invitation")
-    bridge.lastAccountInvite = {uri:"wisp-invite:fixture"}
+    actions.invitation = {uri:"https://example.com/join/#v2.fixture",expires_at:"2030-01-01T00:00:00Z"}
     bridge.activeServer = {id:"test", name:"Friends renamed", connected:true}
     input.wait(50)
     var link = find(popup.contentItem, "serverInviteLink")
-    if (!popup.opened || !link.visible || link.text !== bridge.lastAccountInvite.uri) throw new Error("The completed invitation must remain available after a status refresh")
+    if (!popup.opened || !link.visible || link.text !== actions.invitation.uri) throw new Error("The completed invitation must remain available after a status refresh")
     bridge.activeServer = {id:"test", name:"Friends", connected:false}
     input.wait(50)
     if (button.enabled) throw new Error("Offline invites must be disabled")

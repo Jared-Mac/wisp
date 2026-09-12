@@ -1,3 +1,6 @@
+mod account_membership;
+#[cfg(test)]
+mod account_membership_tests;
 mod account_profile;
 mod attachments;
 mod avatars;
@@ -290,6 +293,7 @@ impl AppState {
 
     #[allow(clippy::too_many_lines)]
     async fn snapshot(&self, self_id: UserId) -> Result<Snapshot, ApiError> {
+        let server_member = account_membership::is_member(&self.pool, self_id).await?;
         let knocks = self.incoming_knocks(self_id).await;
         let hangouts = load_hangouts(&self.pool, self_id).await?;
         let users = sqlx::query(
@@ -358,9 +362,18 @@ impl AppState {
             .map_err(ApiError::internal)?
             .unwrap_or_else(|| "Wisp server".to_owned());
         Ok(Snapshot {
-            voice_moderation: voice_moderation::load(&self.pool).await?,
+            server_member,
+            voice_moderation: if server_member {
+                voice_moderation::load(&self.pool).await?
+            } else {
+                std::collections::BTreeMap::default()
+            },
             chat_encryption_required: self.config.require_chat_e2ee,
-            server_name,
+            server_name: if server_member {
+                server_name
+            } else {
+                "Home".into()
+            },
             seq,
             self_state: wisp_protocol::SelfState {
                 user: self_user,
@@ -505,6 +518,39 @@ async fn authenticate_text_body(
 #[allow(clippy::too_many_lines)]
 pub fn router(state: AppState) -> Router {
     Router::new()
+        .route(
+            "/v2/accounts/capabilities",
+            get(account_membership::capabilities),
+        )
+        .route("/v2/accounts/me", get(account_membership::overview))
+        .route(
+            "/v2/accounts/register",
+            post(account_membership::register).layer(DefaultBodyLimit::max(8192)),
+        )
+        .route("/v2/accounts/handle", put(account_membership::set_handle))
+        .route("/v2/people/lookup", post(account_membership::lookup))
+        .route(
+            "/v2/people/{id}/block",
+            put(account_membership::block).delete(account_membership::unblock),
+        )
+        .route(
+            "/v2/server-invites",
+            post(account_membership::create_invite).get(account_membership::list_invites),
+        )
+        .route(
+            "/v2/server-invites/{id}",
+            delete(account_membership::revoke_invite),
+        )
+        .route(
+            "/v2/server-invites/{id}/envelope",
+            put(account_membership::store_envelope).layer(DefaultBodyLimit::max(16384)),
+        )
+        .route("/v2/invitations/{id}", get(account_membership::resolve))
+        .route("/v2/server/join", post(account_membership::join))
+        .route("/v2/server/leave", post(account_membership::leave))
+        .route("/join/", get(account_membership::invite_page))
+        .route("/join/invite.js", get(account_membership::invite_script))
+        .route("/join/invite.css", get(account_membership::invite_style))
         .route("/healthz", get(health))
         .route("/v1/dev/session", post(dev_session))
         .route("/v1/sessions", post(device_session))
@@ -666,6 +712,10 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/conversations/tab", post(set_conversation_tab))
         .route("/v1/conversations/clear", post(clear_conversation_history))
         .route("/v1/users/{id}", get(user_by_id))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            account_membership::gate,
+        ))
         .layer(TraceLayer::new_for_http())
         .with_state(state)
 }
@@ -1124,6 +1174,12 @@ async fn login_account(
             .ok_or_else(|| ApiError::bad_request("invalid_invite", "invite is invalid, expired, or already used"))?;
         let invite_id: String = invite.get("id");
         let creator = parse_uuid(&invite.get::<String, _>("created_by"))?;
+        sqlx::query("UPDATE users SET server_member=1 WHERE id=?")
+            .bind(user_id.to_string())
+            .execute(&mut *tx)
+            .await
+            .map_err(ApiError::internal)?;
+        room_access::queue_public_admissions(&mut tx).await?;
         add_friendship(&mut tx, creator, user_id).await?;
         if invite.get::<String, _>("kind") == "room"
             && let Some(room) = invite.get::<Option<String>, _>("conversation_id")
@@ -1443,6 +1499,11 @@ async fn join_friend(
     let self_id = authenticate_headers(&state, &headers).await?;
     let self_user = find_user(&state.pool, &self_id.to_string()).await?;
     let friend = find_user(&state.pool, &request.friend).await?;
+    account_membership::require_member(&state.pool, self_id).await?;
+    account_membership::require_member(&state.pool, friend.id).await?;
+    if account_membership::blocked(&state.pool, self_id, friend.id).await? {
+        return Err(ApiError::forbidden("This person is unavailable"));
+    }
     if friend.id == self_id {
         return Err(ApiError::bad_request(
             "cannot_join_self",
@@ -1805,6 +1866,8 @@ async fn persist_message(
     request: SendMessageRequest,
     attachment: Option<StoredAttachment>,
 ) -> Result<Message, ApiError> {
+    account_membership::require_unblocked_chat(&state.pool, sender_id, &request.conversation_id)
+        .await?;
     validate_message_context(state, sender_id, &request).await?;
     let sender = find_user(&state.pool, &sender_id.to_string()).await?;
     let message = Message {
@@ -2111,6 +2174,12 @@ async fn edit_message(
 ) -> Result<Json<Value>, ApiError> {
     let user_id = authenticate_headers(&state, &headers).await?;
     let row = own_message(&state.pool, user_id, id).await?;
+    account_membership::require_unblocked_chat(
+        &state.pool,
+        user_id,
+        &row.get::<String, _>("conversation_id"),
+    )
+    .await?;
     privacy::require_legacy_allowed(&state)?;
     if row.get::<i64, _>("encryption_version") != 0 {
         return Err(ApiError::bad_request(
@@ -2339,8 +2408,12 @@ async fn user_by_id(
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<Json<UserSummary>, ApiError> {
-    let _user_id = authenticate_headers(&state, &headers).await?;
-    Ok(Json(find_user(&state.pool, &id).await?))
+    let user_id = authenticate_headers(&state, &headers).await?;
+    let other = find_user(&state.pool, &id).await?;
+    if !account_membership::can_view_person(&state.pool, user_id, other.id).await? {
+        return Err(ApiError::not_found("Person unavailable"));
+    }
+    Ok(Json(other))
 }
 
 #[derive(Debug, Deserialize)]
@@ -2398,6 +2471,9 @@ async fn event_socket(state: AppState, user_id: UserId, socket: WebSocket) {
         tokio::select! {
             event = events.recv() => match event {
                 Ok(event) => {
+                    let event = if account_membership::is_member(&state.pool,user_id).await.unwrap_or(false) { event } else {
+                        ServerEvent { name: "account_changed".into(), payload: json!({"changed":true}), ..event }
+                    };
                     let Ok(text) = serde_json::to_string(&event) else { continue };
                     if sender.send(WsMessage::Text(text.into())).await.is_err() { break; }
                 }
@@ -2803,7 +2879,7 @@ async fn load_conversations(
     user_id: UserId,
 ) -> Result<Vec<ConversationView>, ApiError> {
     let ids = sqlx::query_scalar::<_, String>(
-        "SELECT c.id FROM conversations c WHERE EXISTS(SELECT 1 FROM accessible_conversation_members cm WHERE cm.conversation_id=c.id AND cm.user_id=?) OR EXISTS(SELECT 1 FROM spots s WHERE s.id=c.spot_id AND s.private=0) OR EXISTS(SELECT 1 FROM channel_access a WHERE a.conversation_id=c.id AND a.user_id=?) ORDER BY COALESCE((SELECT MAX(created_at) FROM messages WHERE conversation_id = c.id), c.created_at) DESC",
+        "SELECT c.id FROM conversations c WHERE EXISTS(SELECT 1 FROM accessible_conversation_members cm WHERE cm.conversation_id=c.id AND cm.user_id=?) OR EXISTS(SELECT 1 FROM spots s JOIN users viewer ON viewer.id=?1 AND viewer.server_member=1 WHERE s.id=c.spot_id AND s.private=0) OR EXISTS(SELECT 1 FROM channel_access a WHERE a.conversation_id=c.id AND a.user_id=?) ORDER BY COALESCE((SELECT MAX(created_at) FROM messages WHERE conversation_id = c.id), c.created_at) DESC",
     )
     .bind(user_id.to_string())
     .bind(user_id.to_string())
@@ -2844,7 +2920,7 @@ async fn load_conversation(
         if error.status != StatusCode::FORBIDDEN {
             return Err(error);
         }
-        return match room_access::preview(pool, id).await? {
+        return match room_access::preview(pool, id, user_id).await? {
             Some(room) => Ok(room),
             None => channel_access::preview(pool, id, user_id)
                 .await?
@@ -2976,6 +3052,9 @@ async fn load_conversation(
 }
 
 async fn load_spots(pool: &SqlitePool, user: UserId) -> Result<Vec<SpotView>, ApiError> {
+    if !account_membership::is_member(pool, user).await? {
+        return Ok(Vec::new());
+    }
     let rows = sqlx::query("SELECT s.id,s.name,s.private,s.category_id,cc.name category_name FROM spots s LEFT JOIN channel_categories cc ON cc.id=s.category_id JOIN conversations c ON c.spot_id=s.id WHERE s.private=0 OR EXISTS(SELECT 1 FROM accessible_conversation_members cm WHERE cm.conversation_id=c.id AND cm.user_id=?) ORDER BY COALESCE(cc.position,9223372036854775807),s.name COLLATE NOCASE")
         .bind(user.to_string())
         .fetch_all(pool)
@@ -3087,6 +3166,9 @@ async fn active_hangout_for_tx(
 }
 
 async fn load_hangouts(pool: &SqlitePool, user: UserId) -> Result<Vec<HangoutView>, ApiError> {
+    if !account_membership::is_member(pool, user).await? {
+        return Ok(Vec::new());
+    }
     let rows =
         sqlx::query("SELECT h.id, h.label FROM hangouts h WHERE h.ended_at IS NULL AND (h.spot_id IS NULL OR EXISTS(SELECT 1 FROM spots s WHERE s.id=h.spot_id AND s.private=0) OR EXISTS(SELECT 1 FROM conversations c JOIN accessible_conversation_members cm ON cm.conversation_id = c.id WHERE c.spot_id = h.spot_id AND cm.user_id = ?)) ORDER BY h.created_at")
             .bind(user.to_string())

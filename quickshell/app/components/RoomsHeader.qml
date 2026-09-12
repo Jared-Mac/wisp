@@ -12,7 +12,8 @@ Item {
   property bool collapsed: false
   signal toggled()
   signal createRequested()
-  implicitHeight: theme.space(30)
+  visible: bridge.serverMember !== false
+  implicitHeight: bridge.serverMember !== false ? theme.space(30) : 0
   Button {
     id: toggle; objectName: "rooms-collapse"
     anchors.left: parent.left; anchors.right: create.left; anchors.rightMargin: root.theme.spacing.xs

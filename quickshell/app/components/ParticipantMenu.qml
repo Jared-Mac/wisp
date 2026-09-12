@@ -53,6 +53,11 @@ Popup {
       ToolTip.visible: hovered; ToolTip.text: root.canMessage ? Accessible.name : "Add as a friend to message"
       onClicked: { root.bridge.openParticipantDirect(root.person); root.close() }
     }
+    ChatButton {
+      theme:root.theme;width:parent.width;text:"Block account";visible:!root.self && !!root.bridge.accountActions
+      ToolTip.visible:hovered;ToolTip.text:"Remove friendship and stop direct messages and friend requests"
+      onClicked:if(root.bridge.accountActions.act("block_person",{user_id:root.person.id},root.person.server_id))root.close()
+    }
     Text {
       visible: root.voiceControls && !root.self; text: "Volume · only for you · " + Math.round(level.value) + "%"
       color: root.theme.muted; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption

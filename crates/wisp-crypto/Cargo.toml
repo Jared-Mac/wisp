@@ -6,6 +6,10 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+aes-gcm = "0.10.3"
+hkdf = "0.12.4"
+url.workspace = true
+chrono.workspace = true
 wisp-protocol = { path = "../wisp-protocol" }
 age = { version = "0.11.3", default-features = false }
 anyhow.workspace = true

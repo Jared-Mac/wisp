@@ -130,6 +130,12 @@ pub(super) async fn edit(
 ) -> Result<Json<Value>, ApiError> {
     let user = authenticate_headers(&state, &headers).await?;
     let row = own_message(&state.pool, user, id).await?;
+    super::account_membership::require_unblocked_chat(
+        &state.pool,
+        user,
+        &row.get::<String, _>("conversation_id"),
+    )
+    .await?;
     validate(&request)?;
     let mut tx = state.pool.begin().await.map_err(ApiError::internal)?;
     sqlx::query("UPDATE messages SET payload=payload WHERE id=?")

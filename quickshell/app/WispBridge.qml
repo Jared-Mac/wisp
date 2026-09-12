@@ -20,6 +20,8 @@ Item {
   WispServerPreferences {id:serverPreferences;bridge:root}
   readonly property alias messageActions: messageActions
   WispMessageActions { id: messageActions; bridge: root }
+  readonly property alias accountActions: accountActions
+  WispAccountActions { id: accountActions; bridge: root }
   readonly property alias friendships: friendships
   WispFriendships { id: friendships; bridge: root }
   readonly property alias voiceRecovery: voiceRecovery
@@ -445,12 +447,12 @@ Item {
   readonly property var serverStates: {
     if ((snapshot.server_states || []).length) return snapshot.server_states
     var fallback = (snapshot.servers || [])[0] || ({id:"local",name:"Wisp server",connected:daemonConnected})
-    return [{server:fallback,self:snapshot.self,voice_moderation:snapshot.voice_moderation || {},friends:snapshot.friends || [],hangouts:snapshot.hangouts || [],knocks:snapshot.knocks || [],room_invitations:snapshot.room_invitations || [],conversations:snapshot.conversations || [],messages:snapshot.messages || [],spots:snapshot.spots || [],devices:snapshot.devices || []}]
+    return [{server:fallback,server_member:snapshot.server_member,self:snapshot.self,voice_moderation:snapshot.voice_moderation || {},friends:snapshot.friends || [],hangouts:snapshot.hangouts || [],knocks:snapshot.knocks || [],room_invitations:snapshot.room_invitations || [],conversations:snapshot.conversations || [],messages:snapshot.messages || [],spots:snapshot.spots || [],devices:snapshot.devices || []}]
   }
   readonly property var servers:serverPreferences.sorted
   readonly property var serverCatalog: {
     var values = (snapshot.servers || []).slice()
-    if (!values.length) values = serverStates.map(function(state) { return state.server })
+    if (!values.length) values = serverStates.filter(function(state) { return state.server_member !== false }).map(function(state) { return state.server })
     return values
   }
   property string activeServerId: ""
@@ -469,9 +471,10 @@ Item {
     if (!servers.some(function(server) { return String(server.id) === preferred })) preferred = String(servers[0].id)
     if (activeServerId !== preferred) activeServerId = preferred
   }
-  readonly property var activeServer: servers.filter(function(server) { return String(server.id) === root.activeServerId })[0] || servers[0] || ({id:"",name:"Wisp server",connected:false})
+  readonly property var activeServer: servers.filter(function(server) { return String(server.id) === root.activeServerId })[0] || servers[0] || (serverStates[0] ? Object.assign({},serverStates[0].server,{name:"Home"}) : {id:"",name:"Home",connected:false})
   readonly property var activeServerState: serverStates.filter(function(state) { return String(state.server.id) === String(root.activeServer.id) })[0]
     || ({server:activeServer,self:{display_name:configuredProfile,presence:"away",connection:"connecting_to_server",server_owner:false,server_admin:false},friends:[],hangouts:[],knocks:[],room_invitations:[],conversations:[],messages:[],spots:[],devices:[]})
+  readonly property bool serverMember: activeServerState.server_member !== false
   readonly property string voiceServerId: String(snapshot.voice_server_id || snapshot.selected_server_id || (servers[0] || {}).id || "")
   readonly property var voiceServerState: serverStates.filter(function(state) { return String(state.server.id)===root.voiceServerId })[0] || serverStates[0] || ({})
   readonly property var voiceHangouts: (voiceServerState.hangouts || []).map(function(room) { return Object.assign({},room,{server_id:root.voiceServerId,server_name:String((voiceServerState.server || {}).name || "")}) })
@@ -1297,6 +1300,7 @@ Item {
       }
       serverPings=replaceEntry(serverPings,action.serverId,{pending:false,checkedAt:Date.now(),ms:isFinite(measured) && measured>=0 ? measured : null});return
     }
+    if (action.kind === "membership") { accountActions.finish(message,action); return }
     if (action.kind === "friendship") { friendships.finish(message,action); return }
     if (action.kind === "messageAction") { messageActions.finish(message,action); return }
     if (action.kind === "soundboard") {

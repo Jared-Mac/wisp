@@ -14,7 +14,7 @@ Item {
   signal selected()
   readonly property bool favorite: root.bridge.friendPreferences.isFavorite(root.friend)
 
-  readonly property bool canRequest: root.friend.online &&
+  readonly property bool canRequest: root.bridge.serverMember !== false && root.friend.online &&
     (root.friend.presence === "open" || root.friend.presence === "knock")
 
   implicitHeight: root.theme.space(root.theme.friendly ? (dense ? 36 : 44) : root.theme.comfortable ? (dense ? 32 : 38) : root.theme.tui ? 28 : 32)
@@ -37,6 +37,7 @@ Item {
     MenuItem { id: dm; text: "Message " + root.friend.display_name; onTriggered: root.bridge.openParticipantDirect(root.friend); ThemeControlStyle { theme: root.theme; control: dm } }
     MenuItem { id: call; text: root.friend.presence === "knock" ? "Knock" : "Join voice"; enabled: root.canRequest; onTriggered: root.bridge.joinFriend(root.friend.display_name); ThemeControlStyle { theme: root.theme; control: call } }
     MenuItem { id: star; text: root.favorite ? "Remove favorite" : "Add favorite"; onTriggered: root.bridge.friendPreferences.toggleFavorite(root.friend); ThemeControlStyle { theme: root.theme; control: star } }
+    MenuItem { id:blockAccount;text:"Block account";visible:!!root.bridge.accountActions;onTriggered:root.bridge.accountActions.act("block_person",{user_id:root.friend.id},root.friend.server_id);ThemeControlStyle {theme:root.theme;control:blockAccount} }
     MenuItem { id: volume; text: "Participant volume"; onTriggered: volumeMenu.open(); ThemeControlStyle { theme: root.theme; control: volume } }
   }
   // Observe the entire row, including child buttons, without intercepting clicks.

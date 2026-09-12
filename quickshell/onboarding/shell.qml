@@ -25,7 +25,18 @@ ShellRoot {
       var requested = Quickshell.env("WISP_ONBOARDING_MODE") || "login"
       return ["register", "login", "bootstrap"].indexOf(requested) >= 0 ? requested : "login"
     }
-    readonly property var invitation: parseInvitation(invite.text.trim())
+    property bool advanced: false
+    property bool invitationEntry: Quickshell.env("WISP_ONBOARDING_JOIN") === "1"
+    property var resolvedInvitation: null
+    property string resolvedInput: ""
+    property bool useSavedAccount: true
+    readonly property var invitation: resolvedInput === invite.text.trim() && resolvedInvitation ? resolvedInvitation : parseInvitation(invite.text.trim())
+    readonly property bool existingAccount: !!(acceptingInvite && invitation.saved_account && useSavedAccount)
+    function modernLink(value) { return /^(https?:\/\/|wisp-invite:v2\.)/.test(value) }
+    function invitationInputChanged() {
+      resolvedInvitation = null; resolvedInput = ""; feedback = ""; useSavedAccount = true
+      if (modernLink(invite.text.trim())) previewTimer.restart()
+    }
     readonly property bool acceptingInvite: mode !== "bootstrap" && invitation !== null
     property bool usernameEdited: false
     function parseInvitation(value) {
@@ -38,7 +49,7 @@ ShellRoot {
         var payload = JSON.parse(decodeURIComponent(escaped))
         if (payload.v !== 1 || typeof payload.token !== "string" || !payload.token.length
             || typeof payload.server !== "string" || !/^https:\/\/[a-z0-9.-]+(?::[0-9]+)?\/?$/i.test(payload.server)) return null
-        return {server: payload.server}
+        return {server: payload.server, server_name:payload.server.replace(/^https:\/\//,""), legacy:true}
       } catch (error) { return null }
     }
     function suggestUsername(value) {
@@ -51,6 +62,7 @@ ShellRoot {
     function selectMode(value) {
       if (busy) return
       mode = value
+      useSavedAccount = false
       feedback = ""
       password.text = ""
       confirmPassword.text = ""
@@ -60,13 +72,17 @@ ShellRoot {
     function submit() {
       if (busy) return
       feedback = ""
-      if (mode !== "bootstrap" && invite.text.trim().indexOf("wisp-invite:") === 0 && !invitation) {
+      if (mode !== "bootstrap" && invite.text.trim().indexOf("wisp-invite:") === 0 && !modernLink(invite.text.trim()) && !invitation) {
         feedback = "This invitation is invalid or needs a newer Wisp version. Ask your friend for a new invite."
         return
       }
-      var embeddedServer = acceptingInvite
-      if ((!server.text.trim() && !embeddedServer) || !username.text.trim() || !password.text) {
-        feedback = "Server, username, and password are required."
+      if (modernLink(invite.text.trim()) && !invitation) {
+        feedback = previewProcess.running ? "Checking invitation…" : "Check the invitation before continuing."
+        previewTimer.restart(); return
+      }
+      if (existingAccount) { busy = true; accountProcess.running = true; return }
+      if ((mode === "bootstrap" && !server.text.trim()) || !username.text.trim() || !password.text) {
+        feedback = "Username and password are required."
         return
       }
       if (mode !== "login" && !displayName.text.trim()) {
@@ -75,10 +91,6 @@ ShellRoot {
       }
       if (mode !== "login" && password.text !== confirmPassword.text) {
         feedback = "Passwords do not match."
-        return
-      }
-      if (mode === "register" && !invite.text.trim()) {
-        feedback = "Paste the invitation code you received."
         return
       }
       if (mode === "bootstrap" && !bootstrapToken.text.trim()) {
@@ -112,7 +124,7 @@ ShellRoot {
             font.weight: Font.DemiBold
           }
           Text {
-            text: window.acceptingInvite ? "Join " + window.invitation.server.replace(/^https:\/\//, "").replace(/\/$/, "") + ". " + (window.mode === "login" ? "Sign in to your existing account." : "Choose your name and a password to get started.") : "A place to hang out with your friends. Sign in, or use an invitation to create your account."
+            text: window.acceptingInvite ? "Join " + (window.invitation.server_name || "this server") + ". " + (window.existingAccount ? "Continue as " + window.invitation.account_name + "." : window.mode === "login" ? "Sign in to continue." : "Create an account to continue.") : "Create an account or sign in. You can join a server later."
             textFormat: Text.PlainText
             color: "#8d96a8"
             font.family: "Hack"
@@ -157,10 +169,17 @@ ShellRoot {
             }
           }
 
-          Text { visible: !window.acceptingInvite; text: "server"; color: "#8d96a8"; font.family: "Hack"; font.pixelSize: 12 }
+          RowLayout {
+            visible: !window.acceptingInvite
+            Button { text: window.invitationEntry ? "Hide invitation" : "Use an invitation"; onClicked: window.invitationEntry = !window.invitationEntry }
+            Button { text: window.advanced ? "Hide advanced" : "Advanced"; onClicked: window.advanced = !window.advanced }
+          }
+          Text { visible: window.acceptingInvite && !!window.invitation && window.invitation.legacy; Layout.fillWidth:true; wrapMode:Text.Wrap; text:"Legacy invitation: joining also adds the inviter as a friend."; color:"#8d96a8"; font.pixelSize:12 }
+          Text { visible: window.acceptingInvite && !!window.invitation && !window.invitation.legacy; Layout.fillWidth:true; wrapMode:Text.Wrap; text:"Invited by " + String((window.invitation || {}).inviter || "a server member") + " · Expires " + new Date((window.invitation || {}).expires_at).toLocaleTimeString(); color:"#8d96a8"; font.pixelSize:12 }
+          Text { visible: !window.acceptingInvite && (window.advanced || window.mode === "bootstrap"); text: "server"; color: "#8d96a8"; font.family: "Hack"; font.pixelSize: 12 }
           TextField {
             id: server
-            visible: !window.acceptingInvite
+            visible: !window.acceptingInvite && (window.advanced || window.mode === "bootstrap")
             objectName: "accountServer"
             Layout.fillWidth: true
             text: Quickshell.env("WISP_ONBOARDING_SERVER") || ""
@@ -172,14 +191,15 @@ ShellRoot {
             background: Rectangle { color: "#1c202b"; border.color: server.activeFocus ? "#2f8cff" : "#3b4353"; radius: 3 }
           }
 
-          Text { visible: window.mode !== "bootstrap" && !window.acceptingInvite; text: window.mode === "login" ? "invite (optional)" : "invite"; color: "#8d96a8"; font.family: "Hack"; font.pixelSize: 12 }
+          Text { visible: window.mode !== "bootstrap" && !window.acceptingInvite && (window.invitationEntry || window.advanced); text: "Invitation link"; color: "#8d96a8"; font.family: "Hack"; font.pixelSize: 12 }
           TextField {
             id: invite
+            onTextChanged: window.invitationInputChanged()
             text: Quickshell.env("WISP_ONBOARDING_INVITE") || ""
             objectName: "accountInvite"
-            visible: window.mode !== "bootstrap" && !window.acceptingInvite
+            visible: window.mode !== "bootstrap" && !window.acceptingInvite && (window.invitationEntry || window.advanced)
             Layout.fillWidth: true
-            placeholderText: "paste friend or room invitation"
+            placeholderText: "Paste a Wisp invitation"
             color: "#e8ecf3"; placeholderTextColor: "#667085"; font.family: "Hack"; font.pixelSize: 13
             background: Rectangle { color: "#1c202b"; border.color: invite.activeFocus ? "#2f8cff" : "#3b4353"; radius: 3 }
           }
@@ -195,21 +215,23 @@ ShellRoot {
             background: Rectangle { color: "#1c202b"; border.color: bootstrapToken.activeFocus ? "#2f8cff" : "#3b4353"; radius: 3 }
           }
 
-          Text { visible: window.mode !== "login"; text: "Your name"; color: "#8d96a8"; font.family: "Hack"; font.pixelSize: 12 }
+          Text { visible: window.mode !== "login" && !window.existingAccount; text: "Your name"; color: "#8d96a8"; font.family: "Hack"; font.pixelSize: 12 }
           TextField {
             id: displayName
             onTextChanged: if (window.mode === "register" && !window.usernameEdited) username.text = window.suggestUsername(text)
             objectName: "accountDisplayName"
-            visible: window.mode !== "login"
+            visible: window.mode !== "login" && !window.existingAccount
             Layout.fillWidth: true
             placeholderText: "name shown to friends"
             color: "#e8ecf3"; placeholderTextColor: "#667085"; font.family: "Hack"; font.pixelSize: 13
             background: Rectangle { color: "#1c202b"; border.color: displayName.activeFocus ? "#2f8cff" : "#3b4353"; radius: 3 }
           }
 
-          Text { text: "username"; color: "#8d96a8"; font.family: "Hack"; font.pixelSize: 12 }
+          Text { visible: !window.existingAccount; text: window.mode === "register" && (!window.invitation || !window.invitation.legacy) ? "Username · friends can find you with this" : "username"; color: "#8d96a8"; font.family: "Hack"; font.pixelSize: 12 }
           TextField {
             id: username
+            visible: !window.existingAccount
+            maximumLength: 32
             onTextEdited: window.usernameEdited = true
             objectName: "accountUsername"
             Layout.fillWidth: true
@@ -218,9 +240,11 @@ ShellRoot {
             background: Rectangle { color: "#1c202b"; border.color: username.activeFocus ? "#2f8cff" : "#3b4353"; radius: 3 }
           }
 
-          Text { text: "password"; color: "#8d96a8"; font.family: "Hack"; font.pixelSize: 12 }
+          Text { visible: !window.existingAccount; text: "password"; color: "#8d96a8"; font.family: "Hack"; font.pixelSize: 12 }
           TextField {
             id: password
+            visible: !window.existingAccount
+            maximumLength: 1024
             objectName: "accountPassword"
             Layout.fillWidth: true
             echoMode: TextInput.Password
@@ -230,10 +254,10 @@ ShellRoot {
             background: Rectangle { color: "#1c202b"; border.color: password.activeFocus ? "#2f8cff" : "#3b4353"; radius: 3 }
           }
 
-          Text { visible: window.mode !== "login"; text: "confirm password"; color: "#8d96a8"; font.family: "Hack"; font.pixelSize: 12 }
+          Text { visible: window.mode !== "login" && !window.existingAccount; text: "confirm password"; color: "#8d96a8"; font.family: "Hack"; font.pixelSize: 12 }
           TextField {
             id: confirmPassword
-            visible: window.mode !== "login"
+            visible: window.mode !== "login" && !window.existingAccount
             Layout.fillWidth: true
             echoMode: TextInput.Password
             placeholderText: "repeat password"
@@ -256,8 +280,8 @@ ShellRoot {
             objectName: "accountSubmit"
             Layout.fillWidth: true
             Layout.preferredHeight: 38
-            enabled: !window.busy
-            text: window.busy ? "working…" : window.mode === "login" ? "sign in" : window.mode === "bootstrap" ? "create owner account" : window.acceptingInvite ? "Join server" : "create account"
+            enabled: !window.busy && !previewProcess.running
+            text: window.busy ? "working…" : window.acceptingInvite ? "Join server" : window.mode === "login" ? "sign in" : window.mode === "bootstrap" ? "create owner account" : "create account"
             font.family: "Hack"
             font.pixelSize: 13
             onClicked: window.submit()
@@ -267,12 +291,33 @@ ShellRoot {
         }
       }
 
+      Timer { id: previewTimer; interval:250; onTriggered: {
+        if (!window.modernLink(invite.text.trim())) return
+        if (previewProcess.running) { restart(); return }
+        previewProcess.currentInput = invite.text.trim()
+        previewProcess.running = true
+      } }
+      Process {
+        id: previewProcess
+        property string currentInput: ""
+        command:["wisp-account"]; stdinEnabled:true
+        onStarted:write(JSON.stringify({action:"preview_invite",invite_code:currentInput}) + "\n")
+        stdout:StdioCollector {id:previewOutput}
+        stderr:StdioCollector {id:previewError}
+        onExited:function(code) {
+          if (currentInput !== invite.text.trim()) return
+          if (code === 0) {
+            try { window.resolvedInvitation = JSON.parse(previewOutput.text); window.resolvedInput = currentInput; window.feedback = "" }
+            catch(error) { window.feedback = "Could not read invitation." }
+          } else window.feedback = String(previewError.text || "Could not open invitation.").trim().replace(/^Error: /, "")
+        }
+      }
       Process {
         id: accountProcess
         command: ["wisp-account"]
         stdinEnabled: true
         onStarted: write(JSON.stringify({
-          action: window.mode,
+          action: window.existingAccount ? "accept_invite" : window.mode,
           server_url: window.acceptingInvite ? window.invitation.server : server.text.trim(),
           username: username.text.trim(),
           display_name: displayName.text.trim(),
@@ -289,7 +334,10 @@ ShellRoot {
           confirmPassword.text = ""
           bootstrapToken.text = ""
           if (exitCode === 0) {
-            window.feedback = "Account saved. Starting Wisp…"
+            var result = ({})
+            try { result = JSON.parse(output.text) } catch(error) {}
+            window.feedback = result.warning || "Account saved. Starting Wisp…"
+            finishTimer.interval = result.warning ? 5000 : 500
             finishTimer.start()
           } else {
             var lines = String(errors.text || "Account setup failed").trim().split("\n")

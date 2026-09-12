@@ -7,6 +7,7 @@ Column {
   objectName:"serverPeopleSection"
   required property var bridge
   required property var theme
+  visible: bridge.serverMember !== false
   property string presentation: "app"
   property bool collapsible: true
   readonly property bool collapsed: collapsible && bridge.friendPreferences.membersCollapsedFor(presentation)

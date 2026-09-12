@@ -21,10 +21,10 @@ Item {
   function sync(eventName) {
     if (!transportReady) return
     var ids=bridge.serverStates.filter(function(s){return s.server.connected!==false}).map(function(s){return String(s.server.id)})
-    var key=bridge.serverStates.map(function(s){return String(s.server.id)+":"+String((s.self || {}).id)+":"+String(s.server.connected)}).join("|")
+    var key=bridge.serverStates.map(function(s){return String(s.server.id)+":"+String((s.self || {}).id)+":"+String(s.server.connected)+":"+String(s.server_member)}).join("|")
     if (key!==connectionKey) {
       connectionKey=key; catalogs=({}); ids.forEach(refresh)
-    } else if (["friend_requests_changed","friendship_changed","account_profile_changed","server_reconnected"].indexOf(eventName)>=0) {
+    } else if (["account_changed","server_membership_changed","friend_requests_changed","friendship_changed","account_profile_changed","server_reconnected"].indexOf(eventName)>=0) {
       ids.forEach(function(id) { refresh(id,true) })
     } else {
       ids.forEach(function(id) { if (state(id).waiting) refresh(id) })

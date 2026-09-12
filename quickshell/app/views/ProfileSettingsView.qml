@@ -10,8 +10,8 @@ Column {
   spacing: root.theme.spacing.lg
   readonly property string serverId: bridge.profileServerId
   readonly property bool inVoice: !!(bridge.activeServerState.self || {}).hangout_id
-  onServerIdChanged: { clearPasswords(); if (visible) bridge.refreshProfile() }
-  onVisibleChanged: { clearPasswords(); if (visible) bridge.refreshProfile() }
+  onServerIdChanged: { clearPasswords(); if (visible) {bridge.refreshProfile();if(bridge.accountActions)bridge.accountActions.act("account_overview",{},serverId)} }
+  onVisibleChanged: { clearPasswords(); if (visible) {bridge.refreshProfile();if(bridge.accountActions)bridge.accountActions.act("account_overview",{},serverId)} }
   function clearPasswords() { currentPassword.text = ""; newPassword.text = ""; confirmPassword.text = "" }
   Connections {
     target: root.bridge
@@ -39,8 +39,8 @@ Column {
     }
   }
   Label { text: "Profile · " + String(root.bridge.activeServer.name || "Server"); color: root.theme.foreground; font.bold: true }
-  Label { text: "These settings apply to your account on this server." }
-  Label { visible: root.bridge.profileReady; text: "Username: " + String(root.bridge.accountProfile.username || "Development account") }
+  Label { text: "Manage your account and profile." }
+  Label { visible: root.bridge.profileReady; text: "Sign-in username: " + String(root.bridge.accountProfile.username || "Development account") }
   ChatButton {
     objectName: "profileRefresh"; theme: root.theme
     text: root.bridge.profileBusy ? "loading…" : "refresh"
@@ -63,6 +63,31 @@ Column {
     enabled: displayName.enabled && !!displayName.text.trim()
       && displayName.text.trim() !== String(root.bridge.accountProfile.display_name || "")
     onClicked: root.bridge.profileAction("update_account_profile", {display_name:displayName.text.trim(),revision:root.bridge.accountProfile.revision})
+  }
+  SettingsSection {
+    id:handleSection;theme:root.theme;title:"Public username";summary:"Let friends find you";expanded:false
+    readonly property var account:root.bridge.accountActions ? root.bridge.accountActions.state(root.serverId) : ({overview:{}})
+    Label {text:"Share this username so people can send you a friend request. Leave it empty to stay out of username search."}
+    Field {id:publicHandle;objectName:"publicFriendHandle";maximumLength:32;placeholderText:"username";text:handleSection.account.overview.handle || ""}
+    ChatButton {theme:root.theme;text:"Save public username";enabled:!handleSection.account.busy;onClicked:root.bridge.accountActions.act("set_public_handle",{handle:publicHandle.text.trim()},root.serverId)}
+    ChatButton {theme:root.theme;text:"Copy @username";visible:!!handleSection.account.overview.handle;onClicked:root.bridge.copyChatText("@"+handleSection.account.overview.handle)}
+    Label {text:handleSection.account.error || handleSection.account.feedback || "";visible:!!text}
+  }
+  SettingsSection {
+    id:blockedSection;theme:root.theme;title:"Blocked accounts";summary:"Manage who can contact you";expanded:false
+    readonly property var account:root.bridge.accountActions ? root.bridge.accountActions.state(root.serverId) : ({overview:{}})
+    Label {text:"Blocking removes friendship and stops new direct messages and friend requests. Unblocking does not add the friend again."}
+    Repeater {
+      model:blockedSection.account.overview.blocked || []
+      Row {
+        required property var modelData
+        width:root.width;spacing:root.theme.spacing.sm
+        Text {width:Math.max(0,parent.width-unblock.width-parent.spacing);text:parent.modelData.display_name;textFormat:Text.PlainText;elide:Text.ElideRight;color:root.theme.foreground;font.family:root.theme.font.family;font.pixelSize:root.theme.font.body}
+        ChatButton {id:unblock;theme:root.theme;text:"Unblock";enabled:!blockedSection.account.busy;onClicked:root.bridge.accountActions.act("unblock_person",{user_id:parent.modelData.id},root.serverId)}
+      }
+    }
+    Label {visible:!(blockedSection.account.overview.blocked || []).length;text:"No blocked accounts"}
+    Label {text:blockedSection.account.error || "";visible:!!text}
   }
   SettingsSection {
     theme: root.theme; title: "Change password"; summary: "Keep your account secure"

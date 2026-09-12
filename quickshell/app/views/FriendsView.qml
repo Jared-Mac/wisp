@@ -17,11 +17,14 @@ Column {
   width: parent ? parent.width : 0
   spacing: root.theme.space(1)
 
+  AddFriendDialog {id:addFriendDialog;bridge:root.bridge;theme:root.theme}
+  Row {
+    width:parent.width;spacing:root.theme.spacing.xs
   Button {
     id: collapseButton
     visible: root.showHeader && !root.tiny
     objectName: "friends-collapse"
-    width: visible ? parent.width : 0
+    width: visible ? Math.max(0,parent.width-addFriendButton.width-parent.spacing) : 0
     height: root.collapsible ? root.theme.space(root.theme.tui ? 26 : 30) : root.theme.space(20)
     enabled: root.collapsible
     Accessible.name: root.collapsed ? "Expand friends" : "Collapse friends"
@@ -48,6 +51,16 @@ Column {
       }
     }
   }
+    ChatButton {
+      id:addFriendButton;objectName:"openAddFriend";theme:root.theme
+      readonly property int pending:root.bridge.friendships.state(root.bridge.activeServer.id).people.filter(function(p){return p.relationship==="incoming"}).length
+      text:pending ? "Friend requests · "+pending : "Add friend";iconName:"invite";iconOnly:true;forceIcon:true
+      primary:pending>0;width:Math.min(root.width,root.theme.space(28));height:root.theme.space(28)
+      ToolTip.visible:hovered || visualFocus;ToolTip.text:text
+      onClicked:addFriendDialog.open()
+    }
+  }
+
 
   NowView {
     objectName: "friendCalls"

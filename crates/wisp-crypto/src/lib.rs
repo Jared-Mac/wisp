@@ -362,3 +362,4 @@ mod tests {
         assert!(encrypt_stream(&b"text"[..], std::io::sink(), &[]).is_err());
     }
 }
+pub mod invitation;

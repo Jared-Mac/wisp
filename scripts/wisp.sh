@@ -7,7 +7,7 @@ case "${1:-}" in
   --ensure-running) ensure_running=true ;;
   wisp-invite:*)
     # Pass invitations as data, never shell code or diagnostic output.
-    [[ $# == 1 && ${#1} -le 16384 && "$1" =~ ^wisp-invite:[A-Za-z0-9_-]+$ ]] || {
+    [[ $# == 1 && ${#1} -le 16384 && "$1" =~ ^wisp-invite:(v2\.)?[A-Za-z0-9_-]+$ ]] || {
       echo "This Wisp invitation is invalid." >&2; exit 2;
     }
     WISP_ONBOARDING_MODE=register WISP_ONBOARDING_INVITE="$1" "$bin_dir/wisp-onboarding" || exit "$?"

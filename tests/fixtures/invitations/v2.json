@@ -1,0 +1,11 @@
+{
+  "comment": "Public test vector; all keys and identifiers are synthetic.",
+  "secret": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+  "nonce": "ICEiIyQlJicoKSor",
+  "url": "https://wisp.invalid/join/#v2.AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+  "lookup_id": "sUwLAC71GKER3DXoy-UWYDtwwVE4erJcAfgrmsmzJh0",
+  "encryption_key": "EqzgG2uX7WZm9fE3wxe9VNeudg_9K07yK-myJN4Vccs",
+  "aad": "wisp-server-invite-v2\nhttps://wisp.invalid\nsUwLAC71GKER3DXoy-UWYDtwwVE4erJcAfgrmsmzJh0",
+  "plaintext": "{\"v\":2,\"server\":\"https://wisp.invalid\",\"id\":\"00000000-0000-0000-0000-000000000000\",\"code\":\"test-only-invite\",\"server_name\":\"Test community\",\"inviter\":{\"id\":\"00000000-0000-0000-0000-000000000000\",\"display_name\":\"Example\"},\"expires_at\":\"2030-01-01T00:00:00Z\",\"media_key\":\"test-only-media-key\"}",
+  "envelope": "ICEiIyQlJicoKSorIcziMKBHFvI9PGQN9xNEIu4acunbNumiIkfaTnv0SNPojuouJIcgKCML3WYTCyKjRI5ryrKKPUmUKJ6LmZwLPg2mxyVdZYaqCaPjCqpE8i64XALvASJlDhZaZrtOTJ02QSPyWm2b-DxQVF32IybFCfzt1lt488MBTucjHue5OUY5-xTuMaq1GyQs5I7EQLi2lUw5V76g2RJKX8eXkCIC7-akPPUt-hn3yEHxjW3YP6otNxsYwjCPBnoDJSDqkiu6QOEw8plNHYMTqXbvAcx9ot4ia8hLvpAUjFNmwoA9tdA4kfA1g42lOjVFPCfO9APe8SziPT7v99uBFEMI3cTlOrCN3SXt0Q53Ye4sJevlOEkEOG9mo1Zzg89icmfTCyMgMdVIQ2poCQvBNE07F4LaOnmk0g"
+}

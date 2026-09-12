@@ -20,6 +20,18 @@ async fn authorize(
             "Choose a friend to invite",
         ));
     }
+    let members: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE id IN (?,?) AND server_member=1")
+            .bind(actor.to_string())
+            .bind(recipient.to_string())
+            .fetch_one(&mut *db)
+            .await
+            .map_err(ApiError::internal)?;
+    if members != 2 {
+        return Err(ApiError::forbidden(
+            "Join this server before inviting someone to voice",
+        ));
+    }
     let room = sqlx::query("SELECT h.spot_id FROM hangouts h JOIN hangout_members m ON m.hangout_id = h.id WHERE h.id = ? AND h.ended_at IS NULL AND m.user_id = ? AND m.left_at IS NULL")
         .bind(hangout.to_string()).bind(actor.to_string()).fetch_optional(&mut *db).await.map_err(ApiError::internal)?
         .ok_or_else(|| ApiError::conflict("room_unavailable", "Your friend is no longer in this voice room"))?;
