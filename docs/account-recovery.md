@@ -19,6 +19,12 @@ missing encryption key. Retain the encryption recovery file or an existing devic
 If no email was verified before the password was lost, this flow cannot recover
 that account. Enrollment requires the existing password.
 
+Accounts with encrypted backup reset their secure password in the native Wisp
+client. The browser offers a token-free **Open Wisp** link; paste the email link
+into the native reset form when asked. Resetting sign-in preserves the encrypted
+backup, but unlocking it afterward requires an existing trusted device to
+restore backup access. See [Encrypted account backup](account-backup.md).
+
 ## Hosting
 
 Migration 32 adds recovery addresses and hashed, expiring single-use tokens.
@@ -48,12 +54,21 @@ Android App Links exclude `/account/`; token links open in the browser.
 
 - `GET /v2/accounts/recovery-email` (device session): verified/pending address and
   whether mail delivery is configured.
-- `POST /v2/accounts/recovery-email` (device session): `email`, `current_password`.
+- `POST /v2/accounts/recovery-email` (classic device session): `email`, `current_password`.
 - `POST /v2/accounts/recovery-email/verify`: `token`.
 - `POST /v2/accounts/password-reset/request`: `identifier`; always generic `202`
   after request-wide capacity/throttling checks when delivery is configured.
-- `POST /v2/accounts/password-reset/inspect`: `token`; validity/expiry only.
-- `POST /v2/accounts/password-reset/complete`: `token`, `new_password`.
+- `POST /v2/accounts/password-reset/inspect`: `token`; validity/expiry and whether
+  native secure reset is required.
+- `POST /v2/accounts/password-reset/complete`: classic accounts only; `token`,
+  `new_password`.
+
+Migration 33 adds secure credentials and encrypted account backup. Secure
+accounts use native `/v3/auth/reset/{start,finish,status}` and exact-operation
+reauthentication for `/v3/accounts/recovery-email`. Their secure passwords never
+go to the classic endpoints. Interrupted native resets retain a private local
+journal for receipt lookup or exact retry. See the
+[native protocol](design/account-vault-api-v1.md) for the complete contract.
 
 These routes do not require membership in a server. Error messages are chosen
 from known protocol codes by both clients; arbitrary server bodies are not shown.

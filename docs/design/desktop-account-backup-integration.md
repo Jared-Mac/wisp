@@ -27,13 +27,22 @@ publication are coordinated so the backend is ready before Android distribution.
   trust during migration, repeated revoked sign-ins and classic recovery devices,
   trusted-device repair after reset, and interrupted installation.
 
-## Remaining release gates
+## Release verification
 
-- Final release build and coordinated cross-platform packaging. No real-account
-  migration or private password entry through tools.
+- Release builds and packaging passed. The desktop client was installed and
+  relaunched with its binary/UI hashes verified, audio settings preserved, and
+  voice/camera/screen sharing off. No real-account password entry or migration
+  was performed through tools.
 - Completed verification includes strict workspace Clippy, 103 server tests,
   98 desktop tests, native CLI remote restore
   including media keys, invitation/join integration, onboarding, backup settings
   in four themes, and the existing dismissible-error/recovery-email UI tests.
-- Finish coordinated desktop/Android versioning, client installation, main release,
-  owner-server migration/health verification and Discord release-note delivery.
+- The owner server passed migration 33, database integrity, service and public
+  health checks. Recovery web assets and native account discovery were verified.
+- A real legacy import exposed an abandoned atomic-write temporary file. The
+  importer now skips only recognized, private uncommitted staging files while
+  preserving and validating canonical trust records. Two regression tests,
+  an offline copy import, and live key/pin/room-record equality checks passed.
+- Android's separate 0.4.0-test build passed its GitHub checks. Publication and
+  Discord notes follow backend readiness; announced revisions are recorded in
+  `../release-tracking/android.json`.
