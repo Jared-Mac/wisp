@@ -1,0 +1,23 @@
+(wisp_account_recovery) {
+    @recovery_pages path /account/forgot-password /account/reset-password /account/verify-email
+    handle @recovery_pages {
+        root * /var/www/wisp/account-recovery
+        header {
+            Cache-Control "no-store"
+            X-Robots-Tag "noindex, nofollow"
+            Referrer-Policy "no-referrer"
+            X-Content-Type-Options "nosniff"
+            Content-Security-Policy "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'"
+        }
+        rewrite * /index.html
+        file_server
+    }
+    @recovery_assets path /account/recovery.js /account/recovery.css
+    handle @recovery_assets {
+        root * /var/www/wisp/account-recovery
+        uri strip_prefix /account
+        header Cache-Control "no-store"
+        header X-Content-Type-Options "nosniff"
+        file_server
+    }
+}

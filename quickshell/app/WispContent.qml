@@ -337,23 +337,11 @@ FocusScope {
       spacing: root.theme.spacing.lg
 
 
-      Rectangle {
-        visible: root.bridge.lastError !== ""
+      ErrorBanner {
         width: parent.width
-        height: errorText.implicitHeight + root.theme.spacing.md * 2
-        radius: root.theme.cornerRadius
-        color: root.theme.alpha(root.theme.danger, 0.12)
-
-        Text {
-          id: errorText
-          anchors.fill: parent
-          anchors.margins: root.theme.spacing.md
-          text: root.bridge.lastError
-          color: root.theme.danger
-          wrapMode: Text.WordWrap
-          font.family: root.theme.font.family
-          font.pixelSize: root.theme.font.caption
-        }
+        theme: root.theme
+        message: root.bridge.lastError
+        onDismissed: root.bridge.dismissError()
       }
 
       Row {

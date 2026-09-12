@@ -1,6 +1,6 @@
 {
   "repository": "TLT26-churn/wisp-android",
-  "last_announced_commit": "caed9ddc1fe0fb7cf514d6ea7ce494c740d71781",
-  "pending_commit": "5138701b49fd588f89688bf0f4865fa38a80da97",
-  "pending_note": "docs/patch-notes/2026-09-12-phone-alerts-and-android-test.md"
+  "last_announced_commit": "5138701b49fd588f89688bf0f4865fa38a80da97",
+  "pending_commit": "2e1b77a55b82846720121dd8dc2a9891e3ff8b6a",
+  "pending_note": "docs/patch-notes/2026-09-12-account-recovery-and-errors.md"
 }

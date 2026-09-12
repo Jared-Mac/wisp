@@ -12,7 +12,7 @@ Column {
   readonly property bool inVoice: !!(bridge.activeServerState.self || {}).hangout_id
   onServerIdChanged: { clearPasswords(); if (visible) {bridge.refreshProfile();if(bridge.accountActions)bridge.accountActions.act("account_overview",{},serverId)} }
   onVisibleChanged: { clearPasswords(); if (visible) {bridge.refreshProfile();if(bridge.accountActions)bridge.accountActions.act("account_overview",{},serverId)} }
-  function clearPasswords() { currentPassword.text = ""; newPassword.text = ""; confirmPassword.text = "" }
+  function clearPasswords() { currentPassword.text = ""; newPassword.text = ""; confirmPassword.text = ""; recoveryPassword.text = "" }
   Connections {
     target: root.bridge
     function onAccountProfileChanged() { displayName.text = String(root.bridge.accountProfile.display_name || root.bridge.selfState.display_name || "") }
@@ -90,10 +90,27 @@ Column {
     Label {text:blockedSection.account.error || "";visible:!!text}
   }
   SettingsSection {
+    id: recoverySection; theme: root.theme; title: "Recovery email"; summary: "Recover access if you forget your password"
+    objectName: "profileRecoverySection"; expanded: false
+    readonly property var recovery: root.bridge.recoveryEmail || ({})
+    Label { text: recoverySection.recovery.verified ? "Verified: " + recoverySection.recovery.email : "No verified recovery email yet."; textFormat: Text.PlainText }
+    Label { visible: !!recoverySection.recovery.pending_email; text: "Awaiting verification: " + (recoverySection.recovery.pending_email || ""); textFormat: Text.PlainText }
+    Label { visible: !recoverySection.recovery.delivery_available; text: "Recovery email is not available on this server yet." }
+    Field { id: recoveryAddress; objectName: "profileRecoveryEmail"; placeholderText: "Email address"; Accessible.name: "Recovery email"; maximumLength: 254; inputMethodHints: Qt.ImhEmailCharactersOnly }
+    Field { id: recoveryPassword; objectName: "profileRecoveryPassword"; placeholderText: "Current password"; Accessible.name: "Current password for recovery email"; maximumLength: 1024; echoMode: TextInput.Password }
+    ChatButton {
+      theme: root.theme; text: "Send verification email"; objectName: "profileVerifyEmail"
+      enabled: root.bridge.profileReady && !root.bridge.profileBusy && !!(root.bridge.recoveryEmail || {}).delivery_available && !!recoveryAddress.text.trim() && !!recoveryPassword.text
+      onClicked: if (root.bridge.profileAction("set_recovery_email", {email:recoveryAddress.text.trim(),current_password:recoveryPassword.text})) recoveryPassword.text = ""
+    }
+    Label { text: "Verify the link from support@wisp.you, then refresh. Keep your encryption recovery file too; an email reset cannot restore missing encryption keys." }
+  }
+  SettingsSection {
     theme: root.theme; title: "Change password"; summary: "Keep your account secure"
     objectName: "profilePasswordSection"; expanded: false
     Label { text: "Password"; color: root.theme.foreground; font.bold: true }
     Label { text: "At least 12 characters. Other devices stay signed in." }
+    ChatButton { theme: root.theme; text: "Forgot password?"; onClicked: Qt.openUrlExternally("https://wisp.you/account/forgot-password") }
     Field {
       id: currentPassword; objectName: "profileCurrentPassword"
       echoMode: TextInput.Password; maximumLength: 1024

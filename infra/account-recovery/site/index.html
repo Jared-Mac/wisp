@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow"><meta name="referrer" content="no-referrer">
+  <title>Account recovery · Wisp</title>
+  <link rel="stylesheet" href="/account/recovery.css"><script src="/account/recovery.js" defer></script>
+</head>
+<body>
+  <main>
+    <a class="brand" href="https://wisp.you">Wisp</a>
+    <h1 id="title">Account recovery</h1>
+    <p id="intro">Loading…</p>
+    <div id="error" role="alert" hidden><span id="error-text"></span><button id="dismiss" type="button" aria-label="Dismiss error" title="Dismiss error">×</button></div>
+    <p id="success" role="status" hidden></p>
+    <form id="form" hidden>
+      <div id="identity-fields" hidden><label for="identifier">Sign-in username or verified email</label><input id="identifier" name="username" autocomplete="username" maxlength="254" autocapitalize="none" spellcheck="false"></div>
+      <div id="password-fields" hidden>
+        <label for="password">New password</label><input id="password" type="password" autocomplete="new-password" maxlength="1024" minlength="12">
+        <label for="confirm">Confirm new password</label><input id="confirm" type="password" autocomplete="new-password" maxlength="1024">
+        <p class="muted">At least 12 characters. Your devices stay signed in; you can revoke them in Settings → Devices.</p>
+      </div>
+      <button id="submit" type="submit">Continue</button>
+    </form>
+    <p id="retry" hidden><a href="/account/forgot-password">Request another reset link</a></p>
+    <p class="muted">Password recovery preserves your account and chats. Keep your encryption recovery file: resetting a password cannot replace missing encryption keys.</p>
+    <noscript>Enable JavaScript to use account recovery.</noscript>
+  </main>
+</body>
+</html>

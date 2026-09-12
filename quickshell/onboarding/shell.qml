@@ -296,6 +296,11 @@ ShellRoot {
             contentItem: Text { text: parent.text; color: "#e8ecf3"; font: parent.font; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
           }
           Button {
+            objectName: "forgotPassword"; visible: window.mode === "login"; enabled: !window.busy
+            Layout.fillWidth: true; text: "Forgot password?"
+            onClicked: Qt.openUrlExternally("https://wisp.you/account/forgot-password")
+          }
+          Button {
             objectName: "declineInvitation"
             visible: window.invitationEntry || !!window.invitation
             Layout.fillWidth: true

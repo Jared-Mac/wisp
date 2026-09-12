@@ -17,6 +17,7 @@ var entries = [
   {section:"appearance", target:"showAvatarsSetting", label:"Show user avatars", keywords:"hide pictures icons simplify lists"},
   {section:"profile", target:"profileDisplayName", label:"Display name", keywords:"account profile username nickname"},
   {section:"profile", target:"profileCurrentPassword", label:"Change password", keywords:"account profile login security"},
+  {section:"profile", target:"profileRecoveryEmail", label:"Recovery email", keywords:"account forgot password reset verify verification email"},
   {section:"profile", target:"profileTwoFactorStatus", label:"Two-factor authentication (planned)", keywords:"account profile security 2fa mfa"},
   {section:"video", target:"streamsAsTilesSetting", label:"Open streams in windows or tiles", keywords:"audio video screen share watch popout pop-out default dock anchor"},
   {section:"video", target:"settingsCamera", label:"Camera", keywords:"audio video webcam device input"},

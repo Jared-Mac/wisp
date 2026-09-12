@@ -2,6 +2,7 @@ mod account_membership;
 #[cfg(test)]
 mod account_membership_tests;
 mod account_profile;
+mod account_recovery;
 mod attachments;
 mod avatars;
 mod channel_access;
@@ -123,6 +124,7 @@ pub struct AppState {
     config: Arc<AppConfig>,
     login_failures: Arc<Mutex<HashMap<String, VecDeque<Instant>>>>,
     password_work: Arc<Semaphore>,
+    recovery: Arc<account_recovery::Recovery>,
 }
 
 #[derive(Debug, Default)]
@@ -259,6 +261,7 @@ impl AppState {
             config: Arc::new(config),
             login_failures: Arc::new(Mutex::new(HashMap::new())),
             password_work: Arc::new(Semaphore::new(PASSWORD_WORK_LIMIT)),
+            recovery: Arc::new(account_recovery::Recovery::default()),
         })
     }
 
@@ -574,6 +577,28 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/sessions", post(device_session))
         .route("/v1/accounts/login", post(login_account))
         .route(
+            "/v2/accounts/recovery-email",
+            get(account_recovery::status)
+                .post(account_recovery::enroll)
+                .layer(DefaultBodyLimit::max(4096)),
+        )
+        .route(
+            "/v2/accounts/recovery-email/verify",
+            post(account_recovery::verify).layer(DefaultBodyLimit::max(4096)),
+        )
+        .route(
+            "/v2/accounts/password-reset/request",
+            post(account_recovery::request_reset).layer(DefaultBodyLimit::max(4096)),
+        )
+        .route(
+            "/v2/accounts/password-reset/inspect",
+            post(account_recovery::inspect).layer(DefaultBodyLimit::max(4096)),
+        )
+        .route(
+            "/v2/accounts/password-reset/complete",
+            post(account_recovery::complete).layer(DefaultBodyLimit::max(4096)),
+        )
+        .route(
             "/v1/accounts/avatar",
             post(avatars::upload)
                 .delete(avatars::remove)
@@ -740,6 +765,7 @@ pub fn router(state: AppState) -> Router {
             account_membership::gate,
         ))
         .layer(TraceLayer::new_for_http())
+        .layer(middleware::from_fn(account_recovery::private_responses))
         .with_state(state)
 }
 

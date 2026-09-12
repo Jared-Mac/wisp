@@ -2192,7 +2192,11 @@ impl Daemon {
                     .await?;
                 Ok(Some(serde_json::to_value(invite)?))
             }
-            "account_profile" | "update_account_profile" | "change_account_password" => {
+            "account_profile"
+            | "update_account_profile"
+            | "change_account_password"
+            | "recovery_email"
+            | "set_recovery_email" => {
                 let value = account_profile::command(
                     &self.api,
                     &self.privacy,
@@ -2763,7 +2767,11 @@ impl Daemon {
                 server.api.conversation_action(action, &args).await?;
                 None
             }
-            "account_profile" | "update_account_profile" | "change_account_password" => Some(
+            "account_profile"
+            | "update_account_profile"
+            | "change_account_password"
+            | "recovery_email"
+            | "set_recovery_email" => Some(
                 account_profile::command(&server.api, &server.privacy, &command.name, &args)
                     .await?,
             ),

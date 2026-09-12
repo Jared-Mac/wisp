@@ -37,6 +37,9 @@ struct Args {
     /// Refuse plaintext chat writes. Enable only after the coordinated cutover.
     #[arg(long, env = "WISP_REQUIRE_CHAT_E2EE", default_value_t = false)]
     require_chat_e2ee: bool,
+    /// Enable recovery email through the owner's existing loopback mail service.
+    #[arg(long, env = "WISP_RECOVERY_MAIL", default_value_t = false)]
+    recovery_mail: bool,
 }
 
 fn default_database_url() -> anyhow::Result<String> {
@@ -113,7 +116,10 @@ async fn main() -> anyhow::Result<()> {
         bootstrap_token: args.bootstrap_token,
         require_chat_e2ee: args.require_chat_e2ee,
     };
-    let state = AppState::new(config).await?;
+    let mut state = AppState::new(config).await?;
+    if args.recovery_mail {
+        state = state.enable_recovery_mail().await?;
+    }
     let maintenance = tokio::spawn(state.clone().maintain_attachments());
     let invitations = tokio::spawn(state.clone().maintain_invitations());
     let activity = tokio::spawn(state.clone().maintain_device_activity());

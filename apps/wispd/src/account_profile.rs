@@ -5,14 +5,19 @@ use wisp_protocol::{AccountProfile, ChangePasswordRequest};
 
 // Never relay arbitrary response bodies to IPC errors or logs, particularly on
 // the password route: proxies may echo the request body in an error page.
-async fn response(response: reqwest::Response) -> anyhow::Result<reqwest::Response> {
+async fn response(mut response: reqwest::Response) -> anyhow::Result<reqwest::Response> {
     if response.status().is_success() {
         return Ok(response);
     }
     let status = response.status();
-    let code = response
-        .json::<wisp_protocol::ProtocolError>()
-        .await
+    let mut body = Vec::new();
+    while let Ok(Some(chunk)) = response.chunk().await {
+        if body.len() + chunk.len() > 8192 {
+            break;
+        }
+        body.extend_from_slice(&chunk);
+    }
+    let code = serde_json::from_slice::<wisp_protocol::ProtocolError>(&body)
         .ok()
         .map(|e| e.code);
     let message = match code.as_deref() {
@@ -20,6 +25,10 @@ async fn response(response: reqwest::Response) -> anyhow::Result<reqwest::Respon
         Some("display_name_taken") => "That display name is already in use.",
         Some("profile_changed") => "Your profile changed on another device. Refresh and try again.",
         Some("current_password_incorrect") => "Current password is incorrect.",
+        Some("invalid_email") => "Enter a valid email address.",
+        Some("recovery_email_unavailable") => "That email address is unavailable for this account.",
+        Some("mail_unavailable") => "Recovery email is temporarily unavailable. Try again later.",
+        Some("recovery_rate_limited") => "Too many attempts. Wait before requesting another email.",
         Some("invalid_password") => {
             "Use a password of at least 12 characters and at most 1024 bytes."
         }
@@ -64,6 +73,13 @@ pub(super) async fn command(
             api.request(reqwest::Method::POST, "/v1/accounts/password")
                 .json(&password)
         }
+        "recovery_email" => api.request(reqwest::Method::GET, "/v2/accounts/recovery-email"),
+        "set_recovery_email" => {
+            let email = super::string_arg(args, "email")?;
+            let password = super::string_arg(args, "current_password")?;
+            api.request(reqwest::Method::POST, "/v2/accounts/recovery-email")
+                .json(&json!({"email":email,"current_password":password}))
+        }
         _ => bail!("Unknown account action"),
     };
     let reply = request
@@ -71,6 +87,19 @@ pub(super) async fn command(
         .await
         .map_err(|_| anyhow::anyhow!("Could not reach the account server"))?;
     let reply = response(reply).await?;
+    if name == "set_recovery_email" {
+        return Ok(json!({"ok":true}));
+    }
+    if name == "recovery_email" {
+        let value: Value = reply
+            .json()
+            .await
+            .map_err(|_| anyhow::anyhow!("Could not read recovery email settings"))?;
+        return Ok(json!({"email":value.get("email").and_then(Value::as_str),
+            "pending_email":value.get("pending_email").and_then(Value::as_str),
+            "verified":value.get("verified").and_then(Value::as_bool).unwrap_or(false),
+            "delivery_available":value.get("delivery_available").and_then(Value::as_bool).unwrap_or(false)}));
+    }
     if name == "change_account_password" {
         return Ok(json!({"ok":true}));
     }

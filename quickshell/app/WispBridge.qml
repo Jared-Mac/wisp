@@ -220,6 +220,7 @@ Item {
   property bool serverSettingsBusy: false
   property string serverSettingsFeedback: ""
   property var accountProfile: ({})
+  property var recoveryEmail: ({email:null,pending_email:null,verified:false,delivery_available:false})
   property bool profileBusy: false
   property bool profileReady: false
   property string profileRequestId: ""
@@ -227,6 +228,7 @@ Item {
   readonly property string profileServerId: String(activeServer.id || "")
   onProfileServerIdChanged: {
     accountProfile = ({})
+    recoveryEmail = ({email:null,pending_email:null,verified:false,delivery_available:false})
     profileRequestId = ""
     profileBusy = false
     profileReady = false
@@ -240,7 +242,7 @@ Item {
       requests[id] = {kind:"profile",action:action,serverId:serverId}
       profileRequestId = id
       profileBusy = true
-      profileFeedback = ""
+      if (action !== "recovery_email") profileFeedback = ""
     }
     return !!id
   }
@@ -303,6 +305,16 @@ Item {
   property int requestId: 0
   property int reconnectAttempt: 0
   property string lastError: ""
+  property string dismissedMediaError: ""
+  function mediaErrorSignature(media) {
+    return JSON.stringify([media.error || "", media.surface_error || "",
+      (media.screen_share || {}).error || "", (media.camera || {}).error || ""])
+  }
+  function dismissError() {
+    if (profileFeedback === lastError) profileFeedback = ""
+    dismissedMediaError = mediaErrorSignature(mediaState)
+    lastError = ""
+  }
   property var snapshot: ({
     "seq": 0,
     "self": {
@@ -1031,8 +1043,11 @@ Item {
     var nextMedia = nextSelf.media || ({})
     var nextShare = nextMedia.screen_share || ({})
     var nextCamera = nextMedia.camera || ({})
-    lastError = String(nextMedia.error || nextMedia.surface_error
+    var mediaError = String(nextMedia.error || nextMedia.surface_error
       || nextShare.error || nextCamera.error || "")
+    var mediaSignature = mediaErrorSignature(nextMedia)
+    if (mediaSignature !== dismissedMediaError) dismissedMediaError = ""
+    lastError = mediaSignature === dismissedMediaError ? "" : mediaError
     if (pendingDirectName !== "") {
       var wanted = pendingDirectName
       var wantedServer = pendingDirectServerId
@@ -1362,10 +1377,20 @@ Item {
       profileRequestId = ""
       profileBusy = false
       if (message.ok) {
-        if (action.action !== "change_account_password") { accountProfile = value; profileReady = true }
-        if (action.action !== "account_profile") { profileFeedback = action.action === "change_account_password" ? "Password changed" : "Display name saved"; settingsSaved() }
+        if (action.action === "recovery_email") {
+          recoveryEmail = value
+          if (value.verified && !value.pending_email && profileFeedback === "Check your email to verify the address.") profileFeedback = "Recovery email is verified."
+        }
+        else if (action.action === "set_recovery_email") {
+          profileFeedback = "Check your email to verify the address."
+          Qt.callLater(function() { root.profileAction("recovery_email", {}) })
+        } else {
+          if (action.action !== "change_account_password") { accountProfile = value; profileReady = true }
+          if (action.action !== "account_profile") { profileFeedback = action.action === "change_account_password" ? "Password changed" : "Display name saved"; settingsSaved() }
+          else Qt.callLater(function() { root.profileAction("recovery_email", {}) })
+        }
       } else {
-        profileFeedback = message.error ? String(message.error.message || "Could not update profile") : "Could not update profile"
+        profileFeedback = ""
         settingsSaveFailed()
       }
     } else if (action.kind === "serverSettings") {
