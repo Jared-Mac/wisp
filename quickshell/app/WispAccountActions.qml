@@ -37,8 +37,19 @@ Item {
     put(request.serverId,patch)
     if(message.ok && ["block_person","unblock_person"].indexOf(request.command)>=0) act("account_overview",{},request.serverId)
   }
-  function joinServer() { if(!onboarding.running) onboarding.running=true }
-  Process {id:onboarding;command:["env","WISP_ONBOARDING_JOIN=1","wisp-onboarding"]}
+  property string incomingInvitation: ""
+  function openInvitation(link) {
+    if (!/^https:\/\/wisp\.you\/[a-z]+(?:-[a-z]+){0,3}[0-9]{12}$/.test(String(link))
+        && !/^https:\/\/[^/?#]+\/join\/#v2\.[A-Za-z0-9_-]{43}$/.test(String(link))) return false
+    joinServer(String(link)); return true
+  }
+  function joinServer(invitation) {
+    if (onboarding.running) return
+    incomingInvitation=String(invitation || "")
+    onboarding.running=true
+  }
+  Process {id:onboarding;command:["env","WISP_ONBOARDING_JOIN=1","WISP_ONBOARDING_INVITE="+root.incomingInvitation,"wisp-onboarding"]}
+
   Connections {
     target:root.bridge
     function onDaemonConnectedChanged() {if(!root.bridge.daemonConnected)root.states=({})}

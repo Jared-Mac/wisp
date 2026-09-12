@@ -503,6 +503,9 @@ FocusScope {
       id: compactDashboard
       spacing: root.theme.space(8)
 
+      Column {
+      width: parent.width; spacing: root.theme.space(8)
+      visible: !people.friendsMode
       ServerSelector {
         width: parent.width
         bridge: root.bridge
@@ -536,20 +539,14 @@ FocusScope {
         theme: root.theme
         onSelected: root.maybeDismiss()
       }
-      InboxButton { width: parent.width; bridge: root.bridge; theme: root.theme }
-      FriendsView {
-        collapsible: true
+      }
+      PeopleView {
+        id: people
         presentation: "panel"
         width: parent.width
         bridge: root.bridge
         theme: root.theme
         onSelected: root.maybeDismiss()
-      }
-      ServerMembersView {
-        presentation: "panel"
-        width: parent.width
-        bridge: root.bridge
-        theme: root.theme
       }
 
       MessagesView {

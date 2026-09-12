@@ -3,6 +3,7 @@
 import base64
 import json
 import os
+import re
 from pathlib import Path
 import socket
 import sys
@@ -89,7 +90,7 @@ with tempfile.TemporaryDirectory(prefix='wisp-accounts-') as directory:
 
     try:
         owner, recipient = environment('owner'), environment('recipient')
-        start([str(BIN / 'wisp-server'), '--addr', f'127.0.0.1:{port}', '--database-url', f'sqlite://{root}/server.sqlite3', '--allow-dev-sessions', 'false', '--bootstrap-token', 'test-bootstrap-only'], clean, 'server')
+        start([str(BIN / 'wisp-server'), '--addr', f'127.0.0.1:{port}', '--database-url', f'sqlite://{root}/server.sqlite3', '--invite-url', origin, '--allow-dev-sessions', 'false', '--bootstrap-token', 'test-bootstrap-only'], clean, 'server')
         eventually(lambda: request('/healthz')['ok'])
         helper(owner, dict(action='bootstrap', server_url=origin, username='owner', display_name='Example owner', password='test-only-password-123', bootstrap_token='test-bootstrap-only', device_name='Test owner', media_key='test-only-shared-media-key'))
         helper(recipient, dict(action='register', username='new-user', display_name='New account', password='test-only-password-123', device_name='Test recipient'))
@@ -105,7 +106,7 @@ with tempfile.TemporaryDirectory(prefix='wisp-accounts-') as directory:
         initial = status(recipient)
         assert initial['servers'] == [] and len(initial['server_states']) == 1
         invite = ipc(owner, 'create_server_invite', {'expires_in_minutes':30})
-        assert invite['uri'].startswith(origin+'/join/#v2.') and invite['qr'].startswith('data:image/svg+xml;base64,')
+        assert re.fullmatch(re.escape(origin)+r'/[a-z]+(?:-[a-z]+){0,3}[0-9]{12}', invite['uri']) and invite['qr'].startswith('data:image/svg+xml;base64,')
         assert len(invite['uri']) < 150
         preview = helper(recipient, dict(action='preview_invite', invite_code=invite['uri']))
         assert preview['saved_account'] and preview['server_name'] and 'media_key' not in preview

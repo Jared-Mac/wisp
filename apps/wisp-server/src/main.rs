@@ -14,6 +14,8 @@ struct Args {
     database_url: Option<String>,
     #[arg(long, env = "WISP_PUBLIC_URL")]
     public_url: Option<String>,
+    #[arg(long, env = "WISP_INVITE_URL")]
+    invite_url: Option<String>,
     #[arg(long, env = "WISP_LIVEKIT_URL", default_value = "ws://127.0.0.1:7880")]
     livekit_url: String,
     #[arg(long, env = "WISP_LIVEKIT_API_KEY", default_value = "devkey")]
@@ -97,6 +99,10 @@ async fn main() -> anyhow::Result<()> {
         public_url: args
             .public_url
             .map(|url| url.trim_end_matches('/').to_owned()),
+        invite_url: args
+            .invite_url
+            .map(|url| wisp_crypto::invitation::origin(&url))
+            .transpose()?,
         livekit_url: args.livekit_url,
         livekit_api_key: args.livekit_api_key,
         livekit_api_secret: args.livekit_api_secret,
@@ -109,6 +115,7 @@ async fn main() -> anyhow::Result<()> {
     };
     let state = AppState::new(config).await?;
     let maintenance = tokio::spawn(state.clone().maintain_attachments());
+    let invitations = tokio::spawn(state.clone().maintain_invitations());
     let storage_notifications = tokio::spawn(state.clone().maintain_storage_cleanup());
     let listener = tokio::net::TcpListener::bind(args.addr).await?;
     info!(address = %args.addr, "wisp-server listening");
@@ -116,6 +123,7 @@ async fn main() -> anyhow::Result<()> {
         .with_graceful_shutdown(shutdown_signal())
         .await?;
     maintenance.abort();
+    invitations.abort();
     storage_notifications.abort();
     Ok(())
 }

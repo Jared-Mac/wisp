@@ -7,6 +7,7 @@ async fn isolated_server() -> (String, tokio::task::JoinHandle<()>) {
 async fn isolated_server_with_media(livekit_url: String) -> (String, tokio::task::JoinHandle<()>) {
     let state = wisp_server::AppState::new(wisp_server::AppConfig {
         database_url: "sqlite::memory:".into(),
+        invite_url: None,
         public_url: None,
         livekit_url,
         livekit_api_key: "isolated".into(),

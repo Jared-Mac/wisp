@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import "../components"
+import "../FriendLogic.js" as FriendLogic
 
 Column {
   id: root
@@ -8,6 +9,14 @@ Column {
   required property var theme
   property string presentation: "app"
   property bool adaptive: false
+  property bool serverOnly: false
+  property bool showCalls: true
+  property var people: bridge.friends
+  readonly property var visibleFriends: serverOnly ? people.filter(function(friend) {
+    return root.bridge.friendships.state(friend.server_id).people.some(function(person) {
+      return String(person.id)===String(friend.id) && person.server_member===true
+    })
+  }) : people
   readonly property bool narrow: adaptive && width < theme.space(140)
   readonly property bool tiny: adaptive && width < theme.space(80)
   signal selected()
@@ -24,7 +33,7 @@ Column {
     id: collapseButton
     visible: root.showHeader && !root.tiny
     objectName: "friends-collapse"
-    width: visible ? Math.max(0,parent.width-addFriendButton.width-parent.spacing) : 0
+    width: visible ? Math.max(0,parent.width-(addFriendButton.visible ? addFriendButton.width+parent.spacing : 0)) : 0
     height: root.collapsible ? root.theme.space(root.theme.tui ? 26 : 30) : root.theme.space(20)
     enabled: root.collapsible
     Accessible.name: root.collapsed ? "Expand friends" : "Collapse friends"
@@ -38,7 +47,7 @@ Column {
     contentItem: Item {
       Text {
         anchors.left: parent.left; anchors.right: parent.right; anchors.rightMargin: root.collapsible ? 16 : 0; anchors.verticalCenter: parent.verticalCenter; elide: Text.ElideRight
-        text: (root.theme.tui ? "┌─ 02: /friends" : root.theme.friendly ? "Friends" : "FRIENDS") + (root.collapsible ? " · " + root.bridge.friends.length : "")
+        text: (root.serverOnly ? "Friends in server" : "Friends") + " · " + root.visibleFriends.length
         color: root.theme.friendSectionColor
         font.family: root.theme.font.family
         font.pixelSize: root.theme.font.caption; font.weight: Font.Bold
@@ -53,6 +62,7 @@ Column {
   }
     ChatButton {
       id:addFriendButton;objectName:"openAddFriend";theme:root.theme
+      visible: !root.serverOnly
       readonly property int pending:root.bridge.friendships.state(root.bridge.activeServer.id).people.filter(function(p){return p.relationship==="incoming"}).length
       text:pending ? "Friend requests · "+pending : "Add friend";iconName:"invite";iconOnly:true;forceIcon:true
       primary:pending>0;width:Math.min(root.width,root.theme.space(28));height:root.theme.space(28)
@@ -64,12 +74,12 @@ Column {
 
   NowView {
     objectName: "friendCalls"
-    width: parent.width; visible: !root.collapsed && visibleHangouts.length > 0
+    width: parent.width; visible: root.showCalls && !root.collapsed && visibleHangouts.length > 0
     bridge: root.bridge; theme: root.theme; adaptive: root.adaptive
     onJoined: root.selected()
   }
   Repeater {
-    model: root.collapsed ? [] : root.bridge.sortedFriends
+    model: root.collapsed ? [] : FriendLogic.sorted(root.visibleFriends, root.bridge.friendPreferences.favorites)
     delegate: FriendRow {
       required property var modelData
       width: root.width

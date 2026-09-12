@@ -537,3 +537,144 @@ async fn invitation_expiry_and_concurrent_redemption_are_enforced() {
         StatusCode::TOO_MANY_REQUESTS
     );
 }
+
+#[tokio::test]
+#[allow(clippy::too_many_lines)] // Exercise renaming before acceptance and again after an existing DM.
+async fn public_handle_changes_preserve_pending_requests_chats_and_crypto_identity() {
+    let (state, app) = setup().await;
+    let peer = signup(&app, "rename-peer").await;
+    let identity_before: String =
+        sqlx::query_scalar("SELECT public_identity FROM chat_identities WHERE user_id=?")
+            .bind(TEST_OWNER_ID)
+            .fetch_one(&state.pool)
+            .await
+            .unwrap();
+    let login_before: Option<String> = sqlx::query_scalar("SELECT username FROM users WHERE id=?")
+        .bind(TEST_OWNER_ID)
+        .fetch_one(&state.pool)
+        .await
+        .unwrap();
+    value(
+        request(
+            &app,
+            "PUT",
+            "/v2/accounts/handle",
+            TEST_OWNER_ID,
+            json!({"handle":"before-name"}),
+        )
+        .await,
+    )
+    .await;
+    value(
+        request(
+            &app,
+            "POST",
+            &format!("/v1/friend-requests/{peer}"),
+            TEST_OWNER_ID,
+            json!({}),
+        )
+        .await,
+    )
+    .await;
+    value(
+        request(
+            &app,
+            "PUT",
+            "/v2/accounts/handle",
+            TEST_OWNER_ID,
+            json!({"handle":"after-name"}),
+        )
+        .await,
+    )
+    .await;
+    let old = value(
+        request(
+            &app,
+            "POST",
+            "/v2/people/lookup",
+            &peer,
+            json!({"handle":"before-name"}),
+        )
+        .await,
+    )
+    .await;
+    assert!(old["person"].is_null());
+    let found = value(
+        request(
+            &app,
+            "POST",
+            "/v2/people/lookup",
+            &peer,
+            json!({"handle":"after-name"}),
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(found["person"]["id"], TEST_OWNER_ID);
+    value(
+        request(
+            &app,
+            "POST",
+            &format!("/v1/friend-requests/{TEST_OWNER_ID}/accept"),
+            &peer,
+            json!({}),
+        )
+        .await,
+    )
+    .await;
+    let chat = find_or_create_direct(
+        &state.pool,
+        TEST_OWNER_ID.parse().unwrap(),
+        peer.parse().unwrap(),
+    )
+    .await
+    .unwrap();
+    let sent=value(request(&app,"POST","/v1/messages",TEST_OWNER_ID,json!({"conversation_id":chat,"content_type":"text/plain","payload":"Existing conversation","encryption_version":0})).await).await;
+    value(
+        request(
+            &app,
+            "PUT",
+            "/v2/accounts/handle",
+            TEST_OWNER_ID,
+            json!({"handle":"another-name"}),
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(
+        find_or_create_direct(
+            &state.pool,
+            TEST_OWNER_ID.parse().unwrap(),
+            peer.parse().unwrap()
+        )
+        .await
+        .unwrap(),
+        chat
+    );
+    let snapshot = state.snapshot(peer.parse().unwrap()).await.unwrap();
+    assert!(
+        snapshot
+            .friends
+            .iter()
+            .any(|f| f.user.id.to_string() == TEST_OWNER_ID)
+    );
+    assert!(
+        snapshot
+            .messages
+            .iter()
+            .any(|m| m.id.to_string() == sent["id"].as_str().unwrap())
+    );
+    let identity_after: String =
+        sqlx::query_scalar("SELECT public_identity FROM chat_identities WHERE user_id=?")
+            .bind(TEST_OWNER_ID)
+            .fetch_one(&state.pool)
+            .await
+            .unwrap();
+    assert_eq!(identity_before, identity_after);
+    let login_after: Option<String> = sqlx::query_scalar("SELECT username FROM users WHERE id=?")
+        .bind(TEST_OWNER_ID)
+        .fetch_one(&state.pool)
+        .await
+        .unwrap();
+    assert_eq!(login_before, login_after);
+}

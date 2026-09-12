@@ -7554,6 +7554,7 @@ dependencies = [
  "aes-gcm",
  "age",
  "anyhow",
+ "argon2",
  "base64 0.22.1",
  "chrono",
  "ed25519-dalek",

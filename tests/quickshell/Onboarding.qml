@@ -78,7 +78,9 @@ ShellRoot {
       username.textEdited()
       name.text = "Another Name"
       check(username.text === "my_handle", "custom username is preserved")
-      check(test.findChild(window, "accountSubmit").text === "Join server", "invitation has a clear join action")
+      check(test.findChild(window, "accountSubmit").text === "Accept invitation", "invitation has a clear join action")
+      check(test.findChild(window,"declineInvitation").visible,"invitation can be declined")
+      for(var form of ["https://wisp.you/tea123456781234","wisp.you/tea123456781234","tea123456781234"]) check(window.modernLink(form),"invitation input supports URL and spoken code")
       window.selectMode("login")
       check(window.acceptingInvite && !name.visible, "existing accounts can accept an invitation")
       check(window.parseInvitation("wisp-invite:broken") === null, "malformed payload is rejected")

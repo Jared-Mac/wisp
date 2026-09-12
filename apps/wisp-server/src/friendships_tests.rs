@@ -34,7 +34,8 @@ async fn members_are_visible_without_friendship_but_private_details_are_not() {
     let directory = list(&app, TEST_OWNER_ID).await;
     assert_eq!(directory["people"].as_array().unwrap().len(), 4);
     for person in directory["people"].as_array().unwrap() {
-        assert_eq!(person.as_object().unwrap().len(), 3);
+        assert_eq!(person.as_object().unwrap().len(), 4);
+        assert_eq!(person["server_member"], true);
         assert!(person["id"].is_string() && person["display_name"].is_string());
     }
     assert_eq!(relation(&directory, TEST_OWNER_ID), "self");
@@ -301,4 +302,56 @@ async fn concurrent_crossed_requests_leave_one_pending_invitation() {
             .unwrap(),
         0
     );
+}
+
+#[tokio::test]
+async fn contacts_outside_the_server_keep_relationships_without_appearing_as_members() {
+    let (state, app) = setup().await;
+    value(
+        request(
+            &app,
+            "POST",
+            &path(TEST_MEMBER_A_ID),
+            TEST_OWNER_ID,
+            json!({}),
+        )
+        .await,
+    )
+    .await;
+    value(
+        request(
+            &app,
+            "POST",
+            &format!("{}/accept", path(TEST_OWNER_ID)),
+            TEST_MEMBER_A_ID,
+            json!({}),
+        )
+        .await,
+    )
+    .await;
+    value(
+        request(
+            &app,
+            "POST",
+            &path(TEST_OWNER_ID),
+            TEST_MEMBER_B_ID,
+            json!({}),
+        )
+        .await,
+    )
+    .await;
+    sqlx::query("UPDATE users SET server_member=0 WHERE id IN (?,?)")
+        .bind(TEST_MEMBER_A_ID)
+        .bind(TEST_MEMBER_B_ID)
+        .execute(&state.pool)
+        .await
+        .unwrap();
+    let directory = list(&app, TEST_OWNER_ID).await;
+    assert_eq!(relation(&directory, TEST_MEMBER_A_ID), "friend");
+    assert_eq!(relation(&directory, TEST_MEMBER_B_ID), "incoming");
+    for person in directory["people"].as_array().unwrap() {
+        if person["id"] == TEST_MEMBER_A_ID || person["id"] == TEST_MEMBER_B_ID {
+            assert_eq!(person["server_member"], false);
+        }
+    }
 }

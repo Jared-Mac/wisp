@@ -18,6 +18,12 @@ Item {
   property string error: ""
   function collapsedFor(presentation) { return presentation === "panel" ? trayCollapsed : collapsed }
   function membersCollapsedFor(presentation) { return presentation === "panel" ? trayMembersCollapsed : membersCollapsed }
+  function friendsViewFor(presentation) { return accountSettings[presentation === "panel" ? "trayFriendsView" : "friendsView"] === true }
+  function setFriendsView(value, presentation) {
+    var patch={}
+    patch[presentation === "panel" ? "trayFriendsView" : "friendsView"]=!!value
+    save(patch)
+  }
   function save(patch) {
     if (!account) return
     // The Omarchy panel can run in another process. Merge its latest fields

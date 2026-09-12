@@ -194,7 +194,7 @@ Item {
       if(!root.member) {root.bridge.accountActions.joinServer();return}
       invitePopup.copied=false
       invitePopup.open()
-      root.bridge.accountActions.act("create_server_invite",{expires_in_minutes:30})
+      root.bridge.accountActions.act("create_server_invite",{expires_in_minutes:720})
     }
   }
   // Status snapshots replace the server object; only a selection change dismisses the invite.
@@ -229,11 +229,7 @@ Item {
         ChatButton {theme:root.theme;objectName:"copyServerInvitation";text:invitePopup.copied ? "Copied!" : "Copy invitation";enabled:!!root.account.invitation;onClicked:{root.bridge.copyChatText(inviteLink.text);invitePopup.copied=true}}
         ChatButton {theme:root.theme;text:invitePopup.showQr ? "Hide QR code" : "Show QR code";enabled:!!root.account.invitation;onClicked:invitePopup.showQr=!invitePopup.showQr}
         Image {width:Math.min(parent.width,root.theme.space(224));height:visible ? width : 0;visible:invitePopup.showQr && !!root.account.invitation;source:root.account.invitation && invitePopup.showQr ? root.account.invitation.qr : "";fillMode:Image.PreserveAspectFit;Accessible.name:"Server invitation QR code"}
-        Row {
-          spacing:root.theme.spacing.xs
-          WispComboBox {id:expiry;theme:root.theme;model:["30 minutes","24 hours"];width:root.theme.space(130)}
-          ChatButton {theme:root.theme;text:"New link";enabled:!root.account.busy;onClicked:{invitePopup.copied=false;root.bridge.accountActions.act("create_server_invite",{expires_in_minutes:expiry.currentIndex===0 ? 30 : 1440})}}
-        }
+        ChatButton {theme:root.theme;text:"New link";enabled:!root.account.busy;onClicked:{invitePopup.copied=false;root.bridge.accountActions.act("create_server_invite",{expires_in_minutes:720})}}
         ChatButton {theme:root.theme;text:"Revoke this invitation";visible:!!root.account.invitation;enabled:!root.account.busy;onClicked:root.bridge.accountActions.act("revoke_server_invite",{invite_id:root.account.invitation.id})}
         ChatButton {theme:root.theme;text:"Manage active invitations";enabled:!root.account.busy;onClicked:root.bridge.accountActions.act("list_server_invites",{})}
         Repeater {

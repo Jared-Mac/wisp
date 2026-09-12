@@ -11,7 +11,7 @@ pub(super) async fn people(
 ) -> Result<Json<Value>, ApiError> {
     let user = authenticate_headers(&state, &headers).await?.to_string();
     let rows = sqlx::query(
-        "SELECT u.id,u.display_name,CASE WHEN u.id=?1 THEN 'self'
+        "SELECT u.id,u.display_name,u.server_member,CASE WHEN u.id=?1 THEN 'self'
          WHEN EXISTS(SELECT 1 FROM friendships f WHERE
            (f.first_user_id=?1 AND f.second_user_id=u.id) OR
            (f.second_user_id=?1 AND f.first_user_id=u.id)) THEN 'friend'
@@ -23,7 +23,8 @@ pub(super) async fn people(
     Ok(Json(json!({"people": rows.into_iter().map(|row| json!({
         "id":row.get::<String,_>("id"),
         "display_name":row.get::<String,_>("display_name"),
-        "relationship":row.get::<String,_>("relationship")
+        "relationship":row.get::<String,_>("relationship"),
+        "server_member":row.get::<bool,_>("server_member")
     })).collect::<Vec<_>>()})))
 }
 

@@ -93,8 +93,7 @@ Item {
       panelContent:Component {
         Column {
           spacing:root.theme.spacing.sm
-          FriendsView {width:parent.width;bridge:root.bridge;theme:root.theme;presentation:"panel"}
-          ServerMembersView {width:parent.width;bridge:root.bridge;theme:root.theme;presentation:"panel";collapsible:false}
+          PeopleView {width:parent.width;bridge:root.bridge;theme:root.theme;presentation:"panel"}
         }
       }
     }

@@ -140,6 +140,7 @@ async fn verified_room_names_survive_restart_without_adding_friends_or_trusting_
     let database_url = format!("sqlite:{}", storage.path().join("server.sqlite3").display());
     let state = wisp_server::AppState::new(wisp_server::AppConfig {
         database_url: database_url.clone(),
+        invite_url: None,
         public_url: None,
         livekit_url: "ws://127.0.0.1:1".into(),
         livekit_api_key: "test".into(),
@@ -331,6 +332,7 @@ async fn verified_room_names_survive_restart_without_adding_friends_or_trusting_
 async fn signed_display_names_propagate_and_reject_identity_changes_and_rollback() {
     let state = wisp_server::AppState::new(wisp_server::AppConfig {
         database_url: "sqlite::memory:".into(),
+        invite_url: None,
         public_url: None,
         livekit_url: "ws://127.0.0.1:1".into(),
         livekit_api_key: "test".into(),
@@ -424,6 +426,7 @@ async fn signed_display_names_propagate_and_reject_identity_changes_and_rollback
 async fn automatic_enrollment_persists_retries_and_requires_recovery_on_another_device() {
     let state = wisp_server::AppState::new(wisp_server::AppConfig {
         database_url: "sqlite::memory:".into(),
+        invite_url: None,
         public_url: Some("https://wisp.invalid".into()),
         livekit_url: "ws://127.0.0.1:1".into(),
         livekit_api_key: "test".into(),
@@ -572,6 +575,7 @@ async fn two_clients_encrypt_restore_and_admit_a_friend_without_manual_verificat
     );
     let state = wisp_server::AppState::new(wisp_server::AppConfig {
         database_url: database_url.clone(),
+        invite_url: None,
         public_url: Some("https://wisp.invalid".into()),
         livekit_url: "ws://127.0.0.1:1".into(),
         livekit_api_key: "test".into(),

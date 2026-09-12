@@ -19,9 +19,9 @@ ShellRoot {
     if(item.footer){var r=find(item.footer,name,seen);if(r)return r}
     var children=item.data || item.contentData || item.children || [];for(var i=0;i<children.length;i++){var r=find(children[i],name,seen);if(r)return r}return null
   }
-  property var catalog:[{id:"self",display_name:"Morgan",relationship:"self"},{id:"river",display_name:"River",relationship:"none"},{id:"sage",display_name:"Sage",relationship:"incoming"},{id:"friend",display_name:"Alex",relationship:"friend"}]
+  property var catalog:[{id:"self",display_name:"Morgan",server_member:true,relationship:"self"},{id:"river",display_name:"River",server_member:true,relationship:"none"},{id:"sage",display_name:"Sage",server_member:true,relationship:"incoming"},{id:"friend",display_name:"Alex",server_member:true,relationship:"friend"}]
   function ack(id,ok,people){bridge.finishRequest({id:id,ok:ok,value:{people:people || catalog},error:ok ? null : {message:"Temporary failure. Try again."}})}
-  function ackLists(){Object.keys(bridge.requests).forEach(function(id){var r=bridge.requests[id];if(r.kind==="friendship" && r.action==="list")test.ack(id,true,r.server_id==="other" ? [{id:"otherSelf",display_name:"Me",relationship:"self"},{id:"river",display_name:"River elsewhere",relationship:"none"}] : test.catalog)})}
+  function ackLists(){Object.keys(bridge.requests).forEach(function(id){var r=bridge.requests[id];if(r.kind==="friendship" && r.action==="list")test.ack(id,true,r.server_id==="other" ? [{id:"otherSelf",display_name:"Me",server_member:true,relationship:"self"},{id:"river",display_name:"River elsewhere",server_member:true,relationship:"none"}] : test.catalog)})}
   function last(){return bridge.sent[bridge.sent.length-1]}
   Wisp.WispTheme {id:theme;profile:Quickshell.env("WISP_TEST_THEME") || "soft_graphite"}
   Wisp.WispBridge {id:bridge;property var sent:[];function send(name,args){if(name==="list_people" && test.dropNextList){test.dropNextList=false;return}var id="fake-"+(++requestId);sent.push({id:id,name:name,args:args});return id}}
@@ -86,13 +86,13 @@ ShellRoot {
     add.clicked();input.wait(20);test.ackLists();input.wait(20)
     var memberMenu=test.find(test.find(dialog,"serverMember-river").parent,"participantMenu")
     test.check(memberMenu.opened && !test.find(memberMenu,"participantMenuVolume").visible,"member menu has no voice-only controls")
-    test.find(memberMenu,"dismissFriendRequest").clicked();test.catalog=test.catalog.map(function(p){return Object.assign({},p,p.id==="river" ? {relationship:"none"} : {})});test.ack(test.last().id,true);memberMenu.close()
+    test.find(memberMenu,"dismissFriendRequest").clicked();test.catalog=test.catalog.map(function(p){return Object.assign({},p,p.id==="river" ? {server_member:true,relationship:"none"} : {})});test.ack(test.last().id,true);memberMenu.close()
     search.text="";input.wait(20)
-    var only=test.find(dialog,"friendRequestsOnly");only.checked=true;input.wait(20);test.check(list.count===1,"incoming requests remain easy to find")
+    test.check(!test.find(dialog,"friendRequestsOnly"),"friend requests have their own Friends view")
     test.find(dialog,"serverMemberAction-sage").clicked();input.wait(20);test.ackLists();input.wait(20)
     var incomingMenu=test.find(test.find(dialog,"serverMember-sage").parent,"participantMenu");test.find(incomingMenu,"addFriend").clicked()
     test.check(test.last().name==="accept_friend_request","incoming request requires acceptance")
-    test.catalog=test.catalog.map(function(p){return Object.assign({},p,p.id==="sage" ? {relationship:"friend"} : {})});test.ack(test.last().id,true);incomingMenu.close();only.checked=false
+    test.catalog=test.catalog.map(function(p){return Object.assign({},p,p.id==="sage" ? {server_member:true,relationship:"friend"} : {})});test.ack(test.last().id,true);incomingMenu.close()
     input.wait(20);test.check(serverPeople.otherMembers.length===1 && trayPeople.otherMembers.length===1,"accepted requests leave both inline member lists")
     test.check(list.count===4,"full directory retains friends, other members and self")
     dialog.close();input.wait(30)

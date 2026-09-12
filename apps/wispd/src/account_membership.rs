@@ -67,7 +67,7 @@ impl Daemon {
                         || key.as_ref().is_some_and(|k| k.len() >= 16),
                     "Restore this device's media encryption key before creating invitations"
                 );
-                let invite:Value=decode(api.request(Method::POST,"/v2/server-invites").json(&json!({"expires_in_minutes":args["expires_in_minutes"].as_u64().unwrap_or(30)})).send().await?).await?;
+                let invite:Value=decode(api.request(Method::POST,"/v2/server-invites").json(&json!({"expires_in_minutes":args["expires_in_minutes"].as_u64().unwrap_or(720)})).send().await?).await?;
                 let invitation = Invitation {
                     v: 2,
                     server: wisp_crypto::invitation::origin(&api.base_url)?,
@@ -90,7 +90,25 @@ impl Daemon {
                     .await?,
                 )
                 .await?;
-                let uri = link.uri();
+                let mut uri = link.uri();
+                if let (Some(origin), Some(label)) = (
+                    invite["short_origin"].as_str(),
+                    invite["short_label"].as_str(),
+                ) {
+                    let short = wisp_crypto::short_invitation::ShortLink::create(origin, label)?;
+                    let envelope = short.seal(&uri)?;
+                    let _: Value = decode(
+                        api.request(
+                            Method::PUT,
+                            &format!("/v2/server-invites/{}/short", invitation.id),
+                        )
+                        .json(&json!({"lookup_id":short.lookup_id(),"envelope":envelope}))
+                        .send()
+                        .await?,
+                    )
+                    .await?;
+                    uri = short.uri();
+                }
                 let qr = qrcode::QrCode::new(uri.as_bytes())?
                     .render::<qrcode::render::svg::Color>()
                     .min_dimensions(256, 256)

@@ -275,17 +275,23 @@ pub(super) async fn create_invite(
     let code = random_token("wisp-server-invite");
     let expires = Utc::now()
         + ChronoDuration::minutes(
-            i64::from(request.expires_in_minutes.unwrap_or(30)).clamp(1, 1440),
+            i64::from(request.expires_in_minutes.unwrap_or(720)).clamp(1, 720),
         );
     sqlx::query("INSERT INTO server_invites(id,code_hash,created_by,created_at,expires_at) VALUES(?,?,?,?,?)")
         .bind(id.to_string()).bind(token_hash(&code)).bind(user.to_string()).bind(Utc::now().to_rfc3339()).bind(expires.to_rfc3339()).execute(&state.pool).await.map_err(ApiError::internal)?;
+    let short_label = super::short_invitations::reserve(&state, id).await?;
+    let short_origin = state
+        .config
+        .invite_url
+        .as_ref()
+        .or(state.config.public_url.as_ref());
     let name: String = sqlx::query_scalar("SELECT name FROM server_identity WHERE id=1")
         .fetch_one(&state.pool)
         .await
         .map_err(ApiError::internal)?;
     let inviter = find_user(&state.pool, &user.to_string()).await?;
     Ok(Json(
-        json!({"id":id,"code":code,"expires_at":expires,"server_name":name,"inviter":inviter,"kind":"server"}),
+        json!({"id":id,"code":code,"expires_at":expires,"server_name":name,"inviter":inviter,"kind":"server","short_label":short_label,"short_origin":short_origin}),
     ))
 }
 
@@ -333,7 +339,7 @@ pub(super) struct Envelope {
     envelope: String,
 }
 
-fn encoded(value: &str, min: usize, max: usize) -> bool {
+pub(super) fn encoded(value: &str, min: usize, max: usize) -> bool {
     (min..=max).contains(&value.len())
         && value
             .bytes()

@@ -14,6 +14,7 @@ Item {
   readonly property bool canAddChat: chat.paneCount < 8
   function addChat(id) { chat.addConversation(chat.activeKey, id) }
   readonly property var layout: bridge.workspaceLayout
+  readonly property bool friendsMode: bridge.serverMember === false || bridge.friendPreferences.friendsViewFor("app")
   readonly property string dock: ["left", "right", "top", "bottom"].indexOf(layout.dock) >= 0 ? layout.dock : "left"
   readonly property bool drawerMode: (theme.comfortable || theme.refinedTui) && width < theme.space(720)
     && !(layout.activityWidth > 0) && (dock === "left" || dock === "right")
@@ -85,6 +86,7 @@ Item {
     Flickable {
       id: rooms
       objectName: "roomsPane"
+      visible: !root.friendsMode
       x: activity.frameInset; y: activity.frameTop
       width: (root.stacked ? activity.roomsSize : parent.width) - activity.frameInset * 2
       height: Math.max(1, (root.stacked ? activity.listsHeight : activity.roomsSize) - activity.frameTop - activity.frameInset)
@@ -113,6 +115,7 @@ Item {
     }
     ResizeHandle {
       objectName: "roomsResizeHandle"
+      visible: !root.friendsMode
       theme: root.theme; verticalLine: root.stacked
       x: root.stacked ? activity.roomsSize : 0; y: root.stacked ? 0 : activity.roomsSize
       width: root.stacked ? root.handleSize : parent.width; height: root.stacked ? activity.listsHeight : root.handleSize
@@ -125,27 +128,25 @@ Item {
     Flickable {
       id: friendsPane
       objectName: "friendsPane"
-      x: (root.stacked ? activity.roomsSize + root.handleSize : 0) + activity.frameInset
-      y: (root.stacked ? 0 : activity.roomsSize + root.handleSize) + activity.frameTop
+      x: (!root.friendsMode && root.stacked ? activity.roomsSize + root.handleSize : 0) + activity.frameInset
+      y: (!root.friendsMode && !root.stacked ? activity.roomsSize + root.handleSize : 0) + activity.frameTop
       width: parent.width - x - activity.frameInset; height: Math.max(0, activity.listsHeight - y - activity.frameInset)
       contentWidth: width; contentHeight: peopleColumn.implicitHeight
       clip: true; boundsBehavior: Flickable.StopAtBounds
       ScrollBar.vertical: ScrollBar {}
       Column {
         id: peopleColumn; width: parent.width; spacing: root.theme.spacing.sm
-        InboxButton { width: parent.width; bridge: root.bridge; theme: root.theme }
-        FriendsView { width: parent.width; bridge: root.bridge; theme: root.theme; adaptive: true; collapsible: true }
-        ServerMembersView { width: parent.width; bridge: root.bridge; theme: root.theme }
+        PeopleView { width: parent.width; bridge: root.bridge; theme: root.theme }
       }
     }
     TerminalFrame {
-      visible: (root.theme.tui || root.theme.comfortable) && activity.width >= root.theme.space(100)
+      visible: !root.friendsMode && (root.theme.tui || root.theme.comfortable) && activity.width >= root.theme.space(100)
       width: root.stacked ? activity.roomsSize : parent.width; height: root.stacked ? activity.listsHeight : activity.roomsSize
       theme: root.theme; title: root.theme.comfortable ? "Server" : root.theme.cleanTui ? "01 /server" : "01: /server"; ink: root.theme.roomSectionColor
     }
     TerminalFrame {
       visible: (root.theme.tui || root.theme.comfortable) && activity.width >= root.theme.space(100)
-      x: root.stacked ? activity.roomsSize + root.handleSize : 0; y: root.stacked ? 0 : activity.roomsSize + root.handleSize
+      x: !root.friendsMode && root.stacked ? activity.roomsSize + root.handleSize : 0; y: !root.friendsMode && !root.stacked ? activity.roomsSize + root.handleSize : 0
       width: parent.width - x; height: activity.listsHeight - y
       theme: root.theme; title: root.theme.comfortable ? "Friends" : root.theme.cleanTui ? "02 /friends" : "02: /friends"; ink: root.theme.friendSectionColor
     }

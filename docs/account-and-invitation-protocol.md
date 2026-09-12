@@ -1,4 +1,7 @@
-# Accounts and invitations, release 30
+# Accounts and invitations
+
+Readable invitation links and directory membership fields are specified in
+[readable-invitations.md](readable-invitations.md) (schema 31).
 
 Accounts and community membership are distinct on the account service. Existing
 accounts retain membership and their UUIDs, credentials, histories, permissions,
@@ -58,7 +61,7 @@ These grant community membership only. They do not automatically make friends.
 All invitation write routes require an authenticated member. Creation is rate
 limited; invites are one-use, expiring, and revocable by creator or server admin.
 
-1. `POST /v2/server-invites` with `{expires_in_minutes:30}` (1–1440) returns
+1. `POST /v2/server-invites` with `{expires_in_minutes:720}` (1–720) returns
    `{id,code,expires_at,server_name,inviter:{id,display_name},kind:"server"}`.
 2. On the client, create the v2 capsule and upload it with
    `PUT /v2/server-invites/{id}/envelope`: `{lookup_id,envelope}`. Upload once.

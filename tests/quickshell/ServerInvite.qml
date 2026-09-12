@@ -26,7 +26,7 @@ ShellRoot {
     id:actions
     property var invitation:null
     function state(id) {return {invitation:invitation,error:"",feedback:"",busy:false,invites:[]}}
-    function act(command,args) {if(command!=="create_server_invite" || args.expires_in_minutes!==30)throw new Error("wrong invite request");bridge.requests++}
+    function act(command,args) {if(command!=="create_server_invite" || args.expires_in_minutes!==720)throw new Error("wrong invite request");bridge.requests++}
     function joinServer() {bridge.requests++}
   }
   FloatingWindow {

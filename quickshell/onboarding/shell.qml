@@ -32,7 +32,7 @@ ShellRoot {
     property bool useSavedAccount: true
     readonly property var invitation: resolvedInput === invite.text.trim() && resolvedInvitation ? resolvedInvitation : parseInvitation(invite.text.trim())
     readonly property bool existingAccount: !!(acceptingInvite && invitation.saved_account && useSavedAccount)
-    function modernLink(value) { return /^(https?:\/\/|wisp-invite:v2\.)/.test(value) }
+    function modernLink(value) { return /^(https?:\/\/|wisp-invite:v2\.|wisp\.you\/|[a-z]+(?:-[a-z]+){0,3}[0-9]{12}$)/.test(value) }
     function invitationInputChanged() {
       resolvedInvitation = null; resolvedInput = ""; feedback = ""; useSavedAccount = true
       if (modernLink(invite.text.trim())) previewTimer.restart()
@@ -206,7 +206,7 @@ ShellRoot {
             objectName: "accountInvite"
             visible: window.mode !== "bootstrap" && !window.acceptingInvite && (window.invitationEntry || window.advanced)
             Layout.fillWidth: true
-            placeholderText: "Paste a Wisp invitation"
+            placeholderText: "Invite link or word-and-number code"
             color: "#e8ecf3"; placeholderTextColor: "#667085"; font.family: "Hack"; font.pixelSize: 13
             background: Rectangle { color: "#1c202b"; border.color: invite.activeFocus ? "#2f8cff" : "#3b4353"; radius: 3 }
           }
@@ -288,12 +288,20 @@ ShellRoot {
             Layout.fillWidth: true
             Layout.preferredHeight: 38
             enabled: !window.busy && !previewProcess.running
-            text: window.busy ? "working…" : window.acceptingInvite ? "Join server" : window.mode === "login" ? "sign in" : window.mode === "bootstrap" ? "create owner account" : "create account"
+            text: window.busy ? "working…" : window.acceptingInvite ? "Accept invitation" : window.mode === "login" ? "sign in" : window.mode === "bootstrap" ? "create owner account" : "create account"
             font.family: "Hack"
             font.pixelSize: 13
             onClicked: window.submit()
             background: Rectangle { radius: 3; color: parent.enabled ? "#2f8cff" : "#273140"; border.color: parent.enabled ? "#72afff" : "#3b4353" }
             contentItem: Text { text: parent.text; color: "#e8ecf3"; font: parent.font; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+          }
+          Button {
+            objectName: "declineInvitation"
+            visible: window.invitationEntry || !!window.invitation
+            Layout.fillWidth: true
+            text: "Decline"
+            enabled: !window.busy
+            onClicked: Qt.quit()
           }
         }
       }

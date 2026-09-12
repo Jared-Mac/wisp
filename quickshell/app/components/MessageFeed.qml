@@ -393,7 +393,7 @@ Rectangle {
         readOnly: true; selectByMouse: true
         textFormat: TextEdit.RichText
         selectedTextColor:root.theme.foreground
-        onLinkActivated:link=>{if(Markup.safeLink(link))Qt.openUrlExternally(link)}
+        onLinkActivated:link=>{if(Markup.safeLink(link) && !root.bridge.accountActions.openInvitation(link))Qt.openUrlExternally(link)}
         wrapMode: TextEdit.Wrap
         font.family: root.theme.font.family; font.pixelSize: root.theme.font.body
       }

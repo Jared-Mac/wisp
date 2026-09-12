@@ -14,7 +14,7 @@ Item {
   signal selected()
   readonly property bool favorite: root.bridge.friendPreferences.isFavorite(root.friend)
 
-  readonly property bool canRequest: root.bridge.serverMember !== false && root.friend.online &&
+  readonly property bool canRequest: root.bridge.participantServer(root.friend).server_member !== false && root.friend.online &&
     (root.friend.presence === "open" || root.friend.presence === "knock")
 
   implicitHeight: root.theme.space(root.theme.friendly ? (dense ? 36 : 44) : root.theme.comfortable ? (dense ? 32 : 38) : root.theme.tui ? 28 : 32)
@@ -35,7 +35,7 @@ Item {
     id: friendMenu; objectName: "friendActionsMenu"; width: root.theme.space(220)
     ThemeControlStyle { theme: root.theme; control: friendMenu; outline: true }
     MenuItem { id: dm; text: "Message " + root.friend.display_name; onTriggered: root.bridge.openParticipantDirect(root.friend); ThemeControlStyle { theme: root.theme; control: dm } }
-    MenuItem { id: call; text: root.friend.presence === "knock" ? "Knock" : "Join voice"; enabled: root.canRequest; onTriggered: root.bridge.joinFriend(root.friend.display_name); ThemeControlStyle { theme: root.theme; control: call } }
+    MenuItem { id: call; text: root.friend.presence === "knock" ? "Knock" : "Join voice"; enabled: root.canRequest; onTriggered: root.bridge.requestFriendVoice(root.friend.server_id,root.friend.id,root.friend.display_name); ThemeControlStyle { theme: root.theme; control: call } }
     MenuItem { id: star; text: root.favorite ? "Remove favorite" : "Add favorite"; onTriggered: root.bridge.friendPreferences.toggleFavorite(root.friend); ThemeControlStyle { theme: root.theme; control: star } }
     MenuItem { id:blockAccount;text:"Block account";visible:!!root.bridge.accountActions;onTriggered:root.bridge.accountActions.act("block_person",{user_id:root.friend.id},root.friend.server_id);ThemeControlStyle {theme:root.theme;control:blockAccount} }
     MenuItem { id: volume; text: "Participant volume"; onTriggered: volumeMenu.open(); ThemeControlStyle { theme: root.theme; control: volume } }
@@ -100,7 +100,7 @@ Item {
     enabled: root.canRequest
     Accessible.name: root.friend.presence === "knock" ? "Knock to request voice with " + root.friend.display_name : "Join voice with " + root.friend.display_name
     ToolTip.visible: hovered || visualFocus; ToolTip.text: Accessible.name
-    onClicked: root.bridge.joinFriend(root.friend.display_name)
+    onClicked: root.bridge.requestFriendVoice(root.friend.server_id,root.friend.id,root.friend.display_name)
     background: Rectangle { radius: root.theme.cornerRadius; color: statusIcon.hovered || statusIcon.visualFocus ? root.theme.alpha(root.theme.foreground,0.08) : "transparent" }
     contentItem: Item {
       PresenceIcon { anchors.centerIn: parent; presence: String(root.friend.presence || "away"); theme: root.theme; showTooltip: false }

@@ -11,13 +11,15 @@ Item {
   signal serverSettingsRequested()
   signal createRoomRequested()
   readonly property real gap: theme.space(14)
-  readonly property real roomsWidth: Math.min(theme.space(224), width*0.25)
-  readonly property real friendsWidth: Math.min(theme.space(184), width*0.20)
+  readonly property bool friendsMode: bridge.serverMember === false || bridge.friendPreferences.friendsViewFor("panel")
+  readonly property real roomsWidth: friendsMode ? 0 : Math.min(theme.space(224), width*0.25)
+  readonly property real friendsWidth: friendsMode ? Math.min(theme.space(300),width*0.35) : Math.min(theme.space(184), width*0.20)
   readonly property real bodyHeight: Math.max(1, height)
 
   Item {
     id: rooms
     objectName: "barRoomsPane"
+    visible: !root.friendsMode
     width: root.roomsWidth; height: root.bodyHeight
     ServerSelector {
       id: server
@@ -78,9 +80,7 @@ Item {
     ScrollBar.vertical: ScrollBar {}
     Column {
       id: people; width: parent.width; spacing: root.theme.space(8)
-      InboxButton { width: parent.width; bridge: root.bridge; theme: root.theme }
-      FriendsView { width: parent.width; bridge: root.bridge; theme: root.theme; adaptive: true; collapsible: true; presentation: "panel" }
-      ServerMembersView { width: parent.width; bridge: root.bridge; theme: root.theme; presentation: "panel" }
+      PeopleView { width: parent.width; bridge: root.bridge; theme: root.theme; presentation: "panel" }
     }
   }
 }

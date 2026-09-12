@@ -43,9 +43,10 @@ ShellRoot {
     bridge.applySnapshot(data);bridge.activeConversationId="local::room"
   }
   Timer{running:true;interval:500;onTriggered:{
-    var tiles=test.find(workspace,"conversationPane"),friend=test.find(workspace,"friendName"),voice=test.find(workspace,"friendPresence-mira")
-    bridge.friendships.put("local",{people:[{id:"river",display_name:"River",server_id:"local",relationship:"none"}],ready:true,loading:false})
+    var tiles=test.find(workspace,"conversationPane")
+    bridge.friendships.put("local",{people:[{id:"river",display_name:"River",server_id:"local",relationship:"none",server_member:true},{id:"mira",display_name:"Mira",server_id:"local",relationship:"friend",server_member:true}],ready:true,loading:false})
     input.wait(50)
+    var friend=test.find(workspace,"friendName"),voice=test.find(workspace,"friendPresence-mira")
     test.check(bridge.workspaceLayout.incomingDmsAsTiles,"incoming DMs default on")
     test.check(bridge.workspaceLayout.activityWidth===280,"first launch chooses a sidebar wide enough for six controls")
     test.check(test.find(workspace,"serverPeopleSection").mapToItem(canvas,0,0).y>test.find(workspace,"friends-collapse").mapToItem(canvas,0,0).y,"other members below friends")
@@ -117,6 +118,11 @@ ShellRoot {
     test.check(test.find(workspace,"currentCallLocation").text==="Lounge" && test.find(workspace,"currentCallConnection").text==="- connected","compact status identifies the connected room")
     appearance.setShowAvatars(false);input.wait(40);test.check(!test.find(workspace,"friendAvatar").visible,"hide avatars applies to friends");appearance.setShowAvatars(true)
     input.wait(40)
+    var peopleToggle=test.find(workspace,"toggleFriendsView")
+    peopleToggle.clicked();input.wait(40)
+    test.check(!test.find(workspace,"roomsPane").visible && test.find(workspace,"friendsPane").y<30,"Friends tab uses the full activity panel")
+    peopleToggle.clicked();input.wait(40)
+    test.check(test.find(workspace,"roomsPane").visible,"returning restores server rooms")
     var screenshot=Quickshell.env("WISP_INBOX_SCREENSHOT")
     if(screenshot)canvas.grabToImage(function(im){im.saveToFile(screenshot);console.log(test.failed?"INBOX_FAILED":"INBOX_OK");Qt.quit()})
     else{console.log(test.failed?"INBOX_FAILED":"INBOX_OK");Qt.quit()}

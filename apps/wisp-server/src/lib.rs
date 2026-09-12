@@ -28,6 +28,7 @@ mod room_access;
 mod room_access_tests;
 mod rooms;
 mod server_management;
+mod short_invitations;
 mod soundboard;
 #[cfg(test)]
 mod soundboard_tests;
@@ -103,6 +104,7 @@ const PASSWORD_WORK_LIMIT: usize = 4;
 pub struct AppConfig {
     pub database_url: String,
     pub public_url: Option<String>,
+    pub invite_url: Option<String>,
     pub livekit_url: String,
     pub livekit_api_key: String,
     pub livekit_api_secret: String,
@@ -546,6 +548,14 @@ pub fn router(state: AppState) -> Router {
             put(account_membership::store_envelope).layer(DefaultBodyLimit::max(16384)),
         )
         .route("/v2/invitations/{id}", get(account_membership::resolve))
+        .route(
+            "/v2/server-invites/{id}/short",
+            put(short_invitations::store),
+        )
+        .route(
+            "/v2/short-invitations/{id}",
+            get(short_invitations::resolve),
+        )
         .route("/v2/server/join", post(account_membership::join))
         .route("/v2/server/leave", post(account_membership::leave))
         .route("/join/", get(account_membership::invite_page))
@@ -3385,6 +3395,7 @@ mod tests {
         AppConfig {
             database_url: "sqlite::memory:".into(),
             public_url: Some("https://wisp.invalid".into()),
+            invite_url: None,
             livekit_url: "ws://127.0.0.1:7880".into(),
             livekit_api_key: "devkey".into(),
             livekit_api_secret: "wisp-local-development-secret-32".into(),

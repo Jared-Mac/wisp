@@ -7,6 +7,7 @@ use wisp_protocol::ServerView;
 async fn server(directory: &Path) -> (String, tokio::task::JoinHandle<()>) {
     let state = wisp_server::AppState::new(wisp_server::AppConfig {
         database_url: format!("sqlite:{}", directory.join("server.sqlite3").display()),
+        invite_url: None,
         public_url: None,
         livekit_url: "ws://127.0.0.1:1".into(),
         livekit_api_key: "test".into(),

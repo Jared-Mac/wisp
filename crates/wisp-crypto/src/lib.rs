@@ -363,3 +363,4 @@ mod tests {
     }
 }
 pub mod invitation;
+pub mod short_invitation;

@@ -1,0 +1,19 @@
+# Import this file at Caddyfile top level, then import wisp_invitations
+# with the coordination API's loopback upstream inside the wisp.you site.
+(wisp_invitations) {
+    @wispInviteCode path_regexp wispInviteCode ^/[a-z]+(-[a-z]+){0,3}[0-9]{12}$
+    # This site serves bearer invitation paths. Keep HTTP access logs disabled.
+    log {
+        output discard
+    }
+    handle @wispInviteCode {
+        rewrite * /join/
+        reverse_proxy {args[0]}
+    }
+    @wispInviteAssets path /join/invite.js /join/invite.css /v2/short-invitations/*
+    handle @wispInviteAssets {
+        header Cache-Control "no-store"
+        header Referrer-Policy "no-referrer"
+        reverse_proxy {args[0]}
+    }
+}

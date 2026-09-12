@@ -19,7 +19,7 @@ Column {
   onVisibleChanged: if (visible) Qt.callLater(ensureMembers)
   readonly property var otherMembers:state.people.filter(function(person) {
     var relationship=bridge.friendships.relationship(person)
-    return relationship!=="self" && relationship!=="friend"
+    return person.server_member === true && relationship!=="self" && relationship!=="friend"
   })
   spacing:theme.spacing.xs
   ServerPeopleDialog {id:directory;bridge:root.bridge;theme:root.theme}

@@ -9,10 +9,10 @@ Dialog {
   property string serverId:""
   readonly property var state: bridge.friendships.state(serverId)
   readonly property var people: state.people.filter(function(p) {
-    return (!requestsOnly.checked || p.relationship==="incoming" || p.relationship==="outgoing")
+    return p.server_member === true
       && (!search.text.trim() || String(p.display_name).toLocaleLowerCase().indexOf(search.text.trim().toLocaleLowerCase())>=0)
   })
-  function showServer(id) {serverId=String(id);search.text="";requestsOnly.checked=false;bridge.friendships.refresh(serverId);open()}
+  function showServer(id) {serverId=String(id);search.text="";bridge.friendships.refresh(serverId);open()}
   parent:Overlay.overlay
   width:Math.min(theme.space(460),parent ? parent.width-24 : 460)
   height:Math.min(theme.space(560),parent ? parent.height-24 : 560)
@@ -28,13 +28,12 @@ Dialog {
       onActivated:{root.serverId=String(model[currentIndex].id);root.bridge.friendships.refresh(root.serverId)}
     }
     TextField {id:search;objectName:"memberSearch";width:parent.width;placeholderText:"Find a person";ThemeControlStyle {theme:root.theme;control:search}}
-    CheckBox {id:requestsOnly;objectName:"friendRequestsOnly";width:parent.width;text:"Friend requests";ThemeControlStyle {theme:root.theme;control:requestsOnly}}
     ServerMemberList {
       id:members;objectName:"serverPeopleList";width:parent.width
-      height:Math.max(40,parent.height-serverPicker.height-search.height-requestsOnly.height-status.height-retry.height-parent.spacing*5)
+      height:Math.max(40,parent.height-serverPicker.height-search.height-status.height-retry.height-parent.spacing*4)
       people:root.people;bridge:root.bridge;theme:root.theme
       Text {anchors.centerIn:parent;width:parent.width;horizontalAlignment:Text.AlignHCenter;wrapMode:Text.Wrap;visible:members.count===0
-        text:root.state.loading || root.state.waiting ? "Loading people…" : root.state.error ? "" : !root.bridge.friendships.connected(root.serverId) ? "Server offline" : requestsOnly.checked ? "No friend requests" : "No matching people"
+        text:root.state.loading || root.state.waiting ? "Loading people…" : root.state.error ? "" : !root.bridge.friendships.connected(root.serverId) ? "Server offline" : "No matching people"
         color:root.theme.muted;font.family:root.theme.font.family;font.pixelSize:root.theme.font.caption}
     }
     Text {id:status;width:parent.width;textFormat:Text.PlainText;wrapMode:Text.Wrap;text:root.state.error || root.state.feedback || "";color:root.state.error ? root.theme.danger : root.theme.muted;font.family:root.theme.font.family;font.pixelSize:root.theme.font.caption}

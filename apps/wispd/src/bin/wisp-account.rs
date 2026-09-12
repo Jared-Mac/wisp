@@ -254,8 +254,33 @@ async fn resolve(client: &reqwest::Client, value: &str) -> anyhow::Result<Resolv
     } else {
         value
     };
+    let expanded = if value.starts_with("wisp.you/") {
+        format!("https://{value}")
+    } else if wisp_crypto::short_invitation::valid_code(value) {
+        format!("https://wisp.you/{value}")
+    } else {
+        value.to_owned()
+    };
+    let mut value = expanded;
     if value.starts_with("https://") || value.starts_with("http://") {
-        let link = wisp_crypto::invitation::Link::parse(value)?;
+        if let Ok(short) = wisp_crypto::short_invitation::ShortLink::parse(&value) {
+            let response = client
+                .get(format!(
+                    "{}/v2/short-invitations/{}",
+                    short.origin,
+                    short.lookup_id()
+                ))
+                .send()
+                .await
+                .context("Could not open invitation")?;
+            let response = response_value(response).await?;
+            value = short.open(
+                response["envelope"]
+                    .as_str()
+                    .context("Invalid encrypted invitation")?,
+            )?;
+        }
+        let link = wisp_crypto::invitation::Link::parse(&value)?;
         let response = client
             .get(format!(
                 "{}/v2/invitations/{}",
@@ -357,6 +382,8 @@ async fn main() -> anyhow::Result<()> {
     let resolved = if request.invite_code.starts_with("wisp-invite:")
         || request.invite_code.starts_with("https://")
         || request.invite_code.starts_with("http://")
+        || request.invite_code.starts_with("wisp.you/")
+        || wisp_crypto::short_invitation::valid_code(request.invite_code.trim())
     {
         Some(resolve(&client, request.invite_code.trim()).await?)
     } else {

@@ -8,7 +8,7 @@ function trimLink(value) {
   return link
 }
 function parts(value) {
-  var result=[], at=0, text=String(value), re=/(?:https?:\/\/|www\.)[^\s<>"']+|:wisp_[a-z]+:|:e_[0-9a-f-]{36}:|@"(?:[^"\\\n]|\\["\\])+"|@[A-Za-z0-9_]+(?:[.-][A-Za-z0-9_]+)*/gi, match
+  var result=[], at=0, text=String(value), re=/(?:https?:\/\/|www\.)[^\s<>"']+|wisp\.you\/[a-z]+(?:-[a-z]+){0,3}[0-9]{12}|:wisp_[a-z]+:|:e_[0-9a-f-]{36}:|@"(?:[^"\\\n]|\\["\\])+"|@[A-Za-z0-9_]+(?:[.-][A-Za-z0-9_]+)*/gi, match
   while ((match=re.exec(text)) !== null) {
     if (match[0][0]==="@" && match.index>0 && !/[\s([{>]/.test(text[match.index-1])) continue
     if (match.index>at) result.push({text:text.slice(at,match.index)})
@@ -16,7 +16,7 @@ function parts(value) {
     if (raw[0] === "@") result.push({text:raw,mention:raw[1]==='"' ? raw.slice(2,-1).replace(/\\(["\\])/g,"$1") : raw.slice(1)})
     else if (raw[0] === ":") result.push({text:raw,emoji:raw})
     else {
-      var url=trimLink(raw), href=/^www\./i.test(url)?"https://"+url:url
+      var url=trimLink(raw), href=/^(?:www\.|wisp\.you\/)/i.test(url)?"https://"+url:url
       result.push(safeLink(href)?{text:url,href:href}:{text:url})
       if (url.length<raw.length) result.push({text:raw.slice(url.length)})
     }

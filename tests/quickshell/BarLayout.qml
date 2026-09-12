@@ -68,6 +68,8 @@ ShellRoot {
   Timer {
     interval:500; running:true
     onTriggered: {
+      bridge.friendships.put("local",{ready:true,loading:false,people:bridge.friends.map(function(friend){return Object.assign({},friend,{relationship:"friend",server_member:true})})})
+      input.wait(30)
       var unread=test.find(page,"unreadChat-local::dm:riley")
       test.check(!!unread && unread.visible,"Popup offers unread conversation navigation")
       if(unread)input.mouseClick(unread,unread.width/2,unread.height/2)
