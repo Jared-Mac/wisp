@@ -13,6 +13,29 @@ CREATE TABLE secure_credentials (
     setup_digest TEXT NOT NULL REFERENCES secure_auth_setup(digest),
     updated_at INTEGER NOT NULL
 );
+-- Never allow a former credential generation to become current again. Keeping
+-- retired IDs prevents old reauthentication/reset state becoming valid anew.
+CREATE TABLE secure_generation_history (
+    generation TEXT PRIMARY KEY NOT NULL CHECK(length(generation)=36),
+    user_id TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+);
+CREATE TRIGGER secure_generation_created AFTER INSERT ON secure_credentials
+BEGIN
+    INSERT INTO secure_generation_history(generation,user_id,created_at)
+    VALUES(NEW.generation,NEW.user_id,NEW.updated_at);
+END;
+CREATE TRIGGER secure_generation_changed AFTER UPDATE OF generation ON secure_credentials
+WHEN NEW.generation<>OLD.generation
+BEGIN
+    INSERT INTO secure_generation_history(generation,user_id,created_at)
+    VALUES(NEW.generation,NEW.user_id,NEW.updated_at);
+END;
+CREATE TRIGGER secure_password_file_requires_new_generation BEFORE UPDATE OF password_file ON secure_credentials
+WHEN NEW.password_file<>OLD.password_file AND NEW.generation=OLD.generation
+BEGIN
+    SELECT RAISE(ABORT,'secure password replacement requires a new generation');
+END;
 CREATE TRIGGER secure_credentials_require_no_legacy_password
 BEFORE INSERT ON secure_credentials
 WHEN EXISTS(SELECT 1 FROM users WHERE id=NEW.user_id AND password_hash IS NOT NULL)
@@ -82,5 +105,16 @@ CREATE TABLE secure_operation_receipts (
     committed_at INTEGER NOT NULL
 );
 CREATE INDEX secure_receipts_user ON secure_operation_receipts(user_id,committed_at);
+-- Scoped terminal evidence prevents a delayed/lost sign-in proof from enabling
+-- an abandoned device. An account cannot preempt another account's attempt ID.
+CREATE TABLE secure_login_terminations (
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    attempt TEXT NOT NULL,
+    device_id TEXT NOT NULL,
+    device_hash TEXT NOT NULL,
+    revoked INTEGER NOT NULL CHECK(revoked IN (0,1)),
+    terminated_at INTEGER NOT NULL,
+    PRIMARY KEY(user_id,attempt)
+);
 INSERT OR IGNORE INTO schema_migrations(version,applied_at)
 VALUES(33,strftime('%Y-%m-%dT%H:%M:%fZ','now'));

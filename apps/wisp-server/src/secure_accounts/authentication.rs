@@ -235,9 +235,6 @@ pub(crate) async fn login_start(
         .await
         .map_err(ApiError::internal)?;
     expire_and_bound(&mut tx).await?;
-    if let Some(existing) = existing(&mut tx, request.attempt, "login", &binding).await? {
-        return Ok(Json(existing.response()));
-    }
     let row = sqlx::query("SELECT u.id,c.generation,c.password_file FROM users u JOIN secure_credentials c ON c.user_id=u.id WHERE u.username=? COLLATE NOCASE")
         .bind(&request.username).fetch_optional(&mut *tx).await.map_err(ApiError::internal)?;
     let (user, generation, record) = if let Some(row) = row {
@@ -258,6 +255,12 @@ pub(crate) async fn login_start(
         network,
         account: user.unwrap_or_else(|| dummy_id(&native, "account", &request.username)),
     };
+    if let Some(user) = user {
+        require_live_login(&mut tx, user, request.attempt).await?;
+    }
+    if let Some(existing) = existing(&mut tx, request.attempt, "login", &binding).await? {
+        return Ok(Json(existing.response()));
+    }
     let context = auth::LoginContext {
         account: auth::AccountContext {
             origin,
@@ -442,13 +445,19 @@ async fn finish(
         .map_err(ApiError::internal)?;
     if kind == "login" {
         let row = sqlx::query(
-            "SELECT kind,effect_digest,result FROM secure_operation_receipts WHERE id=?",
+            "SELECT user_id,kind,effect_digest,result FROM secure_operation_receipts WHERE id=?",
         )
         .bind(request.attempt.to_string())
         .fetch_optional(&mut *tx)
         .await
         .map_err(ApiError::internal)?;
         if let Some(row) = row {
+            require_live_login(
+                &mut tx,
+                parse_uuid(&row.get::<String, _>("user_id"))?,
+                request.attempt,
+            )
+            .await?;
             if row.get::<String, _>("kind") != "login"
                 || row.get::<String, _>("effect_digest") != effect
             {
@@ -496,6 +505,9 @@ async fn finish(
         return Err(denied());
     }
     let user = pending.user.expect("checked account");
+    if kind == "login" {
+        require_live_login(&mut tx, user, request.attempt).await?;
+    }
     let row = sqlx::query("SELECT u.display_name,u.username,c.generation,i.public_identity FROM secure_credentials c JOIN users u ON u.id=c.user_id JOIN chat_identities i ON i.user_id=c.user_id WHERE c.user_id=?")
         .bind(user.to_string()).fetch_optional(&mut *tx).await.map_err(ApiError::internal)?.ok_or_else(denied)?;
     let generation = parse_uuid(&row.get::<String, _>("generation"))?;
@@ -585,4 +597,165 @@ pub(crate) async fn reauth_finish(
     request: Result<Json<ProofFinish>, JsonRejection>,
 ) -> Result<Json<Value>, ApiError> {
     finish(state, headers, request.map_err(|_| invalid())?.0, "reauth").await
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct TerminateLogin {
+    attempt: Uuid,
+    device: DeviceBinding,
+}
+
+async fn require_live_login(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    user: Uuid,
+    attempt: Uuid,
+) -> Result<(), ApiError> {
+    let terminated: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM secure_login_terminations WHERE user_id=? AND attempt=?)",
+    )
+    .bind(user.to_string())
+    .bind(attempt.to_string())
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(ApiError::internal)?;
+    if terminated {
+        return Err(ApiError::conflict(
+            "operation_superseded",
+            "This sign-in attempt was ended on another authenticated device",
+        ));
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_lines)] // Terminal evidence, device revocation and proof cancellation share one lock.
+pub(crate) async fn terminate_login(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    request: Result<Json<TerminateLogin>, JsonRejection>,
+) -> Result<Json<Value>, ApiError> {
+    let Json(request) = request.map_err(|_| invalid())?;
+    rate(&state, &headers).await?;
+    let DeviceBinding::Prospective { id, token_sha256 } = &request.device else {
+        return Err(invalid());
+    };
+    if request.attempt.is_nil() || id.is_nil() {
+        return Err(invalid());
+    }
+    let device_hash = legacy_token_hash(token_sha256).map_err(|_| invalid())?;
+    let (origin, network) = service(&state).await?;
+    let mut tx = state
+        .pool
+        .begin_with("BEGIN IMMEDIATE")
+        .await
+        .map_err(ApiError::internal)?;
+    let session = session(&mut tx, &headers).await?;
+    if session.device == *id {
+        return Err(ApiError::forbidden(
+            "The active recovery device cannot terminate itself",
+        ));
+    }
+    // Enforce the account's secure generation and limit arbitrary missing-row
+    // tombstones as well as recognized pending/committed attempts.
+    current_precondition(&mut tx, session.user).await?;
+    account_membership::rate(&state, format!("login-termination:{}", session.user), 20).await?;
+    let scope = Scope {
+        origin,
+        network,
+        account: session.user,
+    };
+    let prior=sqlx::query("SELECT device_id,device_hash,revoked FROM secure_login_terminations WHERE user_id=? AND attempt=?")
+        .bind(session.user.to_string()).bind(request.attempt.to_string()).fetch_optional(&mut *tx).await.map_err(ApiError::internal)?;
+    if let Some(prior) = prior {
+        if prior.get::<String, _>("device_id") != id.to_string()
+            || prior.get::<String, _>("device_hash") != device_hash
+        {
+            return Err(ApiError::conflict(
+                "operation_conflict",
+                "Sign-in termination differs from its saved binding",
+            ));
+        }
+        return Ok(Json(
+            json!({"terminated":true,"attempt":request.attempt,"device_id":id,"scope":scope,"revoked":prior.get::<bool,_>("revoked")}),
+        ));
+    }
+    let pending = sqlx::query("SELECT kind,state FROM secure_auth_attempts WHERE id=?")
+        .bind(request.attempt.to_string())
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(ApiError::internal)?;
+    if let Some(pending) = pending {
+        if pending.get::<String, _>("kind") != "login" {
+            return Err(ApiError::forbidden(
+                "This attempt is not a matching sign-in",
+            ));
+        }
+        let pending = saved(pending.get("state"))?;
+        if pending.user != Some(session.user)
+            || pending.context.intent
+                != (auth::Intent::SignIn {
+                    device: *id,
+                    token_sha256: token_sha256.clone(),
+                })
+        {
+            return Err(ApiError::forbidden(
+                "This attempt belongs to another account or device",
+            ));
+        }
+    }
+    let receipt =
+        sqlx::query("SELECT user_id,device_id,kind FROM secure_operation_receipts WHERE id=?")
+            .bind(request.attempt.to_string())
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(ApiError::internal)?;
+    if let Some(receipt) = receipt
+        && (receipt.get::<String, _>("user_id") != session.user.to_string()
+            || receipt.get::<Option<String>, _>("device_id") != Some(id.to_string())
+            || receipt.get::<String, _>("kind") != "login")
+    {
+        return Err(ApiError::forbidden(
+            "This receipt belongs to another account or device",
+        ));
+    }
+    let device = sqlx::query("SELECT user_id,token_hash FROM devices WHERE id=?")
+        .bind(id.to_string())
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(ApiError::internal)?;
+    let revoked = device.is_some();
+    if let Some(device) = device {
+        if device.get::<String, _>("user_id") != session.user.to_string()
+            || device.get::<String, _>("token_hash") != device_hash
+        {
+            return Err(ApiError::forbidden(
+                "The device does not match this sign-in binding",
+            ));
+        }
+        let now = Utc::now().to_rfc3339();
+        sqlx::query("UPDATE devices SET revoked_at=COALESCE(revoked_at,?) WHERE id=?")
+            .bind(&now)
+            .bind(id.to_string())
+            .execute(&mut *tx)
+            .await
+            .map_err(ApiError::internal)?;
+        sqlx::query("UPDATE sessions SET revoked_at=COALESCE(revoked_at,?) WHERE device_id=?")
+            .bind(&now)
+            .bind(id.to_string())
+            .execute(&mut *tx)
+            .await
+            .map_err(ApiError::internal)?;
+    }
+    sqlx::query("DELETE FROM secure_auth_attempts WHERE id=? AND kind='login' AND user_id=?")
+        .bind(request.attempt.to_string())
+        .bind(session.user.to_string())
+        .execute(&mut *tx)
+        .await
+        .map_err(ApiError::internal)?;
+    sqlx::query("INSERT INTO secure_login_terminations(user_id,attempt,device_id,device_hash,revoked,terminated_at) VALUES(?,?,?,?,?,?)")
+        .bind(session.user.to_string()).bind(request.attempt.to_string()).bind(id.to_string()).bind(device_hash).bind(revoked).bind(Utc::now().timestamp()).execute(&mut *tx).await.map_err(ApiError::internal)?;
+    tx.commit().await.map_err(ApiError::internal)?;
+    Ok(Json(
+        json!({"terminated":true,"attempt":request.attempt,"device_id":id,"scope":scope,"revoked":revoked}),
+    ))
 }

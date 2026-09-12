@@ -409,3 +409,121 @@ async fn wrong_password_unknown_user_expired_or_changed_generation_never_activat
         .unwrap();
     assert_eq!(count, 0);
 }
+
+#[tokio::test]
+async fn abandoned_login_is_terminal_across_pending_commit_and_lost_start_cases() {
+    for finish_first in [false, true] {
+        let fixture = fixture().await;
+        let (_, recovery_session) = signed_in(&fixture).await;
+        let device = ProspectiveDevice::generate().unwrap();
+        let (attempt, client, started) =
+            login_start(&fixture, PASSWORD, "nativefixture", &device).await;
+        let context: auth::LoginContext =
+            serde_json::from_value(started["context"].clone()).unwrap();
+        let proof = client
+            .finish(
+                &context,
+                started["response"].as_str().unwrap(),
+                Some(&fixture.pin),
+            )
+            .unwrap();
+        let body = json!({"attempt":attempt,"finalization":proof.finalization});
+        if finish_first {
+            assert_eq!(
+                post(&fixture.state, "/v3/auth/login/finish", body.clone(), None)
+                    .await
+                    .0,
+                StatusCode::OK
+            );
+        }
+        let terminate = json!({"attempt":attempt,"device":device.binding()});
+        let (status, ended) = post(
+            &fixture.state,
+            "/v3/auth/login/terminate",
+            terminate.clone(),
+            Some(&recovery_session),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{ended}");
+        assert_eq!(ended["terminated"], true);
+        assert_eq!(ended["revoked"], finish_first);
+        assert_eq!(
+            post(
+                &fixture.state,
+                "/v3/auth/login/terminate",
+                terminate,
+                Some(&recovery_session)
+            )
+            .await
+            .1,
+            ended
+        );
+        assert_ne!(
+            post(&fixture.state, "/v3/auth/login/finish", body, None)
+                .await
+                .0,
+            StatusCode::OK
+        );
+        assert_eq!(
+            credential_session(&fixture, &device).await.0,
+            StatusCode::UNAUTHORIZED
+        );
+        let (_, request) = auth::Login::start(SecretString::from(PASSWORD.to_owned())).unwrap();
+        assert_eq!(post(&fixture.state,"/v3/auth/login/start",json!({"attempt":attempt,"username":"nativefixture","device":device.binding(),"device_name":"Delayed","request":request}),None).await.1["code"],"operation_superseded");
+    }
+    let fixture = fixture().await;
+    let (_, session) = signed_in(&fixture).await;
+    let attempt = Uuid::new_v4();
+    let device = ProspectiveDevice::generate().unwrap();
+    // Unknown outcome includes a start that never reached the service.
+    assert_eq!(
+        post(
+            &fixture.state,
+            "/v3/auth/login/terminate",
+            json!({"attempt":attempt,"device":device.binding()}),
+            Some(&session)
+        )
+        .await
+        .1["terminated"],
+        true
+    );
+    let (_, request) = auth::Login::start(SecretString::from(PASSWORD.to_owned())).unwrap();
+    assert_eq!(post(&fixture.state,"/v3/auth/login/start",json!({"attempt":attempt,"username":"nativefixture","device":device.binding(),"device_name":"Delayed","request":request}),None).await.1["code"],"operation_superseded");
+}
+
+#[tokio::test]
+async fn login_finish_termination_race_cannot_leave_a_live_abandoned_device() {
+    let fixture = fixture().await;
+    let (_, session) = signed_in(&fixture).await;
+    let device = ProspectiveDevice::generate().unwrap();
+    let (attempt, client, started) =
+        login_start(&fixture, PASSWORD, "nativefixture", &device).await;
+    let context: auth::LoginContext = serde_json::from_value(started["context"].clone()).unwrap();
+    let proof = client
+        .finish(
+            &context,
+            started["response"].as_str().unwrap(),
+            Some(&fixture.pin),
+        )
+        .unwrap();
+    let (ended, _) = tokio::join!(
+        post(
+            &fixture.state,
+            "/v3/auth/login/terminate",
+            json!({"attempt":attempt,"device":device.binding()}),
+            Some(&session)
+        ),
+        post(
+            &fixture.state,
+            "/v3/auth/login/finish",
+            json!({"attempt":attempt,"finalization":proof.finalization}),
+            None
+        )
+    );
+    assert_eq!(ended.0, StatusCode::OK);
+    assert_eq!(ended.1["terminated"], true);
+    assert_eq!(
+        credential_session(&fixture, &device).await.0,
+        StatusCode::UNAUTHORIZED
+    );
+}

@@ -10,6 +10,9 @@ use zeroize::Zeroizing;
 pub(super) mod authentication;
 #[cfg(test)]
 mod authentication_tests;
+pub(super) mod registration;
+#[cfg(test)]
+mod registration_tests;
 pub(super) mod vault;
 #[cfg(test)]
 mod vault_tests;

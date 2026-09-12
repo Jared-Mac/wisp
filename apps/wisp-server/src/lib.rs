@@ -600,6 +600,42 @@ pub fn router(state: AppState) -> Router {
             "/v3/auth/reauth/finish",
             post(secure_accounts::authentication::reauth_finish).layer(DefaultBodyLimit::max(8192)),
         )
+        .route(
+            "/v3/auth/register/start",
+            post(secure_accounts::registration::register_start).layer(DefaultBodyLimit::max(16384)),
+        )
+        .route(
+            "/v3/auth/register/finish",
+            post(secure_accounts::registration::register_finish)
+                .layer(DefaultBodyLimit::max(12 * 1024 * 1024)),
+        )
+        .route(
+            "/v3/auth/migrate/start",
+            post(secure_accounts::registration::migrate_start).layer(DefaultBodyLimit::max(16384)),
+        )
+        .route(
+            "/v3/auth/migrate/finish",
+            post(secure_accounts::registration::migrate_finish)
+                .layer(DefaultBodyLimit::max(12 * 1024 * 1024))
+                .layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    authenticate_text_body,
+                )),
+        )
+        .route(
+            "/v3/auth/password/start",
+            post(secure_accounts::registration::password_start).layer(DefaultBodyLimit::max(16384)),
+        )
+        .route(
+            "/v3/auth/password/finish",
+            post(secure_accounts::registration::password_finish)
+                .layer(DefaultBodyLimit::max(16384)),
+        )
+        .route(
+            "/v3/auth/login/terminate",
+            post(secure_accounts::authentication::terminate_login)
+                .layer(DefaultBodyLimit::max(4096)),
+        )
         .route("/v3/accounts/vault/status", get(secure_accounts::status))
         .route(
             "/v3/accounts/vault",

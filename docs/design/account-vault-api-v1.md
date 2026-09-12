@@ -91,6 +91,28 @@ constructs the wrapper, then reauthenticates its exact operation without another
 password prompt. Cancellation/expiry/account change drops the handle; it is never
 serialized. Expensive crypto/network work happens outside the repository lock.
 
+### Ending an outcome-unknown login
+
+After fresh secure sign-in restores the same account on a different staged
+credential, `POST /auth/login/terminate` accepts authenticated
+`{attempt,device:DeviceBinding::Prospective}` for the original unknown sign-in.
+It atomically cancels that pending proof, revokes the exact account/device/token
+hash if already activated, and saves permanent **account-scoped** terminal
+state. Response `{terminated:true,attempt,device_id,scope,revoked}` must match all
+saved bindings before the client retires the original stage; `revoked` alone is
+not the verdict. It never returns or reissues tokens. Exact retries return the
+same terminal result. The current recovery device cannot terminate itself.
+
+Start and finish cannot reactivate a terminated attempt for that account,
+including through an old completion receipt. Missing/expired pending state still
+receives a tombstone, preventing a delayed matching start or finish. Tombstones
+are keyed by account plus attempt; creating one cannot preempt another account's
+start using that attempt UUID. Existing foreign account/kind/device/hash state
+is rejected. Creation (including missing rows) is rate limited per account/peer.
+Signup recovery first verifies the exact committed enrollment receipt, then
+revokes or deliberately retains its original device; signup receipt retries
+never recreate or reactivate that credential.
+
 ## Secure signup and enabling an existing account
 
 New signup stages an identity, vault key, proposed account UUID, generation UUID,
