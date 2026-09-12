@@ -71,11 +71,11 @@ impl AppState {
 }
 
 impl Recovery {
-    fn available(&self) -> bool {
+    pub(super) fn available(&self) -> bool {
         !matches!(self.mailer, Mailer::Disabled)
     }
 
-    async fn rate(
+    pub(super) async fn rate(
         &self,
         headers: &HeaderMap,
         scope: &str,
@@ -102,7 +102,7 @@ impl Recovery {
         Ok(())
     }
 
-    async fn send(&self, email: &str, kind: &str, token: &str) -> Result<(), ApiError> {
+    pub(super) async fn send(&self, email: &str, kind: &str, token: &str) -> Result<(), ApiError> {
         let (subject, path, minutes) = if kind == "verify" {
             (
                 "Verify your Wisp recovery email",
@@ -146,14 +146,14 @@ impl Recovery {
     }
 }
 
-fn mail_unavailable() -> ApiError {
+pub(super) fn mail_unavailable() -> ApiError {
     ApiError {
         status: StatusCode::SERVICE_UNAVAILABLE,
         code: "mail_unavailable",
         message: "Recovery email is temporarily unavailable. Try again later".into(),
     }
 }
-fn rate_error() -> ApiError {
+pub(super) fn rate_error() -> ApiError {
     ApiError {
         status: StatusCode::TOO_MANY_REQUESTS,
         code: "recovery_rate_limited",
@@ -163,20 +163,20 @@ fn rate_error() -> ApiError {
 fn invalid_email() -> ApiError {
     ApiError::bad_request("invalid_email", "Enter a valid email address")
 }
-fn invalid_token() -> ApiError {
+pub(super) fn invalid_token() -> ApiError {
     ApiError::bad_request(
         "invalid_token",
         "This link is invalid or expired. Request a new one",
     )
 }
-fn unavailable_email() -> ApiError {
+pub(super) fn unavailable_email() -> ApiError {
     ApiError::conflict(
         "recovery_email_unavailable",
         "That email address is unavailable for this account",
     )
 }
 
-fn normalize_email(input: &str) -> Result<String, ApiError> {
+pub(super) fn normalize_email(input: &str) -> Result<String, ApiError> {
     let email = input.trim().to_ascii_lowercase();
     if email.len() > 254
         || !email.is_ascii()
@@ -194,7 +194,7 @@ fn new_token() -> String {
     URL_SAFE_NO_PAD.encode(bytes)
 }
 
-fn checked_token(token: &str) -> Result<String, ApiError> {
+pub(super) fn checked_token(token: &str) -> Result<String, ApiError> {
     if token.len() != 43
         || !token
             .bytes()
@@ -205,12 +205,12 @@ fn checked_token(token: &str) -> Result<String, ApiError> {
     Ok(token_hash(token))
 }
 
-async fn issue(
+pub(super) async fn issue(
     tx: &mut sqlx::SqliteConnection,
     user: &str,
     kind: &str,
     email: &str,
-    password: &str,
+    fingerprint: &str,
 ) -> Result<String, ApiError> {
     let token = new_token();
     let now = Utc::now().timestamp();
@@ -224,7 +224,7 @@ async fn issue(
     .await
     .map_err(ApiError::internal)?;
     sqlx::query("INSERT INTO account_recovery_tokens(token_hash,user_id,kind,email,password_fingerprint,expires_at) VALUES (?,?,?,?,?,?)")
-        .bind(token_hash(&token)).bind(user).bind(kind).bind(email).bind(token_hash(password))
+        .bind(token_hash(&token)).bind(user).bind(kind).bind(email).bind(fingerprint)
         .bind(now + if kind == "verify" {VERIFY_SECONDS} else {RESET_SECONDS})
         .execute(tx).await.map_err(ApiError::internal)?;
     Ok(token)
@@ -293,18 +293,45 @@ pub(super) async fn enroll(
             "Current password is incorrect",
         ));
     }
-    let mut tx = state.pool.begin().await.map_err(ApiError::internal)?;
+    let mut tx = state
+        .pool
+        .begin_with("BEGIN IMMEDIATE")
+        .await
+        .map_err(ApiError::internal)?;
+    let unchanged:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM users WHERE id=? AND password_hash=? AND NOT EXISTS(SELECT 1 FROM secure_credentials WHERE user_id=?))")
+        .bind(&user).bind(&password).bind(&user).fetch_one(&mut *tx).await.map_err(ApiError::internal)?;
+    if !unchanged {
+        return Err(ApiError::conflict(
+            "account_state_changed",
+            "Account state changed; refresh before continuing",
+        ));
+    }
+    let token = reserve_verification(&mut tx, &user, &email, &token_hash(&password)).await?;
+    tx.commit().await.map_err(ApiError::internal)?;
+    drop(permit);
+    if let Some(token) = token {
+        state.recovery.send(&email, "verify", &token).await?;
+    }
+    Ok(accepted())
+}
+
+pub(super) async fn reserve_verification(
+    connection: &mut sqlx::SqliteConnection,
+    user: &str,
+    email: &str,
+    fingerprint: &str,
+) -> Result<Option<String>, ApiError> {
     sqlx::query("INSERT OR IGNORE INTO account_recovery_emails(user_id) VALUES (?)")
-        .bind(&user)
-        .execute(&mut *tx)
+        .bind(user)
+        .execute(&mut *connection)
         .await
         .map_err(ApiError::internal)?;
     let exists: bool = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM account_recovery_emails WHERE email=? AND user_id<>?)",
     )
-    .bind(&email)
-    .bind(&user)
-    .fetch_one(&mut *tx)
+    .bind(email)
+    .bind(user)
+    .fetch_one(&mut *connection)
     .await
     .map_err(ApiError::internal)?;
     if exists {
@@ -313,12 +340,12 @@ pub(super) async fn enroll(
     let row = sqlx::query(
         "SELECT email,verification_sent_at FROM account_recovery_emails WHERE user_id=?",
     )
-    .bind(&user)
-    .fetch_one(&mut *tx)
+    .bind(user)
+    .fetch_one(&mut *connection)
     .await
     .map_err(ApiError::internal)?;
-    if row.get::<Option<String>, _>("email").as_deref() == Some(&email) {
-        return Ok(accepted());
+    if row.get::<Option<String>, _>("email").as_deref() == Some(email) {
+        return Ok(None);
     }
     let now = Utc::now().timestamp();
     if now - row.get::<i64, _>("verification_sent_at") < 60 {
@@ -327,17 +354,15 @@ pub(super) async fn enroll(
     sqlx::query(
         "UPDATE account_recovery_emails SET pending_email=?,verification_sent_at=? WHERE user_id=?",
     )
-    .bind(&email)
+    .bind(email)
     .bind(now)
-    .bind(&user)
-    .execute(&mut *tx)
+    .bind(user)
+    .execute(&mut *connection)
     .await
     .map_err(ApiError::internal)?;
-    let token = issue(&mut tx, &user, "verify", &email, &password).await?;
-    tx.commit().await.map_err(ApiError::internal)?;
-    drop(permit);
-    state.recovery.send(&email, "verify", &token).await?;
-    Ok(accepted())
+    issue(connection, user, "verify", email, fingerprint)
+        .await
+        .map(Some)
 }
 
 fn accepted() -> (StatusCode, Json<Value>) {
@@ -358,25 +383,55 @@ pub(super) struct Complete {
     new_password: String,
 }
 
+pub(super) fn credential_fingerprint(
+    password: Option<&str>,
+    generation: Option<&str>,
+) -> Result<String, ApiError> {
+    if let Some(generation) = generation {
+        if password.is_some() || Uuid::parse_str(generation).is_err() {
+            return Err(invalid_token());
+        }
+        return Ok(token_hash(&format!("wisp-secure-recovery-v1:{generation}")));
+    }
+    password.map(token_hash).ok_or_else(invalid_token)
+}
+
 async fn live_token(state: &AppState, digest: &str, kind: &str) -> Result<SqliteRow, ApiError> {
-    let row = sqlx::query("SELECT t.user_id,t.email,t.password_fingerprint,t.expires_at,u.password_hash,r.email AS verified_email,r.pending_email FROM account_recovery_tokens t JOIN users u ON u.id=t.user_id JOIN account_recovery_emails r ON r.user_id=t.user_id WHERE t.token_hash=? AND t.kind=? AND t.consumed_at IS NULL AND t.expires_at>?")
-        .bind(digest).bind(kind).bind(Utc::now().timestamp()).fetch_optional(&state.pool).await.map_err(ApiError::internal)?.ok_or_else(invalid_token)?;
+    let mut connection = state.pool.acquire().await.map_err(ApiError::internal)?;
+    live_token_in(&mut connection, digest, kind).await
+}
+pub(super) async fn live_token_in(
+    connection: &mut sqlx::SqliteConnection,
+    digest: &str,
+    kind: &str,
+) -> Result<SqliteRow, ApiError> {
+    let row=sqlx::query("SELECT t.user_id,t.email,t.password_fingerprint,t.expires_at,u.password_hash,u.username,c.generation AS secure_generation,r.email AS verified_email,r.pending_email FROM account_recovery_tokens t JOIN users u ON u.id=t.user_id JOIN account_recovery_emails r ON r.user_id=t.user_id LEFT JOIN secure_credentials c ON c.user_id=t.user_id WHERE t.token_hash=? AND t.kind=? AND t.consumed_at IS NULL AND t.expires_at>?")
+        .bind(digest).bind(kind).bind(Utc::now().timestamp()).fetch_optional(connection).await.map_err(ApiError::internal)?.ok_or_else(invalid_token)?;
     check_live(&row, kind)?;
     Ok(row)
 }
-
 fn check_live(row: &SqliteRow, kind: &str) -> Result<(), ApiError> {
     let current: Option<String> = row.get("password_hash");
+    let generation: Option<String> = row.get("secure_generation");
     let email: Option<String> = row.get(if kind == "verify" {
         "pending_email"
     } else {
         "verified_email"
     });
-    if current.as_deref().map(token_hash).as_deref()
-        != Some(&row.get::<String, _>("password_fingerprint"))
+    if credential_fingerprint(current.as_deref(), generation.as_deref())?
+        != row.get::<String, _>("password_fingerprint")
         || email.as_deref() != Some(&row.get::<String, _>("email"))
     {
         return Err(invalid_token());
+    }
+    Ok(())
+}
+fn require_classic_reset(row: &SqliteRow) -> Result<(), ApiError> {
+    if row.get::<Option<String>, _>("secure_generation").is_some() {
+        return Err(ApiError::conflict(
+            "secure_reset_required",
+            "Open Wisp to reset this account's secure password",
+        ));
     }
     Ok(())
 }
@@ -424,7 +479,7 @@ async fn reset_mail(state: &AppState, identifier: &str) -> Result<(), ApiError> 
     // Acquire SQLite's write lock before reading cooldown or issuing a link.
     sqlx::query("UPDATE account_recovery_emails SET reset_sent_at=reset_sent_at WHERE email=? OR user_id=(SELECT id FROM users WHERE username=? COLLATE NOCASE)")
         .bind(identifier).bind(identifier).execute(&mut *tx).await.map_err(ApiError::internal)?;
-    let row = sqlx::query("SELECT r.user_id,r.email,r.reset_sent_at,u.password_hash FROM account_recovery_emails r JOIN users u ON u.id=r.user_id WHERE r.email IS NOT NULL AND u.password_hash IS NOT NULL AND (r.email=? OR u.username=? COLLATE NOCASE)")
+    let row = sqlx::query("SELECT r.user_id,r.email,r.reset_sent_at,u.password_hash,c.generation AS secure_generation FROM account_recovery_emails r JOIN users u ON u.id=r.user_id LEFT JOIN secure_credentials c ON c.user_id=u.id WHERE r.email IS NOT NULL AND (u.password_hash IS NOT NULL OR c.generation IS NOT NULL) AND (r.email=? OR u.username=? COLLATE NOCASE)")
         .bind(identifier).bind(identifier).fetch_optional(&mut *tx).await.map_err(ApiError::internal)?;
     let Some(row) = row else { return Ok(()) };
     let now = Utc::now().timestamp();
@@ -444,7 +499,10 @@ async fn reset_mail(state: &AppState, identifier: &str) -> Result<(), ApiError> 
         &user,
         "reset",
         &email,
-        &row.get::<String, _>("password_hash"),
+        &credential_fingerprint(
+            row.get::<Option<String>, _>("password_hash").as_deref(),
+            row.get::<Option<String>, _>("secure_generation").as_deref(),
+        )?,
     )
     .await?;
     tx.commit().await.map_err(ApiError::internal)?;
@@ -461,7 +519,7 @@ pub(super) async fn inspect(
     let expires =
         chrono::DateTime::from_timestamp(row.get("expires_at"), 0).ok_or_else(invalid_token)?;
     Ok(Json(
-        json!({"valid":true,"expires_at":expires.to_rfc3339()}),
+        json!({"valid":true,"expires_at":expires.to_rfc3339(),"secure_reset_required":row.get::<Option<String>,_>("secure_generation").is_some()}),
     ))
 }
 
@@ -472,7 +530,7 @@ pub(super) async fn complete(
 ) -> Result<Json<Value>, ApiError> {
     state.recovery.rate(&headers, "token", 60, 600).await?;
     let digest = checked_token(&request.token)?;
-    live_token(&state, &digest, "reset").await?;
+    require_classic_reset(&live_token(&state, &digest, "reset").await?)?;
     validate_password(&request.new_password)?;
     let _permit = state
         .password_work
@@ -497,7 +555,7 @@ async fn consume(
     if changed != 1 {
         return Err(invalid_token());
     }
-    let row = sqlx::query("SELECT t.user_id,t.email,t.password_fingerprint,u.password_hash,r.email AS verified_email,r.pending_email FROM account_recovery_tokens t JOIN users u ON u.id=t.user_id JOIN account_recovery_emails r ON r.user_id=t.user_id WHERE t.token_hash=?")
+    let row = sqlx::query("SELECT t.user_id,t.email,t.password_fingerprint,u.password_hash,c.generation AS secure_generation,r.email AS verified_email,r.pending_email FROM account_recovery_tokens t JOIN users u ON u.id=t.user_id JOIN account_recovery_emails r ON r.user_id=t.user_id LEFT JOIN secure_credentials c ON c.user_id=t.user_id WHERE t.token_hash=?")
         .bind(digest).fetch_one(&mut *tx).await.map_err(ApiError::internal)?;
     check_live(&row, kind)?;
     let user: String = row.get("user_id");
@@ -519,6 +577,7 @@ async fn consume(
             }
         })?;
     } else {
+        require_classic_reset(&row)?;
         sqlx::query("UPDATE users SET password_hash=? WHERE id=?")
             .bind(password.ok_or_else(invalid_token)?)
             .bind(&user)
@@ -538,3 +597,36 @@ async fn consume(
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+pub(crate) fn captured_mail() -> Arc<Recovery> {
+    Arc::new(Recovery {
+        mailer: Mailer::Capture(Mutex::default()),
+        ..Recovery::default()
+    })
+}
+#[cfg(test)]
+pub(crate) async fn last_test_token(state: &AppState) -> String {
+    let Mailer::Capture(messages) = &state.recovery.mailer else {
+        panic!("Synthetic capture required")
+    };
+    let messages = messages.lock().await;
+    messages
+        .last()
+        .unwrap()
+        .1
+        .split("#token=")
+        .nth(1)
+        .unwrap()
+        .split_whitespace()
+        .next()
+        .unwrap()
+        .to_owned()
+}
+#[cfg(test)]
+pub(crate) async fn test_mail_count(state: &AppState) -> usize {
+    let Mailer::Capture(messages) = &state.recovery.mailer else {
+        panic!("Synthetic capture required")
+    };
+    messages.lock().await.len()
+}

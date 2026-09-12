@@ -250,18 +250,30 @@ pub(super) async fn begin(
             }
             return Ok(old.response(&authorization));
         }
-        let (Some(next), Some(previous)) = (&binding.signup, &old.binding.signup) else {
-            return Err(conflict());
+        let signup_replacement = match (&binding.signup, &old.binding.signup) {
+            (Some(next), Some(previous)) => {
+                kind == "register"
+                    && next.previous_binding_sha256.as_deref() == Some(&old_digest)
+                    && next.identity == previous.identity
+                    && next.scope == previous.scope
+                    && next.id == previous.id
+                    && next.generation == previous.generation
+                    && next.device == previous.device
+                    && next.signup == previous.signup
+            }
+            _ => false,
         };
-        if kind != "register"
-            || next.previous_binding_sha256.as_deref() != Some(&old_digest)
-            || next.identity != previous.identity
-            || next.scope != previous.scope
-            || next.id != previous.id
-            || next.generation != previous.generation
-            || next.device != previous.device
-            || next.signup != previous.signup
-        {
+        // A fresh live email token can renew transport authorization for the
+        // same saved reset effect, including when issuing it invalidated the
+        // previous token before its ticket deadline. Password/vault effects do
+        // not contain the renewable token hash.
+        let mut renewed_reset = old.binding.clone();
+        renewed_reset.reset_token_hash = binding.reset_token_hash.clone();
+        renewed_reset.expected = binding.expected.clone();
+        let reset_replacement = kind == "reset"
+            && renewed_reset == binding
+            && old.binding.expected.credential_generation == binding.expected.credential_generation;
+        if !signup_replacement && !reset_replacement {
             return Err(conflict());
         }
         // This write lock serializes CAS replacement with competing finishes.
@@ -280,10 +292,19 @@ pub(super) async fn begin(
             &binding.request,
         )
         .map_err(|_| invalid())?;
+    let mut expires_at = Utc::now().timestamp() + REGISTRATION_SECONDS;
+    if let Some(reset_token) = &binding.reset_token_hash {
+        let token_expiry:i64=sqlx::query_scalar("SELECT expires_at FROM account_recovery_tokens WHERE token_hash=? AND kind='reset' AND consumed_at IS NULL")
+            .bind(reset_token).fetch_optional(&mut **tx).await.map_err(ApiError::internal)?.ok_or_else(denied)?;
+        expires_at = expires_at.min(token_expiry);
+        if expires_at <= Utc::now().timestamp() {
+            return Err(denied());
+        }
+    }
     let pending = Pending {
         binding,
         response,
-        expires_at: Utc::now().timestamp() + REGISTRATION_SECONDS,
+        expires_at,
     };
     let authorization = ticket(native, &digest, pending.expires_at);
     let bytes = Zeroizing::new(serde_json::to_vec(&pending).map_err(|_| unavailable())?);

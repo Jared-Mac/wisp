@@ -636,6 +636,22 @@ pub fn router(state: AppState) -> Router {
             post(secure_accounts::authentication::terminate_login)
                 .layer(DefaultBodyLimit::max(4096)),
         )
+        .route(
+            "/v3/accounts/recovery-email",
+            post(secure_accounts::recovery::enroll_email).layer(DefaultBodyLimit::max(8192)),
+        )
+        .route(
+            "/v3/auth/reset/start",
+            post(secure_accounts::recovery::reset_start).layer(DefaultBodyLimit::max(16384)),
+        )
+        .route(
+            "/v3/auth/reset/finish",
+            post(secure_accounts::recovery::reset_finish).layer(DefaultBodyLimit::max(16384)),
+        )
+        .route(
+            "/v3/auth/reset/status",
+            post(secure_accounts::recovery::reset_status).layer(DefaultBodyLimit::max(16384)),
+        )
         .route("/v3/accounts/vault/status", get(secure_accounts::status))
         .route(
             "/v3/accounts/vault",
@@ -1261,6 +1277,7 @@ async fn bootstrap_device(
     Ok(Json(credential))
 }
 
+#[allow(clippy::too_many_lines)] // Legacy password recheck and optional invitation admission commit atomically.
 async fn login_account(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -1293,12 +1310,21 @@ async fn login_account(
         row.get::<Option<String>, _>("password_hash")
             .unwrap_or_default(),
     );
-    if !password_matches(request.password, encoded).await? {
+    if !password_matches(request.password, encoded.clone()).await? {
         record_login_failure(&state, &rate_key).await;
         return Err(ApiError::unauthorized("username or password is incorrect"));
     }
     clear_login_failures(&state, &rate_key).await;
-    let mut tx = state.pool.begin().await.map_err(ApiError::internal)?;
+    let mut tx = state
+        .pool
+        .begin_with("BEGIN IMMEDIATE")
+        .await
+        .map_err(ApiError::internal)?;
+    let unchanged:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM users WHERE id=? AND password_hash=? AND NOT EXISTS(SELECT 1 FROM secure_credentials WHERE user_id=?))")
+        .bind(user_id.to_string()).bind(&encoded).bind(user_id.to_string()).fetch_one(&mut *tx).await.map_err(ApiError::internal)?;
+    if !unchanged {
+        return Err(ApiError::unauthorized("username or password is incorrect"));
+    }
     if let Some(code) = request.invite_code.as_deref() {
         let now = Utc::now();
         let invite = sqlx::query("SELECT id,created_by,kind,conversation_id FROM account_invites WHERE code_hash=? AND used_at IS NULL AND expires_at>?")

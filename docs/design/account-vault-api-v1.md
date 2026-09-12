@@ -284,6 +284,16 @@ encrypted vault/wrapper. Return `{completed:true,scope,credential_generation,bac
 No new device/session is issued; never change the device's selected account.
 The old vault remains locked until a trusted device rewraps its retained key.
 
+Reset/status returns `{scope,credential_generation,receipt}` where receipt is null
+or `{operation_id,operation_sha256,scope,device_id:null,kind:"reset",result,committed_at}`.
+It matches the requested account/effect. A changed current generation and no
+matching receipt establishes supersession of the old expected-generation effect;
+the server permanently records retired generations and never reuses them.
+Recovery-email enrollment returns HTTP202 `{ok:true,operation_id,operation_sha256}`.
+This acknowledges the atomic token/grant/receipt commit; mail delivery happens
+afterward and is not implied by the receipt. Exact retries never resend mail.
+
+
 A committed reset receipt also retains the hashes of its consumed token and
 authorization. An exact finish retry with that same proof/effect may return the
 original public completion result after token consumption/expiry; it does not
