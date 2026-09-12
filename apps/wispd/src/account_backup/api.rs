@@ -77,7 +77,7 @@ struct Info {
     network: Uuid,
     max_vault_plaintext_bytes: usize,
 }
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields, tag = "mode", rename_all = "snake_case")]
 pub(crate) enum Status {
     Classic {
@@ -143,7 +143,7 @@ impl Status {
         Ok(())
     }
 }
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct VaultResponse {
     pub(crate) state: Status,
@@ -332,13 +332,13 @@ impl Api {
         &mut self,
         device: &wisp_protocol::DeviceCredential,
     ) -> anyhow::Result<()> {
-        #[derive(Deserialize)]
-        struct Session {
-            token: String,
-        }
-        let result:Session=self.post("/v1/sessions",&serde_json::json!({"device_id":device.device_id,"device_token":device.device_token,"protocol_version":wisp_protocol::PROTOCOL_VERSION}),false,16384).await?;
+        let result:wisp_protocol::DeviceSession=self.post("/v1/sessions",&serde_json::json!({"device_id":device.device_id,"device_token":device.device_token,"protocol_version":wisp_protocol::PROTOCOL_VERSION}),false,16384).await?;
         ensure!(
-            (32..=512).contains(&result.token.len()),
+            (32..=512).contains(&result.token.len())
+                && result.device_id == device.device_id
+                && result.user.id == device.user.id
+                && result.protocol_version == wisp_protocol::PROTOCOL_VERSION
+                && result.expires_at.timestamp() > super::sync::now(),
             "Invalid account session"
         );
         self.device = Some(device.device_id);
@@ -387,6 +387,14 @@ impl Api {
     }
     pub(crate) async fn status(&self) -> anyhow::Result<Status> {
         let state: Status = self.get("/v3/accounts/vault/status", 16384).await?;
+        self.validate_status(&state, false)?;
+        Ok(state)
+    }
+    pub(crate) fn validate_status(
+        &self,
+        state: &Status,
+        migration_recovery: bool,
+    ) -> anyhow::Result<()> {
         state.validate()?;
         ensure!(
             state.scope().origin == self.origin && state.scope().network == self.network,
@@ -409,12 +417,18 @@ impl Api {
                 );
             }
             ensure!(
-                !record.secure || matches!(state, Status::Secure { .. }),
+                !record.secure
+                    || matches!(state, Status::Secure { .. })
+                    || (migration_recovery
+                        && record
+                            .pending
+                            .as_ref()
+                            .is_some_and(|p| p.kind == super::store::Kind::Migration)),
                 "A secure account cannot return to classic sign-in"
             );
             Ok(())
         })?;
-        Ok(state)
+        Ok(())
     }
 }
 async fn read<T: DeserializeOwned>(

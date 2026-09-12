@@ -125,6 +125,7 @@ pub(crate) struct Pending {
     pub(crate) finish: Option<PrivateBytes>,
     pub(crate) effect_digest: Option<String>,
     pub(crate) sent: bool,
+    pub(crate) snapshot_dirty: Option<u64>,
     /// Never overwrite an outcome-unknown operation to recover its session.
     pub(crate) recovery: Vec<Pending>,
 }
@@ -144,12 +145,13 @@ impl Pending {
             finish: None,
             effect_digest: None,
             sent: false,
+            snapshot_dirty: None,
             recovery: Vec::new(),
         }
     }
     fn validate(&self, origin: &str, depth: usize) -> anyhow::Result<()> {
         ensure!(
-            !self.id.is_nil() && depth <= 1 && self.recovery.len() <= 8,
+            !self.id.is_nil() && depth <= 1 && self.recovery.len() <= 32,
             "Invalid pending account operation"
         );
         if let Some(scope) = &self.scope {
@@ -258,6 +260,11 @@ pub(crate) struct Record {
     bundle: Option<PrivateBytes>,
     pub(crate) pending: Option<Pending>,
     pub(crate) last_sync: Option<i64>,
+    /// Fixed encrypted target and verified progress for bounded history catch-up.
+    pub(crate) proof: Option<PrivateBytes>,
+    /// Committed device credential awaiting (or surviving) config installation.
+    pub(crate) installation: Option<PrivateBytes>,
+    pub(crate) installation_pending: bool,
 }
 impl Record {
     fn empty(origin: &str) -> Self {
@@ -280,6 +287,9 @@ impl Record {
             bundle: None,
             pending: None,
             last_sync: None,
+            proof: None,
+            installation: None,
+            installation_pending: false,
         }
     }
     pub(crate) fn bundle(&self) -> anyhow::Result<Option<Bundle>> {
@@ -359,6 +369,25 @@ impl Record {
         if self.key.is_some() {
             self.local_key()?;
         }
+        if let Some(installation) = &self.installation {
+            let device: wisp_protocol::DeviceCredential =
+                serde_json::from_value(installation.value()?)?;
+            ensure!(
+                self.scope
+                    .as_ref()
+                    .is_some_and(|scope| scope.account == device.user.id)
+                    && !device.device_id.is_nil()
+                    && (32..=512).contains(&device.device_token.len()),
+                "Invalid saved account installation"
+            );
+        }
+        ensure!(
+            !self.installation_pending || self.installation.is_some(),
+            "Missing account installation"
+        );
+        if let Some(proof) = &self.proof {
+            proof.decode(12 * 1024 * 1024)?;
+        }
         let bundle = self.bundle()?;
         ensure!(
             bundle.is_none() || (self.key.is_some() && self.scope.is_some()),
@@ -400,6 +429,11 @@ pub(crate) struct Store {
     cache: Mutex<Option<Cache>>,
 }
 struct Locked(File);
+/// Serializes account actions across daemon/onboarding processes while ordinary
+/// trust reads and writes remain available. Never holds the store data lock.
+pub(crate) struct ActionLease {
+    _lock: Locked,
+}
 impl Drop for Locked {
     fn drop(&mut self) {
         let _ = self.0.unlock();
@@ -429,6 +463,23 @@ fn private_dir(path: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 impl Store {
+    pub(crate) fn action(&self) -> anyhow::Result<ActionLease> {
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .mode(0o600)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+            .open(self.path.with_extension("action-lock"))?;
+        check_file(&file.metadata()?)?;
+        file.try_lock().map_err(|_| {
+            anyhow::anyhow!("Another account action is running. Wait for it to finish")
+        })?;
+        Ok(ActionLease {
+            _lock: Locked(file),
+        })
+    }
     pub(crate) fn at(root: &Path, origin: &str) -> anyhow::Result<Self> {
         ensure!(
             root.is_absolute(),
