@@ -331,3 +331,36 @@ verify the saved receipt or explicitly supersede a stranded operation after
 verifying current account identity and vault state against the staged identity/
 checkpoint. Preserve private keys throughout. A signup that never committed uses
 the exact-effect renewal path above; never silently generate a replacement.
+
+### Lost classic device during migration
+
+A still-classic account cannot use secure sign-in to recover a revoked migration
+device. The deliberately labelled original-password recovery flow uses staged
+credentials instead of the legacy unstaged login endpoint. It must never receive
+the proposed secure password or activate automatically after a secure failure.
+
+`POST /v3/auth/migrate/recover` accepts `{recovery,signature,legacy_password}`.
+`recovery` is shared `MigrationRecoveryBinding`:
+`{format:1,id,operation,device,device_name}`, where `id` is a fresh recovery UUID,
+`operation` is the exact saved migration `Operation`, and `device` is a fresh
+`Prospective` binding staged privately before dispatch. The original account
+identity signs the binding with domain `wisp-migration-device-recovery-v1`.
+Never persist `legacy_password` in the journal; exact retry may supply `""` to
+read an existing signed receipt, or prompt for the original password if needed.
+
+One write transaction verifies the unchanged classic password verifier and
+existing account identity, confirms the migration has not committed, revokes its
+original existing device and sessions, activates the staged replacement device,
+and saves a `migration_recovery` receipt keyed by `recovery.id` and its digest.
+Response: `{recovered:true,recovery_id,scope,operation_id,operation_sha256,
+terminated_device_id,device_id,user:{id,display_name},username,identity}`.
+All fields must match the saved bindings. This proves the original exact
+existing-device effect cannot commit later; the account remains classic.
+
+Exact identity-signed replay returns the same receipt without requiring a
+password, even after later migration, but never reactivates a revoked device.
+If migration wins the transaction race, this route cannot create a credential;
+recover through secure sign-in. Preserve every outcome-unknown replacement until
+its exact receipt and explicit revocation (or deliberate installation) are
+confirmed under a fresh same-account session. A lost recovery response or 401 is
+never permission to discard the staged device.

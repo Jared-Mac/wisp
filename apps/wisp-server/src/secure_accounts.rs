@@ -10,6 +10,7 @@ use zeroize::Zeroizing;
 pub(super) mod authentication;
 #[cfg(test)]
 mod authentication_tests;
+pub(super) mod migration_recovery;
 pub(super) mod recovery;
 #[cfg(test)]
 mod recovery_tests;
@@ -129,6 +130,40 @@ pub(super) async fn private_responses(request: Request, next: Next) -> Response 
         );
     }
     response
+}
+
+/// Bound public enrollment memory and work before the request body is read.
+/// An abandoned/slow body cannot reserve one of these slots indefinitely.
+pub(super) async fn public_work(
+    State(state): State<AppState>,
+    request: Request,
+    next: Next,
+) -> Response {
+    let path = request.uri().path();
+    let public = path.starts_with("/v3/auth/login/") && path != "/v3/auth/login/terminate"
+        || path.starts_with("/v3/auth/register/")
+        || path.starts_with("/v3/auth/reset/")
+        || path == "/v3/auth/migrate/recover";
+    if !public {
+        return next.run(request).await;
+    }
+    let Ok(_permit) = state.secure_public_work.try_acquire() else {
+        return ApiError {
+            status: StatusCode::TOO_MANY_REQUESTS,
+            code: "rate_limited",
+            message: "Please try again shortly".into(),
+        }
+        .into_response();
+    };
+    match tokio::time::timeout(std::time::Duration::from_secs(30), next.run(request)).await {
+        Ok(response) => response,
+        Err(_) => ApiError {
+            status: StatusCode::REQUEST_TIMEOUT,
+            code: "request_timeout",
+            message: "Account request timed out; retry its saved action".into(),
+        }
+        .into_response(),
+    }
 }
 
 struct AccountState {

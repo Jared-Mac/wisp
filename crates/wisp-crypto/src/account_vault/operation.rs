@@ -491,3 +491,122 @@ mod tests {
         );
     }
 }
+
+/// Deliberate recovery of a classic account when its migration device was lost.
+/// This cannot authorize secure-password sign-in or change encryption keys.
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct MigrationRecoveryBinding {
+    pub format: u32,
+    pub id: Uuid,
+    pub operation: Operation,
+    pub device: DeviceBinding,
+    pub device_name: String,
+}
+impl MigrationRecoveryBinding {
+    pub fn validate(&self) -> anyhow::Result<()> {
+        self.operation.validate()?;
+        self.device.validate()?;
+        ensure!(
+            self.format == 1
+                && !self.id.is_nil()
+                && self.id != self.operation.id
+                && matches!(self.operation.change, Change::Enroll { signup: None, .. })
+                && matches!(self.operation.device, DeviceBinding::Existing { .. })
+                && matches!(self.device, DeviceBinding::Prospective { .. })
+                && self.device.id() != self.operation.device.id()
+                && self.device_name.trim() == self.device_name
+                && !self.device_name.is_empty()
+                && self.device_name.chars().count() <= 80
+                && !self.device_name.chars().any(char::is_control),
+            "Invalid migration recovery binding"
+        );
+        Ok(())
+    }
+    fn statement(&self) -> anyhow::Result<Vec<u8>> {
+        self.validate()?;
+        Ok(serde_json::to_vec(&(
+            "wisp-migration-device-recovery-v1",
+            self,
+        ))?)
+    }
+    pub fn digest(&self) -> anyhow::Result<String> {
+        Ok(format!("{:x}", Sha256::digest(self.statement()?)))
+    }
+    pub fn sign(&self, identity: &Identity) -> anyhow::Result<String> {
+        Ok(identity.sign_statement("wisp-migration-device-recovery-v1", &self.statement()?))
+    }
+    pub fn verify(&self, identity: &PublicIdentity, signature: &str) -> anyhow::Result<()> {
+        ensure!(
+            signature.len() <= 128,
+            "Invalid migration recovery signature"
+        );
+        identity.verify_statement(
+            "wisp-migration-device-recovery-v1",
+            &self.statement()?,
+            signature,
+        )
+    }
+}
+
+#[cfg(test)]
+mod migration_recovery_tests {
+    use super::*;
+    #[test]
+    fn recovery_signature_binds_original_effect_and_both_devices() {
+        let identity = Identity::generate().unwrap();
+        let binding = MigrationRecoveryBinding {
+            format: 1,
+            id: Uuid::new_v4(),
+            device: DeviceBinding::Prospective {
+                id: Uuid::new_v4(),
+                token_sha256: "a".repeat(64),
+            },
+            device_name: "Synthetic recovery".into(),
+            operation: Operation {
+                format: 1,
+                scope: Scope {
+                    origin: "https://example.invalid".into(),
+                    network: Uuid::new_v4(),
+                    account: Uuid::new_v4(),
+                },
+                id: Uuid::new_v4(),
+                device: DeviceBinding::Existing { id: Uuid::new_v4() },
+                expected: Precondition::default(),
+                change: Change::Enroll {
+                    generation: Uuid::new_v4(),
+                    registration_sha256: "b".repeat(64),
+                    wrapper_sha256: "c".repeat(64),
+                    vault: Checkpoint {
+                        revision: 1,
+                        sha256: "d".repeat(64),
+                    },
+                    signup: None,
+                },
+            },
+        };
+        let signature = binding.sign(&identity).unwrap();
+        binding.verify(&identity.public(), &signature).unwrap();
+        for field in 0..5 {
+            let mut changed = binding.clone();
+            match field {
+                0 => changed.id = Uuid::new_v4(),
+                1 => changed.operation.scope.account = Uuid::new_v4(),
+                2 => changed.operation.device = DeviceBinding::Existing { id: Uuid::new_v4() },
+                3 => {
+                    changed.device = DeviceBinding::Prospective {
+                        id: Uuid::new_v4(),
+                        token_sha256: "a".repeat(64),
+                    }
+                }
+                _ => changed.device_name = "Changed name".into(),
+            }
+            assert!(changed.verify(&identity.public(), &signature).is_err());
+        }
+        assert!(
+            binding
+                .verify(&Identity::generate().unwrap().public(), &signature)
+                .is_err()
+        );
+    }
+}

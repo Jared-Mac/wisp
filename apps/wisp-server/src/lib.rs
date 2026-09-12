@@ -125,6 +125,7 @@ pub struct AppState {
     config: Arc<AppConfig>,
     login_failures: Arc<Mutex<HashMap<String, VecDeque<Instant>>>>,
     password_work: Arc<Semaphore>,
+    secure_public_work: Arc<Semaphore>,
     recovery: Arc<account_recovery::Recovery>,
 }
 
@@ -263,6 +264,7 @@ impl AppState {
             config: Arc::new(config),
             login_failures: Arc::new(Mutex::new(HashMap::new())),
             password_work: Arc::new(Semaphore::new(PASSWORD_WORK_LIMIT)),
+            secure_public_work: Arc::new(Semaphore::new(8)),
             recovery: Arc::new(account_recovery::Recovery::default()),
         })
     }
@@ -614,6 +616,10 @@ pub fn router(state: AppState) -> Router {
             post(secure_accounts::registration::migrate_start).layer(DefaultBodyLimit::max(16384)),
         )
         .route(
+            "/v3/auth/migrate/recover",
+            post(secure_accounts::migration_recovery::recover).layer(DefaultBodyLimit::max(16384)),
+        )
+        .route(
             "/v3/auth/migrate/finish",
             post(secure_accounts::registration::migrate_finish)
                 .layer(DefaultBodyLimit::max(12 * 1024 * 1024))
@@ -868,6 +874,10 @@ pub fn router(state: AppState) -> Router {
         ))
         .layer(TraceLayer::new_for_http())
         .layer(middleware::from_fn(account_recovery::private_responses))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            secure_accounts::public_work,
+        ))
         .layer(middleware::from_fn(secure_accounts::private_responses))
         .with_state(state)
 }

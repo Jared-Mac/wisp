@@ -425,7 +425,11 @@ pub(crate) async fn register_start(
 
 /// Verify legacy password off the `SQLite` write lock, then compare its complete
 /// slow-verifier fingerprint again inside the commit transaction.
-async fn legacy_proof(state: &AppState, user: Uuid, password: String) -> Result<String, ApiError> {
+pub(super) async fn legacy_proof(
+    state: &AppState,
+    user: Uuid,
+    password: String,
+) -> Result<String, ApiError> {
     let _permit = state.password_work.try_acquire().map_err(|_| ApiError {
         status: StatusCode::TOO_MANY_REQUESTS,
         code: "rate_limited",

@@ -666,3 +666,172 @@ async fn termination_is_account_scoped_checks_device_hash_and_forbids_self_revoc
         StatusCode::OK
     );
 }
+
+async fn pending_classic_migration() -> (AppState, Signup, String, Value) {
+    let state = empty().await;
+    let mut signup = Signup::new(&state).await;
+    let old = hash_password("synthetic old classic password".into())
+        .await
+        .unwrap();
+    let account = signup.binding.scope.account;
+    sqlx::query("INSERT INTO users(id,username,display_name,password_hash,server_member) VALUES(?,?,'Classic recovery',?,0)")
+        .bind(account.to_string()).bind(&signup.binding.signup.username).bind(old).execute(&state.pool).await.unwrap();
+    sqlx::query("INSERT INTO chat_identities(user_id,public_identity) VALUES(?,?)")
+        .bind(account.to_string())
+        .bind(serde_json::to_string(&signup.identity.public()).unwrap())
+        .execute(&state.pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO devices(id,user_id,name,token_hash,created_at) VALUES(?,?,'Synthetic',?,?)",
+    )
+    .bind(signup.device.id().to_string())
+    .bind(account.to_string())
+    .bind(token_hash(signup.device.token().expose_secret()))
+    .bind(Utc::now().to_rfc3339())
+    .execute(&state.pool)
+    .await
+    .unwrap();
+    let (_, response) = session_for(&state, &signup.device).await;
+    let session = response["token"].as_str().unwrap().to_owned();
+    let (status, started) = post(&state, "/v3/auth/migrate/start", json!({"operation_id":signup.binding.id,"generation":signup.binding.generation,"request":signup.request,"legacy_password":"synthetic old classic password"}),Some(&session)).await;
+    assert_eq!(status, StatusCode::OK);
+    let mut finish = signup.finish_body(&started);
+    let mut operation: Operation = serde_json::from_value(finish["operation"].clone()).unwrap();
+    operation.device = DeviceBinding::Existing {
+        id: signup.device.id(),
+    };
+    if let Change::Enroll { signup, .. } = &mut operation.change {
+        *signup = None;
+    }
+    finish["signature"] = json!(operation.sign(&signup.identity).unwrap());
+    finish["operation"] = json!(operation);
+    (state, signup, session, finish)
+}
+#[tokio::test]
+async fn staged_classic_recovery_terminates_old_migration_and_replay_never_reactivates() {
+    use wisp_crypto::account_vault::operation::MigrationRecoveryBinding;
+    let (state, signup, session, finish) = pending_classic_migration().await;
+    let device = ProspectiveDevice::generate().unwrap();
+    let binding = MigrationRecoveryBinding {
+        format: 1,
+        id: Uuid::new_v4(),
+        operation: serde_json::from_value(finish["operation"].clone()).unwrap(),
+        device: device.binding(),
+        device_name: "Synthetic recovery".into(),
+    };
+    let mut body = json!({"recovery":binding,"signature":binding.sign(&signup.identity).unwrap(),"legacy_password":"synthetic wrong classic password"});
+    assert_eq!(
+        post(&state, "/v3/auth/migrate/recover", body.clone(), None)
+            .await
+            .0,
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        session_for(&state, &device).await.0,
+        StatusCode::UNAUTHORIZED
+    );
+    body["legacy_password"] = json!("synthetic old classic password");
+    let (status, result) = post(&state, "/v3/auth/migrate/recover", body.clone(), None).await;
+    assert_eq!(status, StatusCode::OK, "{result}");
+    assert_eq!(
+        result["operation_sha256"],
+        binding.operation.digest().unwrap()
+    );
+    assert_eq!(
+        result["terminated_device_id"],
+        signup.device.id().to_string()
+    );
+    assert_eq!(
+        post(&state, "/v3/auth/migrate/finish", finish, Some(&session))
+            .await
+            .0,
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        session_for(&state, &signup.device).await.0,
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(session_for(&state, &device).await.0, StatusCode::OK);
+    // Exact signed receipt remains recoverable with no old password, even if
+    // the recovery device was revoked before its response reached the client.
+    sqlx::query("UPDATE devices SET revoked_at=? WHERE id=?")
+        .bind(Utc::now().to_rfc3339())
+        .bind(device.id().to_string())
+        .execute(&state.pool)
+        .await
+        .unwrap();
+    body["legacy_password"] = json!("");
+    assert_eq!(
+        post(&state, "/v3/auth/migrate/recover", body.clone(), None)
+            .await
+            .1,
+        result
+    );
+    assert_eq!(
+        session_for(&state, &device).await.0,
+        StatusCode::UNAUTHORIZED
+    );
+    body["recovery"]["device_name"] = json!("tampered");
+    assert!(
+        !post(&state, "/v3/auth/migrate/recover", body, None)
+            .await
+            .0
+            .is_success()
+    );
+}
+#[tokio::test]
+async fn migration_and_staged_classic_recovery_have_only_one_winner() {
+    use wisp_crypto::account_vault::operation::MigrationRecoveryBinding;
+    let (state, signup, session, finish) = pending_classic_migration().await;
+    let device = ProspectiveDevice::generate().unwrap();
+    let binding = MigrationRecoveryBinding {
+        format: 1,
+        id: Uuid::new_v4(),
+        operation: serde_json::from_value(finish["operation"].clone()).unwrap(),
+        device: device.binding(),
+        device_name: "Synthetic recovery".into(),
+    };
+    let body = json!({"recovery":binding,"signature":binding.sign(&signup.identity).unwrap(),"legacy_password":"synthetic old classic password"});
+    let (migrated, recovered) = tokio::join!(
+        post(&state, "/v3/auth/migrate/finish", finish, Some(&session)),
+        post(&state, "/v3/auth/migrate/recover", body, None)
+    );
+    assert_ne!(migrated.0.is_success(), recovered.0.is_success());
+    let secure: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM secure_credentials WHERE user_id=?)")
+            .bind(signup.binding.scope.account.to_string())
+            .fetch_one(&state.pool)
+            .await
+            .unwrap();
+    assert_eq!(secure, migrated.0.is_success());
+    assert_eq!(
+        session_for(&state, &device).await.0.is_success(),
+        recovered.0.is_success()
+    );
+}
+#[tokio::test]
+async fn public_secure_concurrency_rejects_before_reading_unbounded_body() {
+    use axum::{body::Body, http::Request};
+    use tower::ServiceExt;
+    let state = empty().await;
+    let _held = state.secure_public_work.acquire_many(8).await.unwrap();
+    let body = Body::from_stream(futures_util::stream::pending::<
+        Result<axum::body::Bytes, std::io::Error>,
+    >());
+    let request = Request::builder()
+        .method("POST")
+        .uri("/v3/auth/register/finish")
+        .header("content-type", "application/json")
+        .body(body)
+        .unwrap();
+    let response = tokio::time::timeout(
+        std::time::Duration::from_secs(1),
+        router(state.clone()).oneshot(request),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(response.headers()["cache-control"], "no-store");
+}

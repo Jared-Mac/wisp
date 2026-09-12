@@ -97,7 +97,7 @@ CREATE TABLE secure_operation_receipts (
     id TEXT PRIMARY KEY NOT NULL,
     user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     device_id TEXT,
-    kind TEXT NOT NULL CHECK(kind IN ('register','migrate','password','rewrap','vault','recovery_email','reset','login')),
+    kind TEXT NOT NULL CHECK(kind IN ('register','migrate','migration_recovery','password','rewrap','vault','recovery_email','reset','login')),
     effect_digest TEXT NOT NULL CHECK(length(effect_digest)=64),
     result TEXT NOT NULL CHECK(length(result)<=16384),
     authorization_hash TEXT,
