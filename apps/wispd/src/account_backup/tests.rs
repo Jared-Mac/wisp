@@ -8,11 +8,11 @@ use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 use wisp_crypto::{Identity, SecretString, keyring::TrustStore};
 const PASSWORD: &str = "synthetic private account password";
-struct Fixture {
-    folder: tempfile::TempDir,
-    origin: String,
-    pool: sqlx::SqlitePool,
-    faults: Arc<Mutex<Option<String>>>,
+pub(crate) struct Fixture {
+    pub(crate) folder: tempfile::TempDir,
+    pub(crate) origin: String,
+    pub(crate) pool: sqlx::SqlitePool,
+    pub(crate) faults: Arc<Mutex<Option<String>>>,
     task: tokio::task::JoinHandle<()>,
 }
 impl Drop for Fixture {
@@ -21,7 +21,7 @@ impl Drop for Fixture {
     }
 }
 impl Fixture {
-    async fn new() -> Self {
+    pub(crate) async fn new() -> Self {
         let folder = tempfile::tempdir().unwrap();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let origin = format!("http://{}", listener.local_addr().unwrap());
@@ -57,14 +57,14 @@ impl Fixture {
             task,
         }
     }
-    async fn client(&self, name: &str) -> Api {
+    pub(crate) async fn client(&self, name: &str) -> Api {
         let store = Arc::new(Store::at(&self.folder.path().join(name), &self.origin).unwrap());
         Api::connect(&self.origin, store, None, None).await.unwrap()
     }
     fn lose(&self, path: &str) {
         *self.faults.lock().unwrap() = Some(path.to_owned());
     }
-    fn fail_before(&self, path: &str) {
+    pub(crate) fn fail_before(&self, path: &str) {
         self.lose(&format!("before:{path}"));
     }
     async fn revoke(&self, device: Uuid) {
@@ -700,4 +700,71 @@ async fn lost_signup_recovery_uses_staged_identity_then_revokes_original_device(
         .await
         .unwrap();
     assert!(revoked);
+}
+
+#[tokio::test]
+async fn unchanged_background_sync_uses_small_status_check_without_downloading_payload() {
+    let fixture = Fixture::new().await;
+    let mut first = fixture.client("first").await;
+    first
+        .signup("synthetic", "Synthetic user", "Synthetic first", password())
+        .await
+        .unwrap();
+    fixture.fail_before("/v3/accounts/vault");
+    first.sync().await.unwrap();
+    assert!(fixture.faults.lock().unwrap().is_some());
+}
+
+#[tokio::test]
+async fn installation_waits_for_restore_then_retries_without_losing_other_accounts_or_previous_files()
+ {
+    let fixture = Fixture::new().await;
+    let mut first = fixture.client("first").await;
+    fixture.lose("/v1/sessions");
+    assert!(
+        first
+            .signup("synthetic", "Synthetic user", "Synthetic first", password())
+            .await
+            .is_err()
+    );
+    let config = fixture.folder.path().join("config");
+    let registry = config.join("accounts.json");
+    let env = config.join("account.env");
+    assert!(
+        first.store.record().unwrap().installation_pending
+            && !first.store.record().unwrap().installation_ready
+    );
+    assert!(super::install::committed(&first.store, &registry, &env).is_err());
+    assert!(!registry.exists() && !env.exists());
+    first.resume_enrollment(None).await.unwrap();
+    let credential = first.installation().unwrap();
+    // A linked service's recovery must not change which server the user chose.
+    super::install::credential(
+        &registry,
+        &env,
+        "https://other.invalid",
+        &credential,
+        None,
+        true,
+    )
+    .unwrap();
+    let primary = std::fs::read(&env).unwrap();
+    assert!(super::install::committed(&first.store, &registry, &env).unwrap());
+    assert!(std::fs::read(&env).unwrap() == primary);
+    let installed = crate::accounts::AccountRegistry::load(&registry).unwrap();
+    assert_eq!(installed.servers.len(), 2);
+    assert!(installed.selected_server_id == crate::accounts::stable_id("https://other.invalid"));
+    let previous = std::fs::read(registry.with_extension("json.previous")).unwrap();
+    // Simulate the final journal acknowledgment being interrupted after files
+    // were installed. An exact retry preserves the real previous-file backup.
+    first
+        .store
+        .update(None, |record| {
+            record.installation_pending = true;
+            Ok(())
+        })
+        .unwrap();
+    assert!(super::install::committed(&first.store, &registry, &env).unwrap());
+    assert!(std::fs::read(registry.with_extension("json.previous")).unwrap() == previous);
+    assert!(!first.store.record().unwrap().installation_pending);
 }

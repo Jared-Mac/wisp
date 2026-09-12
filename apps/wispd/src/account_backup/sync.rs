@@ -1,3 +1,4 @@
+#![allow(clippy::items_after_statements)] // Keep private response types beside their validation.
 //! Signed history catch-up and detached, conflict-preserving trust merges.
 use super::{
     api::{Api, ProofPage, Receipt, VaultResponse},
@@ -60,6 +61,7 @@ impl Api {
     }
     /// Persist every verified page before yielding. A restart resumes the exact
     /// target; it cannot skip a retained checkpoint to shorten a large history.
+    #[allow(clippy::too_many_lines)] // Keep durable transition ordering reviewable as one operation.
     async fn verified_vault(&self) -> anyhow::Result<VaultResponse> {
         let record = self.store.record()?;
         let mut catchup = if let Some(saved) = &record.proof {
@@ -376,6 +378,7 @@ impl Api {
         }
         Ok(Some(receipt))
     }
+    #[allow(clippy::too_many_lines)] // Keep durable transition ordering reviewable as one operation.
     pub(crate) async fn sync(&self) -> anyhow::Result<()> {
         if let Some(pending) = self.store.record()?.pending {
             ensure!(
@@ -412,10 +415,27 @@ impl Api {
                 Ok(())
             })?;
         }
-        ensure!(
-            self.restore(None).await?,
-            "Unlock your encrypted backup before syncing"
-        );
+        let current = self.status().await?;
+        let saved = self.store.record()?;
+        if saved.key_verified
+            && saved.proof.is_none()
+            && saved.checkpoint == current.expected().vault
+        {
+            // A small status check is enough when the authenticated payload
+            // checkpoint is unchanged. Avoid downloading the whole backup on
+            // every background tick or before publishing local-only changes.
+            if saved.expected.as_ref() != Some(&current.expected()) {
+                self.store.update(None, |record| {
+                    record.expected = Some(current.expected());
+                    Ok(())
+                })?;
+            }
+        } else {
+            ensure!(
+                self.restore(None).await?,
+                "Unlock your encrypted backup before syncing"
+            );
+        }
         let record = self.store.record()?;
         if record.synced_dirty == record.dirty {
             return Ok(());

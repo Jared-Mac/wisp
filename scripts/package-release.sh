@@ -91,7 +91,7 @@ install -m 0600 "$repo_dir/infra/local/server.env.example" "$package_dir/infra/l
 mkdir -p "$package_dir/infra/private-host" "$package_dir/docs"
 cp -a "$repo_dir/infra/private-host/." "$package_dir/infra/private-host/"
 install -m 0644 "$repo_dir/docs/privacy-hardening.md" "$repo_dir/docs/private-host-setup.md" "$package_dir/docs/"
-install -m 0644 "$repo_dir/docs/chat-extras.md" "$package_dir/docs/"
+install -m 0644 "$repo_dir/docs/chat-extras.md" "$repo_dir/docs/account-backup.md" "$package_dir/docs/"
 install -m 0755 "$repo_dir/scripts/install-release.sh" "$package_dir/install.sh"
 install -m 0644 "$repo_dir/LICENSE" "$repo_dir/README.md" "$package_dir/"
 mkdir -p "$package_dir/licenses"

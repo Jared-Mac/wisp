@@ -220,6 +220,7 @@ Item {
   property bool serverSettingsBusy: false
   property string serverSettingsFeedback: ""
   property var accountProfile: ({})
+  property var accountBackup: ({})
   property var recoveryEmail: ({email:null,pending_email:null,verified:false,delivery_available:false})
   property bool profileBusy: false
   property bool profileReady: false
@@ -228,6 +229,7 @@ Item {
   readonly property string profileServerId: String(activeServer.id || "")
   onProfileServerIdChanged: {
     accountProfile = ({})
+    accountBackup = ({})
     recoveryEmail = ({email:null,pending_email:null,verified:false,delivery_available:false})
     profileRequestId = ""
     profileBusy = false
@@ -242,7 +244,7 @@ Item {
       requests[id] = {kind:"profile",action:action,serverId:serverId}
       profileRequestId = id
       profileBusy = true
-      if (action !== "recovery_email") profileFeedback = ""
+      if (action !== "recovery_email" && action !== "backup_status") profileFeedback = ""
     }
     return !!id
   }
@@ -1377,8 +1379,15 @@ Item {
       profileRequestId = ""
       profileBusy = false
       if (message.ok) {
-        if (action.action === "recovery_email") {
+        if (action.action.indexOf("backup_") === 0) {
+          accountBackup = value
+          if (action.action !== "backup_status") {
+            profileFeedback = value.pending ? "Account action saved. Continue recovery below." : "Account backup updated."
+            settingsSaved()
+          }
+        } else if (action.action === "recovery_email") {
           recoveryEmail = value
+          Qt.callLater(function() { root.profileAction("backup_status", {}) })
           if (value.verified && !value.pending_email && profileFeedback === "Check your email to verify the address.") profileFeedback = "Recovery email is verified."
         }
         else if (action.action === "set_recovery_email") {
@@ -1388,10 +1397,12 @@ Item {
           if (action.action !== "change_account_password") { accountProfile = value; profileReady = true }
           if (action.action !== "account_profile") { profileFeedback = action.action === "change_account_password" ? "Password changed" : "Display name saved"; settingsSaved() }
           else Qt.callLater(function() { root.profileAction("recovery_email", {}) })
+          if (action.action === "change_account_password") Qt.callLater(function() { root.profileAction("backup_status", {}) })
         }
       } else {
         profileFeedback = ""
         settingsSaveFailed()
+        if (action.action !== "backup_status") Qt.callLater(function() { root.profileAction("backup_status", {}) })
       }
     } else if (action.kind === "serverSettings") {
       if (message.ok) serverSettings = value

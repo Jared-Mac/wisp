@@ -1,4 +1,7 @@
+// Shared with wisp-account; reset and signup are used only by that executable.
+#[allow(dead_code)]
 mod account_backup;
+mod account_backup_commands;
 mod account_membership;
 mod account_profile;
 mod accounts;
@@ -102,10 +105,11 @@ struct ServerApi {
     client: reqwest::Client,
     base_url: String,
     token: Arc<StdRwLock<String>>,
-    auth: AuthMethod,
+    auth: Arc<StdRwLock<AuthMethod>>,
+    account_registry: Option<PathBuf>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 enum AuthMethod {
     Development {
         profile: String,
@@ -117,6 +121,14 @@ enum AuthMethod {
 }
 
 impl ServerApi {
+    fn activate_recovered_device(&self, credential: &wisp_protocol::DeviceCredential, token: &str) {
+        let mut auth = self.auth.write().expect("account credential lock");
+        *auth = AuthMethod::Device {
+            device_id: credential.device_id,
+            device_token: credential.device_token.clone(),
+        };
+        token.clone_into(&mut self.token.write().expect("session token lock"));
+    }
     async fn connect(base_url: String, profile: &str) -> anyhow::Result<(Self, Snapshot)> {
         let device_id = std::env::var("WISP_DEVICE_ID").ok();
         let device_token = std::env::var("WISP_DEVICE_TOKEN").ok();
@@ -158,7 +170,8 @@ impl ServerApi {
             client,
             base_url,
             token: Arc::new(StdRwLock::new(token)),
-            auth,
+            auth: Arc::new(StdRwLock::new(auth)),
+            account_registry: accounts::default_path(),
         };
         let mut snapshot = api.snapshot().await?;
         // The account may be in voice on another device. A fresh desktop has
@@ -182,8 +195,13 @@ impl ServerApi {
     }
 
     async fn renew_session(&self) -> anyhow::Result<()> {
-        let token = obtain_session(&self.client, &self.base_url, &self.auth).await?;
-        *self.token.write().expect("session token lock poisoned") = token;
+        let original = self.auth.read().expect("account credential lock").clone();
+        let token = obtain_session(&self.client, &self.base_url, &original).await?;
+        // An old in-flight renewal must not replace a recovered device's bearer.
+        let current = self.auth.read().expect("account credential lock");
+        if *current == original {
+            *self.token.write().expect("session token lock poisoned") = token;
+        }
         Ok(())
     }
 
@@ -1396,7 +1414,7 @@ impl Daemon {
         }
     }
 
-    async fn handle_command(&self, command: CommandEnvelope) -> Vec<DaemonEnvelope> {
+    async fn handle_command(&self, mut command: CommandEnvelope) -> Vec<DaemonEnvelope> {
         if let Err(code) = command.validate() {
             return vec![DaemonEnvelope::failure(
                 command.id,
@@ -1405,6 +1423,12 @@ impl Daemon {
             )];
         }
         let result = self.run_command(&command).await;
+        // Account input never survives completion in the IPC envelope.
+        for field in ["password", "current_password", "new_password", "reset_link"] {
+            if let Some(Value::String(secret)) = command.args.get_mut(field) {
+                zeroize::Zeroize::zeroize(secret);
+            }
+        }
         match result {
             Ok(value) => {
                 let mut envelopes = vec![DaemonEnvelope::success(command.id, value)];
@@ -1482,6 +1506,82 @@ impl Daemon {
         soundboard::catalog_command(&api, &command.name, args).await
     }
 
+    async fn adopt_installed_account(
+        &self,
+        account: &accounts::ServerAccount,
+    ) -> anyhow::Result<()> {
+        let linked = if account.id == self.primary_server.id {
+            None
+        } else {
+            self.linked_servers.read().await.get(&account.id).cloned()
+        };
+        if account.id != self.primary_server.id && linked.is_none() {
+            return Ok(());
+        }
+        let api = linked.as_ref().map_or(&self.api, |server| &server.api);
+        let privacy = linked
+            .as_ref()
+            .map_or(&self.privacy, |server| &server.privacy);
+        let current = api.auth.read().expect("account credential lock").clone();
+        if matches!(&current, AuthMethod::Device {device_id,device_token}
+            if *device_id == account.device_id && *device_token == account.device_token)
+        {
+            return Ok(());
+        }
+        let store = privacy.backup_store()?;
+        let Ok(_action) = store.action() else {
+            return Ok(());
+        };
+        let record = store.record()?;
+        if !record.secure || !record.installation_ready || record.installation_pending {
+            return Ok(());
+        }
+        let credential: wisp_protocol::DeviceCredential = serde_json::from_value(
+            record
+                .installation
+                .as_ref()
+                .context("Missing confirmed account installation")?
+                .value()?,
+        )?;
+        let expected_account = if let Some(server) = &linked {
+            server.state.read().await.self_state.user.id
+        } else {
+            self.state.read().await.self_state.user.id
+        };
+        ensure!(
+            credential.device_id == account.device_id
+                && credential.device_token == account.device_token
+                && credential.user.id == expected_account
+                && record
+                    .scope
+                    .as_ref()
+                    .is_some_and(|scope| scope.account == expected_account)
+                && account.server_url == api.base_url,
+            "Saved sign-in does not match this account; existing session was preserved"
+        );
+        let mut native =
+            account_backup::api::Api::connect(&api.base_url, store, None, None).await?;
+        native.session(&credential).await?;
+        if *self.voice_server_id.read().await == account.id {
+            let owned = !self.local_voice_left.load(Ordering::Acquire);
+            self.leave_voice_locally().await;
+            if owned {
+                let _ = api.leave().await;
+            }
+        }
+        api.activate_recovered_device(&credential, &native.session_bearer()?);
+        if record.bundle()?.is_some() {
+            privacy.reload_backup()?;
+        }
+        if let Some(server) = linked {
+            self.refresh_linked(&server, "account_session_restored")
+                .await?;
+        } else {
+            self.refresh("account_session_restored").await?;
+        }
+        Ok(())
+    }
+
     #[allow(clippy::too_many_lines)]
     async fn run_command(&self, command: &CommandEnvelope) -> anyhow::Result<Option<Value>> {
         let previously_left = self.local_voice_left.load(Ordering::Acquire);
@@ -1519,6 +1619,56 @@ impl Daemon {
                 .bytes()
                 .await?;
             return Ok(Some(json!({"ping_ms":started.elapsed().as_millis()})));
+        }
+        if account_backup_commands::handles(&command.name) {
+            let id = command.args["server_id"]
+                .as_str()
+                .filter(|id| !id.is_empty())
+                .unwrap_or(&self.primary_server.id);
+            let linked = if id == self.primary_server.id {
+                None
+            } else {
+                Some(
+                    self.linked_servers
+                        .read()
+                        .await
+                        .get(id)
+                        .context("Account is not connected")?
+                        .clone(),
+                )
+            };
+            let api = linked.as_ref().map_or(&self.api, |server| &server.api);
+            let privacy = linked
+                .as_ref()
+                .map_or(&self.privacy, |server| &server.privacy);
+            let fallback = linked.as_ref().map_or_else(
+                || self.primary_media_key.clone(),
+                |server| server.media_key.clone(),
+            );
+            privacy.capture_media_key(account_membership::media_key(&api.base_url, fallback))?;
+            if matches!(
+                command.name.as_str(),
+                "backup_recover_secure" | "backup_recover_classic" | "backup_finish_install"
+            ) && *self.voice_server_id.read().await == id
+            {
+                let owned_voice = !self.local_voice_left.load(Ordering::Acquire);
+                self.leave_voice_locally().await;
+                if owned_voice {
+                    let _ = api.leave().await;
+                }
+            }
+            let result =
+                account_backup_commands::command(api, privacy, &command.name, &command.args)
+                    .await?;
+            if command.name != "backup_status" {
+                if let Some(server) = linked {
+                    self.refresh_linked(&server, "account_backup_changed")
+                        .await?;
+                } else {
+                    self.refresh("account_backup_changed").await?;
+                }
+            }
+            return Ok(Some(result));
         }
         if account_membership::handles(&command.name) {
             return self.membership_command(command).await.map(Some);
@@ -3573,6 +3723,7 @@ async fn serve_client(stream: UnixStream, daemon: Arc<Daemon>) -> anyhow::Result
             },
             line = lines.next_line() => match line? {
                 Some(line) => {
+                    let line = zeroize::Zeroizing::new(line);
                     let mut command = match serde_json::from_str::<CommandEnvelope>(&line) {
                         Ok(command) => command,
                         Err(error) => {
@@ -3616,6 +3767,39 @@ async fn write_envelope(
     bytes.push(b'\n');
     writer.write_all(&bytes).await?;
     Ok(())
+}
+
+async fn synchronize_account_backups(daemon: Arc<Daemon>) {
+    let mut interval = tokio::time::interval(Duration::from_secs(60));
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    loop {
+        interval.tick().await;
+        let media =
+            account_membership::media_key(&daemon.api.base_url, daemon.primary_media_key.clone());
+        if let Err(error) =
+            account_backup_commands::background(&daemon.api, &daemon.privacy, media).await
+        {
+            daemon.privacy.set_backup_error(Some(error.to_string()));
+            warn!(%error, "account backup sync needs attention");
+        }
+        let linked: Vec<_> = daemon
+            .linked_servers
+            .read()
+            .await
+            .values()
+            .cloned()
+            .collect();
+        for server in linked {
+            let media =
+                account_membership::media_key(&server.api.base_url, server.media_key.clone());
+            if let Err(error) =
+                account_backup_commands::background(&server.api, &server.privacy, media).await
+            {
+                server.privacy.set_backup_error(Some(error.to_string()));
+                warn!(%error, "linked account backup sync needs attention");
+            }
+        }
+    }
 }
 
 async fn synchronize_server(daemon: Arc<Daemon>) {
@@ -4804,8 +4988,10 @@ async fn prepare_private_account(
     privacy: &privacy::Privacy,
     snapshot: &mut Snapshot,
 ) {
-    if matches!(&api.auth, AuthMethod::Device { .. })
-        || snapshot.chat_encryption_required
+    if matches!(
+        &*api.auth.read().expect("account credential lock"),
+        AuthMethod::Device { .. }
+    ) || snapshot.chat_encryption_required
         || std::env::var("WISP_REQUIRE_CHAT_E2EE").as_deref() == Ok("true")
     {
         snapshot.chat_encryption_required = true;
@@ -4872,6 +5058,7 @@ async fn start_connected_daemon(
         .merge_server_snapshot(initial, "privacy_initialized")
         .await;
     tokio::spawn(synchronize_server(daemon.clone()));
+    tokio::spawn(synchronize_account_backups(daemon.clone()));
     tokio::spawn(synchronize_media_events(daemon.clone(), media_events));
     tokio::spawn(synchronize_audio_devices(daemon.clone()));
     tokio::spawn(synchronize_video_devices(daemon.clone()));
@@ -4932,7 +5119,9 @@ fn start_linked_accounts(
             let mut attempt = 0_u32;
             loop {
                 match ServerApi::connect_account(&account).await {
-                    Ok((api, snapshot)) => {
+                    Ok((mut api, snapshot)) => {
+                        api.account_registry
+                            .clone_from(&daemon.api.account_registry);
                         let server = Arc::new(LinkedServer {
                             view: account_view(&account, true),
                             privacy: privacy::Privacy::new(
@@ -5033,7 +5222,7 @@ async fn main() -> anyhow::Result<()> {
         }
     };
     info!(socket = %socket_path.display(), "wispd ready; connecting to server");
-    let Some((api, snapshot)) = connect_with_tray(
+    let Some((mut api, snapshot)) = connect_with_tray(
         args.server_url.clone(),
         &args.profile,
         primary_account.as_ref(),
@@ -5052,6 +5241,7 @@ async fn main() -> anyhow::Result<()> {
         }
         return Ok(());
     };
+    api.account_registry.clone_from(&registry_path);
     let daemon = start_connected_daemon(
         args,
         primary_server.clone(),
@@ -5084,11 +5274,25 @@ async fn main() -> anyhow::Result<()> {
                 .map(|server| server.id.clone())
                 .collect();
             let mut interval = tokio::time::interval(Duration::from_secs(2));
+            let mut recovery_attempts =
+                std::collections::HashMap::<String, std::time::Instant>::new();
             loop {
                 interval.tick().await;
                 let Ok(registry) = accounts::AccountRegistry::load(&path) else {
                     continue;
                 };
+                for account in &registry.servers {
+                    if recovery_attempts
+                        .get(&account.id)
+                        .is_some_and(|at| at.elapsed() < Duration::from_secs(30))
+                    {
+                        continue;
+                    }
+                    if let Err(error) = daemon.adopt_installed_account(account).await {
+                        recovery_attempts.insert(account.id.clone(), std::time::Instant::now());
+                        warn!(%error, "saved secure sign-in needs attention");
+                    }
+                }
                 let added: Vec<_> = registry
                     .servers
                     .into_iter()

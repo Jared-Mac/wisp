@@ -41,14 +41,21 @@ ShellRoot {
         }
       }
       check(!!window, "account window loads")
-      var expected = Quickshell.env("WISP_ONBOARDING_MODE") === "register" ? "register" : "login"
+      var expected = Quickshell.env("WISP_ONBOARDING_MODE") || "login"
       check(window.mode === expected, "default login and explicit registration modes")
       var name = test.findChild(window, "accountDisplayName")
       var password = test.findChild(window, "accountPassword")
       var invite = test.findChild(window, "accountInvite")
       var create = test.findChild(window, "accountMode-register")
       check(create.text === "[create account]", "create account action is explicit")
+      window.selectMode("reset")
+      check(test.findChild(window,"accountResetLink").visible && !name.visible && !test.findChild(window,"accountUsername").visible, "native reset asks only for explicitly pasted link and new password")
       window.selectMode("login")
+      check(!window.classicSignIn, "secure sign-in is the default")
+      var classic = test.findChild(window,"classicSignIn")
+      window.setupState = {secure:true}
+      check(!classic.enabled, "secure accounts cannot select classic sign-in")
+      window.setupState = ({})
       check(!name.visible, "sign in does not ask for a new display name")
       window.submit()
       check(!window.busy && window.feedback.length > 0, "missing login fields do not submit")

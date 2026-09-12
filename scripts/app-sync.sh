@@ -93,6 +93,7 @@ fi
 
 if command -v xdg-mime >/dev/null 2>&1; then
   xdg-mime default dev.wisp.desktop x-scheme-handler/wisp-invite
+  xdg-mime default dev.wisp.desktop x-scheme-handler/wisp
 fi
 
 echo "Synced standalone Wisp UI to $destination"

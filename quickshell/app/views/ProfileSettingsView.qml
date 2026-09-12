@@ -12,7 +12,7 @@ Column {
   readonly property bool inVoice: !!(bridge.activeServerState.self || {}).hangout_id
   onServerIdChanged: { clearPasswords(); if (visible) {bridge.refreshProfile();if(bridge.accountActions)bridge.accountActions.act("account_overview",{},serverId)} }
   onVisibleChanged: { clearPasswords(); if (visible) {bridge.refreshProfile();if(bridge.accountActions)bridge.accountActions.act("account_overview",{},serverId)} }
-  function clearPasswords() { currentPassword.text = ""; newPassword.text = ""; confirmPassword.text = ""; recoveryPassword.text = "" }
+  function clearPasswords() { currentPassword.text = ""; newPassword.text = ""; confirmPassword.text = ""; recoveryPassword.text = ""; backupControls.clearPasswords() }
   Connections {
     target: root.bridge
     function onAccountProfileChanged() { displayName.text = String(root.bridge.accountProfile.display_name || root.bridge.selfState.display_name || "") }
@@ -89,6 +89,9 @@ Column {
     Label {visible:!(blockedSection.account.overview.blocked || []).length;text:"No blocked accounts"}
     Label {text:blockedSection.account.error || "";visible:!!text}
   }
+  AccountBackupSettings {
+    id: backupControls; width: parent.width; bridge: root.bridge; theme: root.theme
+  }
   SettingsSection {
     id: recoverySection; theme: root.theme; title: "Recovery email"; summary: "Recover access if you forget your password"
     objectName: "profileRecoverySection"; expanded: false
@@ -100,10 +103,10 @@ Column {
     Field { id: recoveryPassword; objectName: "profileRecoveryPassword"; placeholderText: "Current password"; Accessible.name: "Current password for recovery email"; maximumLength: 1024; echoMode: TextInput.Password }
     ChatButton {
       theme: root.theme; text: "Send verification email"; objectName: "profileVerifyEmail"
-      enabled: root.bridge.profileReady && !root.bridge.profileBusy && !!(root.bridge.recoveryEmail || {}).delivery_available && !!recoveryAddress.text.trim() && !!recoveryPassword.text
+      enabled: root.bridge.profileReady && !root.bridge.profileBusy && !root.bridge.accountBackup.pending && !!(root.bridge.recoveryEmail || {}).delivery_available && !!recoveryAddress.text.trim() && !!recoveryPassword.text
       onClicked: if (root.bridge.profileAction("set_recovery_email", {email:recoveryAddress.text.trim(),current_password:recoveryPassword.text})) recoveryPassword.text = ""
     }
-    Label { text: "Verify the link from support@wisp.you, then refresh. Keep your encryption recovery file too; an email reset cannot restore missing encryption keys." }
+    Label { text: root.bridge.accountBackup.mode === "secure" ? "Verify the link from support@wisp.you. After an email password reset, use a trusted device to restore backup access." : "Verify the link from support@wisp.you. Keep your encryption recovery file until account backup is enabled." }
   }
   SettingsSection {
     theme: root.theme; title: "Change password"; summary: "Keep your account secure"
@@ -115,7 +118,7 @@ Column {
       id: currentPassword; objectName: "profileCurrentPassword"
       echoMode: TextInput.Password; maximumLength: 1024
       placeholderText: "Current password"; Accessible.name: "Current password"
-      enabled: root.bridge.profileReady && !root.bridge.profileBusy && !!root.bridge.accountProfile.password_available
+      enabled: root.bridge.profileReady && !root.bridge.profileBusy && !!root.bridge.accountProfile.password_available && !root.bridge.accountBackup.pending
     }
     Field {
       id: newPassword; objectName: "profileNewPassword"

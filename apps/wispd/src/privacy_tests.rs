@@ -9,9 +9,10 @@ async fn client(server: &str, profile: &str) -> ServerApi {
     let token = obtain_session(&client, server, &auth).await.unwrap();
     ServerApi {
         client,
+        account_registry: None,
         base_url: server.into(),
         token: Arc::new(std::sync::RwLock::new(token)),
-        auth,
+        auth: Arc::new(std::sync::RwLock::new(auth)),
     }
 }
 

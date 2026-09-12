@@ -19,6 +19,7 @@ use wisp_crypto::{
 use wisp_protocol::{DeviceCredential, UserSummary};
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+#[allow(clippy::struct_field_names)] // Exact protocol field names.
 struct Recovered {
     recovered: bool,
     recovery_id: Uuid,
@@ -69,6 +70,12 @@ impl Api {
             .await?;
             let _ = self.receipt(candidate).await?;
         }
+        if root.finish.is_none() && !root.sent {
+            // No finalization was ever available for dispatch. Fresh native
+            // sign-in has already resolved every older staged login.
+            self.clear_recovered_root(&root)?;
+            return Ok(unlocked);
+        }
         let operation: Operation = serde_json::from_value(
             root.finish
                 .as_ref()
@@ -110,6 +117,7 @@ impl Api {
                 "Recovery journal changed"
             );
             record.pending = None;
+            record.installation_ready = true;
             Ok(())
         })
     }
@@ -166,10 +174,12 @@ impl Api {
         self.store.update(None, |record| {
             record.installation = Some(PrivateBytes::json(&credential)?);
             record.installation_pending = true;
+            record.installation_ready = false;
             Ok(())
         })?;
         self.session(&credential).await
     }
+    #[allow(clippy::too_many_lines)] // Keep durable transition ordering reviewable as one operation.
     pub(crate) async fn recover_classic_migration(
         &mut self,
         legacy: SecretString,
@@ -207,10 +217,7 @@ impl Api {
                     Err(error)
                         if error
                             .downcast_ref::<super::api::Failure>()
-                            .is_some_and(|failure| matches!(failure.status, 401 | 404)) =>
-                    {
-                        ()
-                    }
+                            .is_some_and(|failure| matches!(failure.status, 401 | 404)) => {}
                     Err(error) => return Err(error),
                 },
                 Err(error)
@@ -218,10 +225,7 @@ impl Api {
                         .downcast_ref::<super::api::Failure>()
                         .is_some_and(|failure| {
                             matches!(failure.code, "unauthorized" | "account_state_changed")
-                        }) =>
-                {
-                    ()
-                }
+                        }) => {}
                 Err(error) => return Err(error),
             }
         }

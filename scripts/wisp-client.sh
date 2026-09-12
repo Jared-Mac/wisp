@@ -4,6 +4,7 @@ set -euo pipefail
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 export PATH="$script_dir:$PATH"
 config_root=${XDG_CONFIG_HOME:-${HOME:?HOME is required}/.config}/wisp
+if [[ -n ${WISP_ACCOUNTS_FILE:-} ]]; then config_root=$(dirname -- "$WISP_ACCOUNTS_FILE"); fi
 config_file="$config_root/account.env"
 [[ -f "$config_file" ]] || config_file="$config_root/friend.env"
 socket_path=${XDG_RUNTIME_DIR:?XDG_RUNTIME_DIR is required}/wisp/wispd.sock
@@ -14,6 +15,14 @@ if command -v wisp-ui >/dev/null 2>&1 \
   wisp-ui open
   exit 0
 fi
+
+# Complete only already confirmed installations before reading credentials.
+# No sign-in, room join, or network request happens in this recovery step.
+if [[ -x "$script_dir/wisp-account" ]]; then
+  printf '%s\n' '{"action":"finish_installations"}' | "$script_dir/wisp-account" >/dev/null || exit 2
+fi
+config_file="$config_root/account.env"
+[[ -f "$config_file" ]] || config_file="$config_root/friend.env"
 
 saved_setting() {
   local name=$1

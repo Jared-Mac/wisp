@@ -85,6 +85,7 @@ pub(super) struct Privacy {
     decrypted: Mutex<BTreeMap<Uuid, Content>>,
     last_error: Mutex<Option<String>>,
     setup_error: Mutex<Option<String>>,
+    backup_error: Mutex<Option<String>>,
     enrollment: tokio::sync::Mutex<()>,
     contact_updates: Mutex<()>,
 }
@@ -207,6 +208,7 @@ impl Privacy {
             decrypted: Mutex::new(BTreeMap::new()),
             last_error: Mutex::new(None),
             setup_error: Mutex::new(None),
+            backup_error: Mutex::new(None),
             enrollment: tokio::sync::Mutex::new(()),
             contact_updates: Mutex::new(()),
         }
@@ -297,12 +299,29 @@ impl Privacy {
         Ok(())
     }
 
+    pub(crate) fn capture_media_key(&self, media: Option<String>) -> anyhow::Result<()> {
+        self.backup_store()?.capture_media_key(media)
+    }
+
+    pub(crate) fn backup_error(&self) -> Option<String> {
+        self.backup_error.lock().expect("backup error lock").clone()
+    }
+    pub(crate) fn set_backup_error(&self, error: Option<String>) {
+        *self.backup_error.lock().expect("backup error lock") = error;
+    }
     pub fn active(&self) -> anyhow::Result<Option<Arc<Vault>>> {
-        self.active
+        let active = self
+            .active
             .read()
             .expect("privacy state lock")
             .clone()
-            .map_err(anyhow::Error::msg)
+            .map_err(anyhow::Error::msg)?;
+        if active.is_none() && self.backup_store()?.record()?.secure {
+            anyhow::bail!(
+                "Unlock and restore your encrypted account backup in Profile settings before using chat or voice"
+            );
+        }
+        Ok(active)
     }
 
     pub fn status(&self) -> Value {
@@ -357,6 +376,25 @@ impl Privacy {
                 || matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "[::1]")),
             "Encryption setup requires HTTPS (except isolated localhost testing)"
         );
+        // Real accounts must prove their authentication mode before legacy
+        // enrollment can create or import an identity. Secure identities come
+        // exclusively from the verified account backup.
+        let real_account = matches!(
+            &*api.auth.read().expect("account credential lock"),
+            super::AuthMethod::Device { .. }
+        );
+        if real_account {
+            let backup = super::account_backup_commands::connect(api, self).await?;
+            if matches!(
+                backup.status().await?,
+                super::account_backup::api::Status::Secure { .. }
+            ) {
+                self.reload_backup().context(
+                    "Unlock and restore your encrypted account backup in Profile settings",
+                )?;
+                return Ok(self.status());
+            }
+        }
         let directory: Directory = decode(
             api.request(reqwest::Method::GET, "/v1/e2ee/state")
                 .send()

@@ -10,9 +10,13 @@ independent cryptographic audit.
 - Protect message content, captions, original filenames and attachment bytes
   from the hosting provider and coordination/media servers. TLS and encrypted
   disks alone cannot provide this while the server processes plaintext.
-- Client-held account encryption/signing identity, with a user-held recovery
-  code for new/reinstalled devices. No server escrow or password-reset recovery.
-  Loss of all devices and the recovery code means loss of encrypted history.
+- Client-held account encryption/signing identity, with encrypted account backup
+  for native secure sign-in on new devices. Classic accounts can enable backup
+  from a trusted device; private recovery files remain available.
+- Password changes preserve the backup key. Email password reset restores sign-in,
+  but an existing trusted device must repair access to the encrypted backup.
+  Losing all trusted devices and forgetting the secure password cannot be fixed
+  by an email reset. See [Account backup](account-backup.md).
 - User-selected onboarding: trust on first use (TOFU). Automatically pin each
   friend's initial public identity locally and reuse it across rooms; manual
   fingerprint comparison is optional, not a prerequisite for ordinary use.

@@ -6,7 +6,8 @@ trap 'rm -rf -- "$test_dir"' EXIT
 cp -a "$repo_dir/quickshell/app" "$test_dir/app"
 cp "$repo_dir/tests/quickshell/AccountRecovery.qml" "$test_dir/shell.qml"
 mkdir -p "$test_dir/app/native/WispVideo"
-cp "$repo_dir/target/video-ui/libwispvideo.so" "$repo_dir/target/video-ui/qmldir" "$test_dir/app/native/WispVideo/"
+video_ui="${WISP_TEST_VIDEO_UI_DIR:-${CARGO_TARGET_DIR:-$repo_dir/target}/video-ui}"
+cp "$video_ui/libwispvideo.so" "$video_ui/qmldir" "$test_dir/app/native/WispVideo/"
 for theme in ${WISP_TEST_THEMES:-soft_graphite daylight hearth clean_tui}; do
   mkdir -p "$test_dir/$theme/wisp"
   XDG_CONFIG_HOME="$test_dir/$theme" WISP_SOCKET="$test_dir/no-daemon.sock" WISP_TEST_THEME="$theme" \

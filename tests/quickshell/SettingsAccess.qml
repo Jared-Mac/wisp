@@ -23,14 +23,14 @@ ShellRoot {
     for (var child of item.data || item.contentData || item.children || []) { var found = object(child,name,visited); if (found) return found }
     return null
   }
-  function last() { return bridge.sent[bridge.sent.length - 1] }
+  function last() { return bridge.sent.filter(function(c) { return ["account_overview","recovery_email","backup_status"].indexOf(c.name)<0 }).slice(-1)[0] }
   function visibleItem(item, name) {
     if (!item || !item.visible) return null
     if (item.objectName === name) return item
     for (var child of item.children || []) { var found = visibleItem(child,name); if (found) return found }
     return null
   }
-  function reply(value) { bridge.finishRequest({id:"test-" + bridge.requestId,ok:true,value:value}) }
+  function reply(value) { bridge.finishRequest({id:last().id,ok:true,value:value}) }
   function screenshot(label, target) {
     var path = Quickshell.env("WISP_SETTINGS_SCREENSHOT")
     if (path) target.grabToImage(function(result) { result.saveToFile(path + "-" + label + ".png") })
@@ -47,7 +47,13 @@ ShellRoot {
   Wisp.WispBridge {
     id: bridge
     property var sent: []
-    function send(name,args) { sent.push({name:name,args:args}); requestId++; return "test-" + requestId }
+    function send(name,args) {
+      var id="test-"+(++requestId); sent.push({id:id,name:name,args:args})
+      if (["account_overview","recovery_email","backup_status"].indexOf(name)>=0) Qt.callLater(function() {
+        bridge.finishRequest({id:id,ok:true,value:name==="backup_status"?{mode:"classic"}:name==="recovery_email"?{delivery_available:true,verified:false}:{}})
+      })
+      return id
+    }
   }
   FloatingWindow {
     id: window

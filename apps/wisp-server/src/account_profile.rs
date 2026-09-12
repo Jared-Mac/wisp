@@ -8,7 +8,7 @@ use wisp_crypto::{PublicIdentity, profile::SignedProfile};
 use wisp_protocol::{AccountProfile, ChangePasswordRequest};
 
 async fn load(state: &AppState, user: UserId) -> Result<AccountProfile, ApiError> {
-    let row = sqlx::query("SELECT u.username,u.display_name,u.password_hash IS NOT NULL AS password_available,COALESCE(p.revision,0) AS revision FROM users u LEFT JOIN account_profiles p ON p.user_id=u.id WHERE u.id=?")
+    let row = sqlx::query("SELECT u.username,u.display_name,(u.password_hash IS NOT NULL OR EXISTS(SELECT 1 FROM secure_credentials c WHERE c.user_id=u.id)) AS password_available,COALESCE(p.revision,0) AS revision FROM users u LEFT JOIN account_profiles p ON p.user_id=u.id WHERE u.id=?")
         .bind(user.to_string()).fetch_one(&state.pool).await.map_err(ApiError::internal)?;
     Ok(AccountProfile {
         user_id: user,

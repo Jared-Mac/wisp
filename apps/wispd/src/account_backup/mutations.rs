@@ -32,7 +32,9 @@ fn route(kind: Kind) -> anyhow::Result<&'static str> {
 impl Api {
     async fn unlocked_state(&self, password: &SecretString) -> anyhow::Result<Status> {
         let state = self.status().await?;
-        if !self.store.record()?.key_verified {
+        if self.store.record()?.key_verified {
+            ensure!(self.restore(None).await?, "Unlock your backup first");
+        } else {
             let export = self.unlock(copy(password), &state).await?;
             ensure!(
                 self.restore(Some((
@@ -45,8 +47,6 @@ impl Api {
                 .await?,
                 "This backup still needs an existing trusted device to repair its password wrapper"
             );
-        } else {
-            ensure!(self.restore(None).await?, "Unlock your backup first");
         }
         self.status().await
     }
@@ -272,6 +272,7 @@ impl Api {
             Ok(())
         })
     }
+    #[allow(clippy::too_many_lines)] // Keep durable transition ordering reviewable as one operation.
     pub(crate) async fn resume_mutation(
         &self,
         password: Option<SecretString>,
@@ -326,10 +327,7 @@ impl Api {
                 Err(error)
                     if error
                         .downcast_ref::<super::api::Failure>()
-                        .is_some_and(|f| f.code == "unauthorized") =>
-                {
-                    ()
-                }
+                        .is_some_and(|f| f.code == "unauthorized") => {}
                 Err(error) => return Err(error),
             }
         }

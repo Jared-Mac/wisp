@@ -36,9 +36,10 @@ async fn client(server: &str, profile: &str, directory: &Path) -> Session<'stati
     let token = obtain_session(&client, server, &auth).await.unwrap();
     let api = ServerApi {
         client,
+        account_registry: None,
         base_url: server.into(),
         token: Arc::new(std::sync::RwLock::new(token)),
-        auth,
+        auth: Arc::new(std::sync::RwLock::new(auth)),
     };
     let snapshot = api.snapshot().await.unwrap();
     let privacy = Privacy::at(directory.into(), server, snapshot.self_state.user.id);

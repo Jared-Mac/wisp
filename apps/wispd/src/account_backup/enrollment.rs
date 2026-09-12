@@ -46,6 +46,7 @@ fn context(scope: &Scope, username: &str) -> AccountContext {
     }
 }
 impl Api {
+    #[allow(clippy::too_many_lines)] // Keep durable transition ordering reviewable as one operation.
     pub(crate) async fn signup(
         &mut self,
         username: &str,
@@ -230,6 +231,7 @@ impl Api {
         self.stage_enrollment(&pending, &finish, result.server_pin)?;
         self.submit_enrollment(&pending, &finish).await
     }
+    #[allow(clippy::too_many_lines)] // Keep durable transition ordering reviewable as one operation.
     pub(crate) async fn migrate(
         &mut self,
         legacy: SecretString,
@@ -467,6 +469,9 @@ impl Api {
                 "Enrollment journal changed"
             );
             record.pending = None;
+            if record.installation.is_some() {
+                record.installation_ready = true;
+            }
             Ok(())
         })?;
         Ok(())
@@ -501,10 +506,7 @@ impl Api {
                 Err(error)
                     if error
                         .downcast_ref::<super::api::Failure>()
-                        .is_some_and(|f| f.code == "unauthorized") =>
-                {
-                    ()
-                }
+                        .is_some_and(|f| f.code == "unauthorized") => {}
                 Err(error) => return Err(error),
             }
         }

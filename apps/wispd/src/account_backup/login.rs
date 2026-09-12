@@ -1,3 +1,4 @@
+#![allow(clippy::items_after_statements)] // Keep private response types beside their validation.
 //! Native password proofs and durable prospective-device sign-in.
 use super::{
     api::{Api, Grant, LoginStarted, SignedIn, Status},
@@ -210,6 +211,7 @@ impl Api {
     }
     /// When a prior effect is unresolved, new sign-in is nested inside it. Every
     /// possibly activated old credential survives until terminal evidence.
+    #[allow(clippy::too_many_lines)] // Keep durable transition ordering reviewable as one operation.
     pub(crate) async fn login(
         &mut self,
         username: &str,
@@ -275,7 +277,16 @@ impl Api {
         })?);
         self.store.update(Some(record.revision), |record| {
             record.username = Some(context.username.clone());
+            if record.pending.as_ref().is_some_and(|root| {
+                root.kind == Kind::Login
+                    && !root.sent
+                    && root.finish.is_none()
+                    && root.recovery.is_empty()
+            }) {
+                record.pending = None;
+            }
             if let Some(root) = record.pending.as_mut() {
+                root.recovery.retain(|old| old.sent || old.finish.is_some());
                 root.recovery.push(pending);
             } else {
                 record.pending = Some(pending);
@@ -374,6 +385,7 @@ impl Api {
             record.secure = true;
             record.installation = Some(PrivateBytes::json(&credential)?);
             record.installation_pending = true;
+            record.installation_ready = false;
             Ok(())
         })?;
         self.update_login(id, |pending| {
@@ -430,6 +442,7 @@ impl Api {
                 .native()?;
             #[derive(Deserialize)]
             #[serde(deny_unknown_fields)]
+            #[allow(clippy::struct_field_names)] // Exact protocol field names.
             struct Terminated {
                 terminated: bool,
                 attempt: Uuid,
@@ -470,6 +483,7 @@ impl Api {
             );
             if root.kind == Kind::Login {
                 record.pending = None;
+                record.installation_ready = true;
             } else {
                 // The selected recovery credential is durably retained separately.
                 current
@@ -489,5 +503,22 @@ impl Api {
                 .value()?,
         )
         .context("Invalid private account installation")
+    }
+    pub(crate) fn cancel_prepared(&self) -> anyhow::Result<()> {
+        self.store.update(None, |record| {
+            let pending = record
+                .pending
+                .as_ref()
+                .context("No prepared account action")?;
+            ensure!(
+                !pending.sent && pending.recovery.is_empty(),
+                "This action may have reached the server. Resume or recover it before clearing"
+            );
+            record.pending = None;
+            if record.scope.is_none() && !record.secure && record.installation.is_none() {
+                record.username = None;
+            }
+            Ok(())
+        })
     }
 }

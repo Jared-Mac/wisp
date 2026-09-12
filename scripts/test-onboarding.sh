@@ -79,10 +79,27 @@ for invalid in 'https://example.com' 'wisp-invite:$(touch /tmp/wisp-invalid)' 'w
   if "$test_root/bin/wisp" "$invalid" >/dev/null 2>&1; then exit 1; fi
 done
 
+# Native reset accepts exactly the token-free handoff, never a bearer URI.
+cat > "$test_root/bin/wisp-onboarding" <<'MOCK'
+#!/usr/bin/env bash
+[[ $WISP_ONBOARDING_MODE == reset && $# == 0 ]]
+MOCK
+chmod +x "$test_root/bin/wisp-onboarding"
+"$test_root/bin/wisp" wisp://account/reset
+for invalid in 'wisp://account/reset#token=secret' 'wisp://account/reset?token=secret' 'wisp://account/other'; do
+  if "$test_root/bin/wisp" "$invalid" >/dev/null 2>&1; then exit 1; fi
+done
+cat > "$test_root/bin/wisp-account" <<'MOCK'
+#!/usr/bin/env bash
+read -r request
+printf '%s\n' '{"ok":true,"secure":false,"pending":null}'
+MOCK
+chmod +x "$test_root/bin/wisp-account"
+export PATH="$test_root/bin:$PATH"
 if command -v qs >/dev/null 2>&1; then
   cp -a "$repo_dir/quickshell/onboarding" "$test_root/onboarding"
   cp "$repo_dir/tests/quickshell/Onboarding.qml" "$test_root/shell.qml"
-  for mode in "" login register; do
+  for mode in "" login register reset; do
     result=0
     XDG_CONFIG_HOME="$test_root/config" XDG_RUNTIME_DIR="$test_root/runtime" \
       WISP_ONBOARDING_MODE="$mode" QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software \

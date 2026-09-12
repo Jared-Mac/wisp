@@ -14,7 +14,7 @@ ShellRoot {
     id: window
     objectName: "accountWindow"
     visible: true
-    title: acceptingInvite ? "Accept invitation" : mode === "login" ? "Sign in to Wisp" : mode === "register" ? "Create a Wisp account" : "Set up a Wisp server"
+    title: mode === "reset" ? "Reset Wisp password" : acceptingInvite ? "Accept invitation" : mode === "login" ? "Sign in to Wisp" : mode === "register" ? "Create a Wisp account" : "Set up a Wisp server"
     implicitWidth: 560
     implicitHeight: acceptingInvite ? 500 : 650
     minimumSize: Qt.size(440, acceptingInvite ? 460 : 540)
@@ -23,9 +23,15 @@ ShellRoot {
 
     property string mode: {
       var requested = Quickshell.env("WISP_ONBOARDING_MODE") || "login"
-      return ["register", "login", "bootstrap"].indexOf(requested) >= 0 ? requested : "login"
+      return ["register", "login", "bootstrap", "reset"].indexOf(requested) >= 0 ? requested : "login"
     }
     property bool advanced: false
+    property bool classicSignIn: false
+    property var setupState: ({})
+    property string requestedAction: ""
+    readonly property bool resetting: mode === "reset"
+    function refreshSetup() { if (!setupProcess.running && !busy && !resetting) setupProcess.running = true }
+    Component.onCompleted: Qt.callLater(refreshSetup)
     property bool invitationEntry: Quickshell.env("WISP_ONBOARDING_JOIN") === "1"
     property var resolvedInvitation: null
     property string resolvedInput: ""
@@ -37,7 +43,7 @@ ShellRoot {
       resolvedInvitation = null; resolvedInput = ""; feedback = ""; useSavedAccount = true
       if (modernLink(invite.text.trim())) previewTimer.restart()
     }
-    readonly property bool acceptingInvite: mode !== "bootstrap" && invitation !== null
+    readonly property bool acceptingInvite: mode !== "bootstrap" && mode !== "reset" && invitation !== null
     property bool usernameEdited: false
     function parseInvitation(value) {
       if (!/^wisp-invite:[A-Za-z0-9_-]+$/.test(value) || value.length > 16384) return null
@@ -62,6 +68,9 @@ ShellRoot {
     function selectMode(value) {
       if (busy) return
       mode = value
+      classicSignIn = false
+      requestedAction = ""
+      resetLink.text = ""
       useSavedAccount = false
       feedback = ""
       password.text = ""
@@ -69,9 +78,23 @@ ShellRoot {
       bootstrapToken.text = ""
     }
 
+    function perform(action) {
+      if (busy) return
+      requestedAction = action
+      busy = true
+      accountProcess.running = true
+    }
     function submit() {
       if (busy) return
+      requestedAction = ""
       feedback = ""
+      if (resetting) {
+        if (!resetLink.text.trim() || Array.from(password.text).length < 12 || password.text !== confirmPassword.text) {
+          feedback = "Paste your reset link and enter matching passwords of at least 12 characters."
+          return
+        }
+        perform("reset"); return
+      }
       if (mode !== "bootstrap" && invite.text.trim().indexOf("wisp-invite:") === 0 && !modernLink(invite.text.trim()) && !invitation) {
         feedback = "This invitation is invalid or needs a newer Wisp version. Ask your friend for a new invite."
         return
@@ -117,14 +140,14 @@ ShellRoot {
           spacing: 14
 
           Text {
-            text: window.acceptingInvite ? "Accept invitation" : window.mode === "login" ? "Sign in to Wisp" : window.mode === "register" ? "Create your account" : "Set up your server"
+            text: window.resetting ? "Reset your password" : window.acceptingInvite ? "Accept invitation" : window.mode === "login" ? "Sign in to Wisp" : window.mode === "register" ? "Create your account" : "Set up your server"
             color: "#e8ecf3"
             font.family: "Hack"
             font.pixelSize: 22
             font.weight: Font.DemiBold
           }
           Text {
-            text: window.acceptingInvite ? "Join " + (window.invitation.server_name || "this server") + ". " + (window.existingAccount ? "Continue as " + window.invitation.account_name + "." : window.mode === "login" ? "Sign in to continue." : "Create an account to continue.") : "Create an account or sign in. You can join a server later."
+            text: window.resetting ? "Paste the reset link from your email. This changes your password; an existing trusted device is needed to restore backup access afterward." : window.acceptingInvite ? "Join " + (window.invitation.server_name || "this server") + ". " + (window.existingAccount ? "Continue as " + window.invitation.account_name + "." : window.mode === "login" ? "Sign in to continue." : "Create an account to continue.") : "Create an account or sign in. You can join a server later."
             textFormat: Text.PlainText
             color: "#8d96a8"
             font.family: "Hack"
@@ -170,7 +193,7 @@ ShellRoot {
           }
 
           RowLayout {
-            visible: !window.acceptingInvite
+            visible: !window.acceptingInvite && !window.resetting
             Button { text: window.invitationEntry ? "Hide invitation" : "Use an invitation"; onClicked: window.invitationEntry = !window.invitationEntry }
             Button { text: window.advanced ? "Hide advanced" : "Advanced"; onClicked: window.advanced = !window.advanced }
           }
@@ -195,16 +218,17 @@ ShellRoot {
             placeholderTextColor: "#667085"
             font.family: "Hack"
             font.pixelSize: 13
+            onEditingFinished: window.refreshSetup()
             background: Rectangle { color: "#1c202b"; border.color: server.activeFocus ? "#2f8cff" : "#3b4353"; radius: 3 }
           }
 
-          Text { visible: window.mode !== "bootstrap" && !window.acceptingInvite && (window.invitationEntry || window.advanced); text: "Invitation link"; color: "#8d96a8"; font.family: "Hack"; font.pixelSize: 12 }
+          Text { visible: window.mode !== "bootstrap" && !window.resetting && !window.acceptingInvite && (window.invitationEntry || window.advanced); text: "Invitation link"; color: "#8d96a8"; font.family: "Hack"; font.pixelSize: 12 }
           TextField {
             id: invite
             onTextChanged: window.invitationInputChanged()
             text: Quickshell.env("WISP_ONBOARDING_INVITE") || ""
             objectName: "accountInvite"
-            visible: window.mode !== "bootstrap" && !window.acceptingInvite && (window.invitationEntry || window.advanced)
+            visible: window.mode !== "bootstrap" && !window.resetting && !window.acceptingInvite && (window.invitationEntry || window.advanced)
             Layout.fillWidth: true
             placeholderText: "Invite link or word-and-number code"
             color: "#e8ecf3"; placeholderTextColor: "#667085"; font.family: "Hack"; font.pixelSize: 13
@@ -222,22 +246,22 @@ ShellRoot {
             background: Rectangle { color: "#1c202b"; border.color: bootstrapToken.activeFocus ? "#2f8cff" : "#3b4353"; radius: 3 }
           }
 
-          Text { visible: window.mode !== "login" && !window.existingAccount; text: "Your name"; color: "#8d96a8"; font.family: "Hack"; font.pixelSize: 12 }
+          Text { visible: window.mode !== "login" && !window.resetting && !window.existingAccount; text: "Your name"; color: "#8d96a8"; font.family: "Hack"; font.pixelSize: 12 }
           TextField {
             id: displayName
             onTextChanged: if (window.mode === "register" && !window.usernameEdited) username.text = window.suggestUsername(text)
             objectName: "accountDisplayName"
-            visible: window.mode !== "login" && !window.existingAccount
+            visible: window.mode !== "login" && !window.resetting && !window.existingAccount
             Layout.fillWidth: true
             placeholderText: "name shown to friends"
             color: "#e8ecf3"; placeholderTextColor: "#667085"; font.family: "Hack"; font.pixelSize: 13
             background: Rectangle { color: "#1c202b"; border.color: displayName.activeFocus ? "#2f8cff" : "#3b4353"; radius: 3 }
           }
 
-          Text { visible: !window.existingAccount; text: window.mode === "register" && (!window.invitation || !window.invitation.legacy) ? "Username · friends can find you with this" : "username"; color: "#8d96a8"; font.family: "Hack"; font.pixelSize: 12 }
+          Text { visible: !window.existingAccount && !window.resetting; text: window.mode === "register" && (!window.invitation || !window.invitation.legacy) ? "Username · friends can find you with this" : "username"; color: "#8d96a8"; font.family: "Hack"; font.pixelSize: 12 }
           TextField {
             id: username
-            visible: !window.existingAccount
+            visible: !window.existingAccount && !window.resetting
             maximumLength: 32
             onTextEdited: window.usernameEdited = true
             objectName: "accountUsername"
@@ -247,6 +271,25 @@ ShellRoot {
             background: Rectangle { color: "#1c202b"; border.color: username.activeFocus ? "#2f8cff" : "#3b4353"; radius: 3 }
           }
 
+          TextField {
+            id: resetLink; objectName: "accountResetLink"; visible: window.resetting
+            Layout.fillWidth: true; maximumLength: 2048; echoMode: TextInput.Password
+            placeholderText: "Paste reset link or code"; Accessible.name: "Reset link from email"
+            color: "#e8ecf3"; placeholderTextColor: "#667085"
+            background: Rectangle { color: "#1c202b"; border.color: "#3b4353"; radius: 3 }
+          }
+          CheckBox {
+            id: classicToggle; objectName: "classicSignIn"; visible: window.mode === "login" && !window.existingAccount
+            text: "Classic account sign-in"; checked: window.classicSignIn
+            enabled: !window.busy && !window.setupState.secure && !window.setupState.pending
+            onToggled: { window.classicSignIn = checked; password.text = "" }
+          }
+          Text {
+            Layout.fillWidth: true; wrapMode: Text.Wrap; color: "#8d96a8"; font.pixelSize: 12
+            visible: window.mode === "login" && !window.existingAccount
+            text: window.classicSignIn ? "Only for accounts that have not enabled encrypted backup. Use your original password."
+              : "Secure sign-in restores your encrypted account backup. Use classic sign-in only for an older account that has not enabled backup."
+          }
           Text { visible: !window.existingAccount; text: "password"; color: "#8d96a8"; font.family: "Hack"; font.pixelSize: 12 }
           TextField {
             id: password
@@ -288,7 +331,7 @@ ShellRoot {
             Layout.fillWidth: true
             Layout.preferredHeight: 38
             enabled: !window.busy && !previewProcess.running
-            text: window.busy ? "working…" : window.acceptingInvite ? "Accept invitation" : window.mode === "login" ? "sign in" : window.mode === "bootstrap" ? "create owner account" : "create account"
+            text: window.busy ? "working…" : window.resetting ? "Reset password" : window.acceptingInvite ? "Accept invitation" : window.mode === "login" ? "sign in" : window.mode === "bootstrap" ? "create owner account" : "create account"
             font.family: "Hack"
             font.pixelSize: 13
             onClicked: window.submit()
@@ -299,6 +342,22 @@ ShellRoot {
             objectName: "forgotPassword"; visible: window.mode === "login"; enabled: !window.busy
             Layout.fillWidth: true; text: "Forgot password?"
             onClicked: Qt.openUrlExternally("https://wisp.you/account/forgot-password")
+          }
+          Button {
+            text: "Enter a password reset link"; visible: window.mode === "login"; enabled: !window.busy
+            Layout.fillWidth: true; onClicked: window.selectMode("reset")
+          }
+          ColumnLayout {
+            Layout.fillWidth: true; visible: !!window.setupState.pending && !window.resetting
+            Text { Layout.fillWidth: true; wrapMode: Text.Wrap; color: "#8d96a8"; text: "An interrupted account action is saved on this device." }
+            Button { Layout.fillWidth: true; text: "Resume interrupted action"; enabled: !window.busy; onClicked: window.perform("resume") }
+            Button { Layout.fillWidth: true; text: "Recover with secure password"; enabled: !window.busy && !!password.text; onClicked: window.perform("recover") }
+            Button { Layout.fillWidth: true; text: "Recover with original password"; visible: window.setupState.pending === "migration"; enabled: !window.busy && !!password.text; onClicked: window.perform("recover_classic") }
+            Button { Layout.fillWidth: true; text: "Cancel prepared action"; visible: !!window.setupState.can_cancel; enabled: !window.busy; onClicked: window.perform("cancel") }
+          }
+          Button {
+            text: "Resume password reset"; visible: window.resetting; enabled: !window.busy
+            Layout.fillWidth: true; onClicked: window.perform("resume_reset")
           }
           Button {
             objectName: "declineInvitation"
@@ -333,19 +392,41 @@ ShellRoot {
         }
       }
       Process {
+        id: setupProcess; command: ["wisp-account"]; stdinEnabled: true
+        property string requestedServer: ""
+        onStarted: {
+          requestedServer = window.acceptingInvite ? window.invitation.server : server.text.trim()
+          write(JSON.stringify({action:"setup_status",server_url:requestedServer}) + "\n")
+        }
+        stdout: StdioCollector { id: setupOutput }
+        stderr: StdioCollector {}
+        onExited: function(code) {
+          if (requestedServer !== (window.acceptingInvite ? window.invitation.server : server.text.trim())) return
+          if (code === 0) {
+            try { window.setupState = JSON.parse(setupOutput.text) } catch(error) { window.setupState = ({}) }
+            if (window.setupState.secure || window.setupState.pending) window.classicSignIn = false
+            if (window.setupState.pending && window.setupState.username) username.text = window.setupState.username
+          }
+        }
+      }
+      Process {
         id: accountProcess
         command: ["wisp-account"]
         stdinEnabled: true
-        onStarted: write(JSON.stringify({
-          action: window.existingAccount ? "accept_invite" : window.mode,
+        onStarted: {
+          write(JSON.stringify({
+          action: window.requestedAction || (window.existingAccount ? "accept_invite" : window.mode === "login" && window.classicSignIn ? "classic_login" : window.mode),
           server_url: window.acceptingInvite ? window.invitation.server : server.text.trim(),
           username: username.text.trim(),
           display_name: displayName.text.trim(),
           password: password.text,
           invite_code: invite.text.trim(),
           bootstrap_token: bootstrapToken.text.trim(),
-          device_name: Quickshell.env("HOSTNAME") || "Desktop"
+          device_name: "Wisp desktop",
+          reset_link: resetLink.text
         }) + "\n")
+          password.text = ""; confirmPassword.text = ""; bootstrapToken.text = ""; resetLink.text = ""
+        }
         stdout: StdioCollector { id: output }
         stderr: StdioCollector { id: errors }
         onExited: function(exitCode) {
@@ -356,12 +437,19 @@ ShellRoot {
           if (exitCode === 0) {
             var result = ({})
             try { result = JSON.parse(output.text) } catch(error) {}
+            if (result.reset) {
+              window.selectMode("login")
+              window.feedback = "Password reset. Sign in with your new password, then use a trusted device to restore backup access."
+              return
+            }
+            if (result.cancelled) { window.setupState = ({}); window.refreshSetup(); return }
             window.feedback = result.warning || "Account saved. Starting Wisp…"
             finishTimer.interval = result.warning ? 5000 : 500
             finishTimer.start()
           } else {
             var lines = String(errors.text || "Account setup failed").trim().split("\n")
             window.feedback = lines.length ? lines[lines.length - 1].replace(/^Error: /, "") : "Account setup failed"
+            window.refreshSetup()
           }
         }
       }

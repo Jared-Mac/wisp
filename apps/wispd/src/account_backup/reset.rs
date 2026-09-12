@@ -198,10 +198,10 @@ impl Api {
         let done: Done = self
             .post("/v3/auth/reset/finish", finish, false, 8192)
             .await?;
-        self.validate_reset_done(finish, &done)?;
+        Self::validate_reset_done(finish, &done)?;
         self.clear_reset(finish)
     }
-    fn validate_reset_done(&self, finish: &Finish, done: &Done) -> anyhow::Result<()> {
+    fn validate_reset_done(finish: &Finish, done: &Done) -> anyhow::Result<()> {
         ensure!(
             done.completed
                 && done.backup_locked
@@ -226,6 +226,7 @@ impl Api {
             Ok(())
         })
     }
+    #[allow(clippy::too_many_lines)] // Keep durable transition ordering reviewable as one operation.
     pub(crate) async fn resume_reset(&self, new_link: Option<&str>) -> anyhow::Result<()> {
         self.reset_only()?;
         let pending = self
@@ -255,10 +256,7 @@ impl Api {
                             f.code,
                             "invalid_token" | "unauthorized" | "account_state_changed"
                         )
-                    }) =>
-            {
-                ()
-            }
+                    }) => {}
             Err(error) => return Err(error),
         }
         let token = pasted_token(
@@ -280,7 +278,7 @@ impl Api {
                 "Recovery receipt changed"
             );
             let done: Done = serde_json::from_value(receipt.result)?;
-            self.validate_reset_done(&finish, &done)?;
+            Self::validate_reset_done(&finish, &done)?;
             return self.clear_reset(&finish);
         }
         if status.credential_generation != finish.effect.expected_generation {

@@ -33,6 +33,9 @@ const fn registry_version() -> u8 {
 }
 
 pub(crate) fn default_path() -> Option<PathBuf> {
+    if let Some(path) = std::env::var_os("WISP_ACCOUNTS_FILE") {
+        return Some(PathBuf::from(path));
+    }
     std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))
@@ -61,7 +64,7 @@ impl AccountRegistry {
         Ok(registry)
     }
 
-    fn validate(&mut self) -> anyhow::Result<()> {
+    pub(crate) fn validate(&mut self) -> anyhow::Result<()> {
         if self.version != 1 {
             bail!("unsupported Wisp account registry version {}", self.version);
         }

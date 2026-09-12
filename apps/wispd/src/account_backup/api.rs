@@ -1,3 +1,4 @@
+#![allow(clippy::items_after_statements)] // Keep private response types beside their validation.
 //! Bounded native-only account transport. All errors are fixed local messages;
 //! neither server bodies nor request credentials are included in diagnostics.
 use super::store::Store;
@@ -242,6 +243,7 @@ impl SignedIn {
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+#[allow(clippy::struct_field_names)] // Exact protocol field names.
 pub(crate) struct Grant {
     pub(crate) grant: String,
     pub(crate) operation_sha256: String,
@@ -268,6 +270,11 @@ pub(crate) struct Api {
     session: Option<Zeroizing<String>>,
 }
 impl Api {
+    pub(super) fn bearer(&self) -> anyhow::Result<Zeroizing<String>> {
+        self.session
+            .clone()
+            .context("Sign in before activating account credentials")
+    }
     pub(crate) async fn connect(
         origin: &str,
         store: Arc<Store>,
@@ -386,8 +393,25 @@ impl Api {
         read(response, limit).await
     }
     pub(crate) async fn status(&self) -> anyhow::Result<Status> {
+        self.status_for_recovery(false).await
+    }
+    pub(crate) async fn status_for_recovery(
+        &self,
+        migration_recovery: bool,
+    ) -> anyhow::Result<Status> {
         let state: Status = self.get("/v3/accounts/vault/status", 16384).await?;
-        self.validate_status(&state, false)?;
+        self.validate_status(&state, migration_recovery)?;
+        if matches!(state, Status::Secure { .. }) && !self.store.record()?.secure {
+            self.store.update(None, |record| {
+                record.scope = Some(state.scope().clone());
+                record.network = Some(state.scope().network);
+                record.identity = state.identity().cloned();
+                record.username = Some(state.username().to_owned());
+                record.secure = true;
+                record.expected = Some(state.expected());
+                Ok(())
+            })?;
+        }
         Ok(state)
     }
     pub(crate) async fn revoke(&self, device: Uuid) -> anyhow::Result<()> {
@@ -446,6 +470,19 @@ impl Api {
                 ensure!(
                     scope == state.scope(),
                     "Server changed your account identity"
+                );
+            }
+            if let Some(pending) = &record.pending {
+                ensure!(
+                    pending
+                        .scope
+                        .as_ref()
+                        .is_none_or(|scope| scope == state.scope())
+                        && pending
+                            .identity
+                            .as_ref()
+                            .is_none_or(|identity| state.identity() == Some(identity)),
+                    "Account status differs from the staged identity"
                 );
             }
             if let Some(username) = &record.username {

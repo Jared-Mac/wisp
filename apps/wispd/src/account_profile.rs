@@ -49,6 +49,11 @@ pub(super) async fn command(
     name: &str,
     args: &Value,
 ) -> anyhow::Result<Value> {
+    if matches!(name, "change_account_password" | "set_recovery_email")
+        && crate::account_backup_commands::secure_profile_change(api, privacy, name, args).await?
+    {
+        return Ok(json!({"ok":true}));
+    }
     let request = match name {
         "account_profile" => api.request(reqwest::Method::GET, "/v1/accounts/profile"),
         "update_account_profile" => {

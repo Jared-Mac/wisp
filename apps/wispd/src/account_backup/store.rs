@@ -1,3 +1,4 @@
+#![allow(clippy::items_after_statements)] // Keep private response types beside their validation.
 use anyhow::{Context, ensure};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -122,7 +123,7 @@ pub(crate) struct Pending {
     pub(crate) bundle: Option<PrivateBytes>,
     /// Public handshake/staging context, including no raw password or export key.
     pub(crate) start: Option<PrivateBytes>,
-    /// Exact retry body. Renewable authorization is separate from effect_digest.
+    /// Exact retry body. Renewable authorization is separate from `effect_digest`.
     pub(crate) finish: Option<PrivateBytes>,
     pub(crate) effect_digest: Option<String>,
     pub(crate) sent: bool,
@@ -243,6 +244,7 @@ impl Pending {
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+#[allow(clippy::struct_excessive_bools)] // Independent durable facts, validated together on every commit.
 pub(crate) struct Record {
     version: u32,
     pub(crate) origin: String,
@@ -252,6 +254,7 @@ pub(crate) struct Record {
     pub(crate) identity: Option<wisp_crypto::PublicIdentity>,
     pub(crate) pin: Option<ServerPin>,
     pub(crate) secure: bool,
+    pub(crate) auto_sync: bool,
     pub(crate) revision: u64,
     pub(crate) dirty: u64,
     pub(crate) synced_dirty: u64,
@@ -267,6 +270,8 @@ pub(crate) struct Record {
     /// Committed device credential awaiting (or surviving) config installation.
     pub(crate) installation: Option<PrivateBytes>,
     pub(crate) installation_pending: bool,
+    pub(crate) installation_ready: bool,
+    pub(crate) installation_select: bool,
 }
 impl Record {
     fn empty(origin: &str) -> Self {
@@ -279,6 +284,7 @@ impl Record {
             identity: None,
             pin: None,
             secure: false,
+            auto_sync: true,
             revision: 0,
             dirty: 0,
             synced_dirty: 0,
@@ -292,6 +298,8 @@ impl Record {
             proof: None,
             installation: None,
             installation_pending: false,
+            installation_ready: false,
+            installation_select: false,
         }
     }
     pub(crate) fn bundle(&self) -> anyhow::Result<Option<Bundle>> {
@@ -384,7 +392,7 @@ impl Record {
             );
         }
         ensure!(
-            !self.installation_pending || self.installation.is_some(),
+            !(self.installation_pending || self.installation_ready) || self.installation.is_some(),
             "Missing account installation"
         );
         if let Some(proof) = &self.proof {
@@ -452,7 +460,11 @@ fn check_file(metadata: &fs::Metadata) -> anyhow::Result<()> {
 }
 #[allow(clippy::verbose_bit_mask)]
 fn private_dir(path: &Path) -> anyhow::Result<()> {
-    match fs::DirBuilder::new().mode(0o700).create(path) {
+    match fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(path)
+    {
         Ok(()) => (),
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => (),
         Err(e) => return Err(e.into()),
@@ -501,6 +513,54 @@ impl Store {
             origin: origin.to_owned(),
             cache: Mutex::new(None),
         })
+    }
+    /// Read only canonical bounded private journals when finishing an interrupted
+    /// configuration installation. Never infer an account from a filename alone.
+    pub(crate) fn installed_origins(root: &Path) -> anyhow::Result<Vec<String>> {
+        let folder = root.join("account-backup");
+        if !folder.try_exists()? {
+            return Ok(Vec::new());
+        }
+        private_dir(&folder)?;
+        let mut origins = Vec::new();
+        for (index, entry) in fs::read_dir(&folder)?.enumerate() {
+            ensure!(index < 32768, "Too many private account files");
+            let path = entry?.path();
+            if path.extension().is_none_or(|extension| extension != "json") {
+                continue;
+            }
+            let mut file = OpenOptions::new()
+                .read(true)
+                .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+                .open(&path)?;
+            check_file(&file.metadata()?)?;
+            ensure!(
+                file.metadata()?.len() <= MAX_RECORD,
+                "Private account record is too large"
+            );
+            let mut bytes = Zeroizing::new(Vec::new());
+            Read::by_ref(&mut file)
+                .take(MAX_RECORD + 1)
+                .read_to_end(&mut bytes)?;
+            ensure!(
+                bytes.len() <= usize::try_from(MAX_RECORD)?,
+                "Private account record is too large"
+            );
+            let record: Record =
+                serde_json::from_slice(&bytes).context("Private account state is damaged")?;
+            ensure!(
+                path == folder.join(format!(
+                    "{:x}.json",
+                    Sha256::digest(record.origin.as_bytes())
+                )),
+                "Private account filename does not match its service"
+            );
+            record.validate(&record.origin)?;
+            if record.installation_pending && record.installation_ready {
+                origins.push(record.origin);
+            }
+        }
+        Ok(origins)
     }
     #[cfg(test)]
     pub(crate) fn private_path(&self) -> &Path {
@@ -597,7 +657,7 @@ impl Store {
                 let mut bytes = Zeroizing::new(Vec::new());
                 file.take(MAX_RECORD + 1).read_to_end(&mut bytes)?;
                 ensure!(
-                    bytes.len() <= MAX_RECORD as usize,
+                    bytes.len() <= usize::try_from(MAX_RECORD)?,
                     "Private account record is too large"
                 );
                 serde_json::from_slice::<Record>(&bytes)
@@ -622,6 +682,37 @@ impl Store {
         let loaded = &self.refresh(&mut cache)?.loaded;
         read(&loaded.record, loaded.bundle.as_ref())
     }
+    pub(crate) fn capture_media_key(&self, media: Option<String>) -> anyhow::Result<()> {
+        use age::secrecy::ExposeSecret;
+        let Some(media) = media else {
+            return Ok(());
+        };
+        let media = wisp_crypto::SecretString::from(media);
+        self.edit(None, |record| {
+            let Some(bundle) = record.bundle()? else {
+                return Ok(((), false));
+            };
+            if let Some(existing) = bundle.media_key() {
+                ensure!(
+                    existing.expose_secret() == media.expose_secret(),
+                    "Saved media encryption keys conflict; restore the matching account key"
+                );
+                return Ok(((), false));
+            }
+            let bundle = Bundle::new(
+                bundle.scope.clone(),
+                bundle.identity()?.recovery_key()?,
+                Some(media),
+                bundle.trust.clone(),
+            )?;
+            record.set_bundle(&bundle)?;
+            record.dirty = record
+                .dirty
+                .checked_add(1)
+                .context("Backup revision exhausted")?;
+            Ok(((), true))
+        })
+    }
     pub(crate) fn record(&self) -> anyhow::Result<Record> {
         self.read(|record, _| Ok(record.clone()))
     }
@@ -632,6 +723,7 @@ impl Store {
     ) -> anyhow::Result<T> {
         self.edit(expected_revision, |record| Ok((change(record)?, true)))
     }
+    #[allow(clippy::too_many_lines)] // Keep durable transition ordering reviewable as one operation.
     fn edit<T>(
         &self,
         expected_revision: Option<u64>,
@@ -686,7 +778,19 @@ impl Store {
         }
         if let Some(username) = &loaded.record.username {
             ensure!(
-                candidate.username.as_ref() == Some(username),
+                candidate.username.as_ref() == Some(username)
+                    || (!loaded.record.secure
+                        && loaded.record.scope.is_none()
+                        && loaded.record.installation.is_none()
+                        && loaded
+                            .record
+                            .pending
+                            .as_ref()
+                            .is_some_and(|pending| !pending.sent
+                                && pending.finish.is_none()
+                                && pending.recovery.is_empty())
+                        && candidate.username.is_none()
+                        && candidate.pending.is_none()),
                 "Sign-in account cannot change during an operation"
             );
         }
@@ -721,7 +825,7 @@ impl Store {
         let bundle = candidate.validate(&self.origin)?;
         let bytes = Zeroizing::new(serde_json::to_vec(&candidate)?);
         ensure!(
-            bytes.len() <= MAX_RECORD as usize,
+            bytes.len() <= usize::try_from(MAX_RECORD)?,
             "Private account record is too large"
         );
         let parent = self

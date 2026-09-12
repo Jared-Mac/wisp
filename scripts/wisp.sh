@@ -5,6 +5,11 @@ bin_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 ensure_running=false
 case "${1:-}" in
   --ensure-running) ensure_running=true ;;
+  wisp://account/reset)
+    # Native recovery handoff carries no reset token or other bearer material.
+    [[ $# == 1 ]] || exit 2
+    exec env WISP_ONBOARDING_MODE=reset "$bin_dir/wisp-onboarding"
+    ;;
   wisp-invite:*)
     # Pass invitations as data, never shell code or diagnostic output.
     [[ $# == 1 && ${#1} -le 16384 && "$1" =~ ^wisp-invite:(v2\.)?[A-Za-z0-9_-]+$ ]] || {

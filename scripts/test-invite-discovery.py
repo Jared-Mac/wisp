@@ -10,7 +10,7 @@ import time
 import urllib.request
 
 ROOT = Path(__file__).resolve().parents[1]
-BIN = Path(os.environ.get('CARGO_TARGET_DIR', ROOT / 'target')) / 'release'
+BIN = Path(os.environ.get('WISP_TEST_BIN_DIR', Path(os.environ.get('CARGO_TARGET_DIR', ROOT / 'target')) / 'release'))
 
 
 def eventually(action):
@@ -46,7 +46,7 @@ with tempfile.TemporaryDirectory(prefix='wisp-invite-discovery-') as directory:
             log = (root / f'server-{number}.log').open('w')
             logs.append(log)
             processes.append(subprocess.Popen([str(BIN / 'wisp-server'), '--addr', f'127.0.0.1:{port}',
-                '--database-url', f'sqlite://{root}/server-{number}.sqlite3', '--allow-dev-sessions', 'false',
+                '--database-url', f'sqlite://{root}/server-{number}.sqlite3', '--public-url', url, '--allow-dev-sessions', 'false',
                 '--bootstrap-token', 'isolated-bootstrap-fixture'], env=env, stdout=log, stderr=log))
             eventually(lambda: urllib.request.urlopen(url + '/healthz', timeout=1).status == 200)
             servers.append(url)
