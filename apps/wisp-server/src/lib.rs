@@ -29,6 +29,7 @@ mod room_access;
 #[cfg(test)]
 mod room_access_tests;
 mod rooms;
+mod secure_accounts;
 mod server_management;
 mod short_invitations;
 mod soundboard;
@@ -237,6 +238,7 @@ impl AppState {
             .connect_with(options)
             .await?;
         sqlx::migrate!("../../migrations").run(&pool).await?;
+        secure_accounts::initialize(&pool).await?;
         sqlx::query("INSERT OR IGNORE INTO chat_network(id,network_id) VALUES (1,?)")
             .bind(Uuid::new_v4().to_string())
             .execute(&pool)
@@ -573,6 +575,54 @@ pub fn router(state: AppState) -> Router {
         .route("/join/invite.js", get(account_membership::invite_script))
         .route("/join/invite.css", get(account_membership::invite_style))
         .route("/healthz", get(health))
+        .route("/v3/auth/info", get(secure_accounts::info))
+        .route(
+            "/v3/auth/login/start",
+            post(secure_accounts::authentication::login_start).layer(DefaultBodyLimit::max(16384)),
+        )
+        .route(
+            "/v3/auth/login/finish",
+            post(secure_accounts::authentication::login_finish).layer(DefaultBodyLimit::max(8192)),
+        )
+        .route(
+            "/v3/auth/unlock/start",
+            post(secure_accounts::authentication::unlock_start).layer(DefaultBodyLimit::max(8192)),
+        )
+        .route(
+            "/v3/auth/unlock/finish",
+            post(secure_accounts::authentication::unlock_finish).layer(DefaultBodyLimit::max(8192)),
+        )
+        .route(
+            "/v3/auth/reauth/start",
+            post(secure_accounts::authentication::reauth_start).layer(DefaultBodyLimit::max(16384)),
+        )
+        .route(
+            "/v3/auth/reauth/finish",
+            post(secure_accounts::authentication::reauth_finish).layer(DefaultBodyLimit::max(8192)),
+        )
+        .route("/v3/accounts/vault/status", get(secure_accounts::status))
+        .route(
+            "/v3/accounts/vault",
+            get(secure_accounts::vault::read)
+                .post(secure_accounts::vault::store)
+                .layer(DefaultBodyLimit::max(12 * 1024 * 1024))
+                .layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    authenticate_text_body,
+                )),
+        )
+        .route(
+            "/v3/accounts/vault/proof",
+            post(secure_accounts::vault::proof).layer(DefaultBodyLimit::max(4096)),
+        )
+        .route(
+            "/v3/accounts/vault/rewrap",
+            post(secure_accounts::vault::rewrap).layer(DefaultBodyLimit::max(16384)),
+        )
+        .route(
+            "/v3/accounts/operations/{id}",
+            get(secure_accounts::vault::receipt),
+        )
         .route("/v1/dev/session", post(dev_session))
         .route("/v1/sessions", post(device_session))
         .route("/v1/accounts/login", post(login_account))
@@ -766,6 +816,7 @@ pub fn router(state: AppState) -> Router {
         ))
         .layer(TraceLayer::new_for_http())
         .layer(middleware::from_fn(account_recovery::private_responses))
+        .layer(middleware::from_fn(secure_accounts::private_responses))
         .with_state(state)
 }
 

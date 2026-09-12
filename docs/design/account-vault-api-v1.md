@@ -1,6 +1,7 @@
-# Native account backup API v1 — integration contract draft
+# Native account backup API v1 — integration contract
 
-Status: peer review, not deployed. The shared Rust `account_vault` types are the
+Status: frozen for implementation after desktop/Android peer review on 2026-09-12,
+native foundation commit `bb32102`; not deployed. The shared Rust `account_vault` types are the
 cryptographic source of truth. This document names the HTTP fields and transaction
 rules before desktop/server/Android wiring. No client may guess a missing route
 and fall back to sending its secure password through v1/v2.
@@ -260,6 +261,14 @@ supersession. This endpoint issues no device/session and changes no password.
 Receipt absence alone never means the old reset failed.
 
 ## Resolving interrupted operations
+
+Exact receipt response shape:
+`{operation_id,operation_sha256,scope,device_id,kind,result,committed_at}`.
+`device_id` is null for email reset. `result` is the original finish response;
+its credential generation and vault checkpoint are historical. Fetch current
+status separately before continuing work. Vault writes return
+`{committed:true,operation_id,operation_sha256,scope,credential_generation,vault}`;
+rewrap returns the same fields plus `wrapper_generation`.
 
 `GET /accounts/operations/{operation_id}` requires a session for the same account
 and returns only a committed receipt: operation ID, immutable effect digest,
