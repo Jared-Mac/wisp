@@ -1,7 +1,7 @@
 # Desktop native account backup integration
 
-Work in progress on `codex/account-backup`. Not installed, published or deployed.
-The Android distribution stays held until desktop/server integration is complete.
+Desktop/server implementation is complete. Release activation and Android
+publication are coordinated so the backend is ready before Android distribution.
 
 ## Implemented and checked
 
@@ -31,8 +31,8 @@ The Android distribution stays held until desktop/server integration is complete
 
 - Final release build and coordinated cross-platform packaging. No real-account
   migration or private password entry through tools.
-- Completed verification includes strict desktop/server Clippy, 103 server tests,
-  97 desktop tests plus the new session-adoption test, native CLI remote restore
+- Completed verification includes strict workspace Clippy, 103 server tests,
+  98 desktop tests, native CLI remote restore
   including media keys, invitation/join integration, onboarding, backup settings
   in four themes, and the existing dismissible-error/recovery-email UI tests.
 - Finish coordinated desktop/Android versioning, client installation, main release,
