@@ -78,6 +78,7 @@ pub(crate) enum Kind {
     Email,
     Reset,
     Sync,
+    ClassicRecovery,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -230,7 +231,8 @@ impl Pending {
         }
         for recovery in &self.recovery {
             ensure!(
-                recovery.kind == Kind::Login && recovery.id != self.id,
+                matches!(recovery.kind, Kind::Login | Kind::ClassicRecovery)
+                    && recovery.id != self.id,
                 "Invalid nested recovery operation"
             );
             recovery.validate(origin, depth + 1)?;

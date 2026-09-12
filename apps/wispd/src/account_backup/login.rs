@@ -472,7 +472,9 @@ impl Api {
                 record.pending = None;
             } else {
                 // The selected recovery credential is durably retained separately.
-                current.recovery.clear();
+                current
+                    .recovery
+                    .retain(|pending| pending.kind != Kind::Login);
             }
             Ok(())
         })?;

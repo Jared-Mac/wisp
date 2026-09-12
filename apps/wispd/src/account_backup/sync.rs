@@ -351,12 +351,18 @@ impl Api {
             Kind::Sync => "vault",
             Kind::Reset => "reset",
             Kind::Login => "login",
+            Kind::ClassicRecovery => "migration_recovery",
         };
         ensure!(
             receipt.kind == kind && receipt.committed_at > 0,
             "Account receipt purpose changed"
         );
-        if pending.kind != Kind::Reset && pending.kind != Kind::Login {
+        if pending.kind == Kind::ClassicRecovery {
+            ensure!(
+                receipt.device_id == pending.device.as_ref().map(|device| device.id),
+                "Recovery receipt device changed"
+            );
+        } else if pending.kind != Kind::Reset && pending.kind != Kind::Login {
             let body = pending
                 .finish
                 .as_ref()

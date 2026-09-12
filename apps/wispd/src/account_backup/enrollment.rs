@@ -495,16 +495,18 @@ impl Api {
             Some(finish.operation.digest()?) == pending.effect_digest,
             "Saved enrollment effect changed"
         );
-        match self.submit_enrollment(&pending, &finish).await {
-            Ok(()) => return Ok(()),
-            Err(error)
-                if error
-                    .downcast_ref::<super::api::Failure>()
-                    .is_some_and(|f| f.code == "unauthorized") =>
-            {
-                ()
+        if pending.sent {
+            match self.submit_enrollment(&pending, &finish).await {
+                Ok(()) => return Ok(()),
+                Err(error)
+                    if error
+                        .downcast_ref::<super::api::Failure>()
+                        .is_some_and(|f| f.code == "unauthorized") =>
+                {
+                    ()
+                }
+                Err(error) => return Err(error),
             }
-            Err(error) => return Err(error),
         }
         let stage: Stage = serde_json::from_value(
             pending
@@ -557,8 +559,29 @@ impl Api {
                 "Enrollment journal changed"
             );
             saved.finish = Some(PrivateBytes::json(&finish)?);
+            saved.sent = true;
             Ok(())
         })?;
         self.submit_enrollment(&pending, &finish).await
+    }
+    /// The recovery transaction already made the old Existing-device effect
+    /// terminal. Retain its exact prepared credentials/key/ciphertext, changing
+    /// only the operation UUID and authenticated existing device.
+    pub(super) fn rebind_migration(&self, original: Uuid) -> anyhow::Result<()> {
+        self.store.update(None, |record| {
+            let saved = record.pending.as_ref().context("Missing migration journal")?;
+            ensure!(saved.id == original && saved.kind == Kind::Migration && saved.recovery.is_empty(), "Resolve every recovery credential before rebinding migration");
+            let mut finish: Finish = serde_json::from_value(saved.finish.as_ref().context("Missing prepared migration")?.value()?)?;
+            let device = self.device.context("Missing recovered device")?;
+            ensure!(finish.operation.device.id() != device, "Migration recovery must replace the revoked device");
+            let mut next = saved.clone(); next.id = Uuid::new_v4(); next.sent = false;
+            finish.operation.id = next.id; finish.operation.device = DeviceBinding::Existing { id: device };
+            finish.signature = finish.operation.sign(&record.bundle()?.context("Missing original identity")?.identity()?)?;
+            finish.authorization.clear();
+            next.effect_digest = Some(finish.operation.digest()?);
+            next.finish = Some(PrivateBytes::json(&finish)?);
+            next.start = Some(PrivateBytes::json(&Stage { binding: None, body: json!({"operation_id":next.id,"generation":finish.registration.generation,"request":finish.registration.request}) })?);
+            record.pending = Some(next); Ok(())
+        })
     }
 }

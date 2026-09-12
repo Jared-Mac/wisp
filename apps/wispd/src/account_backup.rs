@@ -5,6 +5,7 @@ pub(super) mod api;
 mod enrollment;
 mod login;
 mod mutations;
+mod recovery;
 pub(super) mod reset;
 pub(super) mod store;
 mod sync;

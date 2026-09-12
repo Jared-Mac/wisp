@@ -390,6 +390,47 @@ impl Api {
         self.validate_status(&state, false)?;
         Ok(state)
     }
+    pub(crate) async fn revoke(&self, device: Uuid) -> anyhow::Result<()> {
+        ensure!(
+            Some(device) != self.device,
+            "Cannot retire the current recovery device"
+        );
+        let response = self
+            .client
+            .delete(format!("{}/v1/devices/{device}", self.origin))
+            .bearer_auth(
+                self.session
+                    .as_ref()
+                    .context("Sign in before retiring an old device")?
+                    .as_str(),
+            )
+            .send()
+            .await
+            .map_err(|_| {
+                anyhow::anyhow!(
+                    "Could not confirm the old device was retired; its journal was preserved"
+                )
+            })?;
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Revoked {
+            ok: bool,
+        }
+        match read::<Revoked>(response, 4096).await {
+            Ok(result) => {
+                ensure!(result.ok, "Device retirement was not confirmed");
+                Ok(())
+            }
+            Err(error)
+                if error.downcast_ref::<Failure>().is_some_and(|failure| {
+                    failure.status == 404 && failure.code == "not_found"
+                }) =>
+            {
+                Ok(())
+            }
+            Err(error) => Err(error),
+        }
+    }
     pub(crate) fn validate_status(
         &self,
         state: &Status,
