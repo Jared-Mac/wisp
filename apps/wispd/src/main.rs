@@ -1,3 +1,4 @@
+mod account_backup;
 mod account_membership;
 mod account_profile;
 mod accounts;

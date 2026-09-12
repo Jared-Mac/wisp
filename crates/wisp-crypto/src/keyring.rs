@@ -1,10 +1,11 @@
 //! Private local key storage. Import never overwrites a different identity;
 //! public-key pinning never silently accepts a key change.
-use crate::{Identity, PublicIdentity, SecretString};
+use crate::{Identity, PublicIdentity, SecretString, account_vault::bundle::TrustState};
 use age::secrecy::ExposeSecret;
 use anyhow::{Context, bail};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 use std::{
     fs,
     io::{Read, Write},
@@ -14,9 +15,21 @@ use std::{
 use uuid::Uuid;
 use zeroize::Zeroizing;
 
+/// A portable account keeps all trust changes in one durable transaction. The
+/// callback operates on a detached candidate; implementations must validate and
+/// persist it before publishing any change. No network work belongs here.
+pub trait TrustStore: Send + Sync {
+    fn snapshot(&self) -> anyhow::Result<TrustState>;
+    fn update(
+        &self,
+        change: &mut dyn FnMut(&mut TrustState) -> anyhow::Result<()>,
+    ) -> anyhow::Result<()>;
+}
+
 pub struct Keyring {
     directory: PathBuf,
     identity: Identity,
+    portable: Option<Arc<dyn TrustStore>>,
 }
 
 fn private_directory(path: &Path) -> anyhow::Result<()> {
@@ -95,7 +108,75 @@ impl Keyring {
         Ok(Self {
             directory,
             identity,
+            portable: None,
         })
+    }
+
+    /// Use an already restored identity and atomically persisted account trust.
+    /// This never creates, enrolls, rotates, or writes an identity implicitly.
+    pub fn portable(identity: Identity, store: Arc<dyn TrustStore>) -> Self {
+        Self {
+            directory: PathBuf::new(),
+            identity,
+            portable: Some(store),
+        }
+    }
+
+    /// Export legacy public trust for enabling an existing account. Missing,
+    /// malformed, misnamed, linked or oversized entries never disappear silently.
+    pub fn export_trust(&self) -> anyhow::Result<TrustState> {
+        if let Some(store) = &self.portable {
+            return store.snapshot();
+        }
+        let mut trust = TrustState::default();
+        for folder in ["verified", "conversations", "room-heads"] {
+            for (index, entry) in fs::read_dir(self.directory.join(folder))?.enumerate() {
+                anyhow::ensure!(
+                    index < 4096,
+                    "Too many local trust entries for a portable backup"
+                );
+                let entry = entry?;
+                let name = entry
+                    .file_name()
+                    .into_string()
+                    .map_err(|_| anyhow::anyhow!("Invalid local trust filename"))?;
+                let raw = read_private(&entry.path())?;
+                match folder {
+                    "verified" => {
+                        let account = Uuid::parse_str(&name)?;
+                        anyhow::ensure!(
+                            account.to_string() == name && !account.is_nil(),
+                            "Invalid local identity filename"
+                        );
+                        let identity: PublicIdentity = serde_json::from_str(raw.expose_secret())?;
+                        identity.validate()?;
+                        trust.pins.insert(account, identity);
+                    }
+                    "conversations" => {
+                        let (conversation, members): (String, BTreeSet<Uuid>) =
+                            serde_json::from_str(raw.expose_secret())?;
+                        anyhow::ensure!(
+                            format!("{:x}", Sha256::digest(conversation.as_bytes())) == name,
+                            "Invalid saved conversation binding"
+                        );
+                        trust.legacy_approvals.insert(conversation, members);
+                    }
+                    _ => {
+                        let head: crate::roster::SignedRoster =
+                            serde_json::from_str(raw.expose_secret())?;
+                        anyhow::ensure!(
+                            format!("{:x}", Sha256::digest(head.roster.conversation.as_bytes()))
+                                == name,
+                            "Invalid saved room binding"
+                        );
+                        trust
+                            .room_heads
+                            .insert(head.roster.conversation.clone(), head);
+                    }
+                }
+            }
+        }
+        Ok(trust)
     }
 
     #[must_use]
@@ -133,6 +214,39 @@ impl Keyring {
             own.identity == self.identity.public(),
             "Your room identity does not match this device"
         );
+        if let Some(store) = &self.portable {
+            store.update(&mut |trust| {
+                if let Some(saved) = trust.room_heads.get(conversation) {
+                    anyhow::ensure!(
+                        chain.iter().any(|entry| entry == saved),
+                        "Room history rolled back or forked; refusing to replace its saved identity"
+                    );
+                }
+                for entry in chain {
+                    for (id, member) in &entry.roster.members {
+                        if *id == account {
+                            anyhow::ensure!(
+                                member.identity == self.identity.public(),
+                                "Your encryption identity changed in room history"
+                            );
+                        }
+                        if let Some(saved) = trust.pins.get(id) {
+                            anyhow::ensure!(
+                                *saved == member.identity,
+                                "Account encryption identity changed"
+                            );
+                        } else {
+                            trust.pins.insert(*id, member.identity.clone());
+                        }
+                    }
+                }
+                trust
+                    .room_heads
+                    .insert(conversation.to_owned(), last.clone());
+                Ok(())
+            })?;
+            return Ok(last.clone());
+        }
         let path = self
             .directory
             .join("room-heads")
@@ -213,6 +327,14 @@ impl Keyring {
         members: &BTreeSet<Uuid>,
     ) -> anyhow::Result<()> {
         self.keys_for(account, members)?;
+        if let Some(store) = &self.portable {
+            return store.update(&mut |trust| {
+                trust
+                    .legacy_approvals
+                    .insert(conversation.to_owned(), members.clone());
+                Ok(())
+            });
+        }
         let path = self.roster_path(conversation);
         if path.try_exists()? {
             read_private(&path)?;
@@ -232,6 +354,13 @@ impl Keyring {
         account: Uuid,
         offered: &BTreeSet<Uuid>,
     ) -> anyhow::Result<BTreeMap<Uuid, PublicIdentity>> {
+        if let Some(store) = &self.portable {
+            anyhow::ensure!(
+                store.snapshot()?.legacy_approvals.get(conversation) == Some(offered),
+                "Chat participants changed; review the recipients before sending"
+            );
+            return self.keys_for(account, offered);
+        }
         let (pinned_conversation, pinned): (String, BTreeSet<Uuid>) = serde_json::from_str(
             read_private(&self.roster_path(conversation))
                 .context("Review this chat's recipients before sending")?
@@ -247,6 +376,14 @@ impl Keyring {
     /// Return the first pinned identity; callers may optionally verify its
     /// fingerprint independently. A pin alone is not independent verification.
     pub fn friend(&self, user: Uuid) -> anyhow::Result<PublicIdentity> {
+        if let Some(store) = &self.portable {
+            return store
+                .snapshot()?
+                .pins
+                .get(&user)
+                .cloned()
+                .context("Account identity has not been pinned");
+        }
         let key: PublicIdentity = serde_json::from_str(
             read_private(&self.directory.join("verified").join(user.to_string()))?.expose_secret(),
         )?;
@@ -285,6 +422,13 @@ impl Keyring {
 
     pub fn verified_key(&self, user: Uuid, offered: &PublicIdentity) -> anyhow::Result<()> {
         offered.validate()?;
+        if self.portable.is_some() {
+            anyhow::ensure!(
+                self.friend(user)? == *offered,
+                "Friend's encryption identity changed; sending is blocked"
+            );
+            return Ok(());
+        }
         let pinned: PublicIdentity = serde_json::from_str(
             read_private(&self.directory.join("verified").join(user.to_string()))?.expose_secret(),
         )?;
@@ -299,6 +443,16 @@ impl Keyring {
     /// missing pin, and never automatically reset a changed identity.
     pub fn trust_first_use(&self, user: Uuid, key: &PublicIdentity) -> anyhow::Result<()> {
         key.validate()?;
+        if let Some(store) = &self.portable {
+            return store.update(&mut |trust| {
+                if let Some(saved) = trust.pins.get(&user) {
+                    anyhow::ensure!(saved == key, "Account encryption identity changed");
+                } else {
+                    trust.pins.insert(user, key.clone());
+                }
+                Ok(())
+            });
+        }
         let path = self.directory.join("verified").join(user.to_string());
         match std::fs::symlink_metadata(&path) {
             Ok(_) => self.verified_key(user, key),
@@ -324,6 +478,9 @@ impl Keyring {
     ) -> anyhow::Result<()> {
         if key.fingerprint()? != compared_fingerprint {
             bail!("Fingerprint does not match");
+        }
+        if self.portable.is_some() {
+            return self.trust_first_use(user, key);
         }
         let path = self.directory.join("verified").join(user.to_string());
         if path.try_exists()? {

@@ -543,8 +543,17 @@ async fn automatic_enrollment_persists_retries_and_requires_recovery_on_another_
     );
     assert!(other.status()["error"].is_null());
 
-    // A damaged local identity never becomes a new identity on startup.
+    // The atomic portable record is now authoritative. Losing its historical
+    // source copy cannot rotate the identity or erase current trust.
     fs::remove_file(&key_path).unwrap();
+    let portable = Privacy::at(root.clone(), &server, account);
+    portable.initialize(&api).await.unwrap();
+    assert_eq!(
+        portable.active().unwrap().unwrap().ring.identity().public(),
+        identity
+    );
+    // Damage to current private storage must still block automatic enrollment.
+    fs::write(portable.backup_store().unwrap().private_path(), b"damaged").unwrap();
     let damaged = Privacy::at(root, &server, account);
     assert!(damaged.initialize(&api).await.is_err());
     assert!(!key_path.exists());

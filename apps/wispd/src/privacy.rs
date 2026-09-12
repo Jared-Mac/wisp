@@ -3,7 +3,11 @@
 #[cfg(test)]
 #[path = "privacy_tests.rs"]
 mod tests;
-use super::{ServerApi, decode};
+use super::{
+    ServerApi,
+    account_backup::store::{PrivateBytes, Store},
+    decode,
+};
 use anyhow::{Context, ensure};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde::{Deserialize, Serialize};
@@ -20,7 +24,12 @@ use std::{
 use uuid::Uuid;
 use wisp_crypto::{
     PublicIdentity,
-    keyring::Keyring,
+    account_vault::{
+        Scope,
+        bundle::{Bundle, NameCheckpoint},
+        envelope::VaultKey,
+    },
+    keyring::{Keyring, TrustStore},
     message::{Content, MessageContext},
     profile::{Profile, SignedProfile},
     roster::{Member, Role, Roster, SignedRoster},
@@ -71,6 +80,7 @@ pub(super) struct Privacy {
     root: PathBuf,
     binding: PathBuf,
     account: Uuid,
+    store: Result<Arc<Store>, String>,
     active: RwLock<Result<Option<Arc<Vault>>, String>>,
     decrypted: Mutex<BTreeMap<Uuid, Content>>,
     last_error: Mutex<Option<String>>,
@@ -157,7 +167,27 @@ impl Privacy {
 
     pub(super) fn at(root: PathBuf, server: &str, account: Uuid) -> Self {
         let binding = root.join(format!("{:x}.json", Sha256::digest(server.as_bytes())));
+        let store = Store::at(&root, server)
+            .map(Arc::new)
+            .map_err(|error| error.to_string());
         let active = (|| -> anyhow::Result<Option<Arc<Vault>>> {
+            let store = store
+                .as_ref()
+                .map_err(|error| anyhow::anyhow!(error.clone()))?;
+            let record = store.record()?;
+            if let Some(scope) = &record.scope {
+                ensure!(
+                    scope.account == account,
+                    "Server changed your account identity"
+                );
+            }
+            if store.read(|_, bundle| Ok(bundle.is_some()))? {
+                return Ok(Some(Arc::new(Self::load_portable(&root, store)?)));
+            }
+            ensure!(
+                !record.secure,
+                "Sign in with your secure password to restore this account's encrypted backup"
+            );
             let Some(setup) = read_setup(&binding)? else {
                 return Ok(None);
             };
@@ -165,13 +195,14 @@ impl Privacy {
                 setup.account == account,
                 "Server changed your account identity"
             );
-            Ok(Some(Arc::new(Self::load(&root, &setup)?)))
+            Ok(Some(Arc::new(Self::load(&root, &setup, store)?)))
         })()
         .map_err(|e| e.to_string());
         Self {
             root,
             binding,
             account,
+            store,
             active: RwLock::new(active),
             decrypted: Mutex::new(BTreeMap::new()),
             last_error: Mutex::new(None),
@@ -181,21 +212,89 @@ impl Privacy {
         }
     }
 
-    fn load(root: &Path, setup: &Setup) -> anyhow::Result<Vault> {
-        private_dir(root)?;
-        let network = root.join(setup.network.to_string());
+    fn load(root: &Path, setup: &Setup, store: &Arc<Store>) -> anyhow::Result<Vault> {
+        // Convert existing private files once, before this daemon starts using
+        // the account. The source files stay recoverable; all subsequent trust
+        // changes share the same atomic portable store on every live keyring.
+        if !store.read(|_, bundle| Ok(bundle.is_some()))? {
+            private_dir(root)?;
+            let network = root.join(setup.network.to_string());
+            private_dir(&network)?;
+            let ring = Keyring::open(&network, setup.account)?;
+            let mut trust = ring.export_trust()?;
+            trust.pins.insert(setup.account, ring.identity().public());
+            for (account, name) in &setup.contacts {
+                trust.names.insert(
+                    *account,
+                    NameCheckpoint {
+                        display_name: name.clone(),
+                        revision: setup.profile_revisions.get(account).copied().unwrap_or(0),
+                    },
+                );
+            }
+            let scope = Scope {
+                origin: store.record()?.origin,
+                network: setup.network,
+                account: setup.account,
+            };
+            let bundle = Bundle::new(scope, ring.identity().recovery_key()?, None, trust)?;
+            let key = VaultKey::generate()?;
+            store.update(None, |record| {
+                ensure!(
+                    record.bundle()?.is_none() && !record.secure,
+                    "Account storage changed during local import"
+                );
+                record.key = Some(PrivateBytes::new(&*key.save_private()));
+                record.set_bundle(&bundle)
+            })?;
+        }
+        Self::load_portable(root, store)
+    }
+
+    fn load_portable(root: &Path, store: &Arc<Store>) -> anyhow::Result<Vault> {
+        let (scope, identity, contacts) = store.read(|record, bundle| {
+            let bundle = bundle.context("Restore the account backup before using encryption")?;
+            ensure!(
+                record.scope.as_ref() == Some(&bundle.scope),
+                "Private account scope changed"
+            );
+            Ok((
+                bundle.scope.clone(),
+                bundle.identity()?,
+                bundle
+                    .trust
+                    .names
+                    .iter()
+                    .map(|(id, name)| (*id, name.display_name.clone()))
+                    .collect(),
+            ))
+        })?;
+        let network = root.join(scope.network.to_string());
         private_dir(&network)?;
-        let ring = Keyring::open(&network, setup.account)?;
         let temporary = network.join("temporary");
         private_dir(&temporary)?;
         Ok(Vault {
-            ring,
-            network: setup.network,
-            account: setup.account,
+            ring: Keyring::portable(identity, store.clone()),
+            network: scope.network,
+            account: scope.account,
             temporary,
-            contacts: setup.contacts.clone(),
+            contacts,
             channel_recipients: RwLock::new(BTreeMap::new()),
         })
+    }
+
+    pub(crate) fn backup_store(&self) -> anyhow::Result<Arc<Store>> {
+        self.store
+            .as_ref()
+            .cloned()
+            .map_err(|error| anyhow::anyhow!(error.clone()))
+    }
+    pub(crate) fn reload_backup(&self) -> anyhow::Result<()> {
+        let store = self.backup_store()?;
+        let vault = Self::load_portable(&self.root, &store)?;
+        ensure!(vault.account == self.account, "Account identity changed");
+        *self.active.write().expect("privacy state lock") = Ok(Some(Arc::new(vault)));
+        Ok(())
     }
 
     pub fn active(&self) -> anyhow::Result<Option<Arc<Vault>>> {
@@ -356,8 +455,11 @@ impl Privacy {
         if read_setup(&self.binding)?.is_none() {
             write_setup(&self.binding, &setup, false)?;
         }
-        *self.active.write().expect("privacy state lock") =
-            Ok(Some(Arc::new(Self::load(&self.root, &setup)?)));
+        *self.active.write().expect("privacy state lock") = Ok(Some(Arc::new(Self::load(
+            &self.root,
+            &setup,
+            &self.backup_store()?,
+        )?)));
         *self.setup_error.lock().expect("privacy setup lock") = None;
         Ok(self.status())
     }
@@ -367,34 +469,33 @@ impl Privacy {
     /// and the keyring separately refuses changes to an already pinned key.
     fn sync_contacts(&self, snapshot: &Snapshot) -> anyhow::Result<bool> {
         let _guard = self.contact_updates.lock().expect("contact update lock");
-        let Some(vault) = self.active()? else {
+        if self.active()?.is_none() {
             return Ok(false);
-        };
-        let mut setup = read_setup(&self.binding)?.context("Missing privacy binding")?;
-        ensure!(
-            setup.network == vault.network && setup.account == vault.account,
-            "Privacy binding changed"
-        );
-        let mut changed = false;
-        for friend in &snapshot.friends {
-            if let std::collections::btree_map::Entry::Vacant(entry) =
-                setup.contacts.entry(friend.user.id)
-            {
-                entry.insert(friend.user.display_name.clone());
-                changed = true;
-            }
         }
+        let store = self.backup_store()?;
+        let mut changed = false;
+        TrustStore::update(&*store, &mut |trust| {
+            for friend in &snapshot.friends {
+                if let std::collections::btree_map::Entry::Vacant(entry) =
+                    trust.names.entry(friend.user.id)
+                {
+                    entry.insert(NameCheckpoint {
+                        display_name: friend.user.display_name.clone(),
+                        revision: 0,
+                    });
+                    changed = true;
+                }
+            }
+            Ok(())
+        })?;
         if changed {
-            write_setup(&self.binding, &setup, true)?;
-            *self.active.write().expect("privacy state lock") =
-                Ok(Some(Arc::new(Self::load(&self.root, &setup)?)));
+            self.reload_backup()?;
         }
         Ok(changed)
     }
 
-    /// Remember initial names only after `directory` has verified the signed
-    /// room chains and pinned their identities. As with friend enrollment,
-    /// names use TOFU; later snapshots cannot rename an existing contact.
+    /// Room names follow verified signed membership; a snapshot never renames an
+    /// existing trust entry or discards a higher signed-profile revision floor.
     fn sync_room_names(
         &self,
         vault: &Vault,
@@ -402,42 +503,46 @@ impl Privacy {
         snapshot: &Snapshot,
     ) -> anyhow::Result<()> {
         let _guard = self.contact_updates.lock().expect("contact update lock");
-        let mut setup = read_setup(&self.binding)?.context("Missing privacy binding")?;
-        ensure!(
-            setup.network == vault.network && setup.account == vault.account,
-            "Privacy binding changed"
-        );
-        let mut changed = false;
-        for conversation in &snapshot.conversations {
-            let Some(roster) = directory
-                .rosters
-                .get(&conversation.id)
-                .and_then(|chain| chain.last())
-            else {
-                continue;
-            };
-            for member in &conversation.members {
-                if !roster.roster.members.contains_key(&member.id)
-                    || member.display_name.trim().is_empty()
-                    || member.display_name.chars().count() > 80
-                    || member.display_name.chars().any(char::is_control)
-                {
+        let store = self.backup_store()?;
+        store.read(|record, _| {
+            ensure!(
+                record
+                    .scope
+                    .as_ref()
+                    .is_some_and(|s| s.network == vault.network && s.account == vault.account),
+                "Privacy binding changed"
+            );
+            Ok(())
+        })?;
+        TrustStore::update(&*store, &mut |trust| {
+            for conversation in &snapshot.conversations {
+                let Some(roster) = directory
+                    .rosters
+                    .get(&conversation.id)
+                    .and_then(|chain| chain.last())
+                else {
                     continue;
-                }
-                if let std::collections::btree_map::Entry::Vacant(entry) =
-                    setup.contacts.entry(member.id)
-                {
-                    entry.insert(member.display_name.clone());
-                    changed = true;
+                };
+                for member in &conversation.members {
+                    if !roster.roster.members.contains_key(&member.id)
+                        || member.display_name.trim().is_empty()
+                        || member.display_name.chars().count() > 80
+                        || member.display_name.chars().any(char::is_control)
+                    {
+                        continue;
+                    }
+                    trust
+                        .names
+                        .entry(member.id)
+                        .or_insert_with(|| NameCheckpoint {
+                            display_name: member.display_name.clone(),
+                            revision: 0,
+                        });
                 }
             }
-        }
-        if changed {
-            write_setup(&self.binding, &setup, true)?;
-            *self.active.write().expect("privacy state lock") =
-                Ok(Some(Arc::new(Self::load(&self.root, &setup)?)));
-        }
-        Ok(())
+            Ok(())
+        })?;
+        self.reload_backup()
     }
 
     /// Complete accepted encrypted-room account invitations with an
@@ -550,50 +655,54 @@ impl Privacy {
 
     fn sync_signed_profiles(&self, vault: &Vault, directory: &Directory) -> anyhow::Result<()> {
         let _guard = self.contact_updates.lock().expect("contact update lock");
-        let mut setup = read_setup(&self.binding)?.context("Missing privacy binding")?;
-        ensure!(
-            setup.network == vault.network && setup.account == vault.account,
-            "Privacy binding changed"
-        );
-        let mut changed = false;
-        for (account, signed) in &directory.profiles {
-            ensure!(
-                signed.profile.network == vault.network
-                    && signed.profile.account == *account
-                    && setup.contacts.contains_key(account),
-                "Invalid profile account"
-            );
-            let key = directory
-                .identities
-                .get(account)
-                .context("Missing profile identity")?;
-            signed.verify(key)?;
-            let previous = setup.profile_revisions.get(account).copied().unwrap_or(0);
-            ensure!(
-                signed.profile.revision >= previous,
-                "Account profile rollback blocked"
-            );
-            if signed.profile.revision == previous {
+        let store = self.backup_store()?;
+        TrustStore::update(&*store, &mut |trust| {
+            for (account, signed) in &directory.profiles {
                 ensure!(
-                    setup.contacts.get(account) == Some(&signed.profile.display_name),
-                    "Conflicting account profile blocked"
+                    signed.profile.network == vault.network && signed.profile.account == *account,
+                    "Invalid profile account"
                 );
-            } else {
-                setup
-                    .contacts
-                    .insert(*account, signed.profile.display_name.clone());
-                setup
-                    .profile_revisions
-                    .insert(*account, signed.profile.revision);
-                changed = true;
+                let saved = trust
+                    .names
+                    .get(account)
+                    .context("Invalid profile account")?;
+                let key = directory
+                    .identities
+                    .get(account)
+                    .context("Missing profile identity")?;
+                signed.verify(key)?;
+                ensure!(
+                    signed.profile.revision >= saved.revision,
+                    "Account profile rollback blocked"
+                );
+                if signed.profile.revision == saved.revision {
+                    ensure!(
+                        saved.display_name == signed.profile.display_name,
+                        "Conflicting account profile blocked"
+                    );
+                } else {
+                    trust.names.insert(
+                        *account,
+                        NameCheckpoint {
+                            display_name: signed.profile.display_name.clone(),
+                            revision: signed.profile.revision,
+                        },
+                    );
+                }
+                if let Some(previous) = trust.profiles.get(account) {
+                    ensure!(
+                        previous.profile.revision <= signed.profile.revision,
+                        "Signed profile rollback blocked"
+                    );
+                    if previous.profile.revision == signed.profile.revision {
+                        ensure!(previous == signed, "Conflicting signed profile blocked");
+                    }
+                }
+                trust.profiles.insert(*account, signed.clone());
             }
-        }
-        if changed {
-            write_setup(&self.binding, &setup, true)?;
-            *self.active.write().expect("privacy state lock") =
-                Ok(Some(Arc::new(Self::load(&self.root, &setup)?)));
-        }
-        Ok(())
+            Ok(())
+        })?;
+        self.reload_backup()
     }
 
     fn verify_directory(vault: &Vault, directory: &Directory) -> anyhow::Result<()> {

@@ -7875,6 +7875,7 @@ dependencies = [
 name = "wispd"
 version = "0.1.0"
 dependencies = [
+ "age",
  "anyhow",
  "arboard",
  "ashpd",
@@ -7917,6 +7918,7 @@ dependencies = [
  "wisp-server",
  "x11rb",
  "zbus",
+ "zeroize",
 ]
 
 [[package]]
