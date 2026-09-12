@@ -675,7 +675,7 @@ async fn pending_classic_migration() -> (AppState, Signup, String, Value) {
         .unwrap();
     let account = signup.binding.scope.account;
     sqlx::query("INSERT INTO users(id,username,display_name,password_hash,server_member) VALUES(?,?,'Classic recovery',?,0)")
-        .bind(account.to_string()).bind(&signup.binding.signup.username).bind(old).execute(&state.pool).await.unwrap();
+        .bind(account.to_string()).bind(signup.binding.signup.username.to_ascii_uppercase()).bind(old).execute(&state.pool).await.unwrap();
     sqlx::query("INSERT INTO chat_identities(user_id,public_identity) VALUES(?,?)")
         .bind(account.to_string())
         .bind(serde_json::to_string(&signup.identity.public()).unwrap())

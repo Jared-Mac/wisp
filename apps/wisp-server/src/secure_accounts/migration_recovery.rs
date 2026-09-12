@@ -1,7 +1,7 @@
 //! Explicit original-password recovery when an uncommitted migration device is
 //! revoked. A signed staged credential avoids orphan devices after a lost reply.
 use super::{
-    ApiError, AppState, Deserialize, HeaderMap, Json, Row, State, Utc, Value, Zeroizing,
+    ApiError, AppState, Deserialize, HeaderMap, Json, Row, State, Utc, Value, Zeroizing, auth,
     authentication, invalid, json, registration, service, unavailable, vault,
 };
 use axum::extract::rejection::JsonRejection;
@@ -139,7 +139,7 @@ pub(crate) async fn recover(
     let result = json!({"recovered":true,"recovery_id":recovery.id,"scope":scope,"operation_id":recovery.operation.id,
         "operation_sha256":recovery.operation.digest().map_err(|_|invalid())?,"terminated_device_id":recovery.operation.device.id(),
         "device_id":id,"user":{"id":scope.account,"display_name":row.get::<String,_>("display_name")},
-        "username":row.get::<String,_>("username"),"identity":identity});
+        "username":auth::canonical_username(&row.get::<String,_>("username")).map_err(|_|unavailable())?,"identity":identity});
     sqlx::query("INSERT INTO secure_operation_receipts(id,user_id,device_id,kind,effect_digest,result,committed_at) VALUES(?,?,?,'migration_recovery',?,?,?)")
         .bind(recovery.id.to_string()).bind(scope.account.to_string()).bind(id.to_string()).bind(digest).bind(serde_json::to_string(&result).map_err(|_|unavailable())?).bind(Utc::now().timestamp()).execute(&mut *tx).await.map_err(ApiError::internal)?;
     tx.commit().await.map_err(ApiError::internal)?;
