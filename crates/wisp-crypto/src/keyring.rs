@@ -123,7 +123,9 @@ impl Keyring {
     }
 
     /// Export legacy public trust for enabling an existing account. Missing,
-    /// malformed, misnamed, linked or oversized entries never disappear silently.
+    /// malformed, misnamed, linked or oversized committed entries never disappear
+    /// silently. Interrupted atomic-write staging files are not committed trust.
+    #[allow(clippy::verbose_bit_mask)] // Keep private-file permission checks in octal.
     pub fn export_trust(&self) -> anyhow::Result<TrustState> {
         if let Some(store) = &self.portable {
             return store.snapshot();
@@ -140,6 +142,24 @@ impl Keyring {
                     .file_name()
                     .into_string()
                     .map_err(|_| anyhow::anyhow!("Invalid local trust filename"))?;
+                // These two stores use NamedTempFile's .tmp + six-character
+                // default name before rename. A crash can leave that staging
+                // file behind; legacy readers only ever use the canonical hash.
+                // Never import its possibly partial or uncommitted contents.
+                if folder != "verified"
+                    && name.strip_prefix(".tmp").is_some_and(|suffix| {
+                        suffix.len() == 6 && suffix.bytes().all(|byte| byte.is_ascii_alphanumeric())
+                    })
+                {
+                    let metadata = fs::symlink_metadata(entry.path())?;
+                    anyhow::ensure!(
+                        metadata.is_file()
+                            && metadata.permissions().mode() & 0o077 == 0
+                            && metadata.nlink() == 1,
+                        "Invalid local trust staging file"
+                    );
+                    continue;
+                }
                 let raw = read_private(&entry.path())?;
                 match folder {
                     "verified" => {
@@ -493,6 +513,74 @@ impl Keyring {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn legacy_export_preserves_committed_trust_with_interrupted_writes() {
+        let temp = tempfile::tempdir().unwrap();
+        let account = Uuid::new_v4();
+        let ring = Keyring::create(&temp.path().join("keys"), account).unwrap();
+        let public = ring.identity().public();
+        let network = Uuid::new_v4();
+        let head = crate::roster::Roster {
+            network,
+            conversation: "room".into(),
+            revision: 0,
+            previous: None,
+            actor: account,
+            members: BTreeMap::from([(
+                account,
+                crate::roster::Member {
+                    identity: public.clone(),
+                    role: crate::roster::Role::Host,
+                },
+            )]),
+        }
+        .sign(ring.identity())
+        .unwrap();
+        ring.accept_rosters(network, "room", account, std::slice::from_ref(&head))
+            .unwrap();
+        ring.approve_conversation("dm", account, &BTreeSet::from([account]))
+            .unwrap();
+        let before = serde_json::to_value(ring.export_trust().unwrap()).unwrap();
+        for folder in ["room-heads", "conversations"] {
+            let staged = ring.directory.join(folder).join(".tmpAb12Cd");
+            write_new(&staged, b"unfinished write\xff").unwrap();
+            assert_eq!(
+                serde_json::to_value(ring.export_trust().unwrap()).unwrap(),
+                before
+            );
+            assert_eq!(fs::read(staged).unwrap(), b"unfinished write\xff");
+        }
+        assert_eq!(ring.identity().public(), public);
+        assert_eq!(ring.export_trust().unwrap().room_heads["room"], head);
+        let committed = ring
+            .directory
+            .join("room-heads")
+            .join(format!("{:x}", Sha256::digest(b"room")));
+        fs::write(&committed, b"corrupt committed record").unwrap();
+        assert!(ring.export_trust().is_err());
+    }
+
+    #[test]
+    fn legacy_export_rejects_unknown_or_linked_staging_entries() {
+        let temp = tempfile::tempdir().unwrap();
+        let ring = Keyring::create(&temp.path().join("keys"), Uuid::new_v4()).unwrap();
+        let folder = ring.directory.join("room-heads");
+        let unknown = folder.join("unexpected-backup");
+        write_new(&unknown, b"not a committed record").unwrap();
+        assert!(ring.export_trust().is_err());
+        fs::remove_file(unknown).unwrap();
+        let linked = folder.join(".tmpAb12Cd");
+        std::os::unix::fs::symlink(ring.directory.join("recovery.key"), &linked).unwrap();
+        assert!(ring.export_trust().is_err());
+        fs::remove_file(linked).unwrap();
+        write_new(
+            &ring.directory.join("verified").join(".tmpAb12Cd"),
+            b"unrecognized pin",
+        )
+        .unwrap();
+        assert!(ring.export_trust().is_err());
+    }
 
     #[test]
     fn first_contact_is_automatic_but_changed_keys_and_corruption_never_are() {
