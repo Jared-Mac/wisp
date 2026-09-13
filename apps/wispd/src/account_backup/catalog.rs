@@ -13,8 +13,14 @@ const PATH: &str = "/v3/accounts/server-catalog";
 impl Api {
     /// Caller holds `Store::action`. A missing endpoint on an older server is a
     /// capability miss; it never erases a retained checkpoint or local servers.
-    #[allow(clippy::too_many_lines)] // Keep durable retry, catch-up and merge ordering together.
     pub(crate) async fn sync_catalog(&self, entries: &[Entry]) -> anyhow::Result<Option<Catalog>> {
+        // Catalog proof and upload futures are large. Keep their storage off
+        // the shared command future, including commands that only join voice.
+        Box::pin(self.sync_catalog_inner(entries)).await
+    }
+
+    #[allow(clippy::too_many_lines)] // Keep durable retry, catch-up and merge ordering together.
+    async fn sync_catalog_inner(&self, entries: &[Entry]) -> anyhow::Result<Option<Catalog>> {
         let record = self.store.record()?;
         ensure!(
             record.secure && record.key_verified && record.pending.is_none(),

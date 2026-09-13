@@ -1442,7 +1442,9 @@ impl Daemon {
                 "unsupported IPC envelope",
             )];
         }
-        let result = self.run_command(&command).await;
+        // Account and media commands carry large futures. Keep their storage
+        // off the IPC worker stack, including during voice reconnection.
+        let result = Box::pin(self.run_command(&command)).await;
         // Account input never survives completion in the IPC envelope.
         for field in ["password", "current_password", "new_password", "reset_link"] {
             if let Some(Value::String(secret)) = command.args.get_mut(field) {
