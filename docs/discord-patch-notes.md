@@ -11,7 +11,17 @@ message. When there is no notes file, commit subjects are used as a fallback.
 
 Messages explicitly announce a merge, not a successful deployment. GitHub CI and
 the production deployment service report release status separately. Mentions are
-disabled. Discord confirms delivery before the workflow succeeds; only explicit
+disabled by default. When the owner explicitly requests an `@here` announcement,
+put `<!-- wisp-notify: here -->` on the first line of its new note. The workflow
+removes that metadata and sends one literal `@here` in message content, with the
+corresponding allowed mention enabled. Commit subjects and ordinary note text
+cannot opt in. User/role mentions remain disabled; no `@everyone` is added to
+message content. Discord must confirm both delivery and the requested mention
+before that workflow succeeds. A delivered message whose mention was blocked is
+not automatically resent. Recipients' own Discord notification settings still
+apply. See [Discord's allowed mentions documentation](https://docs.discord.com/developers/resources/message#allowed-mentions-object).
+
+Discord confirms delivery before the workflow succeeds; only explicit
 rate-limit responses are retried. Check the channel before manually rerunning a
 failed job, since a lost response can leave delivery uncertain.
 
