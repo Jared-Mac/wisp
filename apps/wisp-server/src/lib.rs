@@ -658,6 +658,22 @@ pub fn router(state: AppState) -> Router {
             "/v3/auth/reset/status",
             post(secure_accounts::recovery::reset_status).layer(DefaultBodyLimit::max(16384)),
         )
+        .route(
+            "/v3/accounts/server-catalog/status",
+            get(secure_accounts::catalog::status),
+        )
+        .route(
+            "/v3/accounts/server-catalog",
+            get(secure_accounts::catalog::read)
+                .post(secure_accounts::catalog::store)
+                .layer(DefaultBodyLimit::max(
+                    wisp_crypto::account_vault::catalog::MAX_ENVELOPE_WIRE + 1024,
+                )),
+        )
+        .route(
+            "/v3/accounts/server-catalog/proof",
+            post(secure_accounts::catalog::proof).layer(DefaultBodyLimit::max(4096)),
+        )
         .route("/v3/accounts/vault/status", get(secure_accounts::status))
         .route(
             "/v3/accounts/vault",

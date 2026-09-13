@@ -23,6 +23,9 @@ use wisp_crypto::{
 };
 use zeroize::Zeroizing;
 
+#[path = "store/catalog.rs"]
+pub(crate) mod catalog;
+
 const MAX_RECORD: u64 = 48 * 1024 * 1024;
 
 /// Private at-rest serialization is deliberate and has no Debug implementation.

@@ -25,18 +25,18 @@ const PAYLOAD_DOMAIN: &str = "wisp-account-vault-payload-v1";
 pub const MAX_CIPHERTEXT: usize = MAX_PLAINTEXT + 16;
 pub const MAX_ENVELOPE_WIRE: usize = (MAX_CIPHERTEXT.div_ceil(3) * 4) + 16_384;
 
-fn random<const N: usize>() -> anyhow::Result<Zeroizing<[u8; N]>> {
+pub(super) fn random<const N: usize>() -> anyhow::Result<Zeroizing<[u8; N]>> {
     let mut bytes = Zeroizing::new([0; N]);
     getrandom::getrandom(bytes.as_mut())
         .map_err(|_| anyhow::anyhow!("Secure random generator unavailable"))?;
     Ok(bytes)
 }
 
-fn encoded(bytes: &[u8]) -> String {
+pub(super) fn encoded(bytes: &[u8]) -> String {
     STANDARD.encode(bytes)
 }
 
-fn decoded(value: &str, max: usize) -> anyhow::Result<Zeroizing<Vec<u8>>> {
+pub(super) fn decoded(value: &str, max: usize) -> anyhow::Result<Zeroizing<Vec<u8>>> {
     ensure!(
         value.len() <= max.div_ceil(3) * 4,
         "Invalid encrypted backup size"
@@ -53,14 +53,18 @@ fn decoded(value: &str, max: usize) -> anyhow::Result<Zeroizing<Vec<u8>>> {
     Ok(bytes)
 }
 
-fn nonce(value: &str) -> anyhow::Result<[u8; 12]> {
+pub(super) fn nonce(value: &str) -> anyhow::Result<[u8; 12]> {
     decoded(value, 12)?
         .as_slice()
         .try_into()
         .map_err(|_| anyhow::anyhow!("Invalid backup nonce"))
 }
 
-fn derive(secret: &[u8], domain: &str, scope: &Scope) -> anyhow::Result<Zeroizing<[u8; 32]>> {
+pub(super) fn derive(
+    secret: &[u8],
+    domain: &str,
+    scope: &Scope,
+) -> anyhow::Result<Zeroizing<[u8; 32]>> {
     let info = serde_json::to_vec(&(domain, FORMAT, scope))?;
     let mut key = Zeroizing::new([0; 32]);
     Hkdf::<Sha256>::new(Some(b"wisp-account-vault-hkdf-v1"), secret)
@@ -209,7 +213,7 @@ pub struct Header {
     pub nonce: String,
 }
 impl Header {
-    fn validate(&self) -> anyhow::Result<()> {
+    pub(super) fn validate(&self) -> anyhow::Result<()> {
         self.scope.validate()?;
         ensure!(
             self.format == FORMAT && self.revision > 0 && i64::try_from(self.revision).is_ok(),

@@ -637,6 +637,26 @@ impl Daemon {
         }
     }
 
+    async fn catalog_entries(&self) -> Vec<wisp_crypto::account_vault::catalog::Entry> {
+        let linked: Vec<_> = self.linked_servers.read().await.values().cloned().collect();
+        let mut servers = Vec::new();
+        if self.state.read().await.server_member
+            && let Some(entry) =
+                account_backup_commands::catalog_entry(&self.privacy, &self.primary_server.name)
+        {
+            servers.push(entry);
+        }
+        for server in &linked {
+            if server.state.read().await.server_member
+                && let Some(entry) =
+                    account_backup_commands::catalog_entry(&server.privacy, &server.view.name)
+            {
+                servers.push(entry);
+            }
+        }
+        servers
+    }
+
     async fn decorate_snapshot(&self, snapshot: &mut Snapshot) {
         let linked = self
             .linked_servers
@@ -1660,6 +1680,15 @@ impl Daemon {
             let result =
                 account_backup_commands::command(api, privacy, &command.name, &command.args)
                     .await?;
+            if command.name == "backup_sync" {
+                let entries = self.catalog_entries().await;
+                let store = privacy.backup_store()?;
+                let _action = store.action()?;
+                account_backup_commands::connect(api, privacy)
+                    .await?
+                    .sync_catalog(&entries)
+                    .await?;
+            }
             if command.name != "backup_status" {
                 if let Some(server) = linked {
                     self.refresh_linked(&server, "account_backup_changed")
@@ -3774,14 +3803,6 @@ async fn synchronize_account_backups(daemon: Arc<Daemon>) {
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     loop {
         interval.tick().await;
-        let media =
-            account_membership::media_key(&daemon.api.base_url, daemon.primary_media_key.clone());
-        if let Err(error) =
-            account_backup_commands::background(&daemon.api, &daemon.privacy, media).await
-        {
-            daemon.privacy.set_backup_error(Some(error.to_string()));
-            warn!(%error, "account backup sync needs attention");
-        }
         let linked: Vec<_> = daemon
             .linked_servers
             .read()
@@ -3789,11 +3810,21 @@ async fn synchronize_account_backups(daemon: Arc<Daemon>) {
             .values()
             .cloned()
             .collect();
+        let servers = daemon.catalog_entries().await;
+        let media =
+            account_membership::media_key(&daemon.api.base_url, daemon.primary_media_key.clone());
+        if let Err(error) =
+            account_backup_commands::background(&daemon.api, &daemon.privacy, media, &servers).await
+        {
+            daemon.privacy.set_backup_error(Some(error.to_string()));
+            warn!(%error, "account backup sync needs attention");
+        }
         for server in linked {
             let media =
                 account_membership::media_key(&server.api.base_url, server.media_key.clone());
             if let Err(error) =
-                account_backup_commands::background(&server.api, &server.privacy, media).await
+                account_backup_commands::background(&server.api, &server.privacy, media, &servers)
+                    .await
             {
                 server.privacy.set_backup_error(Some(error.to_string()));
                 warn!(%error, "linked account backup sync needs attention");

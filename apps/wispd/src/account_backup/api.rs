@@ -51,6 +51,7 @@ fn code(value: &str) -> &'static str {
     match value {
         "unauthorized" => "unauthorized",
         "account_state_changed" => "account_state_changed",
+        "catalog_state_changed" => "catalog_state_changed",
         "operation_conflict" => "operation_conflict",
         "operation_committed" => "operation_committed",
         "operation_superseded" => "operation_superseded",

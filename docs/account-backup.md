@@ -33,6 +33,13 @@ are under **Settings → Privacy → Encryption details**. An unchanged check do
 only small status metadata. Failed or interrupted actions keep their recovery
 state and can be resumed from the account confirmation or the sign-in window.
 
+Saved member servers also sync in a separate encrypted catalog. Compatible
+clients can show these servers after sign-in without copying passwords, device
+credentials or voice sessions. A discovered service still requires its own
+matching saved account or an explicit sign-in. Local server nicknames, ordering
+and hiding remain device preferences. See `design/server-catalog-v1.md` for the
+wire format, limits and compatibility details.
+
 ## Changing or resetting a password
 
 Changing your password in Profile settings keeps the same backup key and updates

@@ -3,6 +3,8 @@
 //! device state may be persisted. Public IPC reports never serialize this state.
 #[path = "account_backup/api.rs"]
 pub(super) mod api;
+#[path = "account_backup/catalog.rs"]
+mod catalog;
 #[path = "account_backup/enrollment.rs"]
 mod enrollment;
 #[path = "account_backup/install.rs"]

@@ -307,10 +307,34 @@ fn unauthorized(error: &anyhow::Error) -> bool {
         .is_some_and(|failure| failure.status == 401)
 }
 
+pub(crate) fn catalog_entry(
+    privacy: &Privacy,
+    label: &str,
+) -> Option<wisp_crypto::account_vault::catalog::Entry> {
+    let scope = privacy.backup_store().ok()?.record().ok()?.scope?;
+    let mut label: String = label.trim().chars().filter(|c| !c.is_control()).collect();
+    while label.len() > 160 {
+        label.pop();
+    }
+    let label = label.trim();
+    let entry = wisp_crypto::account_vault::catalog::Entry {
+        scope,
+        label: if label.is_empty() {
+            "Wisp server"
+        } else {
+            label
+        }
+        .into(),
+    };
+    entry.validate().ok()?;
+    Some(entry)
+}
+
 pub(crate) async fn background(
     server: &ServerApi,
     privacy: &Privacy,
     media: Option<String>,
+    servers: &[wisp_crypto::account_vault::catalog::Entry],
 ) -> anyhow::Result<()> {
     let store = privacy.backup_store()?;
     let record = store.record()?;
@@ -330,7 +354,7 @@ pub(crate) async fn background(
         return Ok(());
     };
     privacy.capture_media_key(media)?;
-    let api = connect(server, privacy).await?;
+    let mut api = connect(server, privacy).await?;
     if let Err(error) = api.sync().await {
         if error
             .downcast_ref::<crate::account_backup::api::Failure>()
@@ -339,9 +363,13 @@ pub(crate) async fn background(
             return Err(error);
         }
         server.renew_session().await?;
-        connect(server, privacy).await?.sync().await?;
+        api = connect(server, privacy).await?;
+        api.sync().await?;
     }
     privacy.reload_backup()?;
+    // Reuse the connection and its possibly renewed session. Older hosts can
+    // omit catalogs; discovery never alters the local credential registry.
+    api.sync_catalog(servers).await?;
     privacy.set_backup_error(None);
     Ok(())
 }
@@ -625,5 +653,42 @@ mod tests {
                 .is_err()
         );
         assert!(native.store.record().unwrap().revision == revision);
+    }
+
+    #[tokio::test]
+    async fn catalog_background_respects_sync_preference_and_verified_scope() {
+        use wisp_crypto::account_vault::catalog::ReadResponse;
+        let fixture = Fixture::new().await;
+        let (native, server, privacy) = signed_in(&fixture).await;
+        let entry = catalog_entry(&privacy, "  Saved server  ").unwrap();
+        assert!(Some(&entry.scope) == native.store.record().unwrap().scope.as_ref());
+        assert_eq!(entry.label, "Saved server");
+        native
+            .store
+            .update(None, |r| {
+                r.auto_sync = false;
+                Ok(())
+            })
+            .unwrap();
+        background(&server, &privacy, None, std::slice::from_ref(&entry))
+            .await
+            .unwrap();
+        let missing: ReadResponse = native
+            .get("/v3/accounts/server-catalog", 16384)
+            .await
+            .unwrap();
+        assert!(missing.catalog.is_none());
+        native
+            .store
+            .update(None, |r| {
+                r.auto_sync = true;
+                Ok(())
+            })
+            .unwrap();
+        background(&server, &privacy, None, std::slice::from_ref(&entry))
+            .await
+            .unwrap();
+        let restored = native.sync_catalog(&[]).await.unwrap().unwrap();
+        assert!(restored.entries == [entry]);
     }
 }

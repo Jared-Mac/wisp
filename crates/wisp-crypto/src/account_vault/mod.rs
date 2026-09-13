@@ -2,6 +2,7 @@
 //! integration remain under review; private keys must never cross the API.
 pub mod auth;
 pub mod bundle;
+pub mod catalog;
 pub mod device;
 pub mod envelope;
 pub mod operation;
