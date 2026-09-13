@@ -2,16 +2,20 @@
 
 Account backup lets you sign in on another desktop or Android device and restore
 your encryption identity, media key, and saved trust settings without moving a
-recovery file between devices. The service stores an encrypted backup; your
-secure password and decrypted keys stay in the native client.
+recovery file between devices. The service stores an encrypted backup; secure
+sign-in runs in the native client and never sends the password to the service.
 
 ## Existing accounts
 
-On a device that already has your encryption keys, open **Settings → Profile →
-Account backup**. Enter your current password and choose a new, different secure
-password. Enabling backup preserves the account, friendships, public identity,
-and encryption keys. Older clients that only support classic password sign-in
-must be updated before signing in again.
+On a device that already has your encryption keys, Wisp offers a one-time account
+update when you open the app. Confirm your current password privately in that
+dialog. Your password, account, friendships, public identity and encryption keys
+stay the same. You can choose **Later** and reopen it with **Finish account update**
+in Profile. The one-time migration verifies the current password through the
+existing classic authentication route over TLS; subsequent secure sign-ins use
+OPAQUE instead. Older clients that only support classic password sign-in must be
+updated before signing in again. An administrator cannot perform this upgrade
+without the original device's keys and the user's password confirmation.
 
 New accounts use secure sign-in and encrypted backup automatically. Accounts can
 be created and used before joining a server. Your sign-in username is separate
@@ -25,9 +29,9 @@ for an account with a locked or missing backup. Signing in does not join voice,
 start a camera, or share a screen.
 
 Sync runs about once per minute by default. **Sync now** and **Sync automatically**
-are in Account backup settings. An unchanged check downloads only small status
-metadata. Failed or interrupted actions keep their recovery state and can be
-resumed from the same section or the sign-in window.
+are under **Settings → Privacy → Encryption details**. An unchanged check downloads
+only small status metadata. Failed or interrupted actions keep their recovery
+state and can be resumed from the account confirmation or the sign-in window.
 
 ## Changing or resetting a password
 
@@ -36,8 +40,8 @@ how it is unlocked. Verify a recovery email before you need a password reset.
 
 An email reset restores account sign-in, but it cannot by itself decrypt the old
 backup. Paste the email reset link into Wisp's native reset form and choose a new
-password. Then, on an existing trusted device, use **Restore backup access** with
-the new password. Other devices can unlock the repaired backup afterward.
+password. Then confirm that password in **Restore account access** on an existing
+trusted device. Other devices can unlock the repaired backup afterward.
 
 If you lose every trusted device and forget the secure password, an email reset
 cannot recover the encrypted history. Keep a private recovery copy and trusted

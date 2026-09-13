@@ -16,6 +16,7 @@ pub(crate) fn handles(name: &str) -> bool {
     matches!(
         name,
         "backup_status"
+            | "backup_upgrade"
             | "backup_enable"
             | "backup_sync"
             | "backup_unlock"
@@ -145,6 +146,12 @@ async fn run(
                 Ok(())
             })?;
         }
+        "backup_upgrade" => {
+            // The legacy proof checks the current password; native registration
+            // uses that same secret locally. No password reset or identity change.
+            let current = password(args, "current_password")?;
+            api.migrate(current.clone(), current).await?;
+        }
         "backup_enable" => {
             api.migrate(
                 password(args, "current_password")?,
@@ -256,7 +263,7 @@ async fn run(
     }
     if matches!(
         name,
-        "backup_sync" | "backup_enable" | "backup_unlock" | "backup_repair"
+        "backup_sync" | "backup_upgrade" | "backup_enable" | "backup_unlock" | "backup_repair"
     ) {
         privacy.set_backup_error(None);
     }
@@ -386,6 +393,50 @@ mod tests {
             credential.user.id,
         );
         (native, server, privacy)
+    }
+    #[tokio::test]
+    async fn current_password_upgrade_ipc_restores_the_original_identity() {
+        let fixture = Fixture::new().await;
+        let (native, credential, _) =
+            crate::account_backup::tests::classic_client(&fixture, "desktop").await;
+        let original = native
+            .store
+            .record()
+            .unwrap()
+            .bundle()
+            .unwrap()
+            .unwrap()
+            .identity()
+            .unwrap()
+            .public();
+        let server = ServerApi {
+            client: reqwest::Client::new(),
+            account_registry: None,
+            base_url: fixture.origin.clone(),
+            token: Arc::new(RwLock::new(native.session_bearer().unwrap().to_string())),
+            auth: Arc::new(RwLock::new(AuthMethod::Device {
+                device_id: credential.device_id,
+                device_token: credential.device_token,
+            })),
+        };
+        let privacy = Privacy::at(
+            fixture.folder.path().join("desktop"),
+            &fixture.origin,
+            credential.user.id,
+        );
+        assert!(handles("backup_upgrade"));
+        let state = command(
+            &server,
+            &privacy,
+            "backup_upgrade",
+            &json!({"current_password":"synthetic original classic password"}),
+        )
+        .await
+        .unwrap();
+        assert!(
+            state["mode"] == "secure" && state["unlocked"] == true && state["pending"].is_null()
+        );
+        assert!(privacy.backup_store().unwrap().record().unwrap().identity == Some(original));
     }
     #[tokio::test]
     async fn secure_profile_password_change_never_uses_classic_password_endpoint() {

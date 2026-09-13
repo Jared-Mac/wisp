@@ -237,10 +237,6 @@ impl Api {
         legacy: SecretString,
         password: SecretString,
     ) -> anyhow::Result<()> {
-        ensure!(
-            legacy.expose_secret() != password.expose_secret(),
-            "Choose a new password different from your original account password"
-        );
         let record = self.store.record()?;
         if let Some(pending) = &record.pending {
             ensure!(

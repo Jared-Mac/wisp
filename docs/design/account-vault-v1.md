@@ -83,9 +83,12 @@ normal shutdown without making shutdown unbounded.
 ## Authentication transition
 
 Legacy accounts and running device credentials keep working. Account backup is
-opt-in migration from a trusted device, authorized by the old password and a
-signature from the existing account identity. The new password is distinct and
-never sent to a plaintext-password route. The registration record, encrypted
+an explicit one-time migration from a trusted device, authorized by the current
+password and a signature from the existing account identity. The default account
+upgrade keeps that password: it is verified once by the existing classic route
+over TLS, then used locally for OPAQUE registration. Subsequent secure sign-in
+never sends the password to a classic route. Older interrupted migrations that
+selected a different password remain recoverable. The registration record, encrypted
 vault, wrapped key, and removal of the old password verifier commit atomically.
 If migration fails, legacy access and current files remain intact.
 

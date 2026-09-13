@@ -1,6 +1,6 @@
 {
   "repository": "TLT26-churn/wisp-android",
-  "last_announced_commit": "52c1a612b62b70e82b9960ac6fd487b6f0a79f48",
-  "pending_commit": "343db473a20fc0aba0b8ae925198f037f4d1c441",
-  "pending_note": "docs/patch-notes/2026-09-12-android-encrypted-backup.md"
+  "last_announced_commit": "343db473a20fc0aba0b8ae925198f037f4d1c441",
+  "pending_commit": null,
+  "pending_note": null
 }

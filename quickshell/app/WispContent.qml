@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Window
 import "components"
 import "views"
 
@@ -45,6 +46,12 @@ FocusScope {
     : landscapePanel ? theme.space(560) : trayChatFocused ? theme.space(800) : Math.min(theme.space(800), fixedHeader.height + panelColumn.implicitHeight + contentPadding * 2 + theme.spacing.lg + trayAudioDock.height)
   focus: true
 
+  AccountSetupDialog {
+    id:accountSetupDialog; setup:root.bridge.accountSetup; theme:root.theme
+    surfaceActive:root.visible && !!root.Window.window && root.Window.window.visible && root.Window.window.active
+      && !root.bridge.delegateConversationsToDesktop
+  }
+
   function maybeDismiss() {
     if (dismissOnNavigate) requestClose()
   }
@@ -55,6 +62,7 @@ FocusScope {
   }
 
   function resetNavigation() {
+    accountSetupDialog.close()
     cameraConfirmation.close()
     accountMenu.closeMenu()
     accessControls.closeMenus()
@@ -91,7 +99,7 @@ FocusScope {
   Keys.priority: Keys.AfterItem
   Keys.onPressed: function(event) { root.handleWindowKey(event) }
   function handleWindowKey(event) {
-    if (cameraConfirmation.visible) return
+    if (cameraConfirmation.visible || accountSetupDialog.visible) return
     if (event.modifiers === Qt.ShiftModifier && (event.key === Qt.Key_M || event.key === Qt.Key_D)) {
       if (!event.isAutoRepeat) {
         if (event.key === Qt.Key_M) root.bridge.toggleMuted()

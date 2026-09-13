@@ -26,7 +26,7 @@ Column {
   }
   Text {
     width: parent.width; wrapMode: Text.Wrap
-    text: "Encryption is set up automatically when your account connects. Private keys are saved only on this device."
+    text: "Encryption is set up automatically. Your account keys and trust settings sync in an encrypted backup so you can sign in on another device."
     color: root.theme.muted; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
   }
   Text {
@@ -57,7 +57,7 @@ Column {
   }
   Text {
     width: parent.width; wrapMode: Text.Wrap
-    text: "Back up your recovery file to another safe location to keep access if this device is lost. On a new device, restore that file if this account already has encryption keys."
+    text: "A private recovery file gives you an extra way to restore your encryption keys. Keep it somewhere safe."
     color: root.theme.muted; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
   }
   Text {
@@ -70,13 +70,35 @@ Column {
     theme: root.theme; title: "Encryption details"; summary: "Key verification and privacy limits"
     objectName: "privacyDetailsSection"; expanded: false
     Text {
+      width:parent.width; wrapMode:Text.Wrap
+      visible:root.bridge.accountBackup.mode === "secure"
+      text:root.bridge.accountBackup.last_synced_at ? "Account keys last synced " + new Date(root.bridge.accountBackup.last_synced_at * 1000).toLocaleString() + (root.bridge.accountBackup.has_changes ? " · Changes waiting" : "") : "Encrypted account sync is ready."
+      color:root.theme.muted; font.family:root.theme.font.family; font.pixelSize:root.theme.font.caption
+    }
+    CheckBox {
+      text:"Sync account keys automatically"; checked:!!root.bridge.accountBackup.auto_sync
+      visible:root.bridge.accountBackup.mode === "secure"
+      enabled:!!root.bridge.accountSetup && !root.bridge.accountSetup.busy
+      onToggled:root.bridge.accountSetup.act("backup_auto_sync",{enabled:checked})
+      ThemeControlStyle {theme:root.theme;control:parent}
+    }
+    ChatButton {
+      theme:root.theme; text:"Sync now"; visible:root.bridge.accountBackup.mode === "secure"
+      enabled:!!root.bridge.accountSetup && !root.bridge.accountSetup.busy && !!root.bridge.accountBackup.unlocked && !root.bridge.accountBackup.pending
+      onClicked:root.bridge.accountSetup.act("backup_sync",{})
+    }
+    ErrorBanner {
+      width:parent.width; theme:root.theme; message:root.bridge.accountSetup ? root.bridge.accountSetup.error : ""
+      onDismissed:root.bridge.accountSetup.error=""
+    }
+    Text {
       width: parent.width; wrapMode: Text.Wrap
       text: "Trust on first connection: Wisp remembers each friend's initial key across rooms. Unexpected key changes stop sending. Encrypted room membership requires a signed update from an authorized client. All participants need an updated, configured client."
       color: root.theme.muted; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
     }
     Text {
       width: parent.width; wrapMode: Text.Wrap
-      text: "Existing plaintext history and backups are not encrypted retroactively. Recovery files can unlock your history: keep them off the server and never send them to friends. Losing every device and the recovery file loses access. This archive design does not provide forward secrecy."
+      text: "Existing plaintext history and backups are not encrypted retroactively. Recovery files can unlock your history: keep them off the server and never send them to friends. If you lose your password and every trusted device or recovery file, your encrypted history cannot be restored. This archive design does not provide forward secrecy."
       color: root.theme.muted; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
     }
     Text {

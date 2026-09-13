@@ -12,7 +12,7 @@ Column {
   readonly property bool inVoice: !!(bridge.activeServerState.self || {}).hangout_id
   onServerIdChanged: { clearPasswords(); if (visible) {bridge.refreshProfile();if(bridge.accountActions)bridge.accountActions.act("account_overview",{},serverId)} }
   onVisibleChanged: { clearPasswords(); if (visible) {bridge.refreshProfile();if(bridge.accountActions)bridge.accountActions.act("account_overview",{},serverId)} }
-  function clearPasswords() { currentPassword.text = ""; newPassword.text = ""; confirmPassword.text = ""; recoveryPassword.text = ""; backupControls.clearPasswords() }
+  function clearPasswords() { currentPassword.text = ""; newPassword.text = ""; confirmPassword.text = ""; recoveryPassword.text = "" }
   Connections {
     target: root.bridge
     function onAccountProfileChanged() { displayName.text = String(root.bridge.accountProfile.display_name || root.bridge.selfState.display_name || "") }
@@ -89,8 +89,11 @@ Column {
     Label {visible:!(blockedSection.account.overview.blocked || []).length;text:"No blocked accounts"}
     Label {text:blockedSection.account.error || "";visible:!!text}
   }
-  AccountBackupSettings {
-    id: backupControls; width: parent.width; bridge: root.bridge; theme: root.theme
+  ChatButton {
+    theme:root.theme; text:"Finish account update"
+    visible:!!root.bridge.accountSetup && root.bridge.accountSetup.needsAttention
+    enabled:!!root.bridge.accountSetup && !root.bridge.accountSetup.busy
+    onClicked:root.bridge.accountSetup.request()
   }
   SettingsSection {
     id: recoverySection; theme: root.theme; title: "Recovery email"; summary: "Recover access if you forget your password"
@@ -106,7 +109,7 @@ Column {
       enabled: root.bridge.profileReady && !root.bridge.profileBusy && !root.bridge.accountBackup.pending && !!(root.bridge.recoveryEmail || {}).delivery_available && !!recoveryAddress.text.trim() && !!recoveryPassword.text
       onClicked: if (root.bridge.profileAction("set_recovery_email", {email:recoveryAddress.text.trim(),current_password:recoveryPassword.text})) recoveryPassword.text = ""
     }
-    Label { text: root.bridge.accountBackup.mode === "secure" ? "Verify the link from support@wisp.you. After an email password reset, use a trusted device to restore backup access." : "Verify the link from support@wisp.you. Keep your encryption recovery file until account backup is enabled." }
+    Label { text: "Verify the link from support@wisp.you. After an email password reset, use a trusted device to restore encrypted account access." }
   }
   SettingsSection {
     theme: root.theme; title: "Change password"; summary: "Keep your account secure"

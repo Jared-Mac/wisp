@@ -333,6 +333,70 @@ async fn password_change_and_lost_completion_preserve_payload_key_and_new_sign_i
     assert!(other.store.record().unwrap().identity == before.identity);
 }
 #[tokio::test]
+async fn classic_upgrade_keeps_current_password_identity_media_and_trust() {
+    let fixture = Fixture::new().await;
+    let (mut first, _, key) = classic_client(&fixture, "first").await;
+    let before = first.store.record().unwrap();
+    let legacy = SecretString::from("synthetic original classic password".to_owned());
+    assert!(
+        first
+            .migrate(
+                SecretString::from("incorrect synthetic password".to_owned()),
+                legacy.clone()
+            )
+            .await
+            .is_err()
+    );
+    assert!(matches!(
+        first.status().await.unwrap(),
+        super::api::Status::Classic { .. }
+    ));
+    assert!(!first.store.record().unwrap().secure);
+    first.migrate(legacy.clone(), legacy.clone()).await.unwrap();
+    let after = first.store.record().unwrap();
+    assert!(after.secure && after.pending.is_none());
+    assert!(
+        after.identity
+            == before
+                .bundle()
+                .unwrap()
+                .unwrap()
+                .identity()
+                .ok()
+                .map(|identity| identity.public())
+    );
+    assert!(after.local_key().unwrap().save_private().as_slice() == key.save_private().as_slice());
+    let mut remote = fixture.client("remote").await;
+    assert!(
+        remote
+            .login("classicuser", legacy, "Synthetic remote")
+            .await
+            .unwrap()
+    );
+    let restored = remote.store.record().unwrap();
+    assert!(restored.identity == after.identity);
+    assert!(
+        restored.local_key().unwrap().save_private().as_slice() == key.save_private().as_slice()
+    );
+    assert!(
+        restored
+            .bundle()
+            .unwrap()
+            .unwrap()
+            .encode_private()
+            .unwrap()
+            .as_slice()
+            == after
+                .bundle()
+                .unwrap()
+                .unwrap()
+                .encode_private()
+                .unwrap()
+                .as_slice()
+    );
+}
+
+#[tokio::test]
 async fn classic_migration_preserves_media_and_concurrent_trust_updates_after_lost_finish() {
     let fixture = Fixture::new().await;
     let (mut first, _credential, key) = classic_client(&fixture, "first").await;
@@ -490,7 +554,7 @@ async fn separate_reset_journal_leaves_selected_identity_untouched_then_trusted_
     assert!(remote.store.record().unwrap().identity == initial.identity);
 }
 
-async fn classic_client(
+pub(crate) async fn classic_client(
     fixture: &Fixture,
     name: &str,
 ) -> (

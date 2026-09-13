@@ -22,6 +22,8 @@ Item {
   WispMessageActions { id: messageActions; bridge: root }
   readonly property alias accountActions: accountActions
   WispAccountActions { id: accountActions; bridge: root }
+  readonly property alias accountSetup: accountSetup
+  WispAccountSetup { id: accountSetup; bridge: root }
   readonly property alias friendships: friendships
   WispFriendships { id: friendships; bridge: root }
   readonly property alias voiceRecovery: voiceRecovery
@@ -237,11 +239,12 @@ Item {
     profileFeedback = ""
   }
   function profileAction(action, args) {
-    if (profileBusy) return false
+    if (action === "backup_status") return accountSetup.act(action,args || {})
+    if (profileBusy || accountSetup.requestId && ["account_profile","recovery_email"].indexOf(action)<0) return false
     var serverId = profileServerId
     var id = send(action, Object.assign({}, args || {}, {server_id:serverId}))
     if (id) {
-      requests[id] = {kind:"profile",action:action,serverId:serverId}
+      requests[id] = {kind:"profile",action:action,serverId:serverId,accountScope:accountSetup.scope}
       profileRequestId = id
       profileBusy = true
       if (action !== "recovery_email" && action !== "backup_status") profileFeedback = ""
@@ -1168,7 +1171,7 @@ Item {
       return
     }
     var avatarImageReply = message.type === "result" && (requests[message.id] || {}).kind === "avatar" && (requests[message.id] || {}).action === "image"
-    var handledReply = message.type === "result" && ["voiceRecovery", "soundboard", "serverPing"].indexOf((requests[message.id] || {}).kind) >= 0
+    var handledReply = message.type === "result" && ["voiceRecovery", "soundboard", "serverPing", "accountSetup"].indexOf((requests[message.id] || {}).kind) >= 0
     if (message.type === "result") finishRequest(message)
     if (message.type === "result" && !handledReply && !avatarImageReply && message.ok !== true && message.error) {
       lastError = String(message.error.message || "Wisp command failed")
@@ -1321,6 +1324,7 @@ Item {
     var action = requests[message.id]
     if (!action) return
     delete requests[message.id]
+    if (action.kind === "accountSetup") { accountSetup.finish(message,action); return }
     var value = message.value || ({})
     var conversationId = action.conversationId
     if (action.kind === "desktopActivity") {
@@ -1375,7 +1379,7 @@ Item {
       } else privacyFeedback = message.error ? String(message.error.message) : "Privacy operation failed"
       privacyBusy = false
     } else if (action.kind === "profile") {
-      if (action.serverId !== profileServerId || message.id !== profileRequestId) return
+      if (action.serverId !== profileServerId || action.accountScope !== accountSetup.scope || message.id !== profileRequestId) return
       profileRequestId = ""
       profileBusy = false
       if (message.ok) {
