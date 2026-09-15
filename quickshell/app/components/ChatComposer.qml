@@ -11,6 +11,12 @@ Column {
   property bool spacious: false
   property bool autoGrow: false
   property bool compact: false
+  property string previousTypingConversation: ""
+  function stopTyping() { if (bridge.typing) bridge.typing.stop(previousTypingConversation || conversationId) }
+  onConversationIdChanged: { stopTyping(); previousTypingConversation=conversationId }
+  onVisibleChanged: if (!visible) stopTyping()
+  onBusyChanged: if (busy) stopTyping()
+  Component.onDestruction: stopTyping()
   readonly property alias emojiPicker: composerEmojiPicker
   readonly property alias mentionPicker: mentionPicker
   readonly property var mentionQuery: Mentions.query(editor.text,editor.cursorPosition)
@@ -53,6 +59,19 @@ Column {
   function focusEditor() { editor.forceActiveFocus() }
   spacing: autoGrow ? theme.spacing.xs : theme.tui ? theme.spacing.sm : theme.spacing.lg
 
+
+  Text {
+    objectName: "chatTypingIndicator"
+    width: parent.width
+    height: root.theme.space(18)
+    text: root.bridge.typing ? root.bridge.typing.label(root.conversationId) : ""
+    textFormat: Text.PlainText
+    elide: Text.ElideRight
+    color: root.theme.muted
+    font.family: root.theme.font.family
+    font.pixelSize: root.theme.font.caption
+    Accessible.name: text
+  }
 
   Text {
     objectName: "roomChatAccessPending"
@@ -176,9 +195,14 @@ Column {
         property bool wispTextEditor: true
         // Keep the submitted draft stable until its acknowledgement arrives.
         readOnly: root.busy || root.pendingAccess
-        onActiveFocusChanged: if (activeFocus) root.editorFocused()
+        onActiveFocusChanged: { if (activeFocus) root.editorFocused(); else root.stopTyping() }
         text: root.bridge.draftFor(root.conversationId)
-        onTextChanged: root.bridge.setDraft(root.conversationId, text)
+        onTextChanged: {
+          var edited = root.bridge.draftFor(root.conversationId) !== text
+          root.bridge.setDraft(root.conversationId, text)
+          if (edited && activeFocus && root.visible && !root.busy && root.bridge.typing)
+            root.bridge.typing.edited(root.conversationId,text)
+        }
         color: root.theme.foreground
         placeholderText: root.pendingAccess ? "Waiting for chat access" : root.destination ? "Message " + root.destination : "Message"
         placeholderTextColor: root.theme.muted

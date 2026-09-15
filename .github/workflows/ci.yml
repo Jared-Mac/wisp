@@ -100,6 +100,8 @@ jobs:
 
       - name: Test home-room notification rules
         run: node scripts/test-room-activity.cjs
+      - name: Test typing expiry and sender grouping
+        run: node scripts/test-typing.cjs
       - name: Test account recovery browser flow
         run: node scripts/test-account-recovery-web.cjs
 

@@ -434,7 +434,7 @@ impl ServerApi {
         url.set_scheme(if url.scheme() == "https" { "wss" } else { "ws" })
             .map_err(|()| anyhow!("unsupported server URL scheme"))?;
         url.set_path("/v1/events");
-        url.set_query(None);
+        url.set_query(Some("typing=true"));
         let mut request = url.as_str().into_client_request()?;
         let token = self
             .token
@@ -1773,6 +1773,33 @@ impl Daemon {
                 self.refresh_linked(&server, "reactions_changed").await?;
             }
             return Ok(Some(value));
+        }
+        if command.name == "chat_typing" {
+            let server_id = command.args["server_id"]
+                .as_str()
+                .unwrap_or(&self.primary_server.id);
+            let api = if server_id == self.primary_server.id {
+                self.api.clone()
+            } else {
+                self.linked_servers
+                    .read()
+                    .await
+                    .get(server_id)
+                    .context("Server is not connected")?
+                    .api
+                    .clone()
+            };
+            let response = api
+                .request(reqwest::Method::POST, "/v1/typing")
+                .json(&command.args)
+                .timeout(Duration::from_secs(3))
+                .send()
+                .await?;
+            // Older servers simply do not advertise typing; never disturb chat for that.
+            if response.status() != reqwest::StatusCode::NOT_FOUND {
+                ensure_ok(response).await?;
+            }
+            return Ok(None);
         }
         if command.name == "desktop_activity" {
             return Ok(Some(self.activity.status().await));
@@ -3802,7 +3829,7 @@ async fn serve_client(stream: UnixStream, daemon: Arc<Daemon>) -> anyhow::Result
                             continue;
                         }
                     };
-                    if matches!(command.name.as_str(), "send_reply" | "forward_message" | "send_attachment_message" | "send_image_message" | "save_chat_file" | "import_chat_files" | "paste_clipboard" | "soundboard_upload" | "soundboard_play" | "soundboard_preview") {
+                    if matches!(command.name.as_str(), "chat_typing" | "send_reply" | "forward_message" | "send_attachment_message" | "send_image_message" | "save_chat_file" | "import_chat_files" | "paste_clipboard" | "soundboard_upload" | "soundboard_play" | "soundboard_preview") {
                         if transfers.len() >= 8 {
                             write_envelope(&mut writer, &DaemonEnvelope::failure(command.id, "transfers_busy", "Too many active transfers")).await?;
                         } else {
@@ -3904,6 +3931,12 @@ async fn synchronize_server(daemon: Arc<Daemon>) {
                                 message.to_text().unwrap_or_default(),
                             ) {
                                 debug!(name = %event.name, seq = event.seq, "server event");
+                                if event.name == "chat_typing" {
+                                    let mut payload = event.payload;
+                                    payload["server_id"] = json!(daemon.primary_server.id);
+                                    daemon.emit("chat_typing", payload, daemon.next_seq(0));
+                                    continue;
+                                }
                                 event.name
                             } else {
                                 "server_state_changed".into()
@@ -3970,10 +4003,19 @@ async fn synchronize_linked_server(daemon: Arc<Daemon>, server: Arc<LinkedServer
                 while let Some(message) = incoming.next().await {
                     match message {
                         Ok(message) if message.is_text() => {
-                            let event_name = serde_json::from_str::<ServerEvent>(
+                            let event_name = if let Ok(event) = serde_json::from_str::<ServerEvent>(
                                 message.to_text().unwrap_or_default(),
-                            )
-                            .map_or_else(|_| "server_state_changed".to_owned(), |event| event.name);
+                            ) {
+                                if event.name == "chat_typing" {
+                                    let mut payload = event.payload;
+                                    payload["server_id"] = json!(server.view.id);
+                                    daemon.emit("chat_typing", payload, daemon.next_seq(0));
+                                    continue;
+                                }
+                                event.name
+                            } else {
+                                "server_state_changed".to_owned()
+                            };
                             if let Err(error) = daemon.refresh_linked(&server, &event_name).await {
                                 warn!(%error, server = %server.view.name, "linked-server snapshot refresh failed");
                                 break;

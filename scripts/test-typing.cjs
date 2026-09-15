@@ -1,0 +1,17 @@
+const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
+const logic={};vm.createContext(logic);vm.runInContext(fs.readFileSync(`${__dirname}/../quickshell/app/TypingLogic.js`,'utf8'),logic);
+let state=logic.receive({}, {user_id:'friend',display_name:'Mira',active:true,timeout_ms:8000},1000,'self');
+assert.equal(logic.label(state),'Mira is typing…');
+assert.equal(logic.label(logic.prune(state,8999)),'Mira is typing…');
+assert.equal(logic.label(logic.prune(state,9000)),'');
+state=logic.receive(state,{user_id:'friend',display_name:'New name',active:true,timeout_ms:8000},4000,'self');
+assert.equal(logic.label(logic.prune(state,9000)),'New name is typing…');
+assert.equal(logic.label(logic.receive(state,{user_id:'friend',active:false},4001,'self')),'');
+assert.equal(logic.label(logic.receive({}, {user_id:'self',display_name:'Me',active:true},0,'self')),'');
+state=logic.receive(state,{user_id:'other',display_name:'Theo',active:true},5000,'self');
+assert.equal(logic.label(state),'New name and Theo are typing…');
+assert.equal(logic.label(logic.prune(state,12500)),'Theo is typing…');
+assert.equal(logic.label(logic.prune(state,13000)),'');
+const bounded=logic.receive({}, {user_id:'friend',active:true,timeout_ms:999999},0,'self');
+assert.equal(logic.label(logic.prune(bounded,8000)),'');
+console.log('Typing expiry, refresh, explicit stop, self suppression, multiple senders and bounded timeout passed');

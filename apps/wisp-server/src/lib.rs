@@ -40,6 +40,7 @@ mod soundboard_tests;
 mod storage_cleanup;
 #[cfg(test)]
 mod text_tests;
+mod typing;
 mod voice_moderation;
 
 use argon2::{
@@ -139,6 +140,7 @@ struct RuntimeState {
     seq: u64,
     connected_clients: usize,
     knocks: HashMap<KnockId, PendingKnock>,
+    typing: HashMap<(UserId, String), Instant>,
 }
 
 #[derive(Debug, Clone)]
@@ -299,6 +301,9 @@ impl AppState {
             runtime.connected_clients = runtime.connected_clients.saturating_sub(1);
         }
         drop(runtime);
+        if !connected {
+            typing::disconnected(self, user_id).await;
+        }
         self.emit(
             "presence_changed",
             json!({"user_id": user_id, "online": connected}),
@@ -756,6 +761,7 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/friend-requests/{id}/accept", post(friendships::accept))
         .route("/v1/snapshot", get(snapshot))
         .route("/v1/events", get(events))
+        .route("/v1/typing", post(typing::update))
         .route("/v1/presence", post(set_presence))
         .route("/v2/devices/me/activity", post(device_activity::heartbeat))
         .route(
@@ -2185,6 +2191,7 @@ async fn persist_message(
         .await
         .map_err(ApiError::internal)?;
     tx.commit().await.map_err(ApiError::internal)?;
+    typing::clear(state, sender_id, &message.conversation_id).await;
     // The row is committed before the acknowledgement and notification.
     state
         .emit("message_created", json!({"changed": true}))
@@ -2622,6 +2629,8 @@ async fn user_by_id(
 struct EventQuery {
     #[serde(default)]
     token: Option<String>,
+    #[serde(default)]
+    typing: bool,
 }
 
 async fn events(
@@ -2644,10 +2653,10 @@ async fn events(
         }
         authenticate_token(&state, token).await?
     };
-    Ok(ws.on_upgrade(move |socket| event_socket(state, user_id, socket)))
+    Ok(ws.on_upgrade(move |socket| event_socket(state, user_id, socket, query.typing)))
 }
 
-async fn event_socket(state: AppState, user_id: UserId, socket: WebSocket) {
+async fn event_socket(state: AppState, user_id: UserId, socket: WebSocket, typing_enabled: bool) {
     state.set_connected(user_id, true).await;
     let (mut sender, mut receiver) = socket.split();
     let mut events = state.events.subscribe();
@@ -2673,8 +2682,9 @@ async fn event_socket(state: AppState, user_id: UserId, socket: WebSocket) {
         tokio::select! {
             event = events.recv() => match event {
                 Ok(event) => {
+                    if event.name == "chat_typing" && (!typing_enabled || !typing::visible(&state, &event, user_id).await) { continue; }
                     if !device_activity::event_visible(&event, user_id) { continue; }
-                    let event = if event.name == "notification_policy_changed" || account_membership::is_member(&state.pool,user_id).await.unwrap_or(false) { event } else {
+                    let event = if event.name == "chat_typing" || event.name == "notification_policy_changed" || account_membership::is_member(&state.pool,user_id).await.unwrap_or(false) { event } else {
                         ServerEvent { name: "account_changed".into(), payload: json!({"changed":true}), ..event }
                     };
                     let Ok(text) = serde_json::to_string(&event) else { continue };

@@ -12,6 +12,8 @@ Item {
   readonly property alias updates: updates
   WispUpdates { id: updates; bridge: root }
   property string clientName: "quickshell"
+  readonly property alias typing: typing
+  WispTyping { id: typing; bridge: root }
   readonly property alias unreadMarkers: unreadMarkers
   WispUnreadMessages { id: unreadMarkers; bridge: root }
   readonly property alias roomActivity:roomActivity
@@ -56,6 +58,7 @@ Item {
   onDaemonConnectedChanged: {
     if (!daemonConnected) serverPings=({})
     if (!daemonConnected) friendships.reset()
+    if (!daemonConnected) typing.reset()
     if (!daemonConnected) messageActions.disconnected()
     chatExtras.invalidate()
     soundboard.reset()
@@ -1010,6 +1013,7 @@ Item {
     })
     unreadMarkers.observe(previousFlat, nextFlat, eventName, next)
     snapshot = next
+    typing.reconcile()
     Qt.callLater(function() { friendships.sync(eventName || "") })
     privacySnapshotReady = true
     Qt.callLater(refreshPrivacy)
@@ -1149,6 +1153,10 @@ Item {
       lastError = "Invalid response from wispd"
       return
     }
+    if (message.type === "event" && message.name === "chat_typing") {
+      typing.receive(message.payload || {})
+      return
+    }
     if (message.type === "event" && message.name === "desktop_activity_changed") {
       desktopActivity=message.payload || desktopActivity
       return
@@ -1172,7 +1180,7 @@ Item {
       return
     }
     var avatarImageReply = message.type === "result" && (requests[message.id] || {}).kind === "avatar" && (requests[message.id] || {}).action === "image"
-    var handledReply = message.type === "result" && ["voiceRecovery", "soundboard", "serverPing", "accountSetup"].indexOf((requests[message.id] || {}).kind) >= 0
+    var handledReply = message.type === "result" && ["voiceRecovery", "soundboard", "serverPing", "accountSetup", "typing"].indexOf((requests[message.id] || {}).kind) >= 0
     if (message.type === "result") finishRequest(message)
     if (message.type === "result" && !handledReply && !avatarImageReply && message.ok !== true && message.error) {
       lastError = String(message.error.message || "Wisp command failed")
@@ -1280,6 +1288,7 @@ Item {
   function sendComposedMessage(conversationId) {
     if ((conversationById(conversationId) || {}).pending_access) return
     if (!conversationId || conversationValue(sendingConversations,conversationId,false) || conversationValue(importingConversations,conversationId,0)) return
+    typing.stop(conversationId)
     var text = draftFor(conversationId).trim()
     var attachments = attachmentsFor(conversationId)
     if (attachments.length > 0) {

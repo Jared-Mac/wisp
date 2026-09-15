@@ -58,3 +58,23 @@ Desktop/server implementation: `b60b083a0d5d` (included in the main release).
   confirmation/cancel, server switching, and media removal after an outage.
 
 Android completion: **not started; await explicit batch instruction**.
+
+## Queued: live chat typing (2026-09-15)
+
+Status: **deferred Android — do not port until the owner requests a batch**.
+
+- Show names of active typists per chat, keyed by stable user IDs, excluding self.
+- POST `/v1/typing` with `{conversation_id, active}` on actual editor changes, no
+  more than once per three seconds. Never transmit draft text or renew an idle draft.
+- Subscribe through `/v1/events?typing=true`. Consume `chat_typing` events directly,
+  without fetching a snapshot or generating
+  unread counts/notifications: `{conversation_id,user_id,display_name?,active,
+  timeout_ms}`. Expire locally within eight seconds; `active:false` clears at once.
+- Stop on send, empty draft, leaving the editor, closing the view and disconnect.
+  Clear received state on disconnect/access loss. Keep server/account scopes separate.
+- Server checks current chat access and DM blocks for senders/recipients. DMs work
+  for friends without server membership. No migration; tolerate 404 on old servers.
+- Source: `apps/wisp-server/src/typing.rs`, daemon `chat_typing` routing,
+  `quickshell/app/WispTyping.qml`, `TypingLogic.js`, `components/ChatComposer.qml`.
+- Validation: server private-recipient/throttle/send/disconnect tests and desktop
+  timeout, multiple-sender, self-filtering, server-isolation and composer fixtures.
