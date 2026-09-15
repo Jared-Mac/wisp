@@ -68,7 +68,10 @@ ShellRoot {
   }
   Wisp.WispAppearance {
     id: themeAppearance; environment: Quickshell.env("WISP_TEST_ADAPTER") === "omarchy" ? "omarchy" : "desktop"
-    Component.onCompleted: if (Quickshell.env("WISP_TEST_PALETTE")) setPalette(Quickshell.env("WISP_TEST_PALETTE"))
+    Component.onCompleted: {
+      if (Quickshell.env("WISP_TEST_PALETTE")) setPalette(Quickshell.env("WISP_TEST_PALETTE"))
+      if (Quickshell.env("WISP_TEST_CHAT_LAYOUT")) setChatLayout(Quickshell.env("WISP_TEST_CHAT_LAYOUT"))
+    }
   }
   Binding { target: theme; property: "profile"; value: themeAppearance.profile; when: test.mode === "themes" }
   Wisp.WispTheme {
@@ -631,6 +634,15 @@ ShellRoot {
         picker.currentIndex = index; picker.activated(index)
         test.check(theme.profile === style.profile, "Settings selects " + style.profile)
       })
+      var chatLayout = test.findItem(window.contentItem, "chatLayoutSetting")
+      test.check(!!chatLayout && chatLayout.enabled, "Chat layout is available in Appearance")
+      if (chatLayout) {
+        chatLayout.model.forEach(function(layout,index) {
+          chatLayout.currentIndex = index; chatLayout.activated(index)
+          test.check(theme.chatLayout === layout.key, "Settings selects chat layout " + layout.key)
+        })
+        chatLayout.currentIndex = 0; chatLayout.activated(0)
+      }
       var customize = test.findItem(window.contentItem, "appearanceCustomization")
       test.check(!customize.expanded, "Customization starts collapsed")
       customize.expanded = true

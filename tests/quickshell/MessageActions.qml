@@ -21,7 +21,8 @@ ShellRoot {
   }
   function last(){return bridge.sent[bridge.sent.length-1]}
   function ack(ok,value){bridge.finishRequest({id:"fake-"+bridge.requestId,ok:ok,value:value || {},error:ok ? null : {message:"Test send failure"}})}
-  Wisp.WispTheme {id:theme;profile:Quickshell.env("WISP_TEST_THEME") || "clean"}
+  Wisp.WispAppearance {id:appearance;environment:"desktop";Component.onCompleted:setChatLayout(Quickshell.env("WISP_TEST_CHAT_LAYOUT") || "grouped")}
+  Wisp.WispTheme {id:theme;appearanceController:appearance;profile:Quickshell.env("WISP_TEST_THEME") || "clean"}
   Wisp.WispBridge {id:bridge;property var sent:[];function send(name,args){sent.push({name:name,args:args});return "fake-"+(++requestId)}}
   FloatingWindow {
     id:window;visible:true;implicitWidth:620;implicitHeight:760;color:theme.background

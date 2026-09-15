@@ -1,14 +1,27 @@
 # Message runs and screen-share sounds
 
-Consecutive messages from the same person share one avatar, with tighter spacing
-inside the run. Names and timestamps remain on every message. A different sender,
-calendar day, or new-message divider starts a fresh run. Hiding avatars in
-Appearance still removes the avatar gutter entirely.
+Appearance → Chat layout offers three independent transcript styles, shared by
+the main app and tray and saved across launches. Grouped is the default for new
+and existing preferences that have no chat-layout selection.
 
-The add-reaction button sits in the message heading and appears on hover or
-keyboard focus. Its space is reserved so messages do not jump. Existing reaction
-chips stay visible. Room invitations have no reaction controls, and both the
-daemon and server reject attempts to add reactions to them.
+- **Grouped:** one avatar and name/time header per sender run, on a continuous background.
+- **Compact:** timestamps in a quiet left gutter and names inline with text, without
+  chat avatars. Attachments and reply/forward context keep a compact name heading.
+- **Soft groups:** one subtle rounded card per sender run, with a shared avatar/header.
+
+A different sender/server, five-minute inactivity gap, calendar day, invitation,
+or new-message divider starts a fresh run. Existing avatar visibility settings
+still apply to Grouped and Soft groups. Compact does not change the avatar setting
+for other lists or for switching back to the other chat styles.
+
+Message actions and add-reaction controls appear on hover or keyboard focus in a
+floating toolbar, without adding a row or moving messages. Continued-message
+timestamps appear on hover; the action tooltip includes the full timestamp.
+Existing reaction chips stay visible. Room invitations have no reaction controls,
+and both the daemon and server reject attempts to add reactions to them. Replies,
+forwards, pins, attachment previews, selectable text, unread navigation and live
+typing remain available in all three layouts. Stable message delegates preserve
+playing embeds across snapshots and style changes.
 
 Screen-share start and stop cues follow changes in the current voice room's
 sharing list, including your own stream. Joining, reconnecting, loading history,

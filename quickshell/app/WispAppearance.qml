@@ -21,6 +21,11 @@ Item {
     })
     return result
   }
+  readonly property string chatLayout: ["grouped","compact","soft_groups"].indexOf(preferences.chatLayout) >= 0 ? preferences.chatLayout : "grouped"
+  function setChatLayout(value) {
+    if (["grouped","compact","soft_groups"].indexOf(value) < 0) return
+    preferences.chatLayout=value; settings.writeAdapter()
+  }
   readonly property bool showAvatars: preferences.showAvatars
   function setShowAvatars(value) { preferences.showAvatars = !!value; settings.writeAdapter() }
   property string error: ""
@@ -86,6 +91,7 @@ Item {
       property var colorOptions: ({})
       property var stylePalettes: ({})
       property bool showAvatars: true
+      property string chatLayout: "grouped"
     }
   }
 }

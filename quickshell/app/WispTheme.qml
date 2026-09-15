@@ -5,6 +5,7 @@ import QtQuick
 // private modules from that shell.
 QtObject {
   id: root
+  readonly property string chatLayout: appearanceController ? appearanceController.chatLayout : "grouped"
   readonly property bool showAvatars: !appearanceController || appearanceController.showAvatars !== false
 
   // Hosts select the default through WispAppearance; adapters keep their styling.

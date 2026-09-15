@@ -68,6 +68,26 @@ Column {
       ThemeControlStyle {theme:root.theme;control:otherStyles}
     }
   }
+  Column {
+    width: parent.width; spacing: root.theme.space(6)
+    Text { text:"Chat layout"; color:root.theme.foreground; font.family:root.theme.font.family; font.pixelSize:root.theme.font.body }
+    WispComboBox {
+      id: chatLayoutPicker; objectName:"chatLayoutSetting"
+      theme:root.theme; width:parent.width; enabled:!!root.appearance; textRole:"label"
+      model:[{key:"grouped",label:"Grouped · default",detail:"One avatar and header per sender, with a continuous chat background."},
+        {key:"compact",label:"Compact",detail:"Names beside messages, quiet timestamps, and no chat avatars."},
+        {key:"soft_groups",label:"Soft groups",detail:"Subtle cards collect consecutive messages from the same person."}]
+      currentIndex: {for(var i=0;i<model.length;i++)if(model[i].key===root.theme.chatLayout)return i;return 0}
+      onActivated:root.appearance.setChatLayout(model[currentIndex].key)
+      Accessible.name:"Chat layout"
+      ThemeControlStyle {theme:root.theme;control:chatLayoutPicker}
+    }
+    Text {
+      width:parent.width; wrapMode:Text.WordWrap
+      text:chatLayoutPicker.model[chatLayoutPicker.currentIndex].detail+" Applies to the app and tray."
+      color:root.theme.muted; font.family:root.theme.font.family; font.pixelSize:root.theme.font.caption
+    }
+  }
   CheckBox {
     id: avatarSetting; objectName: "showAvatarsSetting"; width: parent.width
     text: "Show user avatars"; checked: root.theme.showAvatars; enabled: !!root.appearance

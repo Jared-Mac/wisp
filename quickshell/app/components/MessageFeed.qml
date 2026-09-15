@@ -9,6 +9,19 @@ Rectangle {
   required property var theme
   required property string conversationId
   signal replyRequested()
+  readonly property bool compactChat: theme.chatLayout === "compact"
+  readonly property bool softGroups: theme.chatLayout === "soft_groups"
+  readonly property bool chatAvatars: theme.showAvatars && !compactChat
+  function sameRun(previous, current) {
+    if (!previous || !current) return false
+    var gap=Date.parse(current.created_at)-Date.parse(previous.created_at)
+    return String(previous.sender.id)===String(current.sender.id)
+      && String(previous.server_id || bridge.activeServer.id)===String(current.server_id || bridge.activeServer.id)
+      && previous.content_type!=="application/vnd.wisp.room-invitation+json"
+      && current.content_type!=="application/vnd.wisp.room-invitation+json"
+      && gap>=0 && gap<5*60*1000
+      && new Date(previous.created_at).toDateString()===new Date(current.created_at).toDateString()
+  }
   property bool readerFocused: false
   property bool readerEngaged: false
   property string readerKey: ""
@@ -118,12 +131,21 @@ Rectangle {
       id: message
       required property int index
       readonly property var previousMessage: index > 0 ? root.incomingMessages[index-1] : null
-      readonly property bool sameAuthor: !!previousMessage && !startsUnread
-        && String(previousMessage.sender.id)===String(modelData.sender.id)
-        && String(previousMessage.server_id || root.bridge.activeServer.id)===serverId
-        && new Date(previousMessage.created_at).toDateString()===new Date(modelData.created_at).toDateString()
-      readonly property real messageGap: index===0 ? 0 : root.theme.space(sameAuthor ? 6 : root.theme.cleanTui ? 14 : root.theme.tui ? 12 : 18)
-      implicitHeight: Math.max(transcript.implicitHeight, avatar.visible ? avatar.height : 0) + newMessagesDivider.height + messageGap
+      readonly property bool sameAuthor: !startsUnread && root.sameRun(previousMessage,modelData)
+      readonly property var nextMessage: index+1<root.incomingMessages.length ? root.incomingMessages[index+1] : null
+      readonly property bool endsRun: !root.sameRun(modelData,nextMessage)
+        || (!!root.unreadBoundary && nextMessage && root.unreadBoundary.firstId===String(nextMessage.id))
+      readonly property real messageGap: index===0 ? (root.compactChat ? root.theme.space(22) : 0) : root.theme.space(sameAuthor ? (root.softGroups ? 0 : 3) : root.compactChat ? 8 : 14)
+      readonly property real topInset: root.softGroups ? root.theme.space(sameAuthor ? 3 : 10) : 0
+      readonly property real bottomInset: root.softGroups ? root.theme.space(endsRun ? 10 : 3) : 0
+      readonly property real contentTop: newMessagesDivider.height + messageGap + topInset
+      readonly property color senderColor: !root.theme.colorEnabled("senderNames") ? root.theme.foreground : ownMessage ? root.theme.accent : root.theme.secondaryAccent
+      readonly property string shortTime: Qt.formatDateTime(new Date(modelData.created_at),root.theme.tui ? "HH:mm" : "h:mm AP")
+      readonly property bool inlineBody: root.compactChat && !isImage && !isFile && !isInvitation
+        && !(modelData.context || {}).reply_to && !(modelData.context || {}).forwarded_from
+      // Use the preference, not effective child visibility: hiding a tile must
+      // not feed back into its delegate geometry while the view relayouts.
+      implicitHeight: Math.max(transcript.implicitHeight, root.chatAvatars && !sameAuthor ? root.theme.space(32) : 0) + contentTop + bottomInset
       readonly property bool startsUnread: !!root.unreadBoundary && root.unreadBoundary.firstId===String(modelData.id)
       required property var modelData
       readonly property bool isImage: modelData.content_type === "image/png"
@@ -134,6 +156,15 @@ Rectangle {
       readonly property string imageUrl: root.bridge.chatImageUrls[String(modelData.id)] || ""
       readonly property string serverId: String(modelData.server_id || root.bridge.activeServer.id)
       width: Math.min(messages.width, root.theme.comfortable ? root.theme.space(860) : messages.width)
+      Rectangle {
+        id: groupBackground; objectName:"messageGroup-"+String(message.modelData.id)
+        visible:root.softGroups; x:0; y:newMessagesDivider.height+message.messageGap
+        width:parent.width; height:parent.height-y
+        color:Qt.tint(root.theme.background,root.theme.alpha(root.theme.foreground,root.theme.light ? 0.055 : 0.045))
+        radius:root.theme.space(10)
+        Rectangle {visible:message.sameAuthor;anchors.top:parent.top;width:parent.width;height:parent.radius;color:parent.color}
+        Rectangle {visible:!message.endsRun;anchors.bottom:parent.bottom;width:parent.width;height:parent.radius;color:parent.color}
+      }
       Rectangle { anchors.fill: parent; visible: root.highlightedId===String(message.modelData.id); color: root.theme.alpha(root.theme.accent,0.12); radius: root.theme.cornerRadius }
       HoverHandler { id: messageHover }
       Component.onCompleted: { if (isImage) root.bridge.loadChatImage(String(modelData.id));root.bridge.chatExtras.loadText(serverId,copyText) }
@@ -158,49 +189,32 @@ Rectangle {
       }
       WispAvatar {
         id: avatar; objectName:"messageAvatar-"+String(message.modelData.id)
-        y: newMessagesDivider.height + message.messageGap
+        x: root.softGroups ? root.theme.space(10) : 0
+        y: message.contentTop
         TapHandler { onTapped: authorMenu.showPerson(Object.assign({},message.modelData.sender,{server_id:message.serverId}),parent) }
         HoverHandler { cursorShape:Qt.PointingHandCursor }
-        bridge: root.bridge; userId: String(message.modelData.sender.id); serverId: message.serverId; theme: root.theme; name: message.modelData.sender.display_name || ""; visible: root.theme.friendly && root.theme.showAvatars && !message.sameAuthor; width: root.theme.space(32); height: width }
-      Column {
-        id: transcript
-        y: newMessagesDivider.height + message.messageGap
-        x: root.theme.friendly && root.theme.showAvatars ? root.theme.space(44) : 0
-        width: parent.width-x
-        spacing: root.theme.comfortable ? root.theme.space(6) : root.theme.tui ? root.theme.space(2) : root.theme.spacing.md
+        bridge: root.bridge; userId: String(message.modelData.sender.id); serverId: message.serverId; theme: root.theme; name: message.modelData.sender.display_name || ""; visible: root.chatAvatars && !message.sameAuthor; width: root.theme.space(32); height: width }
+      Text {
+        objectName:"messageTime-"+String(message.modelData.id)
+        visible:root.compactChat || message.sameAuthor
+        x:0; y:message.contentTop+root.theme.space(2)
+        width:root.compactChat ? root.theme.space(52) : Math.max(0,transcript.x-root.theme.space(6))
+        opacity: !message.sameAuthor || messageHover.hovered ? 1 : 0
+        text:message.shortTime; textFormat:Text.PlainText; elide:Text.ElideRight
+        color:root.theme.muted; font.family:root.theme.font.family; font.pixelSize:root.theme.font.caption
+      }
       Row {
-        id: messageHeading
-        spacing: root.theme.spacing.lg
-        Button {
-          id: authorButton
-          objectName:"messageAuthor-"+String(message.modelData.id)
-          padding:0; implicitHeight:authorLabel.implicitHeight; implicitWidth:Math.min(authorLabel.implicitWidth,Math.max(40,transcript.width-root.theme.space(150)))
-          Accessible.name:"View "+String(message.modelData.sender.display_name || "member")
-          onClicked:authorMenu.showPerson(Object.assign({},message.modelData.sender,{server_id:message.serverId}),authorButton)
-          background:Rectangle {color:authorButton.hovered ? root.theme.alpha(root.theme.accent,0.10) : "transparent";radius:2}
-          contentItem:Text {
-          id:authorLabel; textFormat:Text.PlainText;elide:Text.ElideRight
-          text: (root.theme.cleanTui || root.theme.refinedTui) ? String(message.modelData.sender.display_name || "") : root.theme.tui ? "<" + String(message.modelData.sender.display_name || "") + ">" : String(message.modelData.sender.display_name || "")
-          color: !root.theme.colorEnabled("senderNames") ? root.theme.foreground : message.modelData.sender.id === root.bridge.selfState.id ? root.theme.accent : root.theme.secondaryAccent
-          font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption; font.bold: true
-        }
-        }
-        Text {
-          Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
-          text: root.theme.friendly ? Qt.formatDateTime(new Date(message.modelData.created_at), "h:mm AP") : (root.theme.cleanTui || root.theme.refinedTui) ? Qt.formatDateTime(new Date(message.modelData.created_at), "HH:mm") : root.theme.tui ? "[" + Qt.formatDateTime(new Date(message.modelData.created_at), "HH:mm:ss") + "]" : Qt.formatDateTime(new Date(message.modelData.created_at), "MMM d · h:mm AP")
-          color: root.theme.muted; font.pixelSize: root.theme.font.caption
-        }
-        Text {
-          Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
-          visible: !!message.modelData.edited_at
-          text: "edited"
-          color: root.theme.alpha(root.theme.muted, 0.8)
-          font.pixelSize: root.theme.space(root.theme.comfortable ? 12 : 10)
-        }
+        id: actionToolbar
+        anchors.right:parent.right; anchors.rightMargin:root.softGroups ? root.theme.space(8) : 0
+        y:message.contentTop-root.theme.space(root.compactChat ? 22 : message.sameAuthor ? 16 : 0)
+        z:5; spacing:root.theme.space(3)
+        HoverHandler {id:actionHover}
+        Rectangle {parent:message;x:actionToolbar.x-2;y:actionToolbar.y-2;width:actionToolbar.width+4;height:actionToolbar.height+4;z:4;radius:root.theme.cornerRadius;color:root.theme.surface;visible:messageHover.hovered || actionHover.hovered || optionsButton.activeFocus || reactionBar.actionEngaged || messageMenu.opened}
         ChatButton {
-          objectName: "messageOptions-" + String(message.modelData.id)
+          id: optionsButton; objectName: "messageOptions-" + String(message.modelData.id)
           theme: root.theme; text: "···"; quiet: root.theme.comfortable || root.theme.refinedTui
-          opacity: !(root.theme.comfortable || root.theme.refinedTui) || messageHover.hovered || activeFocus || messageMenu.opened ? 1 : 0
+          opacity: messageHover.hovered || actionHover.hovered || reactionBar.actionEngaged || activeFocus || messageMenu.opened ? 1 : 0
+          ToolTip.visible: hovered; ToolTip.text: "Message actions · " + Qt.formatDateTime(new Date(message.modelData.created_at), "MMM d, h:mm:ss AP")
           Accessible.name: "Message actions"
           implicitWidth: root.theme.space(26); implicitHeight: root.theme.space(20)
           onClicked: messageMenu.open()
@@ -263,6 +277,45 @@ Rectangle {
                text: "Delete message…"; onTriggered: { root.deletingId = String(message.modelData.id); deleteDialog.open() } }
           }
         }
+      }
+      Column {
+        id: transcript
+        y: message.contentTop
+        x: (root.softGroups ? root.theme.space(10) : 0) + (root.compactChat ? root.theme.space(58) : root.chatAvatars ? root.theme.space(44) : 0)
+        width: Math.max(1,parent.width-x-(root.softGroups ? root.theme.space(10) : 0))
+        spacing: root.theme.space(4)
+      Row {
+        id: messageHeading
+        visible: root.compactChat ? !message.inlineBody : !message.sameAuthor
+        spacing: root.theme.space(8)
+        Button {
+          id: authorButton
+          objectName:"messageAuthor-"+String(message.modelData.id)
+          padding:0; implicitHeight:authorLabel.implicitHeight; implicitWidth:Math.min(authorLabel.implicitWidth,Math.max(24,transcript.width-root.theme.space(root.compactChat ? 64 : 125)))
+          Accessible.name:"View "+String(message.modelData.sender.display_name || "member")
+          onClicked:authorMenu.showPerson(Object.assign({},message.modelData.sender,{server_id:message.serverId}),authorButton)
+          background:Rectangle {color:authorButton.hovered ? root.theme.alpha(root.theme.accent,0.10) : "transparent";radius:2}
+          contentItem:Text {
+          id:authorLabel; textFormat:Text.PlainText;elide:Text.ElideRight
+          text: (root.theme.cleanTui || root.theme.refinedTui) ? String(message.modelData.sender.display_name || "") : root.theme.tui ? "<" + String(message.modelData.sender.display_name || "") + ">" : String(message.modelData.sender.display_name || "")
+          color: message.senderColor
+          font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption; font.bold: true
+        }
+        }
+        Text {
+          Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
+          visible: !root.compactChat
+          text: root.theme.friendly ? Qt.formatDateTime(new Date(message.modelData.created_at), "h:mm AP") : (root.theme.cleanTui || root.theme.refinedTui) ? Qt.formatDateTime(new Date(message.modelData.created_at), "HH:mm") : root.theme.tui ? "[" + Qt.formatDateTime(new Date(message.modelData.created_at), "HH:mm:ss") + "]" : Qt.formatDateTime(new Date(message.modelData.created_at), "MMM d · h:mm AP")
+          color: root.theme.muted; font.pixelSize: root.theme.font.caption
+        }
+        Text {
+          Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
+          visible: !!message.modelData.edited_at
+          text: "edited"
+          color: root.theme.alpha(root.theme.muted, 0.8)
+          font.pixelSize: root.theme.space(root.theme.comfortable ? 12 : 10)
+        }
+
       }
       Button {
         id: replyPreview; objectName: "messageReplyPreview-" + String(message.modelData.id)
@@ -377,28 +430,30 @@ Rectangle {
       }
       Rectangle {
         width: parent.width
-        height: bodyText.implicitHeight + (root.theme.hearth ? root.theme.space(16) : 0)
-        color: root.theme.hearth ? root.theme.bubble : "transparent"
+        height: bodyText.implicitHeight
+        color: "transparent"
         radius: root.theme.cornerRadius
         visible: !message.isInvitation && bodyText.text !== ""
       TextEdit {
         id: bodyText
-        x: root.theme.hearth ? root.theme.space(12) : 0
-        y: root.theme.hearth ? root.theme.space(8) : 0
+        x: 0
+        y: 0
         objectName:"messageBody-"+String(message.modelData.id)
         width: Math.max(1,parent.width-x*2)
-        text: root.bridge.chatExtras.richText(message.serverId,message.copyText,Math.round(root.theme.font.body*1.5),root.theme.accent,root.conversationId)
+        text: (message.inlineBody ? '<a href="wisp-author" style="text-decoration:none;color:'+message.senderColor+'"><b>'+Markup.escape(message.modelData.sender.display_name || "member")+'</b></a>&nbsp; ' : "")
+          + root.bridge.chatExtras.richText(message.serverId,message.copyText,Math.round(root.theme.font.body*1.5),root.theme.accent,root.conversationId)
+          + ((message.sameAuthor || message.inlineBody) && message.modelData.edited_at ? ' <span style="color:'+root.theme.muted+';font-size:'+root.theme.font.caption+'px">(edited)</span>' : "")
         visible: !message.isInvitation && text !== ""
         color: root.theme.foreground
         readOnly: true; selectByMouse: true
         textFormat: TextEdit.RichText
         selectedTextColor:root.theme.foreground
-        onLinkActivated:link=>{if(Markup.safeLink(link) && !root.bridge.accountActions.openInvitation(link))Qt.openUrlExternally(link)}
+        onLinkActivated:link=>{if(link==="wisp-author")authorMenu.showPerson(Object.assign({},message.modelData.sender,{server_id:message.serverId}),bodyText);else if(Markup.safeLink(link) && !root.bridge.accountActions.openInvitation(link))Qt.openUrlExternally(link)}
         wrapMode: TextEdit.Wrap
         font.family: root.theme.font.family; font.pixelSize: root.theme.font.body
       }
       }
-      ReactionBar {allowed:!message.isInvitation;actionHost:messageHeading;revealActions:messageHover.hovered; width:parent.width;bridge:root.bridge;theme:root.theme;serverId:message.serverId;messageId:String(message.modelData.id)}
+      ReactionBar {id:reactionBar;allowed:!message.isInvitation;actionHost:actionToolbar;revealActions:messageHover.hovered || actionHover.hovered || optionsButton.activeFocus || messageMenu.opened; width:parent.width;bridge:root.bridge;theme:root.theme;serverId:message.serverId;messageId:String(message.modelData.id)}
       Repeater {
         model:Markup.youtube(message.copyText)
         VideoEmbed {required property string modelData;theme:root.theme;videoId:modelData}

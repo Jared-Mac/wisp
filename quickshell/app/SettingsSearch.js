@@ -1,5 +1,6 @@
 // Index labels and aliases only; never search account fields or private content.
 var entries = [
+  {section:"appearance",target:"chatLayoutSetting",label:"Chat layout",keywords:"grouped compact soft groups message density avatars inline sender headers"},
   {section:"notifications",target:"autoAwaySetting",label:"Automatic Away",keywords:"presence idle inactive pc activity computer desktop mobile phone notifications thirty minutes"},
   {section:"notifications",target:"idleThresholdSetting",label:"PC inactivity time",keywords:"away phone mobile alerts gaming controller keyboard mouse threshold minutes"},
   {section:"updates",target:"checkForUpdates",label:"Check for updates",keywords:"release version download manual update"},

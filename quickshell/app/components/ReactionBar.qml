@@ -10,6 +10,7 @@ Flow {
   property Item actionHost: null
   property bool revealActions: true
   property bool allowed: true
+  readonly property bool actionEngaged: reactionAction.activeFocus || picker.opened
   visible: allowed
   property var reactions:allowed ? bridge.chatExtras.groups(serverId,messageId) : []
   spacing:theme.space(5)
@@ -34,6 +35,7 @@ Flow {
     }
   }
   ChatButton {
+    id: reactionAction
     parent: root.actionHost || root
     visible:root.allowed
     quiet: true

@@ -12,6 +12,7 @@ ShellRoot {
     running: true; interval: 150
     onTriggered: {
       var expected = Quickshell.env("WISP_EXPECT_APPEARANCE")
+      test.check(appearance.chatLayout === (Quickshell.env("WISP_TEST_RELOAD")==="1" ? "soft_groups" : "grouped"), "chat layout defaults and persistence")
       test.check(appearance.profile === expected, "migration profile " + appearance.profile + " expected " + expected)
       test.check(appearance.palette === Quickshell.env("WISP_EXPECT_PALETTE"), "migration palette " + appearance.palette)
       if (Quickshell.env("WISP_TEST_RELOAD") === "1") {
@@ -19,6 +20,12 @@ ShellRoot {
           && !appearance.colorOptions.roomSections && !appearance.colorOptions.friendSections
           && !appearance.colorOptions.friendNames && !appearance.colorOptions.senderNames, "color preferences persisted")
       } else {
+        ;["grouped","compact","soft_groups"].forEach(function(layout) {
+          appearance.setChatLayout(layout)
+          test.check(theme.chatLayout===layout && popup.chatLayout===layout,"chat layouts apply on both surfaces")
+        })
+        appearance.setChatLayout("invalid")
+        test.check(appearance.chatLayout==="soft_groups","invalid chat layout is ignored")
         var profiles = ["soft_graphite","daylight","hearth","performative","clean_tui","herdr","terminal","legacy"]
         var palettes = ["soft_graphite","daylight","hearth","ash_olive","herdr","wisp","graphite","violet","ember","astra"]
         profiles.forEach(function(style) {

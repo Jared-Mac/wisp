@@ -17,6 +17,7 @@ run_case() {
 run_case default '{}' legacy wisp
 run_case cachyos-default '{}' legacy wisp cachyos
 run_case omarchy-default '{}' legacy wisp omarchy
+run_case invalid-chat-layout '{"chatLayout":"missing"}' legacy wisp
 run_case invalid-profile '{"version":2,"profile":"missing","palette":"graphite"}' legacy graphite
 run_case old-performative '{"profile":"terminal","palette":"performative"}' performative ash_olive
 run_case old-classic-performative '{"profile":"legacy","palette":"performative"}' performative ash_olive

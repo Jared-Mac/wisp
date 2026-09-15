@@ -78,3 +78,24 @@ Status: **deferred Android — do not port until the owner requests a batch**.
   `quickshell/app/WispTyping.qml`, `TypingLogic.js`, `components/ChatComposer.qml`.
 - Validation: server private-recipient/throttle/send/disconnect tests and desktop
   timeout, multiple-sender, self-filtering, server-isolation and composer fixtures.
+
+## Queued: selectable chat layouts (2026-09-15)
+
+Status: **deferred Android — do not port until the owner requests a batch**.
+
+- Appearance offers Grouped (default), Compact, and Soft groups; persist selection
+  independently of color/theme and avatar preferences. Desktop shares it across
+  the main app and tray. No protocol or schema change.
+- Grouped uses one avatar/header per sender run. Compact puts names inline with
+  text and times in a left gutter, without chat avatars. Soft groups adds one
+  subtle rounded background per sender run. Keep attachment/reply/forward context.
+- Runs break on sender/server change, a five-minute gap, day boundary, invitations,
+  or the unread divider. Deletions promote the next message to run start.
+- Desktop hover/keyboard actions replace repeated permanent controls; Android
+  should preserve touch access to reactions and the message menu in its future port.
+- Source: `components/MessageFeed.qml`, `components/ReactionBar.qml`,
+  `views/AppearanceSettingsView.qml`, `WispAppearance.qml`; behavior details in
+  `docs/chat-message-layout.md` (QML paths relative to `quickshell/app`).
+- Validation: all three layouts across four themes and narrow tray widths;
+  selection persistence, sender/unread grouping, hover/focus actions, invitation
+  transitions, attachments and existing message actions.

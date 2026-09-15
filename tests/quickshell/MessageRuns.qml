@@ -8,6 +8,7 @@ import "app/components" as Components
 ShellRoot {
   id:test
   property bool failed:false
+  readonly property string layout: Quickshell.env("WISP_TEST_CHAT_LAYOUT") || "grouped"
   function check(ok,label){if(!ok){failed=true;console.error("MESSAGE_RUNS_FAILED: "+label)}}
   function find(item,name){if(!item)return null;if(item.objectName===name)return item;for(var c of item.children || []){var r=find(c,name);if(r)return r}return null}
   property var initial:null
@@ -15,7 +16,7 @@ ShellRoot {
   Wisp.WispTheme {id:theme;appearanceController:appearance;profile:appearance.profile}
   Wisp.WispBridge {id:bridge;property var sent:[];function send(name,args){sent.push({name:name,args:args});return "fake-"+(++requestId)}}
   FloatingWindow {
-    id:window;visible:true;implicitWidth:520;implicitHeight:760;color:theme.background
+    id:window;visible:true;implicitWidth:Number(Quickshell.env("WISP_TEST_WIDTH")) || 520;implicitHeight:760;color:theme.background
     Rectangle {
       id:canvas;anchors.fill:parent;color:theme.background
       Components.MessageFeed {id:feed;anchors.fill:parent;anchors.margins:12;theme:theme;bridge:bridge;conversationId:"local::chat"}
@@ -23,6 +24,7 @@ ShellRoot {
   }
   TestCase {id:input;parent:window.contentItem;when:false}
   Component.onCompleted:{
+    appearance.setChatLayout(layout)
     appearance.setProfile(Quickshell.env("WISP_TEST_THEME") || "soft_graphite")
     var data=JSON.parse(JSON.stringify(bridge.snapshot)),self={id:"self",display_name:"Morgan",hangout_id:null,media:{},presence:"open"}
     var server={id:"local",name:"Community",connected:true};data.servers=[server];data.selected_server_id="local";data.self=Object.assign(data.self,self)
@@ -37,8 +39,10 @@ ShellRoot {
     input.mouseMove(window.contentItem,0,0);input.wait(40)
     for(var i=0;i<6;i++) {
       var avatar=test.find(feed,"messageAvatar-m"+i)
-      test.check(avatar && avatar.visible===(theme.friendly && theme.showAvatars && [0,2,3,4].indexOf(i)>=0),"avatar starts the appropriate sender run "+i)
-      test.check(test.find(feed,"messageAuthor-m"+i).visible,"every message keeps its author")
+      test.check(avatar && avatar.visible===(layout!=="compact" && theme.showAvatars && [0,2,3,4].indexOf(i)>=0),"avatar starts the appropriate sender run "+i)
+      test.check(test.find(feed,"messageAuthor-m"+i).visible===(layout!=="compact" && [0,2,3,4].indexOf(i)>=0),"only grouped run starts have headings "+i)
+      if(layout==="compact")test.check(test.find(feed,"messageBody-m"+i).text.indexOf("wisp-author")>=0,"compact author is inline")
+      test.check(test.find(feed,"messageGroup-m"+i).visible===(layout==="soft_groups"),"soft grouping background follows preference")
     }
     var action=test.find(feed,"addReaction-m1"), list=test.find(feed,"messageList"), height=list.contentHeight
     test.check(action && action.opacity===0,"empty reaction action is hidden at rest")
@@ -51,10 +55,10 @@ ShellRoot {
     test.check(!test.find(feed,"addReaction-invite").visible && !test.find(feed,"reaction-invite-😀"),"invites have no reaction action or historical chips")
     var count=bridge.sent.length;bridge.chatExtras.react("local","invite","😀");test.check(bridge.sent.length===count,"invite reactions cannot issue a client command")
     bridge.unreadMarkers.boundaries=({"local::chat":{firstId:"m1",createdAt:"2026-09-10T12:01:00Z",seen:false}});input.wait(30)
-    test.check(test.find(feed,"messageAvatar-m1").visible===(theme.friendly && theme.showAvatars),"unread boundary begins a new avatar run")
+    test.check(test.find(feed,"messageAvatar-m1").visible===(layout!=="compact" && theme.showAvatars),"unread boundary begins a new avatar run")
     bridge.unreadMarkers.boundaries=({})
     var next=JSON.parse(JSON.stringify(test.initial));next.server_states[0].messages.shift();bridge.applySnapshot(next);input.wait(40)
-    test.check(test.find(feed,"messageAvatar-m1").visible===(theme.friendly && theme.showAvatars),"deletion promotes the next message to run start")
+    test.check(test.find(feed,"messageAvatar-m1").visible===(layout!=="compact" && theme.showAvatars),"deletion promotes the next message to run start")
     bridge.applySnapshot(test.initial);input.wait(50)
     var screenshot=Quickshell.env("WISP_MESSAGE_RUNS_SCREENSHOT")
     if(screenshot) canvas.grabToImage(function(im){im.saveToFile(screenshot);console.log(test.failed?"MESSAGE_RUNS_FAILED":"MESSAGE_RUNS_OK");Qt.quit()})
