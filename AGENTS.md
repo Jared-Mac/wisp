@@ -1,5 +1,23 @@
 # Wisp local workflow
 
+## Android changes: collect now, port later
+
+- Before committing a desktop/server change that affects Android, add or update
+  its entry in `docs/android-handoff.md` with behavior, API/schema compatibility,
+  source paths and validation. This applies to all developers and coding agents.
+- The Android queue is deferred. Do not have the Android task read it, implement
+  entries, or start a release until the owner explicitly requests an Android batch.
+  An FYI that the file exists is allowed; do not request a reply or routine status.
+- Coordinate tasks only for actionable dependencies, shared changes or blockers.
+  A pull/main push does not authorize an Android port. Keep Android source in its
+  separate repository and never announce queued work as released.
+- These private workflows, including Android coordination and Discord automation,
+  are for development only. Before publishing the actual source release, follow
+  `docs/development-workflows.md` to remove them from that release. Keep them active
+  during current development; do not expose them in product UI or runtime behavior.
+
+## Build and release
+
 - After completing requested updates or pulling changes, build the current client,
   sync its installed UI, and relaunch the local running app unless the user says
   otherwise. Verify the running binary and installed UI match this checkout.

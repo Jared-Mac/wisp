@@ -743,6 +743,14 @@ impl Daemon {
     }
 
     async fn merge_server_snapshot(&self, mut incoming: Snapshot, event_name: &str) {
+        let membership_removed = !incoming.server_member
+            && *self.voice_server_id.read().await == self.primary_server.id
+            && !self.local_voice_left.load(Ordering::Acquire);
+        if membership_removed {
+            // Snapshot refresh is nested inside media commands; keep the
+            // disconnect state machine off the worker's stack.
+            Box::pin(self.leave_voice_locally()).await;
+        }
         prepare_private_account(&self.api, &self.privacy, &mut incoming).await;
         if std::env::var("WISP_REQUIRE_CHAT_E2EE").as_deref() == Ok("true") {
             incoming.chat_encryption_required = true;
@@ -861,6 +869,12 @@ impl Daemon {
         event_name: &str,
     ) -> anyhow::Result<()> {
         let mut snapshot = server.api.snapshot().await?;
+        let membership_removed = !snapshot.server_member
+            && *self.voice_server_id.read().await == server.view.id
+            && !self.local_voice_left.load(Ordering::Acquire);
+        if membership_removed {
+            Box::pin(self.leave_voice_locally()).await;
+        }
         prepare_private_account(&server.api, &server.privacy, &mut snapshot).await;
         if server
             .privacy
@@ -2421,6 +2435,19 @@ impl Daemon {
                 self.refresh("server_settings_changed").await?;
                 Ok(Some(value))
             }
+            "moderate_server_member" => {
+                let args = serde_json::json!({"user_id":command.args["user_id"],"action":command.args["action"],"reason":command.args.get("reason").cloned().unwrap_or_else(||serde_json::json!(""))});
+                let value = self
+                    .api
+                    .server_request(
+                        reqwest::Method::POST,
+                        "/v1/server/members/moderate",
+                        Some(&args),
+                    )
+                    .await?;
+                self.refresh("server_membership_changed").await?;
+                Ok(Some(value))
+            }
             "create_server_category" => {
                 let value = self
                     .api
@@ -2976,6 +3003,19 @@ impl Daemon {
                     .server_request(reqwest::Method::POST, "/v1/server/admins", Some(&args))
                     .await?,
             ),
+            "moderate_server_member" => {
+                let request = serde_json::json!({"user_id":args["user_id"],"action":args["action"],"reason":args.get("reason").cloned().unwrap_or_else(||serde_json::json!(""))});
+                Some(
+                    server
+                        .api
+                        .server_request(
+                            reqwest::Method::POST,
+                            "/v1/server/members/moderate",
+                            Some(&request),
+                        )
+                        .await?,
+                )
+            }
             "create_server_category" => Some(
                 server
                     .api

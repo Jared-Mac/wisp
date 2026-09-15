@@ -43,3 +43,15 @@ database, environment file, backup directory, internal LiveKit API, and local an
 public health URLs. Deployment code lives in `infra/deploy/`; changes to these
 privileged helpers require installation by the VPS owner or a sudo administrator.
 The pipeline intentionally cannot update its own privileged access controls.
+
+## One-time moderation upgrade (schema 35)
+
+The server moderation release also needs the signaling `forward_auth` block from
+`infra/private-host/Caddyfile.example`. CI deploys the Wisp binary but cannot change
+Caddy's root-owned configuration. Do not mark this release complete until an owner
+has backed up the current proxy configuration, preserved the existing website and
+invite routes, installed that signaling block after the updated Wisp server is
+running, and validated/reloaded Caddy while voice is idle. Keep raw LiveKit signaling
+inaccessible from the public network. Verify both valid media admission and denial
+without a token, backend room-service access, and public health afterwards. See
+[server moderation](server-moderation.md#self-hosted-media-boundary).

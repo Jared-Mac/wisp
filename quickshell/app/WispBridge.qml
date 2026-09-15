@@ -276,14 +276,14 @@ Item {
   function refreshServerSettings() {
     if (!daemonConnected || !canManageServer || serverSettingsBusy) return
     var id = send("server_settings", {server_id:String(activeServer.id || "")})
-    if (id) { requests[id] = {kind:"serverSettings"}; serverSettingsBusy = true }
+    if (id) { requests[id] = {kind:"serverSettings",serverId:String(activeServer.id || "")}; serverSettingsBusy = true }
   }
   function serverMutation(action, args) {
     if (!canManageServer || serverSettingsBusy) return false
     var values = Object.assign({}, args || {}, {server_id:String(activeServer.id || "")})
     var id = send(action, values)
     if (id) {
-      requests[id] = {kind:"serverMutation",action:action}
+      requests[id] = {kind:"serverMutation",action:action,serverId:String(activeServer.id || "")}
       serverSettingsBusy = true
       serverSettingsFeedback = ""
     }
@@ -1168,6 +1168,7 @@ Item {
       if (message.name === "soundboard_changed") soundboard.invalidate()
       if (message.name === "account_avatar_changed") avatars.invalidate()
       applySnapshot(message.payload.snapshot, message.name)
+      if (["server_settings_changed","server_membership_changed"].indexOf(message.name)>=0 && canManageServer) refreshServerSettings()
       return
     }
     var avatarImageReply = message.type === "result" && (requests[message.id] || {}).kind === "avatar" && (requests[message.id] || {}).action === "image"
@@ -1409,13 +1410,15 @@ Item {
         if (action.action !== "backup_status") Qt.callLater(function() { root.profileAction("backup_status", {}) })
       }
     } else if (action.kind === "serverSettings") {
+      if (action.serverId!==undefined && action.serverId!==String(activeServer.id || "")) { serverSettingsBusy=false;refreshServerSettings();return }
       if (message.ok) serverSettings = value
       else serverSettingsFeedback = message.error ? String(message.error.message || "Could not load server settings") : "Could not load server settings"
       serverSettingsBusy = false
     } else if (action.kind === "serverMutation") {
       serverSettingsBusy = false
+      if (action.serverId!==undefined && action.serverId!==String(activeServer.id || "")) {refreshServerSettings();return}
       if (message.ok) {
-        serverSettingsFeedback = "Changes saved"
+        serverSettingsFeedback = value.media_pending ? "Changes saved. Voice disconnect will retry automatically." : "Changes saved"
         settingsSaved()
         refreshServerSettings()
       } else {

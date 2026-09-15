@@ -11,6 +11,7 @@ Column {
   property string pendingDeleteKind: ""
   property string pendingDeleteId: ""
   property string pendingDeleteName: ""
+  property var pendingModeration: ({})
   readonly property bool owner: String(bridge.serverSettings.role || "") === "owner"
   readonly property var categories: [{id:"",name:"No category"}].concat(bridge.serverSettings.categories || [])
   width: parent ? parent.width : 0
@@ -37,6 +38,15 @@ Column {
     bridge.serverMutation(action, {id:pendingDeleteId})
     deleteDialog.close()
   }
+  function confirmModeration(action, member) {
+    pendingModeration = {action:action,id:String(member.id),name:String(member.display_name),serverId:String(bridge.activeServer.id)}
+    moderationReason.text = ""
+    moderationDialog.open()
+  }
+  function moderatePending() {
+    if (String(bridge.activeServer.id) !== pendingModeration.serverId) { moderationDialog.close(); return }
+    if (bridge.serverMutation("moderate_server_member", {user_id:pendingModeration.id,action:pendingModeration.action,reason:moderationReason.text.trim()})) moderationDialog.close()
+  }
 
   Row {
     width: parent.width
@@ -51,8 +61,8 @@ Column {
       Text {
         width: parent.width; wrapMode: Text.WordWrap
         text: root.owner
-          ? "Owner · full Wisp administration. VPS access, secrets, and server shutdown stay outside the app."
-          : "Administrator · manage rooms, categories, and channels. Ownership and server infrastructure remain owner-only."
+          ? "Owner · manage this server, its members, and administrators."
+          : "Administrator · manage members, rooms, and channels."
         color: root.theme.muted
         font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
       }
@@ -121,7 +131,7 @@ Column {
     Item { objectName: "settingsServerRoles"; width: 0; height: 0 }
     Text {
       width: parent.width; wrapMode: Text.WordWrap
-      text: root.owner ? "Only the owner can grant or revoke persistent server-admin access." : "Only the owner can change server-admin access."
+      text: "Members can be managed while offline. Only the owner can manage administrators."
       color: root.theme.muted
       font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
     }
@@ -129,22 +139,24 @@ Column {
       model: root.bridge.serverSettings.members || []
       delegate: Rectangle {
         required property var modelData
-        width: root.width; height: root.theme.space(38)
+        width: root.width; height: memberContent.implicitHeight + root.theme.spacing.sm * 2
         radius: root.theme.cornerRadius; color: root.theme.alpha(root.theme.foreground, 0.04)
         border.width: root.theme.tui ? 1 : 0; border.color: root.theme.separator
+        Column {
+          id: memberContent
+          anchors.left:parent.left;anchors.right:parent.right;anchors.top:parent.top
+          anchors.margins:root.theme.spacing.sm;spacing:root.theme.spacing.xs
         Text {
-          anchors.left: parent.left; anchors.leftMargin: root.theme.spacing.md
-          anchors.right: roleButton.left; anchors.rightMargin: root.theme.spacing.sm
-          anchors.verticalCenter: parent.verticalCenter
+          width: parent.width
           text: String(modelData.display_name) + " · " + String(modelData.role)
           elide: Text.ElideRight; color: root.theme.foreground
           font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
         }
+        Flow {
+          width:parent.width;spacing:root.theme.spacing.xs
         ChatButton {
           id: roleButton
           visible: root.owner && modelData.role !== "owner"
-          anchors.right: parent.right; anchors.rightMargin: root.theme.spacing.xs
-          anchors.verticalCenter: parent.verticalCenter
           height: root.theme.space(28)
           theme: root.theme
           text: modelData.role === "admin" ? "remove admin" : "make admin"
@@ -152,9 +164,50 @@ Column {
           enabled: !root.bridge.serverSettingsBusy
           onClicked: root.bridge.serverMutation("set_server_admin", {user_id:String(modelData.id),admin:modelData.role !== "admin"})
         }
+        ChatButton {
+          objectName:"kickServerMember-"+String(modelData.id)
+          theme:root.theme;text:"kick";destructive:true;height:root.theme.space(28)
+          visible:!!root.bridge.serverSettings.member_moderation && modelData.role!=="owner" && (root.owner || modelData.role!=="admin")
+          enabled:!root.bridge.serverSettingsBusy
+          ToolTip.visible:hovered;ToolTip.text:"Remove from this server; they can rejoin with a new invite."
+          onClicked:root.confirmModeration("kick",modelData)
+        }
+        ChatButton {
+          objectName:"banServerMember-"+String(modelData.id)
+          theme:root.theme;text:"ban";destructive:true;height:root.theme.space(28)
+          visible:!!root.bridge.serverSettings.member_moderation && modelData.role!=="owner" && (root.owner || modelData.role!=="admin")
+          enabled:!root.bridge.serverSettingsBusy
+          ToolTip.visible:hovered;ToolTip.text:"Remove from this server and prevent rejoining."
+          onClicked:root.confirmModeration("ban",modelData)
+        }
+        }
+        }
       }
     }
   }
+  }
+
+  SettingsSection {
+    theme:root.theme;title:"Banned members";summary:"Manage server bans";objectName:"serverBansSection"
+    visible:!!root.bridge.serverSettings.member_moderation
+    Column {
+      width:parent.width;spacing:root.theme.spacing.sm
+      Text {
+        width:parent.width;wrapMode:Text.WordWrap
+        text:(root.bridge.serverSettings.bans || []).length ? "Lifting a ban allows a new invite; it does not rejoin the server." : "No banned members."
+        color:root.theme.muted;font.family:root.theme.font.family;font.pixelSize:root.theme.font.caption
+      }
+      Repeater {
+        model:root.bridge.serverSettings.bans || []
+        delegate:Column {
+          required property var modelData
+          width:parent.width;spacing:root.theme.spacing.xs
+          Text {width:parent.width;text:String(modelData.display_name);elide:Text.ElideRight;color:root.theme.foreground;font.family:root.theme.font.family;font.pixelSize:root.theme.font.body}
+          Text {width:parent.width;visible:!!modelData.reason;text:String(modelData.reason || "");wrapMode:Text.WordWrap;color:root.theme.muted;font.family:root.theme.font.family;font.pixelSize:root.theme.font.caption}
+          ChatButton {objectName:"unbanServerMember-"+String(modelData.id);theme:root.theme;text:"unban";enabled:!root.bridge.serverSettingsBusy;onClicked:root.confirmModeration("unban",modelData)}
+        }
+      }
+    }
   }
 
 
@@ -397,6 +450,40 @@ Column {
       }
     }
   }
+  }
+
+  Dialog {
+    id:moderationDialog;objectName:"serverMemberModerationDialog"
+    parent:Overlay.overlay
+    width:Math.min(root.theme.space(430),parent ? parent.width-root.theme.space(24) : root.theme.space(430))
+    x:parent ? (parent.width-width)/2 : 0;y:parent ? (parent.height-height)/2 : 0
+    modal:true;closePolicy:Popup.CloseOnEscape
+    title:root.pendingModeration.action==="unban" ? "Lift server ban" : root.pendingModeration.action==="ban" ? "Ban member" : "Kick member"
+    font.family:root.theme.font.family;font.pixelSize:root.theme.font.caption
+    ThemeControlStyle {theme:root.theme;control:moderationDialog;outline:true}
+    contentItem:Column {
+      spacing:root.theme.spacing.md
+      Text {
+        width:parent.width;wrapMode:Text.WordWrap;color:root.theme.foreground
+        font.family:root.theme.font.family;font.pixelSize:root.theme.font.body
+        text:root.pendingModeration.action==="unban"
+          ? "Allow “"+root.pendingModeration.name+"” to rejoin with a new invite?"
+          : "Remove “"+root.pendingModeration.name+"” from this server and disconnect their voice? "
+            +(root.pendingModeration.action==="ban" ? "They cannot rejoin until this ban is lifted." : "They can rejoin with a new invite.")
+      }
+      TextField {
+        id:moderationReason;objectName:"serverModerationReason"
+        visible:root.pendingModeration.action==="ban";width:parent.width;maximumLength:280
+        placeholderText:"Reason (optional)";color:root.theme.foreground;placeholderTextColor:root.theme.muted
+        font.family:root.theme.font.family;font.pixelSize:root.theme.font.body
+        background:Rectangle {color:root.theme.background;border.width:1;border.color:root.theme.separator;radius:root.theme.cornerRadius}
+      }
+    }
+    footer:Flow {
+      padding:root.theme.spacing.sm;spacing:root.theme.spacing.sm
+      ChatButton {objectName:"confirmServerModeration";theme:root.theme;text:root.pendingModeration.action==="unban" ? "lift ban" : root.pendingModeration.action==="ban" ? "ban member" : "kick member";primary:true;destructive:root.pendingModeration.action!=="unban";enabled:!root.bridge.serverSettingsBusy && String(root.bridge.activeServer.id)===root.pendingModeration.serverId;onClicked:root.moderatePending()}
+      ChatButton {theme:root.theme;text:"cancel";onClicked:moderationDialog.close()}
+    }
   }
 
   Dialog {

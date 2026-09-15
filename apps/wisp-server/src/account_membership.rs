@@ -38,7 +38,7 @@ pub(super) async fn gate(
         || path.starts_with("/v1/rooms")
         || path.starts_with("/v1/room-invitations")
         || path.starts_with("/v1/spots/")
-        || path.starts_with("/v1/livekit/")
+        || (path.starts_with("/v1/livekit/") && path != "/v1/livekit/admission")
         || path.starts_with("/v1/soundboard")
         || path == "/v1/account-invites"
         || path == "/v1/admin/invites"
@@ -407,8 +407,13 @@ pub(super) async fn join(
             "Invalid invitation",
         ));
     }
-    let mut tx = state.pool.begin().await.map_err(ApiError::internal)?;
-    // Begin with a write so concurrent redemption cannot both observe unused.
+    let mut tx = state
+        .pool
+        .begin_with("BEGIN IMMEDIATE")
+        .await
+        .map_err(ApiError::internal)?;
+    super::member_moderation::ensure_not_banned(&mut tx, user).await?;
+    // Serialize redemption with moderation and other invitation redemptions.
     let changed = sqlx::query("UPDATE server_invites SET used_at=?,used_by=?,envelope=NULL WHERE code_hash=? AND used_at IS NULL AND revoked_at IS NULL AND expires_at>? AND EXISTS(SELECT 1 FROM users u WHERE u.id=server_invites.created_by AND u.server_member=1)")
         .bind(Utc::now().to_rfc3339()).bind(user.to_string()).bind(token_hash(&request.code)).bind(Utc::now().to_rfc3339()).execute(&mut *tx).await.map_err(ApiError::internal)?;
     if changed.rows_affected() != 1 {

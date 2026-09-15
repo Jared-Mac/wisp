@@ -104,8 +104,9 @@ pub(super) async fn settings(
     let rooms = sqlx::query("SELECT c.id,s.name,s.private,s.category_id,EXISTS(SELECT 1 FROM hangouts h WHERE h.spot_id=s.id AND h.ended_at IS NULL) active FROM spots s JOIN conversations c ON c.spot_id=s.id ORDER BY s.name COLLATE NOCASE")
         .fetch_all(&state.pool).await.map_err(ApiError::internal)?
         .into_iter().map(|row| json!({"id":row.get::<String,_>("id"),"name":row.get::<String,_>("name"),"category_id":row.get::<Option<String>,_>("category_id"),"private":row.get::<bool,_>("private"),"active":row.get::<bool,_>("active")})).collect::<Vec<_>>();
+    let bans = super::member_moderation::bans(&state).await?;
     Ok(Json(
-        json!({"name":name,"role":if owner {"owner"} else {"admin"},"members":members,"categories":categories,"channels":channels,"rooms":rooms}),
+        json!({"name":name,"role":if owner {"owner"} else {"admin"},"members":members,"categories":categories,"channels":channels,"rooms":rooms,"member_moderation":true,"bans":bans}),
     ))
 }
 

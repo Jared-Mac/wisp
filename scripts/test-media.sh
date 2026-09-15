@@ -713,7 +713,33 @@ jq -e '
   ([.self.media.remote_videos[].subscribed] | all(. == false))
 ' <<<"$reconnected_json" >/dev/null
 
-target/debug/wispctl --socket "$test_dir/wispd.sock" leave
+# A server kick must stop this client's active media and cancel recovery, even
+# though its account and direct messages remain signed in. All identities and
+# services here are isolated test fixtures; no production session is touched.
+python3 - "$test_dir/wisp.sqlite3" "$server_port" <<'PY'
+import json, sqlite3, sys, urllib.request
+db, port = sys.argv[1:]
+actor = "00000000-0000-4000-8000-000000000002"
+target = "00000000-0000-4000-8000-000000000001"
+with sqlite3.connect(db) as conn:
+    conn.execute("INSERT INTO server_identity(id,owner_user_id) VALUES(1,?) ON CONFLICT(id) DO UPDATE SET owner_user_id=excluded.owner_user_id", (actor,))
+base = "http://127.0.0.1:" + port
+def post(path, body, token=None):
+    headers = {"Content-Type":"application/json"}
+    if token: headers["Authorization"] = "Bearer " + token
+    request = urllib.request.Request(base + path, data=json.dumps(body).encode(), headers=headers)
+    with urllib.request.urlopen(request, timeout=10) as response: return json.load(response)
+session = post("/v1/dev/session", {"v":1,"profile":"MemberA"})
+result = post("/v1/server/members/moderate", {"user_id":target,"action":"kick"}, session["token"])
+assert result["ok"] and not result["media_pending"], "LiveKit must acknowledge removal"
+PY
+for _ in $(seq 1 100); do
+  kicked_json=$(target/debug/wispctl --socket "$test_dir/wispd.sock" status)
+  if jq -e '.server_member == false and .self.hangout_id == null and .self.media.livekit_connected == false and .self.media.microphone_published == false' <<<"$kicked_json" >/dev/null; then break; fi
+  sleep 0.1
+done
+jq -e '.server_member == false and .self.hangout_id == null and .self.media.livekit_connected == false and .self.media.microphone_published == false and .self.media.camera.active == false and .self.media.screen_share.active == false' <<<"$kicked_json" >/dev/null
+sleep 1
 final_json=$(target/debug/wispctl --socket "$test_dir/wispd.sock" status)
 jq -e '
   .self.connection == "available" and

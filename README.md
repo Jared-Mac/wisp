@@ -729,3 +729,11 @@ outside the service do not receive these cgroup limits.
 
 The release job uses GitHub's short-lived repository token. It does not require
 or receive deployment credentials, LiveKit secrets, or a personal access token.
+## Private development coordination
+
+Desktop/server changes affecting Android are collected in
+[the deferred Android change queue](docs/android-handoff.md). All contributors
+and coding agents should update it with relevant changes. Android work starts
+only when an explicit batch update is requested. These internal workflows will
+be removed from the public source release as described in
+[development workflow retirement](docs/development-workflows.md).

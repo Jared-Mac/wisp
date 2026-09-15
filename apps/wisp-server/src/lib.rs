@@ -17,6 +17,8 @@ mod friendships_tests;
 mod groups;
 mod invitation_privacy;
 mod invitations;
+mod media_admission;
+mod member_moderation;
 #[cfg(test)]
 mod message_actions_tests;
 mod message_pins;
@@ -124,6 +126,7 @@ pub struct AppState {
     events: broadcast::Sender<ServerEvent>,
     config: Arc<AppConfig>,
     login_failures: Arc<Mutex<HashMap<String, VecDeque<Instant>>>>,
+    member_disconnects: Arc<Mutex<()>>,
     password_work: Arc<Semaphore>,
     secure_public_work: Arc<Semaphore>,
     recovery: Arc<account_recovery::Recovery>,
@@ -263,6 +266,7 @@ impl AppState {
             events,
             config: Arc::new(config),
             login_failures: Arc::new(Mutex::new(HashMap::new())),
+            member_disconnects: Arc::new(Mutex::new(())),
             password_work: Arc::new(Semaphore::new(PASSWORD_WORK_LIMIT)),
             secure_public_work: Arc::new(Semaphore::new(8)),
             recovery: Arc::new(account_recovery::Recovery::default()),
@@ -771,6 +775,10 @@ pub fn router(state: AppState) -> Router {
             get(server_management::settings).patch(server_management::update_profile),
         )
         .route("/v1/server/admins", post(server_management::set_admin))
+        .route(
+            "/v1/server/members/moderate",
+            post(member_moderation::moderate),
+        )
         .route("/v1/server/voice", post(voice_moderation::update))
         .route(
             "/v1/server/categories",
@@ -793,6 +801,7 @@ pub fn router(state: AppState) -> Router {
             patch(server_management::rename_room).delete(server_management::delete_room),
         )
         .route("/v1/livekit/token", post(livekit_token))
+        .route("/v1/livekit/admission", get(media_admission::authorize))
         .route("/v1/e2ee/messages", text_body(post(privacy::send), &state))
         .route(
             "/v1/soundboard",
@@ -1352,6 +1361,7 @@ async fn login_account(
         return Err(ApiError::unauthorized("username or password is incorrect"));
     }
     if let Some(code) = request.invite_code.as_deref() {
+        member_moderation::ensure_not_banned(&mut tx, user_id).await?;
         let now = Utc::now();
         let invite = sqlx::query("SELECT id,created_by,kind,conversation_id FROM account_invites WHERE code_hash=? AND used_at IS NULL AND expires_at>?")
             .bind(token_hash(code))
@@ -3411,6 +3421,18 @@ async fn add_member(
     hangout_id: HangoutId,
     user_id: UserId,
 ) -> Result<(), ApiError> {
+    member_moderation::ensure_not_banned(tx, user_id).await?;
+    let member: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM users WHERE id=? AND server_member=1)")
+            .bind(user_id.to_string())
+            .fetch_one(&mut **tx)
+            .await
+            .map_err(ApiError::internal)?;
+    if !member {
+        return Err(ApiError::forbidden(
+            "Join this server before entering voice",
+        ));
+    }
     let allowed: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM hangouts h WHERE h.id = ? AND (h.spot_id IS NULL OR EXISTS(SELECT 1 FROM spots s WHERE s.id=h.spot_id AND s.private=0) OR EXISTS(SELECT 1 FROM conversations c JOIN accessible_conversation_members cm ON cm.conversation_id = c.id WHERE c.spot_id = h.spot_id AND cm.user_id = ?)))")
         .bind(hangout_id.to_string()).bind(user_id.to_string()).fetch_one(&mut **tx).await.map_err(ApiError::internal)?;
     if !allowed {
@@ -3546,7 +3568,9 @@ fn issue_livekit_token(
         sub: user.id.to_string(),
         name: &user.display_name,
         nbf: (now - ChronoDuration::seconds(5)).timestamp(),
-        exp: (now + ChronoDuration::minutes(15)).timestamp(),
+        // Keep initial grants short-lived on self-hosted media servers, where
+        // removing a participant does not revoke a cached admission token.
+        exp: (now + ChronoDuration::seconds(60)).timestamp(),
         video: LiveKitVideoGrant {
             room_join: true,
             room,

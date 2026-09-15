@@ -124,6 +124,7 @@ async fn main() -> anyhow::Result<()> {
     let invitations = tokio::spawn(state.clone().maintain_invitations());
     let activity = tokio::spawn(state.clone().maintain_device_activity());
     let storage_notifications = tokio::spawn(state.clone().maintain_storage_cleanup());
+    let member_disconnects = tokio::spawn(state.clone().maintain_member_disconnects());
     let listener = tokio::net::TcpListener::bind(args.addr).await?;
     info!(address = %args.addr, "wisp-server listening");
     axum::serve(listener, wisp_server::router(state))
@@ -133,6 +134,7 @@ async fn main() -> anyhow::Result<()> {
     invitations.abort();
     activity.abort();
     storage_notifications.abort();
+    member_disconnects.abort();
     Ok(())
 }
 

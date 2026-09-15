@@ -10,5 +10,11 @@ REPLACE_WITH_PUBLIC_HOSTNAME {
 }
 
 REPLACE_WITH_PUBLIC_HOSTNAME:8443 {
+    # Gate the entire signaling ingress so alternate/encoded paths cannot
+    # bypass membership checks. Signed backend room-service grants also work.
+    forward_auth 127.0.0.1:8787 {
+        uri /v1/livekit/admission
+        header_up X-Wisp-Media-Token "{query.access_token}"
+    }
     reverse_proxy 127.0.0.1:7880
 }
