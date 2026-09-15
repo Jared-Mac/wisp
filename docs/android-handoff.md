@@ -22,8 +22,8 @@ see [development workflow retirement](development-workflows.md).
 
 ## Queued: server kick, ban and unban (2026-09-15)
 
-Status: **deferred — desktop/server implemented and tested locally, not yet released; Android must wait**.
-Desktop branch: `codex/server-moderation` (record release commit when published).
+Status: **deferred Android — desktop/server implemented and tested; Android must wait**.
+Desktop/server implementation: `b60b083a0d5d` (included in the main release).
 
 - Server owners/admins can kick or ban offline as well as online members through
   Server settings → People and roles. Ban management has its own section.
