@@ -20,6 +20,7 @@ FocusScope {
   property int contentPadding: trayChatFocused ? theme.space(8) : presentation === "panel" ? theme.space(12) : theme.comfortable ? theme.space(18) : theme.cleanTui ? theme.space(14) : theme.tui ? theme.space(10) : theme.spacing.huge
   property bool dismissOnNavigate: false
   property bool showAppButton: false
+  property string appButtonText: "Open app"
   property bool showCloseButton: false
   // Top-level pages share one route home. Non-home pages expose it in both the
   // header and the identity menu without duplicating navigation state.
@@ -259,7 +260,7 @@ FocusScope {
 
         ChatButton {
           objectName: "headerOpenAppButton"; visible: root.showAppButton
-          theme: root.theme; text: "Open app"; iconName: "window"
+          theme: root.theme; text: root.appButtonText; iconName: "window"
           iconOnly:root.presentation === "panel";forceIcon:iconOnly
           ToolTip.visible:hovered || visualFocus;ToolTip.text:"Open app"
           height: root.theme.space(32); onClicked: root.appRequested()

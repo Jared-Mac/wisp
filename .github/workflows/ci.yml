@@ -129,6 +129,7 @@ jobs:
           bash scripts/test-private-host.sh
           bash scripts/test-onboarding.sh
           bash scripts/test-omarchy-update.sh
+          python3 tests/omarchy-plugin.py
 
       - name: Scan tracked source for secrets
         run: ./scripts/scan-secrets.sh

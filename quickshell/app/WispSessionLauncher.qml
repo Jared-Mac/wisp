@@ -5,6 +5,7 @@ import Quickshell.Io
 Item {
   id: root
   property bool daemonConnected: false
+  property bool clientMissing: false
   signal completed(string action, int exitCode)
 
   function ensureRunning() {
@@ -18,12 +19,12 @@ Item {
   Process {
     id: ensureProcess
     command: ["env", "WISP_INTEGRATION=omarchy", "wisp", "--ensure-running"]
-    onExited: function(code, status) { root.completed("ensure", code) }
+    onExited: function(code, status) { root.clientMissing = code === 127 || code === 126; root.completed("ensure", code) }
   }
 
   Process {
     id: appProcess
     command: ["env", "WISP_INTEGRATION=omarchy", "wisp"]
-    onExited: function(code, status) { root.completed("app", code) }
+    onExited: function(code, status) { root.clientMissing = code === 127 || code === 126; root.completed("app", code) }
   }
 }

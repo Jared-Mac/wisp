@@ -19,5 +19,6 @@ case "$(basename "$0")" in
   wisp)
     [[ ${WISP_INTEGRATION:-} == omarchy ]]
     printf 'wisp:%s\n' "$*" >>"$WISP_TEST_STATE/calls"
+    exit "${WISP_TEST_EXIT_CODE:-0}"
     ;;
 esac

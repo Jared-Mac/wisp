@@ -13,6 +13,13 @@ case "${1:-}" in
 esac
 if [[ "$existing_only" == true && ! -d "$destination" ]]; then exit 0; fi
 
+# Omarchy owns Git-installed plugins. Copying over them would erase .git or
+# dirty the checkout and prevent fast-forward updates.
+if [[ -e "$destination/.git" ]]; then
+  echo "Git-managed Wisp plugin left unchanged; update with: omarchy plugin update dev.wisp"
+  exit 0
+fi
+
 omarchy plugin validate "$repo_dir/quickshell"
 mkdir -p "$plugin_root"
 

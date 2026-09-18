@@ -1,0 +1,26 @@
+name: Update from Wisp release
+on:
+  schedule:
+    - cron: '23 * * * *'
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: plugin-release
+  cancel-in-progress: false
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Import matching released plugin
+        run: python3 .github/update.py
+      - name: Publish update
+        run: |
+          git add --all
+          if git diff --cached --quiet; then exit 0; fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m "Update Wisp plugin to $(python3 -c 'import json; print(json.load(open("release.json"))["version"])')"
+          git push

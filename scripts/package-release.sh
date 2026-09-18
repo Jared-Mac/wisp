@@ -114,3 +114,12 @@ python3 "$repo_dir/scripts/client-release-metadata.py" "$package_dir" "$dist_dir
 
 echo "Created $archive"
 echo "Created $archive.sha256"
+
+# Omarchy installs a source-only Git plugin, independently of the native client.
+python3 "$repo_dir/scripts/export-omarchy-plugin.py" "$staging_dir/dev.wisp"
+tar -czf "$dist_dir/wisp-omarchy-plugin.tar.gz" -C "$staging_dir" dev.wisp
+(
+  cd "$dist_dir"
+  sha256sum wisp-omarchy-plugin.tar.gz >wisp-omarchy-plugin.tar.gz.sha256
+)
+echo "Created $dist_dir/wisp-omarchy-plugin.tar.gz"

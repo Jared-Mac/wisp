@@ -81,7 +81,9 @@ Panel {
     id: sessionLauncher
     daemonConnected: bridge.daemonConnected
     onCompleted: function(action, exitCode) {
-      if (exitCode !== 0) bridge.lastError = "Couldn't start Wisp account sign-in. Try wisp-onboarding from a terminal."
+      if (exitCode !== 0) bridge.lastError = sessionLauncher.clientMissing
+        ? "Install the Wisp desktop client to use this plugin. Select Install Wisp for setup instructions."
+        : "Couldn't start Wisp account sign-in. Try wisp-onboarding from a terminal."
     }
   }
 
@@ -299,9 +301,14 @@ Panel {
       horizontalPanel: true
       contentPadding: 0
       showAppButton: true
+      appButtonText: sessionLauncher.clientMissing ? "Install Wisp" : "Open app"
       showCloseButton: false
       dismissOnNavigate: false
       onAppRequested: {
+        if (sessionLauncher.clientMissing) {
+          Qt.openUrlExternally("https://github.com/Jared-Mac/omarchy-wisp#install")
+          return
+        }
         root.close()
         sessionLauncher.openApp()
       }

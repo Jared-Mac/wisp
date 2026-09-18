@@ -18,7 +18,7 @@ done
 for name in omarchy omarchy-shell; do
   install -m 0755 "$mock" "$test_root/mock-bin/$name"
 done
-for mode in absent existing client_only; do
+for mode in absent existing client_only git_directory git_file; do
   config="$test_root/$mode/config"
   state="$test_root/$mode/state"
   plugin="$config/omarchy/plugins/dev.wisp"
@@ -26,6 +26,11 @@ for mode in absent existing client_only; do
   if [[ $mode == existing ]]; then
     mkdir -p "$plugin"
     touch "$plugin/previous-version"
+  fi
+  if [[ $mode == git_directory || $mode == git_file ]]; then
+    mkdir -p "$plugin"
+    printf 'user plugin content\n' >"$plugin/Panel.qml"
+    if [[ $mode == git_directory ]]; then mkdir "$plugin/.git"; else printf 'gitdir: elsewhere\n' >"$plugin/.git"; fi
   fi
   client_only=0
   if [[ $mode == client_only ]]; then
@@ -41,7 +46,10 @@ for mode in absent existing client_only; do
     [[ $(cat "$test_root/$mode/bin/wisp-server") == 'existing server' ]]
     [[ ! -e "$test_root/$mode/bin/wisp-backup" && ! -e "$test_root/$mode/bin/wisp-restore" ]]
   fi
-  if [[ $mode != existing ]]; then
+  if [[ $mode == git_directory || $mode == git_file ]]; then
+    [[ -e "$plugin/.git" && $(cat "$plugin/Panel.qml") == 'user plugin content' ]]
+    [[ ! -e "$state/rescanned" && ! -e "$state/wisp/backups" ]]
+  elif [[ $mode != existing ]]; then
     [[ ! -e "$plugin" && ! -e "$state/rescanned" ]]
   else
     cmp "$repo_dir/quickshell/Panel.qml" "$plugin/Panel.qml"

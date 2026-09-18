@@ -126,6 +126,11 @@ if command -v qs >/dev/null 2>&1; then
   rg -q 'SESSION_LAUNCHER_OK' "$test_root/qml.log"
   [[ $(rg -c '^wisp:--ensure-running$' "$test_root/session/calls") == 1 ]]
   [[ $(rg -c '^wisp:$' "$test_root/session/calls") == 1 ]]
+  PATH="$test_root/bin:$PATH" XDG_CONFIG_HOME="$test_root/config" \
+    XDG_RUNTIME_DIR="$test_root/runtime" WISP_TEST_STATE="$test_root/session" \
+    WISP_TEST_EXIT_CODE=127 QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software \
+    timeout 10 qs --path "$test_root" >"$test_root/qml.log" 2>&1 || { cat "$test_root/qml.log"; exit 1; }
+  rg -q SESSION_LAUNCHER_MISSING_OK "$test_root/qml.log"
 fi
 rg -q 'sessionLauncher.ensureRunning\(\)' "$repo_dir/quickshell/Panel.qml"
 rg -q 'sessionLauncher.openApp\(\)' "$repo_dir/quickshell/Panel.qml"

@@ -9,7 +9,13 @@ ShellRoot {
     id: launcher
     daemonConnected: true
     onCompleted: function(action, exitCode) {
-      if (exitCode !== 0) Qt.exit(1)
+      if (Quickshell.env("WISP_TEST_EXIT_CODE") === "127") {
+        if (exitCode !== 127 || !clientMissing) { Qt.exit(1); return }
+        console.log("SESSION_LAUNCHER_MISSING_OK")
+        Qt.quit()
+        return
+      }
+      if (exitCode !== 0 || clientMissing) Qt.exit(1)
       test.completions++
       if (test.completions === 1 && action === "ensure") {
         daemonConnected = true
