@@ -68,6 +68,10 @@ ShellRoot {
   Timer {
     interval:500; running:true
     onTriggered: {
+      page.appButtonText="Install Wisp"; input.wait(30)
+      var appButton=test.find(page,"headerOpenAppButton")
+      test.check(appButton && appButton.visible && !appButton.iconOnly && appButton.text==="Install Wisp","Missing client shows a labeled installation button")
+      page.appButtonText="Open app"
       bridge.friendships.put("local",{ready:true,loading:false,people:bridge.friends.map(function(friend){return Object.assign({},friend,{relationship:"friend",server_member:true})})})
       input.wait(30)
       var unread=test.find(page,"unreadChat-local::dm:riley")

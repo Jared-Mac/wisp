@@ -261,8 +261,8 @@ FocusScope {
         ChatButton {
           objectName: "headerOpenAppButton"; visible: root.showAppButton
           theme: root.theme; text: root.appButtonText; iconName: "window"
-          iconOnly:root.presentation === "panel";forceIcon:iconOnly
-          ToolTip.visible:hovered || visualFocus;ToolTip.text:"Open app"
+          iconOnly:root.presentation === "panel" && root.appButtonText === "Open app";forceIcon:iconOnly
+          ToolTip.visible:hovered || visualFocus;ToolTip.text:root.appButtonText
           height: root.theme.space(32); onClicked: root.appRequested()
         }
         ChatButton {
