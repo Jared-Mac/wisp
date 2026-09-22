@@ -1,6 +1,6 @@
 {
   "repository": "TLT26-churn/wisp-android",
   "last_announced_commit": "1b0f91d9a1c9f19242b567732dd4932966218e5d",
-  "pending_commit": null,
-  "pending_note": null
+  "pending_commit": "f8976e6c385db9a546476b15efb2729ddf33b5bd",
+  "pending_note": "docs/patch-notes/2026-09-22-android-07-test.md"
 }

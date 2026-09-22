@@ -20,9 +20,9 @@ This queue is internal coordination, not product documentation or a runtime
 dependency. Remove it and its agent instructions from a public source release;
 see [development workflow retirement](development-workflows.md).
 
-## Queued: server kick, ban and unban (2026-09-15)
+## Released on Android: server kick, ban and unban (2026-09-15)
 
-Status: **deferred Android — desktop/server implemented and tested; Android must wait**.
+Status: **Released in Android 0.7.0-test (build 9), 2026-09-22**.
 Desktop/server implementation: `b60b083a0d5d` (included in the main release).
 
 - Server owners/admins can kick or ban offline as well as online members through
@@ -57,11 +57,17 @@ Desktop/server implementation: `b60b083a0d5d` (included in the main release).
   and new sessions, invitation rejection without consuming it, unban/reinvite,
   confirmation/cancel, server switching, and media removal after an outage.
 
-Android completion: **not started; await explicit batch instruction**.
+Android implementation: `TLT26-churn/wisp-android` commit
+`7e35071a480cd8ba57988819eec6d5189422df6e`, included in released 0.7.0-test (code 9).
+Kotlin/server integration covers offline moderation, protected roles, rename/new
+sessions, invite preservation, unban/reinvite, and retained friends/DMs. Confirmation
+and account-switch UI tests compile; phone/emulator media-removal checks remain.
+The signed test APK is published at https://wisp.you/android-test. See Android
+`docs/android-0.7-verification.md` for the remaining device-test limits.
 
-## Queued: live chat typing (2026-09-15)
+## Released on Android: live chat typing (2026-09-15)
 
-Status: **deferred Android — do not port until the owner requests a batch**.
+Status: **Released in Android 0.7.0-test (build 9), 2026-09-22**.
 
 - Show names of active typists per chat, keyed by stable user IDs, excluding self.
 - POST `/v1/typing` with `{conversation_id, active}` on actual editor changes, no
@@ -79,11 +85,31 @@ Status: **deferred Android — do not port until the owner requests a batch**.
 - Validation: server private-recipient/throttle/send/disconnect tests and desktop
   timeout, multiple-sender, self-filtering, server-isolation and composer fixtures.
 
-## Queued: selectable chat layouts (2026-09-15)
+Android implementation: `TLT26-churn/wisp-android` commit
+`7e35071a480cd8ba57988819eec6d5189422df6e`, included in released 0.7.0-test (code 9).
+Unit and loopback server integration tests pass for scoped expiry, editor throttling,
+private recipients, opt-in, clear, blocked DMs, and no unread effects. Existing
+WebSocket transport opts into typing; idle chats do not poll. Device UI testing remains pending; the signed test APK is published.
 
-Status: **deferred Android — do not port until the owner requests a batch**.
+## Released: selectable Android chat layouts (2026-09-22)
 
-- Appearance offers Grouped (default), Compact, and Soft groups; persist selection
+Status: **Released in Android 0.7.0-test (build 9), 2026-09-22**.
+`TLT26-churn/wisp-android` commit `ad6f1281536077b810691c3cba5a0117ad79f3c0`
+adds all three layouts included in the 0.7.0-test (code 9) release. Per the owner's choice,
+**Soft groups is Android's default**, including existing preferences without a
+layout selection. Chat headers/composer and message/reaction spacing are smaller;
+incoming messages stay left and sent messages right. Wisp tabs stay hidden in chat;
+native navigation retains its black inset protection.
+
+Android retains individual keyed messages for scrolling/attachment state, with
+tap/long-press actions per message and the existing follow/unread badge behavior.
+The full debug and preview JVM suites each passed 154 tests; the final UI adjustment
+passed 10 focused checks per variant, APK builds and lint (0 errors). Instrumented
+layout/action/scroll tests compile but have not run: the owner requires the emulator
+to remain closed. Phone visual testing remains pending. The signed test APK is published. Backend
+health/capabilities return HTTP 200; this client-only change requires no server delta.
+
+- Appearance offers Grouped (desktop default), Compact, and Soft groups (Android default); persist selection
   independently of color/theme and avatar preferences. Desktop shares it across
   the main app and tray. No protocol or schema change.
 - Grouped uses one avatar/header per sender run. Compact puts names inline with
@@ -92,10 +118,25 @@ Status: **deferred Android — do not port until the owner requests a batch**.
 - Runs break on sender/server change, a five-minute gap, day boundary, invitations,
   or the unread divider. Deletions promote the next message to run start.
 - Desktop hover/keyboard actions replace repeated permanent controls; Android
-  should preserve touch access to reactions and the message menu in its future port.
+  uses per-message tap/long-press menus and keeps reaction chips visible.
 - Source: `components/MessageFeed.qml`, `components/ReactionBar.qml`,
   `views/AppearanceSettingsView.qml`, `WispAppearance.qml`; behavior details in
   `docs/chat-message-layout.md` (QML paths relative to `quickshell/app`).
 - Validation: all three layouts across four themes and narrow tray widths;
   selection persistence, sender/unread grouping, hover/focus actions, invitation
   transitions, attachments and existing message actions.
+
+## Android 0.7.0-test publication evidence (2026-09-22)
+
+- Final pushed source: `f8976e6c385db9a546476b15efb2729ddf33b5bd` in the private Android repository.
+- Android checks: run `35767708295` succeeded (APKs, unit tests, lint and protocol checks).
+- Published APK: `Wisp-0.7.0-test.apk`, build 9, 50,072,482 bytes.
+  SHA-256: `c794ab47c63aa234f30d696e24e23e8f096d7418a8ad229b51781bc145685318`.
+- Signature, app ID, SDK/ABI metadata, non-debuggable build, 16 KB alignment,
+  public APK/hash, update manifest and app-link certificate association verified.
+  Previous public distribution retained and backed up. No backend delta or restart.
+- Also released: notification previews with an opt-out and in-app update downloads
+  with integrity/signing verification and Android install confirmation.
+- Device UI tests were compiled, not run; the emulator remained closed as requested.
+- Discord coverage is tracked in `docs/release-tracking/android.json`; pending
+  entries with confirmed workflow delivery already count as covered.
