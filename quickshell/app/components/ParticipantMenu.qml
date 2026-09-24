@@ -26,6 +26,7 @@ Popup {
     bridge.friendships.refresh(person.server_id)
     open()
   }
+  RemoveFriendDialog {id:removeDialog;bridge:root.bridge;theme:root.theme}
   background: Rectangle { color: root.theme.surface; border.color: root.theme.separator; border.width: 1; radius: root.theme.cornerRadius }
   height: Math.min(parent ? parent.height-16 : 600, body.implicitHeight+padding*2)
   contentItem: ScrollView {
@@ -52,6 +53,11 @@ Popup {
       Accessible.name: "Open direct message in a new tile"
       ToolTip.visible: hovered; ToolTip.text: root.canMessage ? Accessible.name : "Add as a friend to message"
       onClicked: { root.bridge.openParticipantDirect(root.person); root.close() }
+    }
+    ChatButton {
+      objectName:"participantRemoveFriend";theme:root.theme;width:parent.width;text:"Remove friend…"
+      visible:!root.self && root.bridge.friendships.relationship(root.person)==="friend"
+      onClicked:{removeDialog.confirm(root.person);root.close()}
     }
     ChatButton {
       theme:root.theme;width:parent.width;text:"Block account";visible:!root.self && !!root.bridge.accountActions

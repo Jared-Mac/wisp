@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <title>Wisp Moments: melting</title>
+  <defs><linearGradient id="body" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#fff0c2"/><stop offset="1" stop-color="#efb669"/></linearGradient></defs>
+  <path d="M11 52V31C11 14 25 7 35 13c4-7 9-8 14-7-5 4-7 7-6 12 8 6 10 14 10 34l-10-5-11 6-11-6z" fill="url(#body)" stroke="#51352f" stroke-width="2.5" stroke-linejoin="round"/>
+  <g fill="none" stroke="#51352f" stroke-width="2.7" stroke-linecap="round" stroke-linejoin="round"><path d="M10 45q-6 10 4 12h34q12-1 8-9l-3-5-10 6-11-4-11 5z" fill="#efb669"/><path d="M18 28h8m12 2h8M28 36q4 3 8 0"/><path d="M43 14q-8 10 0 11 8-1 0-11" fill="#a8dded" stroke-width="1.8"/><path d="M18 8 14 4m10 3-1-5m-13 12-6-1" stroke="#db765c"/></g>
+</svg>

@@ -74,7 +74,7 @@ Column {
             primary: root.theme.friendly && !root.current
             Accessible.name: (root.current ? "Invite to " : "Join voice in ") + root.room.name
             ToolTip.visible: hovered; ToolTip.text: Accessible.name
-            onClicked: if (root.current) invitePicker.open(); else root.bridge.joinConversationVoice(root.conversationId)
+            onClicked: if (root.current) invitePicker.showAt(joinAction); else root.bridge.joinConversationVoice(root.conversationId)
           }
           ChatButton {
             id: moreAction; objectName: "roomMoreButton"; theme: root.theme; text: "···"; iconName: "more"; iconOnly: root.theme.friendly || root.narrow; forceIcon: root.narrow; implicitWidth: root.narrow ? Math.min(body.width,root.theme.space(28)) : root.theme.space(30)

@@ -355,3 +355,214 @@ async fn contacts_outside_the_server_keep_relationships_without_appearing_as_mem
         }
     }
 }
+
+#[tokio::test]
+#[allow(clippy::too_many_lines)] // Follow removal, retries and renewed consent through one relationship.
+async fn removing_friend_is_scoped_mutual_and_preserves_membership_and_chats() {
+    let (state, app) = setup().await;
+    value(
+        request(
+            &app,
+            "POST",
+            &path(TEST_MEMBER_A_ID),
+            TEST_OWNER_ID,
+            json!({}),
+        )
+        .await,
+    )
+    .await;
+    value(
+        request(
+            &app,
+            "POST",
+            &format!("{}/accept", path(TEST_OWNER_ID)),
+            TEST_MEMBER_A_ID,
+            json!({}),
+        )
+        .await,
+    )
+    .await;
+    value(
+        request(
+            &app,
+            "POST",
+            "/v1/conversations/direct",
+            TEST_OWNER_ID,
+            json!({"friend":TEST_MEMBER_A_ID}),
+        )
+        .await,
+    )
+    .await;
+    let before_chats = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM conversation_members")
+        .fetch_one(&state.pool)
+        .await
+        .unwrap();
+    let before_rooms = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM hangout_members")
+        .fetch_one(&state.pool)
+        .await
+        .unwrap();
+    let endpoint = format!("/v1/friends/{TEST_MEMBER_A_ID}");
+    assert_eq!(
+        request(&app, "DELETE", &endpoint, "not-authenticated", json!({}))
+            .await
+            .status(),
+        StatusCode::UNAUTHORIZED
+    );
+    value(request(&app, "DELETE", &endpoint, TEST_MEMBER_B_ID, json!({})).await).await;
+    assert_eq!(
+        relation(&list(&app, TEST_OWNER_ID).await, TEST_MEMBER_A_ID),
+        "friend"
+    );
+    for _ in 0..2 {
+        value(request(&app, "DELETE", &endpoint, TEST_OWNER_ID, json!({})).await).await;
+    }
+    assert_eq!(
+        relation(&list(&app, TEST_OWNER_ID).await, TEST_MEMBER_A_ID),
+        "none"
+    );
+    assert_eq!(
+        relation(&list(&app, TEST_MEMBER_A_ID).await, TEST_OWNER_ID),
+        "none"
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM conversation_members")
+            .fetch_one(&state.pool)
+            .await
+            .unwrap(),
+        before_chats
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM hangout_members")
+            .fetch_one(&state.pool)
+            .await
+            .unwrap(),
+        before_rooms
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT server_member FROM users WHERE id=?")
+            .bind(TEST_MEMBER_A_ID)
+            .fetch_one(&state.pool)
+            .await
+            .unwrap(),
+        1
+    );
+    // A fresh request is allowed, but becoming friends still requires consent.
+    let requested = value(
+        request(
+            &app,
+            "POST",
+            &path(TEST_MEMBER_A_ID),
+            TEST_OWNER_ID,
+            json!({}),
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(relation(&requested, TEST_MEMBER_A_ID), "outgoing");
+    value(request(&app, "DELETE", &endpoint, TEST_OWNER_ID, json!({})).await).await;
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM friend_requests")
+            .fetch_one(&state.pool)
+            .await
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        request(
+            &app,
+            "POST",
+            &format!("{}/accept", path(TEST_OWNER_ID)),
+            TEST_MEMBER_A_ID,
+            json!({})
+        )
+        .await
+        .status(),
+        StatusCode::CONFLICT
+    );
+    assert_eq!(
+        request(
+            &app,
+            "DELETE",
+            &format!("/v1/friends/{TEST_OWNER_ID}"),
+            TEST_OWNER_ID,
+            json!({})
+        )
+        .await
+        .status(),
+        StatusCode::BAD_REQUEST
+    );
+    assert!(
+        sqlx::query("PRAGMA foreign_key_check")
+            .fetch_all(&state.pool)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn removing_nonmember_friend_remains_retryable_after_directory_disappearance() {
+    let (state, app) = setup().await;
+    value(
+        request(
+            &app,
+            "POST",
+            &path(TEST_MEMBER_A_ID),
+            TEST_OWNER_ID,
+            json!({}),
+        )
+        .await,
+    )
+    .await;
+    value(
+        request(
+            &app,
+            "POST",
+            &format!("{}/accept", path(TEST_OWNER_ID)),
+            TEST_MEMBER_A_ID,
+            json!({}),
+        )
+        .await,
+    )
+    .await;
+    sqlx::query("UPDATE users SET server_member=0 WHERE id=?")
+        .bind(TEST_MEMBER_A_ID)
+        .execute(&state.pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        relation(&list(&app, TEST_OWNER_ID).await, TEST_MEMBER_A_ID),
+        "friend"
+    );
+    for _ in 0..2 {
+        let directory = value(
+            request(
+                &app,
+                "DELETE",
+                &format!("/v1/friends/{TEST_MEMBER_A_ID}"),
+                TEST_OWNER_ID,
+                json!({}),
+            )
+            .await,
+        )
+        .await;
+        assert!(
+            !directory["people"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|p| p["id"] == TEST_MEMBER_A_ID)
+        );
+    }
+    value(
+        request(
+            &app,
+            "DELETE",
+            &format!("/v1/friends/{}", Uuid::new_v4()),
+            TEST_OWNER_ID,
+            json!({}),
+        )
+        .await,
+    )
+    .await;
+}

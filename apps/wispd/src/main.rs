@@ -1724,6 +1724,7 @@ impl Daemon {
                 | "send_friend_request"
                 | "accept_friend_request"
                 | "dismiss_friend_request"
+                | "remove_friend"
         ) {
             return self.friendship_command(command).await.map(Some);
         }

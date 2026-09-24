@@ -59,7 +59,7 @@ Column {
           if(modelData.action==="share") root.bridge.toggleShare()
           else if(modelData.action==="camera") root.cameraRequested()
           else if(modelData.action==="soundboard") soundboardPopup.openAt(action, actionPointer.hovered ? actionPointer.point.position : Qt.point(width/2, height))
-          else if(modelData.action==="invite") invitePicker.open()
+          else if(modelData.action==="invite") invitePicker.showAt(action)
           else if(modelData.action==="mute") root.bridge.toggleMuted()
           else if(modelData.action==="deafen") root.bridge.toggleDeafened()
           else {root.bridge.leave();root.leaveRequested()}

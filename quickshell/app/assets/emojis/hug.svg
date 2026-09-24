@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <title>Wisp Moments: hug</title>
+  <defs><linearGradient id="body" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#fff0c2"/><stop offset="1" stop-color="#efb669"/></linearGradient></defs>
+  <path d="M11 52V31C11 14 25 7 35 13c4-7 9-8 14-7-5 4-7 7-6 12 8 6 10 14 10 34l-10-5-11 6-11-6z" fill="url(#body)" stroke="#51352f" stroke-width="2.5" stroke-linejoin="round"/>
+  <g fill="none" stroke="#51352f" stroke-width="2.7" stroke-linecap="round" stroke-linejoin="round"><path d="M18 29q4-5 8 0m12 0q4-5 8 0M28 35q4 4 8 0"/><path d="M32 52 20 41c-8-9 6-15 12-6 6-9 20-3 12 6z" fill="#ec8394"/><path d="M13 36q-1 12 12 9m26-9q1 12-12 9" stroke="#51352f" stroke-width="7"/><path d="M13 36q-1 12 12 9m26-9q1 12-12 9" stroke="#ffe0a1" stroke-width="4"/></g>
+</svg>

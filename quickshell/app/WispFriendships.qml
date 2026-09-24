@@ -3,6 +3,7 @@ import QtQuick
 Item {
   id: root
   required property var bridge
+  signal actionFinished(string requestId, bool success, string error)
   property var catalogs: ({})
   property string connectionKey: ""
   property bool transportReady: bridge.daemonConnected && bridge.receivedSnapshot && !bridge.updates.preparing
@@ -51,14 +52,16 @@ Item {
   function act(person, action) {
     person=bridge.scopedParticipant(person)
     var serverId=String(person.server_id), previous=relationship(person)
-    if (state(serverId).loading || state(serverId).action || !connected(serverId) || previous==="self" || previous==="friend") return
+    if (state(serverId).loading || state(serverId).action || !connected(serverId) || previous==="self" || (previous==="friend" && action!=="remove")) return ""
     if (action==="send" && previous!=="none" || action==="accept" && previous!=="incoming" || action==="dismiss" && ["incoming","outgoing"].indexOf(previous)<0) return
-    var commands={send:"send_friend_request",accept:"accept_friend_request",dismiss:"dismiss_friend_request"}
+    if (action==="remove" && previous!=="friend") return ""
+    var commands={remove:"remove_friend",send:"send_friend_request",accept:"accept_friend_request",dismiss:"dismiss_friend_request"}
     if (!commands[action]) return
     var id=bridge.send(commands[action],{server_id:serverId,user_id:String(person.id)})
     if (!id) {put(serverId,{error:"Reconnect to send a friend request."});return}
     bridge.requests[id]={kind:"friendship",server_id:serverId,action:action,user_id:String(person.id),previous:previous,connectionKey:connectionKey}
     put(serverId,{action:action,error:"",feedback:"",requestId:id})
+    return id
   }
   function finish(message, request) {
     var serverId=request.server_id, current=state(serverId)
@@ -70,10 +73,11 @@ Item {
       if (request.action!=="list") {
         patch.feedbackUser=request.user_id
         var person=patch.people.filter(function(p){return String(p.id)===request.user_id})[0] || {}
-        patch.feedback=request.action==="accept" ? "Friend added" : request.action==="dismiss" ? (request.previous==="incoming" ? "Request declined" : "Request cancelled") : person.relationship==="incoming" ? "They've already sent you a request. Choose Accept." : person.relationship==="friend" ? "Already friends" : "Friend request sent"
+        patch.feedback=request.action==="remove" ? "Friend removed" : request.action==="accept" ? "Friend added" : request.action==="dismiss" ? (request.previous==="incoming" ? "Request declined" : "Request cancelled") : person.relationship==="incoming" ? "They've already sent you a request. Choose Accept." : person.relationship==="friend" ? "Already friends" : "Friend request sent"
       }
     } else patch.error=String((message.error || {}).message || "Couldn't load server members. Try again.")
     put(serverId,patch)
+    if (request.action!=="list") actionFinished(String(message.id),!!message.ok,patch.error || "")
     if (patch.feedback) feedbackTimer.restart()
     if (dirty) refresh(serverId)
   }

@@ -754,6 +754,7 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/admin/invites", post(create_invite))
         .route("/v1/account-invites", post(create_account_invite))
         .route("/v1/people", get(friendships::people))
+        .route("/v1/friends/{id}", delete(friendships::remove))
         .route(
             "/v1/friend-requests/{id}",
             post(friendships::send).delete(friendships::dismiss),

@@ -29,26 +29,42 @@ impl Daemon {
             ensure!(
                 accept
                     || command.name == "send_friend_request"
-                    || command.name == "dismiss_friend_request",
+                    || command.name == "dismiss_friend_request"
+                    || command.name == "remove_friend",
                 "Unknown friend action"
             );
             (
-                if command.name == "dismiss_friend_request" {
+                if matches!(
+                    command.name.as_str(),
+                    "dismiss_friend_request" | "remove_friend"
+                ) {
                     reqwest::Method::DELETE
                 } else {
                     reqwest::Method::POST
                 },
-                format!(
-                    "/v1/friend-requests/{user}{}",
-                    if accept { "/accept" } else { "" }
-                ),
+                if command.name == "remove_friend" {
+                    format!("/v1/friends/{user}")
+                } else {
+                    format!(
+                        "/v1/friend-requests/{user}{}",
+                        if accept { "/accept" } else { "" }
+                    )
+                },
             )
         };
-        let result: Value = decode(api.request(method, &path).send().await?).await?;
+        let response = api.request(method, &path).send().await?;
+        ensure!(
+            command.name != "remove_friend" || response.status() != reqwest::StatusCode::NOT_FOUND,
+            "This server needs an update before friends can be removed."
+        );
+        let result: Value = decode(response).await?;
         // Refresh through the normal contact enrollment and pinned-key checks.
         // A pending request alone never enters the encrypted friend directory.
         if command.name != "list_people" {
-            let event = if command.name == "accept_friend_request" {
+            let event = if matches!(
+                command.name.as_str(),
+                "accept_friend_request" | "remove_friend"
+            ) {
                 "friendship_changed"
             } else {
                 "friend_requests_changed"

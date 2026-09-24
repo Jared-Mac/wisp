@@ -143,3 +143,34 @@ pub(super) async fn dismiss(
     }
     people(State(state), headers).await
 }
+
+/// Remove only the authenticated account's friendship edge. Chat history,
+/// room membership, trusted identities and blocks have independent lifetimes.
+pub(super) async fn remove(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(other): Path<UserId>,
+) -> Result<Json<Value>, ApiError> {
+    let user = authenticate_headers(&state, &headers).await?;
+    if user == other {
+        return Err(ApiError::bad_request(
+            "self_request",
+            "This is your own account",
+        ));
+    }
+    // Do not require directory visibility: after removal, an account-only
+    // friend may disappear from it. Retries must still succeed without exposing
+    // whether arbitrary account IDs exist. The first write serializes accepts.
+    let mut tx = state.pool.begin().await.map_err(ApiError::internal)?;
+    let removed = sqlx::query("DELETE FROM friendships WHERE (first_user_id=?1 AND second_user_id=?2) OR (first_user_id=?2 AND second_user_id=?1)")
+        .bind(user.to_string()).bind(other.to_string()).execute(&mut *tx).await.map_err(ApiError::internal)?.rows_affected();
+    let requests = sqlx::query("DELETE FROM friend_requests WHERE (sender_id=?1 AND recipient_id=?2) OR (sender_id=?2 AND recipient_id=?1)")
+        .bind(user.to_string()).bind(other.to_string()).execute(&mut *tx).await.map_err(ApiError::internal)?.rows_affected();
+    tx.commit().await.map_err(ApiError::internal)?;
+    if removed > 0 || requests > 0 {
+        state
+            .emit("friendship_changed", json!({"changed":true}))
+            .await;
+    }
+    people(State(state), headers).await
+}

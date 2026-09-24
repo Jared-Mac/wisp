@@ -20,6 +20,33 @@ This queue is internal coordination, not product documentation or a runtime
 dependency. Remove it and its agent instructions from a public source release;
 see [development workflow retirement](development-workflows.md).
 
+## Queued: remove friends and additional Wisp emojis (2026-09-23)
+
+Status: **Deferred; desktop/server implementation only. Do not port yet.**
+
+- Desktop adds a confirmed **Remove friend** action to friend context menus and
+  participant menus. Cancel does nothing; failures allow retry. Confirmations are
+  bound to the initiating account/server and dismissed if that connection changes.
+- `DELETE /v1/friends/{user_id}` removes only the authenticated account's mutual
+  friendship and pending requests between that pair. Returns the same `{people}`
+  directory as existing friend actions and emits `friendship_changed`. Idempotent
+  after removal, including when a nonmember disappears from the directory. Self
+  removal is 400; unauthenticated is 401. Older servers return 404. No migration.
+- Preserve DMs/history, memberships, keys and account blocks. Removal does not
+  block the account; a new request/acceptance can restore friendship. Use stable
+  user IDs. Desktop daemon command is `remove_friend` with `server_id,user_id`.
+- Desktop now includes the twelve Wisp Everyday assets already released on
+  Android, with matching shortcodes/artwork. Six new bundled SVGs use the same
+  `:wisp_NAME:` format: hug, music, gaming, bonk, melting, comfy. Older clients
+  display unknown shortcodes as text. No upload, API or schema change for artwork.
+- Sources: server `friendships.rs`, daemon `friendships.rs`, `WispFriendships.qml`,
+  `components/RemoveFriendDialog.qml`, `ChatMarkup.js`, `assets/emojis/*.svg`.
+  `AnchoredPicker.qml` also keeps desktop emoji/invite popups inside their window.
+- Validation: authenticated/actor-scoped API removal, mutual state, idempotence,
+  request cleanup, retained membership/history; linked-account daemon routing;
+  four-theme confirmation/cancel/retry/disconnect UI; picker bounds on resized
+  app/tray windows; shortcode insertion, reaction routing and all SVG loading.
+
 ## Released on Android: server kick, ban and unban (2026-09-15)
 
 Status: **Released in Android 0.7.0-test (build 9), 2026-09-22**.

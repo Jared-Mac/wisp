@@ -37,12 +37,14 @@ Item {
     MenuItem { id: dm; text: "Message " + root.friend.display_name; onTriggered: root.bridge.openParticipantDirect(root.friend); ThemeControlStyle { theme: root.theme; control: dm } }
     MenuItem { id: call; text: root.friend.presence === "knock" ? "Knock" : "Join voice"; enabled: root.canRequest; onTriggered: root.bridge.requestFriendVoice(root.friend.server_id,root.friend.id,root.friend.display_name); ThemeControlStyle { theme: root.theme; control: call } }
     MenuItem { id: star; text: root.favorite ? "Remove favorite" : "Add favorite"; onTriggered: root.bridge.friendPreferences.toggleFavorite(root.friend); ThemeControlStyle { theme: root.theme; control: star } }
+    MenuItem { id:removeFriend;objectName:"removeFriendAction";text:"Remove friend…";onTriggered:removeDialog.confirm(root.friend);ThemeControlStyle {theme:root.theme;control:removeFriend} }
     MenuItem { id:blockAccount;text:"Block account";visible:!!root.bridge.accountActions;onTriggered:root.bridge.accountActions.act("block_person",{user_id:root.friend.id},root.friend.server_id);ThemeControlStyle {theme:root.theme;control:blockAccount} }
     MenuItem { id: volume; text: "Participant volume"; onTriggered: volumeMenu.open(); ThemeControlStyle { theme: root.theme; control: volume } }
   }
   // Observe the entire row, including child buttons, without intercepting clicks.
   HoverHandler { id: rowHover }
-  TapHandler { acceptedButtons: Qt.RightButton; onTapped: if(root.compactActions) friendMenu.popup(); else volumeMenu.open() }
+  TapHandler { acceptedButtons: Qt.RightButton; onTapped: friendMenu.popup() }
+  RemoveFriendDialog { id:removeDialog;bridge:root.bridge;theme:root.theme }
   ParticipantVolumeMenu { id: volumeMenu; bridge: root.bridge; theme: root.theme; people: [root.friend] }
 
   Rectangle {

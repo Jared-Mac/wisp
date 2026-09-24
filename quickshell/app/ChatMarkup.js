@@ -1,4 +1,27 @@
+var wispEveryday = [
+  {name:"wink", keywords:"playful cheeky"},
+  {name:"cool", keywords:"sunglasses chill"},
+  {name:"think", keywords:"thinking hmm curious"},
+  {name:"blush", keywords:"shy embarrassed"},
+  {name:"sweat", keywords:"nervous awkward oops"},
+  {name:"facepalm", keywords:"oops disbelief"},
+  {name:"peek", keywords:"lurk watching hiding"},
+  {name:"party", keywords:"celebrate celebration confetti"},
+  {name:"coffee", keywords:"break cozy tired"},
+  {name:"popcorn", keywords:"movie watching snack"},
+  {name:"salute", keywords:"respect thanks"},
+  {name:"shrug", keywords:"unsure dunno whatever"}
+]
+var wispMoments = [
+  {name:"hug", keywords:"love care comfort thanks"},
+  {name:"music", keywords:"listening headphones song"},
+  {name:"gaming", keywords:"game controller play"},
+  {name:"bonk", keywords:"oops silly hammer"},
+  {name:"melting", keywords:"overwhelmed hot tired"},
+  {name:"comfy", keywords:"blanket cozy relax"}
+]
 var wispNames = ["smile","laugh","love","cry","angry","wave","sleep","shock","gg","hype","yes","no"]
+  .concat(wispEveryday.concat(wispMoments).map(function(item){return item.name}))
 var standard = ["😀","😂","🥹","😍","🤔","😭","😎","😴","👍","👎","❤️","🔥","🎉","👀","✅","💯","🙌","🙏","👋","✨","💀","🚀","🍿","☕"]
 function escape(value) { return String(value).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;") }
 function safeLink(url) { return /^https?:\/\/[^\s<>"'\\]+$/i.test(String(url)) }

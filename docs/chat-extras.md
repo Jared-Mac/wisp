@@ -29,13 +29,25 @@ Run `scripts/test-mentions.sh` for autocomplete, rendering, and notification che
 ## Emoji and reactions
 
 The composer’s smile button opens a searchable picker containing standard
-Unicode emojis, twelve bundled Wisp emojis, the account library and server
+Unicode emojis, thirty bundled Wisp emojis, the account library and server
 emojis. Click the reaction button below a message to add a reaction; click a
 selected reaction again to remove yours. Counts are per person, and hovering
 shows who reacted. Reactions are encrypted and signed with the same account
 keys as chat, bound to the original message and its original audience (restricted
 to people who still belong to the conversation). The server sees routing
 metadata, not which emoji was chosen, for encrypted reactions.
+
+The original twelve mint ghosts are joined by **Wisp Everyday**, twelve lavender
+ghosts: wink, cool, think, blush, sweat, facepalm, peek, party, coffee, popcorn,
+salute and shrug. Search `everyday` to see the whole new set, or try terms such as
+`cozy`, `celebrate` or `thinking`. Their shortcodes are `:wisp_coffee:` and so on;
+they work in both messages and reactions. All artwork is bundled SVG, with no
+download or upload required. Older clients without the artwork display the
+readable shortcode. No server change or migration is needed.
+
+Six warm gold **Wisp Moments** ghosts add hug, music, gaming, bonk, melting and
+comfy. Search `moments` to see this set. The picker stays within the app or tray
+window, including when opened from a narrow chat tile at the right edge.
 
 Manage personal emojis in Settings → Profile → My emojis. Server administrators
 manage shared emojis in Settings → Server → Server emojis. Both libraries have

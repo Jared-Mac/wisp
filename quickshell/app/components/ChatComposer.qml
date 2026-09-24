@@ -12,7 +12,7 @@ Column {
   property bool autoGrow: false
   property bool compact: false
   property string previousTypingConversation: ""
-  function stopTyping() { if (bridge.typing) bridge.typing.stop(previousTypingConversation || conversationId) }
+  function stopTyping() { if (bridge && bridge.typing) bridge.typing.stop(previousTypingConversation || conversationId) }
   onConversationIdChanged: { stopTyping(); previousTypingConversation=conversationId }
   onVisibleChanged: if (!visible) stopTyping()
   onBusyChanged: if (busy) stopTyping()
@@ -287,10 +287,9 @@ Column {
   ChatButton {
     id:emojiButton;anchors.right:sendButton.left;anchors.bottom:parent.bottom;anchors.margins:root.theme.space(4);width:root.theme.space(36);height:root.theme.space(32)
     objectName:"composerEmojiButton";theme:root.theme;text:"☺";enabled:!root.busy && !root.pendingAccess
-    onClicked:composerEmojiPicker.open()
+    onClicked:composerEmojiPicker.showAt(emojiButton)
     EmojiPicker {
       id:composerEmojiPicker;bridge:root.bridge;theme:root.theme;serverId:String((root.conversation || {}).server_id || root.bridge.activeServer.id)
-      width:Math.min(root.width,root.theme.space(340));y:-height
       onPicked:emoji=>{editor.insert(editor.cursorPosition,emoji);editor.forceActiveFocus()}
     }
   }

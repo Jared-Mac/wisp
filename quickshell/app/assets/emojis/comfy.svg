@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <title>Wisp Moments: comfy</title>
+  <defs><linearGradient id="body" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#fff0c2"/><stop offset="1" stop-color="#efb669"/></linearGradient></defs>
+  <path d="M11 52V31C11 14 25 7 35 13c4-7 9-8 14-7-5 4-7 7-6 12 8 6 10 14 10 34l-10-5-11 6-11-6z" fill="url(#body)" stroke="#51352f" stroke-width="2.5" stroke-linejoin="round"/>
+  <g fill="none" stroke="#51352f" stroke-width="2.7" stroke-linecap="round" stroke-linejoin="round"><path d="M18 28q4 4 8 0m12 0q4 4 8 0M28 35q4 3 8 0"/><path d="M10 36q18 4 44 0v17l-10 5-12-5-12 5-10-5z" fill="#9bbdaf"/><path d="m12 40 38 13M13 51l36-12" stroke="#d2e5ca"/><path d="M6 19h6l-6 6h6m42-14h6l-6 6h6" stroke="#718eaa" stroke-width="2"/></g>
+</svg>

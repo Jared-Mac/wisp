@@ -37,7 +37,7 @@ Item {
           spacing:root.theme.spacing.sm
           RoomCard {width:parent.width;visible:root.inVoice && !!root.voiceSpot;room:root.voiceSpot || {id:"",name:"Voice",members:[]};bridge:root.bridge;theme:root.theme;mainApp:true;adaptive:true}
           HangoutCard {width:parent.width;visible:root.inVoice && !root.voiceSpot;hangout:root.bridge.currentVoiceRoom || {id:"",label:"Voice",members:[]};bridge:root.bridge;theme:root.theme;adaptive:true}
-          ChatButton {visible:root.inVoice && !root.voiceSpot;theme:root.theme;text:"Invite";iconName:"invite";onClicked:invite.open()}
+          ChatButton {visible:root.inVoice && !root.voiceSpot;theme:root.theme;text:"Invite";iconName:"invite";onClicked:invite.showAt(this)}
           Text {visible:!root.inVoice;text:"Not connected to voice";color:root.theme.muted;font.family:root.theme.font.family;font.pixelSize:root.theme.font.caption}
         }
       }

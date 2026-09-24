@@ -149,6 +149,28 @@ async fn member_directory_commands_use_the_selected_server_account() {
             .await
             .is_err()
     );
+    // Removing through a linked connection must use that connection's account;
+    // accidentally using the primary account would try to remove itself.
+    for (server, target) in [("linked", owner), ("primary", member)] {
+        let removed = daemon
+            .run_command(&CommandEnvelope::new(
+                "remove-fixture",
+                "remove_friend",
+                json!({"server_id":server,"user_id":target}),
+            ))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            removed["people"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|p| p["id"] == target.to_string())
+                .unwrap()["relationship"],
+            "none"
+        );
+    }
     task.abort();
 }
 

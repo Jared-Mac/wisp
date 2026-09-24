@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <title>Wisp Everyday: party</title>
+  <defs><linearGradient id="body" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#eee5ff"/><stop offset="1" stop-color="#a48ae4"/></linearGradient></defs>
+  <path d="M11 52V31C11 14 25 7 35 13c4-7 9-8 14-7-5 4-7 7-6 12 8 6 10 14 10 34l-10-5-11 6-11-6z" fill="url(#body)" stroke="#30274f" stroke-width="2.5" stroke-linejoin="round"/>
+  <g fill="none" stroke="#30274f" stroke-width="2.7" stroke-linecap="round" stroke-linejoin="round"><path d="m18 29 5-3 4 3m10 0 4-3 4 3M25 36h14q-7 16-14 0" fill="#30274f"/><path d="m11 22 7-19 13 16Z" fill="#f5a4c7"/><path d="m15 12 9 2" stroke="#fff0af"/><path d="m53 14 5-4m-1 12h4M5 29l-2-4m51 20 4 3" stroke="#f4c66c"/><path d="m53 32 6-2M8 12l-3-2" stroke="#87e8ed"/></g>
+</svg>

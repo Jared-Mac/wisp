@@ -1,16 +1,12 @@
 import QtQuick
 import QtQuick.Controls
 
-Popup {
+AnchoredPicker {
   id: root
   objectName: "callInvitePicker"
   required property var bridge
-  required property var theme
-  parent: Overlay.overlay
-  width: Math.min(root.theme.space(360), parent ? parent.width - root.theme.spacing.lg * 2 : root.theme.space(360))
-  height: Math.min(root.theme.space(420), parent ? parent.height - root.theme.spacing.lg * 2 : root.theme.space(420), body.implicitHeight + padding * 2)
-  x: parent ? (parent.width - width) / 2 : 0
-  y: parent ? Math.max(root.theme.spacing.lg, parent.height - height - root.theme.space(110)) : 0
+  desiredWidth: theme.space(360)
+  desiredHeight: Math.min(theme.space(420),body.implicitHeight+padding*2)
   readonly property string callKey: root.bridge.currentVoiceRoom ? String(root.bridge.currentVoiceRoom.server_id || "") + ":" + root.bridge.currentVoiceRoom.id : ""
   onCallKeyChanged: close()
   padding: theme.spacing.lg
@@ -18,6 +14,7 @@ Popup {
   background: Rectangle { color: root.theme.surface; radius: root.theme.cornerRadius; border.width: 1; border.color: root.theme.separator }
   contentItem: Flickable {
     contentHeight: body.implicitHeight; clip: true
+    ScrollBar.vertical: ScrollBar { policy:ScrollBar.AsNeeded }
     Column {
       id: body; width: parent.width; spacing: root.theme.spacing.sm
       Text {

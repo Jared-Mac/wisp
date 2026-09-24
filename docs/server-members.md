@@ -23,6 +23,15 @@ existing shared friendship and follows the client's normal encrypted contact
 enrollment and pinned-key checks. No DM, voice connection or publication starts
 until the user explicitly requests it.
 
+Right-click a friend (or use Menu / Shift+F10), then choose **Remove friend…**.
+The participant menu opened from a chat name or room member has the same action.
+Removal requires confirmation and keeps chats, server membership and account
+keys. It does not block the account. Either person can send a new friend request.
+The authenticated `DELETE /v1/friends/{user_id}` endpoint removes the mutual
+friendship and pending requests only; repeated removal succeeds. The response is
+the normal people directory, followed by a `friendship_changed` event. Older
+servers return 404; the client explains that the server needs updating.
+
 Member catalogs refresh on connection, account profile changes, friendship
 events and manual refresh. Ordinary presence snapshots do not fetch the
 directory. Open member menus and keyboard focus survive request-state changes.
