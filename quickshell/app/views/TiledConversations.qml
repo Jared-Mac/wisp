@@ -175,7 +175,7 @@ Item {
   }
   function syncConversations() {
     if (!loaded) { initialize(); return }
-    var open=bridge.conversations.filter(function(c) { return !c.tab_closed })
+    var open=bridge.listedConversations.filter(function(c) { return !c.tab_closed })
     var next=Tiles.copy(tree), used=Tiles.leaves(next).map(function(n) { return n.id })
     Tiles.leaves(next).forEach(function(n) {
       if (root.videoFor(n.id)) return
@@ -232,7 +232,7 @@ Item {
   function split(nodeKey,edge) {
     if (panes.count>=8) return
     var used=Tiles.leaves(tree).map(function(n) { return n.id })
-    var other=bridge.conversations.filter(function(c) { return !c.tab_closed && used.indexOf(String(c.id))<0 })[0]
+    var other=bridge.listedConversations.filter(function(c) { return !c.tab_closed && used.indexOf(String(c.id))<0 })[0]
     var leaf={key:key(),id:other?String(other.id):""}
     commit(Tiles.insert(Tiles.copy(tree),nodeKey,leaf,edge,key()))
     activate(leaf.key)

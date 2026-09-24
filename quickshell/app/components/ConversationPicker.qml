@@ -13,7 +13,7 @@ Popup {
   readonly property var rows: {
     var term=query.trim().toLocaleLowerCase()
     var serverGroups=({})
-    bridge.conversations.forEach(function(c) {
+    bridge.listedConversations.forEach(function(c) {
       var label=String(c.label === "Hangout" ? "Room" : c.label || "Messages")
       var serverName=String(c.server_name || "Wisp server")
       if (term && (label+" "+serverName+" "+String(c.category_name || "")).toLocaleLowerCase().indexOf(term)<0) return

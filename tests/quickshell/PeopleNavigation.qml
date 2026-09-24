@@ -54,6 +54,25 @@ ShellRoot {
     var data=JSON.parse(JSON.stringify(bridge.snapshot));data.server_states[0].server_member=false;data.servers=[];bridge.applySnapshot(data);input.wait(30)
     test.check(app.friendsMode && tray.friendsMode,"accounts without servers open Friends automatically")
     test.check(!bridge.sent.some(function(c){return c.name==="join" || c.name==="join_friend"}),"navigation never joins voice")
+    // An unfriend/clear/close sequence must not leave an empty former contact in
+    // either DM list. The durable record remains available to incoming messages.
+    data=JSON.parse(JSON.stringify(bridge.snapshot))
+    data.server_states[0].friends=data.server_states[0].friends.filter(function(p){return p.id!=="outside"})
+    var chat=data.server_states[0].conversations[0]
+    chat.unread_count=0;chat.last_message=null;chat.history_cleared_at="2026-09-23T20:00:00Z";chat.tab_closed=false
+    bridge.applySnapshot(data);input.wait(40)
+    test.check(app.directChats.length===0 && tray.directChats.length===0,"cleared former-friend DM disappears from both lists even when closing a tile kept its server tab open")
+    test.check(!!bridge.conversationById("local::dm"),"navigation cleanup preserves the durable conversation and any existing tile")
+    var scoped=JSON.parse(JSON.stringify(data))
+    scoped.server_states.push({server:{id:"other",name:"Other",connected:true},self:{id:"other-self"},friends:[{id:"outside"}],conversations:[Object.assign({},chat,{id:"other-dm"})],messages:[],spots:[],hangouts:[]})
+    bridge.applySnapshot(scoped);input.wait(20)
+    test.check(bridge.listedConversations.length===1 && bridge.listedConversations[0].server_id==="other","friendship on another server does not retain the cleared local DM")
+    bridge.applySnapshot(JSON.parse(JSON.stringify(data)));input.wait(20)
+    test.check(bridge.listedConversations.length===0,"fresh snapshots keep the cleared DM hidden")
+    data.server_states[0].friends.push({id:"outside",display_name:"Renamed friend",online:false,presence:"closed"});bridge.applySnapshot(data);input.wait(20)
+    test.check(app.directChats.length===1,"friendship restored by ID shows the conversation again")
+    data=JSON.parse(JSON.stringify(data));data.server_states[0].friends.pop();data.server_states[0].conversations[0].last_message={id:"new",created_at:"2026-09-23T20:01:00Z",sender:{id:"outside"},content_type:"text/plain",payload:"Hello"};bridge.applySnapshot(data);input.wait(20)
+    test.check(app.directChats.length===1 && tray.directChats.length===1,"new visible history restores a former-friend DM")
     if(Quickshell.env("WISP_PEOPLE_SCREENSHOT")) {
       bridge.friendPreferences.setFriendsView(true,"app")
       data=JSON.parse(JSON.stringify(bridge.snapshot));data.server_states[0].server_member=true;data.servers=[data.server_states[0].server];bridge.applySnapshot(data)

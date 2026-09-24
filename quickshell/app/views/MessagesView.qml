@@ -171,12 +171,12 @@ Column {
   }
   Text {
     Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
-    visible: !root.bridge.activeConversation && root.bridge.conversations.length === 0
+    visible: !root.bridge.activeConversation && root.bridge.listedConversations.length === 0
     text: "Start a private message from a friend row."
     color: root.theme.muted; font.pixelSize: root.theme.font.body
   }
   Repeater {
-    model: root.bridge.activeConversation ? [] : root.bridge.conversations
+    model: root.bridge.activeConversation ? [] : root.bridge.listedConversations
     delegate: Rectangle {
       required property var modelData
       width: root.width; height: root.theme.space(root.theme.cleanTui ? 42 : 48)

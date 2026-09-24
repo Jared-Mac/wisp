@@ -32,6 +32,11 @@ friendship and pending requests only; repeated removal succeeds. The response is
 the normal people directory, followed by a `friendship_changed` event. Older
 servers return 404; the client explains that the server needs updating.
 
+After removing a friend and clearing the DM history, the empty DM leaves the
+chat lists and pickers. Closing a tile does not delete the underlying conversation.
+New messages or a renewed friendship make it appear again. Chats with retained
+history remain available. This behavior applies to both app and tray.
+
 Member catalogs refresh on connection, account profile changes, friendship
 events and manual refresh. Ordinary presence snapshots do not fetch the
 directory. Open member menus and keyboard focus survive request-state changes.

@@ -77,3 +77,13 @@ viewerAfter.self.media.screen_share.active=false;
 assert.deepEqual(tabs(logic.streamViewerSoundEvents(viewerBefore,viewerAfter,'video_viewers_changed')),[]);
 viewerAfter.self.media.screen_share.active=true;viewerAfter.self.media.livekit_connected=false;
 assert.deepEqual(tabs(logic.streamViewerSoundEvents(viewerBefore,viewerAfter,'video_viewers_changed')),[]);
+
+// Clearing must not imply deletion; only empty former-friend DMs leave navigation.
+const clearedDm={kind:'direct',history_cleared_at:'2026-09-23T20:00:00Z',last_message:null,unread_count:0,members:[{id:'self'},{id:'former'}]};
+assert.equal(logic.listConversation(clearedDm,[]),false);
+assert.equal(logic.listConversation({...clearedDm,history_cleared_at:null},[]),true);
+assert.equal(logic.listConversation({...clearedDm,last_message:{id:'older-visible'}},[]),true);
+assert.equal(logic.listConversation({...clearedDm,unread_count:1},[]),true);
+assert.equal(logic.listConversation({...clearedDm,kind:'circle'},[]),true);
+assert.equal(logic.listConversation(clearedDm,[{id:'former',display_name:'New name'}]),true);
+assert.equal(logic.listConversation(clearedDm,[{id:'someone-else'}]),false);

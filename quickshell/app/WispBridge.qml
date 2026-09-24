@@ -640,6 +640,10 @@ Item {
     })
     return result
   }
+  readonly property var listedConversations: conversations.filter(function(conversation) {
+    var state=root.participantServer({server_id:conversation.server_id})
+    return ChatLogic.listConversation(conversation,state.friends || [])
+  })
   readonly property var messages: {
     var result=[]
     serverStates.forEach(function(state) { (state.messages || []).forEach(function(message) { result.push(root.scopedMessage(state.server,message)) }) })

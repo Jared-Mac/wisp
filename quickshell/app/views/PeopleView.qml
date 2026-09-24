@@ -29,7 +29,7 @@ Column {
     })
     return result
   }
-  readonly property var directChats: bridge.conversations.filter(function(chat) {return chat.kind==="direct"})
+  readonly property var directChats: bridge.listedConversations.filter(function(chat) {return chat.kind==="direct"})
   spacing: theme.spacing.sm
 
   Flow {

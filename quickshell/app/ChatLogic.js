@@ -1,3 +1,13 @@
+// Keep the conversation record for existing tiles and future messages. Only
+// omit an explicitly cleared, empty former-friend DM from navigation lists.
+function listConversation(conversation, friends) {
+  if (conversation.kind !== "direct" || !conversation.history_cleared_at
+      || conversation.last_message || Number(conversation.unread_count || 0)>0) return true
+  return (friends || []).some(function(friend) {
+    return (conversation.members || []).some(function(member) { return String(member.id)===String(friend.id) })
+  })
+}
+
 function visibleConversations(conversations, hangouts) {
   var activeHangouts = {}
   ;(hangouts || []).forEach(function(hangout) {

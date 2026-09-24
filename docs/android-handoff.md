@@ -39,6 +39,12 @@ Status: **Deferred; desktop/server implementation only. Do not port yet.**
   Android, with matching shortcodes/artwork. Six new bundled SVGs use the same
   `:wisp_NAME:` format: hug, music, gaming, bonk, melting, comfy. Older clients
   display unknown shortcodes as text. No upload, API or schema change for artwork.
+- Follow-up: omit a DM from navigation only when `history_cleared_at` is set,
+  `last_message` is null, `unread_count` is zero, and none of its members is a
+  current friend on that account service. Keep the durable conversation and any
+  already-open tile. A new message or restored friendship lists it again; new
+  empty chats and chats with retained history stay listed. No new API/schema.
+  See `ChatLogic.listConversation` and `WispBridge.listedConversations`.
 - Sources: server `friendships.rs`, daemon `friendships.rs`, `WispFriendships.qml`,
   `components/RemoveFriendDialog.qml`, `ChatMarkup.js`, `assets/emojis/*.svg`.
   `AnchoredPicker.qml` also keeps desktop emoji/invite popups inside their window.
