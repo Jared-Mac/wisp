@@ -8,7 +8,7 @@ The soundboard opens beside your mouse. Colors and typography follow your theme.
 
 ## Install
 
-Requires **Omarchy 4.0.3 or newer** and the **Wisp desktop client**. This plugin is
+Requires **Omarchy 4.0.3 or newer**, **Python 3**, and the **Wisp desktop client**. This plugin is
 the bar interface; Wisp handles your account, connection and media separately.
 
 1. Install the latest [Wisp Linux client](https://github.com/Jared-Mac/wisp/releases/tag/main).
@@ -36,6 +36,11 @@ mute. Choose a room or chat, use the bottom controls for your current call, or
 select **Open app** for the full desktop workspace. Settings include soundboard
 uploads, private previews and volume controls. `ffmpeg` is needed for importing
 sounds, not for using existing soundboard buttons.
+
+The local Python relay limits incoming IPC frames to 8 MiB before parsing,
+validates bounded collections and fields, and forwards one frame at a time to
+the shell. Invalid or oversized responses disconnect the plugin until its UI
+is restarted. No protocol or server upgrade is required.
 
 ## Update
 

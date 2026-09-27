@@ -311,6 +311,7 @@ Item {
   readonly property var activeSocket: socketLoader.item
   readonly property bool daemonConnected: !!(activeSocket && activeSocket.connected)
   property int requestId: 0
+  property bool ipcRejected: false
   property int reconnectAttempt: 0
   property string lastError: ""
   property string dismissedMediaError: ""
@@ -791,8 +792,9 @@ Item {
     || !!mediaState.error || !!mediaState.surface_error || !!screenShareState.error
     || !!cameraState.error
   readonly property string selfStatusLabel: buildSelfStatusLabel()
-  readonly property string errorMessage: !daemonConnected
-    ? "wispd is not running"
+  readonly property string errorMessage: ipcRejected
+    ? "Wisp rejected an invalid or oversized response. Restart Wisp after updating the client."
+    : !daemonConnected ? "wispd is not running"
     : String(lastError || mediaState.error || mediaState.surface_error
       || screenShareState.error || cameraState.error || "")
   readonly property string barText: buildBarText()
@@ -1151,10 +1153,11 @@ Item {
   }
 
   function handleLine(line) {
+    if (ipcRejected) return
     var message
     try { message = JSON.parse(line) }
     catch (error) {
-      lastError = "Invalid response from wispd"
+      if (activeSocket) activeSocket.reject()
       return
     }
     if (message.type === "event" && message.name === "chat_typing") {
@@ -1688,15 +1691,15 @@ Item {
 
   Component {
     id: socketComponent
-    Socket {
+    WispIpcConnection {
       id: connection
       path: root.socketPath
-      connected: true
-      parser: SplitParser {
-        splitMarker: "\n"
-        onRead: function(line) { root.handleLine(line) }
+      onRead: function(line) { root.handleLine(line) }
+      onUnsafeResponse: {
+        root.ipcRejected = true
+        root.lastError = "Wisp rejected an invalid or oversized response. Restart Wisp after updating the client."
       }
-      onConnectionStateChanged: {
+      onConnectedChanged: {
         if (connected) {
           root.reconnectAttempt = 0
           // During Loader construction, this Socket can connect before
@@ -1728,13 +1731,13 @@ Item {
     sourceComponent: socketComponent
   }
 
-  // Runs only while disconnected. A retry creates a fresh QLocalSocket because
-  // reconnecting a failed Quickshell Socket in-place is a no-op.
+  // A rejected stream stays disconnected until this UI is restarted. Ordinary
+  // connection failures retry with a fresh relay and empty buffers.
   Timer {
     interval: Math.min(2000, 200 + root.reconnectAttempt * 150)
     repeat: true
     triggeredOnStart: false
-    running: !root.daemonConnected
+    running: !root.daemonConnected && !root.ipcRejected
     onTriggered: {
       root.reconnectAttempt = Math.min(12, root.reconnectAttempt + 1)
       socketLoader.active = false
