@@ -44,8 +44,22 @@ The daemon/server protocol is unchanged and existing clients remain compatible.
 No Android or server migration is required. Normal connection failures still
 retry. The relay never sends a join, mute, camera, or screen-share command.
 
+Transfer progress also has a lifetime limit in QML: at most 128 upload/download
+entries are retained, with the least recently updated evicted first. Entries
+expire after five minutes without an update, or five seconds after completion
+(including empty transfers). A one-second timer removes expired entries even
+when no new events arrive, and disconnecting clears the map. Repeated completion
+events do not extend an existing completion deadline. Only nonnegative safe
+integer byte counters and a local expiry time are retained; IDs are limited to
+256 characters, directions to upload/download, and extra payload fields are
+discarded. These rules bound persistent state across any number of valid frames.
+
 Validation: `python3 -m unittest discover -s tests -p 'test_ipc_transport.py'`.
 The tests exercise a real Unix socket, an exact-limit frame, overflow without
 a newline, fragmented UTF-8, coalesced frames, acknowledgement backpressure,
 malformed/oversized objects, EOF, command limits, and the QML transport when
 Quickshell is available. CI always runs the Python checks.
+`node scripts/test-transfer-progress.cjs` covers repeated active/completed events,
+eviction, expiry, field projection and invalid counters in CI.
+`bash scripts/test-transfer-progress.sh` exercises repeated events through the
+real QML bridge, progress labels, disconnect cleanup and timer-based expiry.

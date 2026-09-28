@@ -101,6 +101,9 @@ jobs:
       - name: Test bounded desktop IPC transport
         run: python3 -m unittest discover -s tests -p 'test_ipc_transport.py'
 
+      - name: Test transfer progress retention
+        run: node scripts/test-transfer-progress.cjs
+
       - name: Test home-room notification rules
         run: node scripts/test-room-activity.cjs
       - name: Test typing expiry and sender grouping

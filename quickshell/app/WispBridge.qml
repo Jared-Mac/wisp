@@ -5,6 +5,7 @@ import Quickshell.Io
 import "ChatLogic.js" as ChatLogic
 import "FriendLogic.js" as FriendLogic
 import "ChatMarkup.js" as ChatMarkup
+import "TransferProgress.js" as TransferProgress
 
 Item {
   id: root
@@ -57,6 +58,7 @@ Item {
   property string lastAppliedVolumes: ""
   onDaemonConnectedChanged: {
     if (!daemonConnected) serverPings=({})
+    if (!daemonConnected) transferProgress=({})
     if (!daemonConnected) friendships.reset()
     if (!daemonConnected) typing.reset()
     if (!daemonConnected) messageActions.disconnected()
@@ -203,6 +205,12 @@ Item {
   property var savedFiles: ({})
   property var savingFiles: ({})
   property var transferProgress: ({})
+  Timer {
+    interval: 1000
+    repeat: true
+    running: Object.keys(root.transferProgress).length > 0
+    onTriggered: root.transferProgress = TransferProgress.prune(root.transferProgress, Date.now())
+  }
   property var chatImageUrls: ({})
   property var imageErrors: ({})
   property var imageRequests: ({})
@@ -1169,8 +1177,7 @@ Item {
       return
     }
     if (message.type === "event" && message.name === "file_transfer_progress") {
-      var progress = message.payload || ({})
-      transferProgress = replaceEntry(transferProgress, progress.direction + ":" + progress.id, progress)
+      transferProgress = TransferProgress.receive(transferProgress, message.payload, Date.now())
       return
     }
     if (message.type === "snapshot") {

@@ -41,6 +41,9 @@ The local Python relay limits incoming IPC frames to 8 MiB before parsing,
 validates bounded collections and fields, and forwards one frame at a time to
 the shell. Invalid or oversized responses disconnect the plugin until its UI
 is restarted. No protocol or server upgrade is required.
+File-transfer progress retains at most 128 entries. Entries expire after five
+minutes without an update or five seconds after completion, and disconnecting
+clears them. Only byte counters and a local expiry time are retained.
 
 ## Update
 
