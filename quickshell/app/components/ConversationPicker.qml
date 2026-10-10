@@ -58,6 +58,9 @@ Popup {
   closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
   background: Rectangle { color: root.theme.surface; radius: root.theme.cornerRadius; border.width: 1; border.color: root.theme.muted }
   function resetSelection() {
+    // A hidden picker must not instantiate/position ListView delegates. During
+    // saved-layout restoration its owning tile can be replaced before exposure.
+    if (!visible) return
     var index=-1
     for (var i=0;i<rows.length;i++) {
       if (rows[i].section) continue
@@ -123,7 +126,7 @@ Popup {
       anchors.bottomMargin: root.theme.spacing.sm
       anchors.topMargin: root.theme.spacing.sm
       clip: true
-      model: root.rows
+      model: root.visible ? root.rows : []
       boundsBehavior: Flickable.StopAtBounds
       ScrollBar.vertical: ScrollBar {}
       delegate: ItemDelegate {
