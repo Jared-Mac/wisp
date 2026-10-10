@@ -29,7 +29,7 @@ def public_name(name):
         path = PurePosixPath(name)
         if any(part.startswith(".") or part in {"native", "__pycache__"} for part in path.parts):
             raise ValueError(f"Unexpected plugin source path: {name}")
-        if path.suffix not in {".qml", ".js", ".json", ".svg", ".png", ".wav"} and name != "quickshell/app/assets/PRESENCE-ICONS-LICENSE.txt":
+        if path.suffix not in {".qml", ".js", ".json", ".svg", ".png", ".wav"} and name not in {"quickshell/app/assets/PRESENCE-ICONS-LICENSE.txt", "quickshell/app/ipc-transport.py"}:
             raise ValueError(f"Unexpected plugin source type: {name}")
         return name.removeprefix("quickshell/")
     if name == "LICENSE":

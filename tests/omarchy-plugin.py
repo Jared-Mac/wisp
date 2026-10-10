@@ -51,6 +51,8 @@ class PluginTests(unittest.TestCase):
             files = {'quickshell/manifest.json':'{"id":"dev.wisp","version":"0.1.0"}',
                      'quickshell/app/assets/PRESENCE-ICONS-LICENSE.txt':'attribution',
                      'quickshell/Panel.qml':'committed', 'quickshell/app/WispBridge.qml':'public', 'LICENSE':'license',
+                     'quickshell/app/ipc-transport.py':'# bounded transport',
+                     'quickshell/app/WispIpcConnection.qml':'Item {}',
                      'AGENTS.md':'private', 'docs/android-handoff.md':'private', '.github/workflows/private.yml':'private'}
             for name in exporter.PUBLIC:
                 files['packaging/omarchy-plugin/'+name]='public'
@@ -63,6 +65,8 @@ class PluginTests(unittest.TestCase):
             with patch.object(exporter,'REPO',root):
                 commit=exporter.export('HEAD',destination)
                 self.assertEqual((destination/'Panel.qml').read_text(),'committed')
+                self.assertEqual((destination/'app/ipc-transport.py').read_text(),'# bounded transport')
+                self.assertTrue((destination/'app/WispIpcConnection.qml').is_file())
                 self.assertFalse((destination/'app/local.qml').exists())
                 self.assertFalse((destination/'AGENTS.md').exists())
                 self.assertEqual((destination/'app/assets/PRESENCE-ICONS-LICENSE.txt').read_text(),'attribution')
