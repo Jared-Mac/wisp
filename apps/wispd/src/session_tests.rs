@@ -980,7 +980,8 @@ async fn friend_server_invitations_are_encrypted_and_require_friendship() {
     assert!(message.payload.as_str().unwrap().contains("\nExpires: "));
     assert!(message.payload.as_str().unwrap().contains("/join/#v2."));
     assert!(snapshot.self_state.hangout_id.is_none());
-    assert!(!daemon.media.is_connected_to(uuid::Uuid::new_v4()).await);
+    let local = daemon.state.read().await.self_state.media.clone();
+    assert!(!local.microphone_published && !local.camera.active && !local.screen_share.active);
     let before = daemon
         .run_command(&CommandEnvelope::new(
             "list",
