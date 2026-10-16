@@ -242,3 +242,8 @@ so an automatic update cannot interrupt acceptance or invitation delivery. Sourc
 UI regression. The Windows updater also requires a responsive native daemon before
 confirming installation; otherwise the old portable package is restored. No API
 or schema changes, and Android implementation remains deferred.
+
+Invitation menu follow-up: the desktop popup repositions when its link/QR content
+grows or the window resizes, keeping all actions within the viewport. Source:
+`components/ServerSelector.qml`; headless real-QML validation covers direct friend
+selection, link/QR expansion and a narrow window. No protocol or schema changes.

@@ -209,10 +209,19 @@ Item {
     width:Math.min(root.theme.space(340),root.Window.window ? root.Window.window.width-root.theme.space(24) : root.theme.space(340))
     height:Math.min(inviteContent.implicitHeight+padding*2,root.Window.window ? root.Window.window.height-root.theme.space(40) : root.theme.space(600))
     parent:Overlay.overlay
-    onAboutToShow:{
+    function place() {
+      if (!parent) return
       var point=root.mapToItem(parent,0,root.height)
       x=Math.max(root.theme.space(8),Math.min(point.x,parent.width-width-root.theme.space(8)))
       y=Math.max(root.theme.space(8),Math.min(point.y,parent.height-height-root.theme.space(8)))
+    }
+    onAboutToShow:place()
+    onHeightChanged:if(visible)Qt.callLater(place)
+    onWidthChanged:if(visible)Qt.callLater(place)
+    Connections {
+      target:root.Window.window
+      function onWidthChanged(){if(invitePopup.visible)invitePopup.place()}
+      function onHeightChanged(){if(invitePopup.visible)invitePopup.place()}
     }
     padding:root.theme.spacing.md
     closePolicy:Popup.CloseOnEscape | Popup.CloseOnPressOutside
