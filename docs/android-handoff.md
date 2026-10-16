@@ -173,3 +173,29 @@ health/capabilities return HTTP 200; this client-only change requires no server 
 - Device UI tests were compiled, not run; the emulator remained closed as requested.
 - Discord coverage is tracked in `docs/release-tracking/android.json`; pending
   entries with confirmed workflow delivery already count as covered.
+
+## Queued: keep healthy connections during failed room admission (2026-10-15)
+
+Status: **Deferred; desktop implementation only. Do not port yet.**
+
+- A failed encrypted-room admission must not discard a successfully fetched server
+  snapshot or put the whole account into a reconnect loop. Leave the affected
+  admission pending; retain all signature/key verification and retry on refresh.
+- Apply the same separation to primary and additional server accounts. Do not
+  automatically join voice or publish media as part of recovery.
+- API/schema: unchanged. Sources: `apps/wispd/src/main.rs` (`refresh_room_admissions`)
+  and `apps/wispd/src/session_tests.rs` (rejected admission regression).
+- Validation: isolated server returns HTTP 403 for the encryption directory;
+  primary and linked snapshot refreshes still succeed, recovery succeeds, and
+  microphone/camera/screen publishing remain off.
+
+## Queued: friend-to-server invitations and Windows update parity (2026-10-15)
+
+Status: **Requested; implementation pending. Do not port or release yet.**
+
+- Friends should receive server invitations entirely inside Wisp, showing the
+  server name and explicit Accept/Decline actions. Existing invitation links
+  remain supported. Mobile implementation belongs to a later requested batch.
+- Windows auto-updating has been requested with launch/background/manual checks
+  and configurable automatic behavior. This entry does not announce a release.
+- API/schema and source references will be updated when implementation is complete.

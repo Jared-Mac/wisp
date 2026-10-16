@@ -715,3 +715,147 @@ async fn audio_failure_releases_media_and_latches_without_rejoining() {
     );
     server.abort();
 }
+
+#[tokio::test]
+#[allow(clippy::too_many_lines)]
+async fn rejected_room_admission_does_not_discard_primary_or_linked_snapshots() {
+    use axum::{extract::Request, middleware::Next, response::IntoResponse};
+    let denied = Arc::new(AtomicBool::new(false));
+    let failures = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let state = wisp_server::AppState::new(wisp_server::AppConfig {
+        database_url: "sqlite::memory:".into(),
+        invite_url: None,
+        public_url: None,
+        livekit_url: "ws://127.0.0.1:1".into(),
+        livekit_api_key: "isolated".into(),
+        livekit_api_secret: "isolated-no-media".into(),
+        knock_ttl: Duration::from_secs(30),
+        allow_dev_sessions: true,
+        bootstrap_token: None,
+        require_chat_e2ee: false,
+    })
+    .await
+    .unwrap();
+    let guard = denied.clone();
+    let rejected = failures.clone();
+    let router = wisp_server::router(state).layer(axum::middleware::from_fn(
+        move |request: Request, next: Next| {
+            let guard = guard.clone();
+            let rejected = rejected.clone();
+            async move {
+                if request.uri().path() == "/v1/e2ee/state" && guard.load(Ordering::Acquire) {
+                    rejected.fetch_add(1, Ordering::Relaxed);
+                    return (axum::http::StatusCode::FORBIDDEN,
+                        axum::Json(json!({"code":"forbidden", "message":"Only friends can be added to a room"}))).into_response();
+                }
+                next.run(request).await
+            }
+        },
+    ));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let task = tokio::spawn(async move {
+        axum::serve(listener, router).await.unwrap();
+    });
+    let (api, snapshot) = ServerApi::connect_with_auth(
+        url.clone(),
+        AuthMethod::Development {
+            profile: "Owner".into(),
+        },
+    )
+    .await
+    .unwrap();
+    let (linked_api, linked_snapshot) = ServerApi::connect_with_auth(
+        url.clone(),
+        AuthMethod::Development {
+            profile: "MemberA".into(),
+        },
+    )
+    .await
+    .unwrap();
+    let temporary = tempfile::tempdir().unwrap();
+    let primary_privacy = privacy::Privacy::at(
+        temporary.path().join("primary"),
+        &url,
+        snapshot.self_state.user.id,
+    );
+    let linked_privacy = privacy::Privacy::at(
+        temporary.path().join("linked"),
+        &url,
+        linked_snapshot.self_state.user.id,
+    );
+    primary_privacy.initialize(&api).await.unwrap();
+    linked_privacy.initialize(&linked_api).await.unwrap();
+    let view = ServerView {
+        id: "primary".into(),
+        name: "Primary".into(),
+        url: url.clone(),
+        connected: true,
+    };
+    let linked_view = ServerView {
+        id: "linked".into(),
+        name: "Linked".into(),
+        url,
+        connected: true,
+    };
+    let (media, _) = MediaManager::new(false, None);
+    let mut daemon = Daemon::new(
+        "Owner".into(),
+        view.clone(),
+        vec![view, linked_view.clone()],
+        api,
+        snapshot,
+        None,
+        media,
+        false,
+        Duration::from_secs(30),
+        ShortcutManager::from_environment(),
+    );
+    daemon.privacy = primary_privacy;
+    let linked = Arc::new(LinkedServer {
+        privacy: linked_privacy,
+        api: linked_api,
+        view: linked_view,
+        state: RwLock::new(linked_snapshot),
+        connected: AtomicBool::new(false),
+        media_key: None,
+    });
+    daemon
+        .linked_servers
+        .write()
+        .await
+        .insert("linked".into(), linked.clone());
+    denied.store(true, Ordering::Release);
+    // Prove that the fixture really rejects the auxiliary request, while the
+    // authenticated snapshot remains usable and no media is auto-published.
+    assert!(
+        daemon
+            .privacy
+            .reconcile_pending_admissions(&daemon.api, &daemon.api.snapshot().await.unwrap())
+            .await
+            .is_err()
+    );
+    for _ in 0..2 {
+        let before = daemon.state.read().await.seq;
+        daemon.refresh("fixture_refresh").await.unwrap();
+        assert!(daemon.state.read().await.seq > before);
+        daemon
+            .refresh_linked(&linked, "fixture_refresh")
+            .await
+            .unwrap();
+        assert!(linked.connected.load(Ordering::Acquire));
+        let snapshot = daemon.state.read().await;
+        assert!(snapshot.self_state.hangout_id.is_none());
+        assert!(!snapshot.self_state.media.microphone_published);
+        assert!(!snapshot.self_state.media.camera.active);
+        assert!(!snapshot.self_state.media.screen_share.active);
+    }
+    assert!(failures.load(Ordering::Relaxed) >= 5);
+    denied.store(false, Ordering::Release);
+    daemon.refresh("fixture_recovered").await.unwrap();
+    daemon
+        .refresh_linked(&linked, "fixture_recovered")
+        .await
+        .unwrap();
+    task.abort();
+}

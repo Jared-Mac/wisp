@@ -850,15 +850,29 @@ impl Daemon {
         );
     }
 
+    async fn refresh_room_admissions(
+        api: &ServerApi,
+        privacy: &privacy::Privacy,
+        snapshot: &mut Snapshot,
+    ) {
+        // Admission is auxiliary to fetching server state. A rejected signature,
+        // stale friendship or unavailable identity must leave that room pending,
+        // not discard a healthy snapshot and reconnect the entire account.
+        match privacy.reconcile_pending_admissions(api, snapshot).await {
+            Ok(true) => match api.snapshot().await {
+                Ok(updated) => *snapshot = updated,
+                Err(error) => {
+                    warn!(%error, "room admission refresh deferred; retaining server snapshot")
+                }
+            },
+            Ok(false) => {}
+            Err(error) => warn!(%error, "room admission deferred; retaining server snapshot"),
+        }
+    }
+
     async fn refresh(&self, event_name: &str) -> anyhow::Result<()> {
         let mut snapshot = self.api.snapshot().await?;
-        if self
-            .privacy
-            .reconcile_pending_admissions(&self.api, &snapshot)
-            .await?
-        {
-            snapshot = self.api.snapshot().await?;
-        }
+        Self::refresh_room_admissions(&self.api, &self.privacy, &mut snapshot).await;
         self.merge_server_snapshot(snapshot, event_name).await;
         Ok(())
     }
@@ -876,13 +890,7 @@ impl Daemon {
             Box::pin(self.leave_voice_locally()).await;
         }
         prepare_private_account(&server.api, &server.privacy, &mut snapshot).await;
-        if server
-            .privacy
-            .reconcile_pending_admissions(&server.api, &snapshot)
-            .await?
-        {
-            snapshot = server.api.snapshot().await?;
-        }
+        Self::refresh_room_admissions(&server.api, &server.privacy, &mut snapshot).await;
         if std::env::var("WISP_REQUIRE_CHAT_E2EE").as_deref() == Ok("true") {
             snapshot.chat_encryption_required = true;
         }
