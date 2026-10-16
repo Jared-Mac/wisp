@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import "../components"
+import "../ChatMarkup.js" as Markup
 
 Column {
   id: root
@@ -195,7 +196,7 @@ Column {
           Binding on font.family { when: root.theme.terminal; value: root.theme.font.family; restoreMode: Binding.RestoreBindingOrValue }
           width: parent.width; elide: Text.ElideRight
           text: modelData.last_message
-            ? modelData.last_message.sender.display_name + ": " + (modelData.last_message.content_type === "application/vnd.wisp.room-invitation+json" ? "Voice invite · " + modelData.last_message.payload.room_label : modelData.last_message.content_type === "image/png" ? "Image" : modelData.last_message.content_type === "application/octet-stream" ? String(modelData.last_message.payload.file_name || "File") : String(modelData.last_message.payload || ""))
+            ? modelData.last_message.sender.display_name + ": " + (Markup.serverInvitation(modelData.last_message) ? "Server invite · " + Markup.serverInvitation(modelData.last_message).server_name : modelData.last_message.content_type === "application/vnd.wisp.room-invitation+json" ? "Voice invite · " + modelData.last_message.payload.room_label : modelData.last_message.content_type === "image/png" ? "Image" : modelData.last_message.content_type === "application/octet-stream" ? String(modelData.last_message.payload.file_name || "File") : String(modelData.last_message.payload || ""))
             : modelData.spot_id ? "Room · chat and voice" : modelData.kind === "hangout" ? "Temporary call" : modelData.kind
           color: root.theme.muted; font.pixelSize: root.theme.font.caption
         }

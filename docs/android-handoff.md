@@ -199,3 +199,39 @@ Status: **Requested; implementation pending. Do not port or release yet.**
 - Windows auto-updating has been requested with launch/background/manual checks
   and configurable automatic behavior. This entry does not announce a release.
 - API/schema and source references will be updated when implementation is complete.
+
+## Queued: browser link feedback (2026-10-15)
+
+External chat links now display brief “Opened in browser” feedback and suppress
+repeated clicks on the same link for two seconds. Different links still open
+immediately, and a failed browser launch can be retried. Invite links continue
+through the in-app invitation flow. No API/schema changes. Sources:
+`quickshell/app/components/LinkFeedback.qml`, `MessageFeed.qml`, `VideoEmbed.qml`.
+Validated by `scripts/test-link-feedback.py` using real QML and an isolated browser
+launcher fixture. Android platform feedback remains deferred until a requested
+batch; this does not announce an Android release.
+
+## Queued: in-app invitations to friends (2026-10-15)
+
+Desktop server invitation menus can send a one-use, 12-hour invitation directly
+to an accepted friend through their encrypted DM. Link/QR invitations remain.
+Recipients see a server card with Accept… (opens the existing verified invitation
+preview/confirmation) and Decline (remembered on this device). Expired invitations
+are disabled. No room is joined and no media is published by receiving/accepting
+a server invitation. Friendship and server membership are verified by the existing
+authenticated endpoints; failure to send revokes the generated invitation.
+
+Compatibility: no schema/server API migration or new encrypted content type. New
+daemon IPC command `send_server_invite` accepts `server_id`, `friend` (stable UUID),
+and optional `expires_in_minutes` (server caps at 720). The signed/encrypted
+`text/plain` payload is exactly `Server invitation: <single-line server name>\n`
+`Expires: <RFC3339>\n<existing Wisp invite URL>`. Older clients display a usable
+link; updated clients render the card. Preview must verify the actual invitation
+before acceptance; never trust the display name in the DM as authority.
+
+Sources: `apps/wispd/src/account_membership.rs`, `quickshell/app/ChatMarkup.js`,
+`WispAccountActions.qml`, `components/ServerSelector.qml`, `ServerInvitationCard.qml`,
+`MessageFeed.qml`. Validation: isolated encrypted delivery/friendship rejection
+regression in `session_tests.rs`, parser tests in
+`scripts/test-server-invitation-markup.cjs`, Windows headless card/preview tests.
+Android port remains deferred; do not read/action this queue until an explicit batch.

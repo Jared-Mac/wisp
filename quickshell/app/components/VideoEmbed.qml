@@ -5,6 +5,7 @@ Column {
   id:root
   required property var theme
   required property string videoId
+  signal browserRequested(string url)
   property bool playing:false
   property string errorText:""
   readonly property bool windowVisible:!Window.window || Window.window.visible
@@ -23,7 +24,7 @@ Column {
         root.errorText="";root.playing=true
       }
     }
-    ChatButton {theme:root.theme;text:"browser";onClicked:Qt.openUrlExternally("https://www.youtube.com/watch?v="+root.videoId)}
+    ChatButton {theme:root.theme;text:"browser";onClicked:root.browserRequested("https://www.youtube.com/watch?v="+root.videoId)}
   }
   Loader {
     id:player;width:parent.width;height:active?Math.max(200,width*9/16):0

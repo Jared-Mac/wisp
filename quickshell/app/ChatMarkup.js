@@ -25,6 +25,15 @@ var wispNames = ["smile","laugh","love","cry","angry","wave","sleep","shock","gg
 var standard = ["😀","😂","🥹","😍","🤔","😭","😎","😴","👍","👎","❤️","🔥","🎉","👀","✅","💯","🙌","🙏","👋","✨","💀","🚀","🍿","☕"]
 function escape(value) { return String(value).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;") }
 function safeLink(url) { return /^https?:\/\/[^\s<>"'\\]+$/i.test(String(url)) }
+function serverInvitation(message) {
+  if (!message || message.content_type !== "text/plain" || typeof message.payload !== "string") return null
+  var match = /^Server invitation: ([^\r\n]+)\nExpires: ([^\r\n]+)\n(https?:\/\/[^\s]+)$/.exec(message.payload)
+  if (!match || !safeLink(match[3]) || !isFinite(Date.parse(match[2]))) return null
+  // Only recognized Wisp invitation URLs get an in-app acceptance control.
+  if (!/^https:\/\/wisp\.you\/[a-z]+(?:-[a-z]+){0,3}[0-9]{12}$/.test(match[3])
+      && !/^https?:\/\/[^/?#]+\/join\/#v2\.[A-Za-z0-9_-]{43}$/.test(match[3])) return null
+  return {server_name:match[1], expires_at:match[2], uri:match[3]}
+}
 function trimLink(value) {
   var link=value.replace(/[.,!?;:]+$/g,"")
   while (/\)$/.test(link) && (link.match(/\)/g)||[]).length > (link.match(/\(/g)||[]).length) link=link.slice(0,-1)

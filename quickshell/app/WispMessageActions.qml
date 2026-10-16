@@ -1,4 +1,5 @@
 import QtQuick
+import "ChatMarkup.js" as Markup
 
 Item {
   id: root
@@ -14,6 +15,8 @@ Item {
   function replyFor(id) { return replies[canonical(id)] || null }
   function preview(message) {
     if (!message) return "Message unavailable"
+    var invitation=Markup.serverInvitation(message)
+    if (invitation) return "Server invite · " + invitation.server_name
     if (message.content_type === "text/plain") return String(message.payload || "")
     var payload=message.payload || {}, caption=String(payload.caption || "")
     return (message.content_type === "image/png" ? "Image" : String(payload.file_name || "File")) + (caption ? " · " + caption : "")

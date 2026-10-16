@@ -9,6 +9,7 @@ pub(crate) fn handles(name: &str) -> bool {
     matches!(
         name,
         "create_server_invite"
+            | "send_server_invite"
             | "revoke_server_invite"
             | "list_server_invites"
             | "lookup_person"
@@ -57,7 +58,21 @@ impl Daemon {
         let api = linked.as_ref().map_or(&self.api, |server| &server.api);
         let args = &command.args;
         let result = match command.name.as_str() {
-            "create_server_invite" => {
+            "create_server_invite" | "send_server_invite" => {
+                let privacy = linked.as_ref().map_or(&self.privacy, |s| &s.privacy);
+                let direct = if command.name == "send_server_invite" {
+                    // Resolve the recipient through the authenticated friendship
+                    // API before creating an invitation. Never send invite keys
+                    // through the plaintext fallback used by older dev servers.
+                    ensure!(
+                        privacy.active()?.is_some(),
+                        "Unlock encrypted chat before inviting a friend"
+                    );
+                    let friend: uuid::Uuid = string_arg(args, "friend")?.parse()?;
+                    Some(api.create_direct(friend.to_string()).await?)
+                } else {
+                    None
+                };
                 let fallback = linked
                     .as_ref()
                     .map_or_else(|| self.primary_media_key.clone(), |s| s.media_key.clone());
@@ -109,11 +124,59 @@ impl Daemon {
                     .await?;
                     uri = short.uri();
                 }
-                let qr = qrcode::QrCode::new(uri.as_bytes())?
-                    .render::<qrcode::render::svg::Color>()
-                    .min_dimensions(256, 256)
-                    .build();
-                json!({"id":invitation.id,"uri":uri,"expires_at":invitation.expires_at,"server_name":invitation.server_name,"qr":"data:image/svg+xml;base64,".to_owned()+&STANDARD.encode(qr)})
+                if let Some(conversation) = direct {
+                    let sent = async {
+                        let vault = privacy
+                            .active()?
+                            .context("Unlock encrypted chat before inviting a friend")?;
+                        let (_, roster) = privacy.recipients(api, &conversation).await?;
+                        // Keep the signed content compatible with older clients:
+                        // they display a readable invitation and its working link.
+                        let name = invitation.server_name.replace(['\r', '\n'], " ");
+                        let text = format!(
+                            "Server invitation: {name}\nExpires: {}\n{uri}",
+                            invitation.expires_at.to_rfc3339()
+                        );
+                        let request = crate::privacy::Privacy::seal(
+                            &vault,
+                            &roster,
+                            uuid::Uuid::new_v4(),
+                            wisp_crypto::message::Content {
+                                context: None,
+                                content_type: "text/plain".into(),
+                                payload: json!(text),
+                                attachment: None,
+                            },
+                        )?;
+                        let _: wisp_protocol::Message = decode(
+                            api.request(Method::POST, "/v1/e2ee/messages")
+                                .json(&request)
+                                .send()
+                                .await?,
+                        )
+                        .await?;
+                        anyhow::Ok(())
+                    }
+                    .await;
+                    if let Err(error) = sent {
+                        // A failed delivery must not leave a usable orphan invite.
+                        let _ = api
+                            .request(
+                                Method::DELETE,
+                                &format!("/v2/server-invites/{}", invitation.id),
+                            )
+                            .send()
+                            .await;
+                        return Err(error);
+                    }
+                    json!({"sent":true,"conversation_id":conversation.id,"server_name":invitation.server_name})
+                } else {
+                    let qr = qrcode::QrCode::new(uri.as_bytes())?
+                        .render::<qrcode::render::svg::Color>()
+                        .min_dimensions(256, 256)
+                        .build();
+                    json!({"id":invitation.id,"uri":uri,"expires_at":invitation.expires_at,"server_name":invitation.server_name,"qr":"data:image/svg+xml;base64,".to_owned()+&STANDARD.encode(qr)})
+                }
             }
             "revoke_server_invite" => {
                 let invite: uuid::Uuid = string_arg(args, "invite_id")?.parse()?;
@@ -179,7 +242,7 @@ impl Daemon {
         };
         if matches!(
             command.name.as_str(),
-            "leave_server" | "block_person" | "unblock_person"
+            "leave_server" | "block_person" | "unblock_person" | "send_server_invite"
         ) {
             if let Some(server) = linked {
                 self.refresh_linked(&server, "server_membership_changed")

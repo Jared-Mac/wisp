@@ -9,6 +9,7 @@ Rectangle {
   required property var theme
   required property string conversationId
   signal replyRequested()
+  LinkFeedback { id: linkFeedback; theme: root.theme }
   readonly property bool compactChat: theme.chatLayout === "compact"
   readonly property bool softGroups: theme.chatLayout === "soft_groups"
   readonly property bool chatAvatars: theme.showAvatars && !compactChat
@@ -19,6 +20,7 @@ Rectangle {
       && String(previous.server_id || bridge.activeServer.id)===String(current.server_id || bridge.activeServer.id)
       && previous.content_type!=="application/vnd.wisp.room-invitation+json"
       && current.content_type!=="application/vnd.wisp.room-invitation+json"
+      && !Markup.serverInvitation(previous) && !Markup.serverInvitation(current)
       && gap>=0 && gap<5*60*1000
       && new Date(previous.created_at).toDateString()===new Date(current.created_at).toDateString()
   }
@@ -150,7 +152,8 @@ Rectangle {
       required property var modelData
       readonly property bool isImage: modelData.content_type === "image/png"
       readonly property bool isFile: modelData.content_type === "application/octet-stream"
-      readonly property bool isInvitation: modelData.content_type === "application/vnd.wisp.room-invitation+json"
+      readonly property var serverInvitation: Markup.serverInvitation(modelData)
+      readonly property bool isInvitation: modelData.content_type === "application/vnd.wisp.room-invitation+json" || !!serverInvitation
       readonly property bool ownMessage: modelData.sender.id === root.bridge.selfState.id
       readonly property string copyText: isImage ? String(modelData.payload.caption || "") : isFile ? String(modelData.payload.caption || modelData.payload.file_name || "") : isInvitation ? "" : String(modelData.payload || "")
       readonly property string imageUrl: root.bridge.chatImageUrls[String(modelData.id)] || ""
@@ -448,7 +451,7 @@ Rectangle {
         readOnly: true; selectByMouse: true
         textFormat: TextEdit.RichText
         selectedTextColor:root.theme.foreground
-        onLinkActivated:link=>{if(link==="wisp-author")authorMenu.showPerson(Object.assign({},message.modelData.sender,{server_id:message.serverId}),bodyText);else if(Markup.safeLink(link) && !root.bridge.accountActions.openInvitation(link))Qt.openUrlExternally(link)}
+        onLinkActivated:link=>{if(link==="wisp-author")authorMenu.showPerson(Object.assign({},message.modelData.sender,{server_id:message.serverId}),bodyText);else if(Markup.safeLink(link) && !root.bridge.accountActions.openInvitation(link))linkFeedback.open(link)}
         wrapMode: TextEdit.Wrap
         font.family: root.theme.font.family; font.pixelSize: root.theme.font.body
       }
@@ -456,12 +459,16 @@ Rectangle {
       ReactionBar {id:reactionBar;allowed:!message.isInvitation;actionHost:actionToolbar;revealActions:messageHover.hovered || actionHover.hovered || optionsButton.activeFocus || messageMenu.opened; width:parent.width;bridge:root.bridge;theme:root.theme;serverId:message.serverId;messageId:String(message.modelData.id)}
       Repeater {
         model:Markup.youtube(message.copyText)
-        VideoEmbed {required property string modelData;theme:root.theme;videoId:modelData}
+        VideoEmbed {required property string modelData;theme:root.theme;videoId:modelData;onBrowserRequested:url=>linkFeedback.open(url)}
       }
       Loader {
         width: parent.width
-        active: message.isInvitation
+        active: message.isInvitation && !message.serverInvitation
         sourceComponent: RoomInvitationCard { bridge: root.bridge; theme: root.theme; invitation: message.modelData.payload; outgoing: message.modelData.sender.id === root.bridge.selfState.id }
+      }
+      Loader {
+        width:parent.width;active:!!message.serverInvitation
+        sourceComponent: ServerInvitationCard {bridge:root.bridge;theme:root.theme;invitation:message.serverInvitation;messageId:String(message.modelData.id);serverId:message.serverId;outgoing:message.ownMessage}
       }
     }
   }

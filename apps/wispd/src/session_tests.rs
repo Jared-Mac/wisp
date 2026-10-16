@@ -859,3 +859,162 @@ async fn rejected_room_admission_does_not_discard_primary_or_linked_snapshots() 
         .unwrap();
     task.abort();
 }
+
+#[tokio::test]
+#[allow(clippy::too_many_lines)]
+async fn friend_server_invitations_are_encrypted_and_require_friendship() {
+    let temporary = tempfile::tempdir().unwrap();
+    let database = format!(
+        "sqlite://{}",
+        temporary.path().join("server.sqlite3").display()
+    );
+    let state = wisp_server::AppState::new(wisp_server::AppConfig {
+        database_url: database.clone(),
+        invite_url: None,
+        public_url: None,
+        livekit_url: "ws://127.0.0.1:1".into(),
+        livekit_api_key: "fixture".into(),
+        livekit_api_secret: "fixture-no-media".into(),
+        knock_ttl: Duration::from_secs(30),
+        allow_dev_sessions: true,
+        bootstrap_token: None,
+        require_chat_e2ee: false,
+    })
+    .await
+    .unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let task = tokio::spawn(async move {
+        axum::serve(listener, wisp_server::router(state))
+            .await
+            .unwrap();
+    });
+    let (api, snapshot) = ServerApi::connect_with_auth(
+        url.clone(),
+        AuthMethod::Development {
+            profile: "Owner".into(),
+        },
+    )
+    .await
+    .unwrap();
+    let (peer_api, _) = ServerApi::connect_with_auth(
+        url.clone(),
+        AuthMethod::Development {
+            profile: "MemberA".into(),
+        },
+    )
+    .await
+    .unwrap();
+    let peer_id = peer_api.snapshot().await.unwrap().self_state.user.id;
+    let pool = sqlx::SqlitePool::connect(&database).await.unwrap();
+    sqlx::query(
+        "INSERT INTO server_identity(id,owner_user_id,name) VALUES(1,?,'Fixture community')",
+    )
+    .bind(snapshot.self_state.user.id.to_string())
+    .execute(&pool)
+    .await
+    .unwrap();
+    pool.close().await;
+    let owner_privacy = privacy::Privacy::at(
+        temporary.path().join("owner"),
+        &url,
+        snapshot.self_state.user.id,
+    );
+    let peer_privacy = privacy::Privacy::at(temporary.path().join("peer"), &url, peer_id);
+    owner_privacy.initialize(&api).await.unwrap();
+    peer_privacy.initialize(&peer_api).await.unwrap();
+    let view = ServerView {
+        id: "fixture".into(),
+        name: "Fixture".into(),
+        url,
+        connected: true,
+    };
+    let (media, _) = MediaManager::new(false, None);
+    let mut daemon = Daemon::new(
+        "Owner".into(),
+        view.clone(),
+        vec![view],
+        api,
+        snapshot,
+        None,
+        media,
+        false,
+        Duration::from_secs(30),
+        ShortcutManager::from_environment(),
+    );
+    let command = CommandEnvelope::new(
+        "invite-friend",
+        "send_server_invite",
+        json!({"friend":peer_id}),
+    );
+    // Encryption is mandatory even if a development server permits plaintext.
+    assert!(daemon.run_command(&command).await.is_err());
+    daemon.privacy = owner_privacy;
+    let result = daemon.run_command(&command).await.unwrap().unwrap();
+    assert_eq!(result["sent"], true);
+    assert!(
+        result.get("uri").is_none(),
+        "Delivery response should not expose the invitation key"
+    );
+    let mut snapshot = peer_api.snapshot().await.unwrap();
+    assert!(
+        !serde_json::to_string(&snapshot)
+            .unwrap()
+            .contains("Server invitation:")
+    );
+    peer_privacy
+        .decrypt_snapshot(&peer_api, &mut snapshot)
+        .await;
+    let message = snapshot
+        .messages
+        .iter()
+        .find(|message| {
+            message.conversation_id == result["conversation_id"].as_str().unwrap()
+                && message
+                    .payload
+                    .as_str()
+                    .is_some_and(|text| text.starts_with("Server invitation: "))
+        })
+        .expect("Recipient could not decrypt the invitation");
+    assert_eq!(message.content_type, "text/plain");
+    assert!(message.payload.as_str().unwrap().contains("\nExpires: "));
+    assert!(message.payload.as_str().unwrap().contains("/join/#v2."));
+    assert!(snapshot.self_state.hangout_id.is_none());
+    assert!(!daemon.media.is_connected_to(uuid::Uuid::new_v4()).await);
+    let before = daemon
+        .run_command(&CommandEnvelope::new(
+            "list",
+            "list_server_invites",
+            json!({}),
+        ))
+        .await
+        .unwrap()
+        .unwrap();
+    daemon
+        .run_command(&CommandEnvelope::new(
+            "remove",
+            "remove_friend",
+            json!({"user_id":peer_id}),
+        ))
+        .await
+        .unwrap();
+    assert!(
+        daemon.run_command(&command).await.is_err(),
+        "Removed friends cannot receive invitations"
+    );
+    let after = daemon
+        .run_command(&CommandEnvelope::new(
+            "list",
+            "list_server_invites",
+            json!({}),
+        ))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        before["invites"].as_array().unwrap().len(),
+        after["invites"].as_array().unwrap().len(),
+        "Rejected recipient created an orphan invitation"
+    );
+    task.abort();
+}
