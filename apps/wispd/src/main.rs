@@ -862,7 +862,7 @@ impl Daemon {
             Ok(true) => match api.snapshot().await {
                 Ok(updated) => *snapshot = updated,
                 Err(error) => {
-                    warn!(%error, "room admission refresh deferred; retaining server snapshot")
+                    warn!(%error, "room admission refresh deferred; retaining server snapshot");
                 }
             },
             Ok(false) => {}

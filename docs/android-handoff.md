@@ -235,3 +235,10 @@ Sources: `apps/wispd/src/account_membership.rs`, `quickshell/app/ChatMarkup.js`,
 regression in `session_tests.rs`, parser tests in
 `scripts/test-server-invitation-markup.cjs`, Windows headless card/preview tests.
 Android port remains deferred; do not read/action this queue until an explicit batch.
+
+Update-safety follow-up: account and invitation actions now keep the client busy,
+so an automatic update cannot interrupt acceptance or invitation delivery. Source:
+`WispAccountActions.qml`, `WispUpdates.qml`; verified by the isolated update-settings
+UI regression. The Windows updater also requires a responsive native daemon before
+confirming installation; otherwise the old portable package is restored. No API
+or schema changes, and Android implementation remains deferred.

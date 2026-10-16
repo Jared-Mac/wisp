@@ -5,6 +5,7 @@ Item {
   id: root
   required property var bridge
   property var states: ({})
+  readonly property bool busy: onboarding.running || Object.keys(states).some(function(id) { return !!states[id].busy })
   function state(serverId) { return states[String(serverId)] || {busy:false,error:"",feedback:"",invitation:null,person:null,overview:{},invites:[]} }
   function put(serverId,patch) { states=bridge.replaceEntry(states,String(serverId),Object.assign({},state(serverId),patch)) }
   function act(command,args,serverId) {

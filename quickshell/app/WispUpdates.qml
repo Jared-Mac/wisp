@@ -27,6 +27,7 @@ Item {
     && !hasValues(bridge.importingConversations) && !hasValues(bridge.savingFiles) && !hasValues(bridge.messageActions.replies)
     && !bridge.privacyBusy && !bridge.profileBusy && !bridge.serverSettingsBusy && !bridge.audioTestBusy
     && !bridge.friendships.busy
+    && (!bridge.accountActions || !bridge.accountActions.busy)
     && ["idle","ready","complete","error"].indexOf(bridge.audioTestState.phase) >= 0
     && !bridge.soundboard.pending && !bridge.soundboard.playing && !bridge.soundboard.previewing && !hasValues(bridge.soundboard.busy)
   readonly property string statusText: {
