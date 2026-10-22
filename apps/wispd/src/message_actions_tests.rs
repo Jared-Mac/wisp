@@ -1,7 +1,7 @@
 use super::*;
 use crate::{AuthMethod, obtain_session};
 use std::{path::Path, sync::atomic::AtomicBool};
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 use wisp_protocol::ServerView;
 
 async fn server(directory: &Path) -> (String, tokio::task::JoinHandle<()>) {
@@ -45,6 +45,7 @@ async fn client(server: &str, profile: &str, directory: &Path) -> Session<'stati
     let privacy = Privacy::at(directory.into(), server, snapshot.self_state.user.id);
     privacy.initialize(&api).await.unwrap();
     Session::Linked(Arc::new(LinkedServer {
+        refresh_operation: Mutex::new(()),
         view: ServerView {
             id: server.into(),
             name: "Isolated".into(),

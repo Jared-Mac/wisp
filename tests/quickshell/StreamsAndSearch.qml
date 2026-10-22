@@ -78,7 +78,19 @@ ShellRoot {
       test.screenshot("room",room)
       input.mouseClick(watch,watch.width/2,watch.height/2)
       test.check(test.lastWatch().args.open && test.lastWatch().args.hosted && test.lastWatch().args.source === "screen_share","participant watch subscribes to that screen through the desktop host")
-      test.acknowledgeWatch(true)
+      // The daemon can reply while old audio snapshots are still queued.
+      // Those snapshots must not create and then immediately destroy a viewer.
+      var watchCommand = test.lastWatch()
+      bridge.finishRequest({id:watchCommand.id,ok:true,value:{}})
+      for (var stale=0;stale<3;stale++) {
+        bridge.applySnapshot(JSON.parse(JSON.stringify(bridge.snapshot)),"audio_telemetry_changed")
+        input.wait(20)
+        test.check(test.videoLeaves(host).length === 0,"wait for confirmed subscription after early Watch reply")
+      }
+      var subscribed = JSON.parse(JSON.stringify(bridge.snapshot))
+      subscribed.self.media.remote_videos[0].subscribed=true
+      bridge.applySnapshot(subscribed,"video_watch_changed")
+      input.wait(100)
       var leaf = test.videoLeaves(host)[0]
       var tile = leaf ? test.find(page,"chatTileHost-" + leaf.key) : null
       test.check(tile && tile.detached && tile.popoutWindow.visible,"watch opens a separate window by default")
@@ -116,6 +128,16 @@ ShellRoot {
       bridge.watchVideo({participant:"Riley",source:"screen_share"},false)
       bridge.finishRequest({id:delayedWatch.id,ok:true,value:{}}); input.wait(80)
       test.check(test.videoLeaves(host).length === 0,"delayed watch reply cannot reopen a stream after Leave")
+      test.acknowledgeWatch(true)
+      // Leave can also arrive after the reply, before subscription confirmation.
+      test.find(room,buttonName).clicked()
+      var pendingWatch = test.lastWatch()
+      bridge.finishRequest({id:pendingWatch.id,ok:true,value:{}})
+      bridge.watchVideo({participant:"Riley",source:"screen_share"},false)
+      var lateSubscription = JSON.parse(JSON.stringify(bridge.snapshot))
+      lateSubscription.self.media.remote_videos[0].subscribed=true
+      bridge.applySnapshot(lateSubscription,"video_watch_changed"); input.wait(60)
+      test.check(test.videoLeaves(host).length === 0,"Leave cancels an acknowledged Watch awaiting its snapshot")
       test.acknowledgeWatch(true)
       // Screen and camera subscriptions remain independent when a publisher stops one.
       test.find(room,buttonName).clicked(); test.acknowledgeWatch(true)

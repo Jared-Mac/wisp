@@ -12,8 +12,17 @@ Column {
   property bool autoGrow: false
   property bool compact: false
   property string previousTypingConversation: ""
+  property string pasteRequestId: ""
+  property int pasteStart: 0
+  property int pasteEnd: 0
+  function pasteClipboard() {
+    if (busy || pendingAccess) return
+    pasteStart = editor.selectionStart
+    pasteEnd = editor.selectionEnd
+    pasteRequestId = bridge.pasteClipboard(conversationId) || ""
+  }
   function stopTyping() { if (bridge && bridge.typing) bridge.typing.stop(previousTypingConversation || conversationId) }
-  onConversationIdChanged: { stopTyping(); previousTypingConversation=conversationId }
+  onConversationIdChanged: { stopTyping(); previousTypingConversation=conversationId; pasteRequestId="" }
   onVisibleChanged: if (!visible) stopTyping()
   onBusyChanged: if (busy) stopTyping()
   Component.onDestruction: stopTyping()
@@ -230,7 +239,7 @@ Column {
           if (event.key === Qt.Key_Escape && root.replyingTo && !root.busy) {
             root.bridge.messageActions.cancelReply(root.conversationId); event.accepted=true
           } else if (event.matches(StandardKey.Paste)) {
-            root.bridge.pasteClipboard(root.conversationId)
+            if (!event.isAutoRepeat) root.pasteClipboard()
             event.accepted = true
           } else if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter)
               && !(event.modifiers & Qt.ShiftModifier)) {
@@ -336,9 +345,13 @@ Column {
   }
   Connections {
     target: root.bridge
-    enabled: root.visible
-    function onClipboardTextReady(conversationId, value) {
-      if (conversationId === root.conversationId) editor.insert(editor.cursorPosition, value)
+    enabled: !!root.pasteRequestId
+    function onClipboardTextReady(conversationId, value, requestId) {
+      if (conversationId !== root.conversationId || !root.pasteRequestId || requestId !== root.pasteRequestId) return
+      root.pasteRequestId = ""
+      var position = root.pasteStart
+      editor.remove(root.pasteStart, root.pasteEnd)
+      editor.insert(position, value)
     }
   }
 }

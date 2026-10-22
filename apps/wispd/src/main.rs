@@ -289,8 +289,12 @@ impl ServerApi {
         .await
     }
 
-    async fn send_message(&self, conversation_id: String, text: String) -> anyhow::Result<()> {
-        let _: wisp_protocol::Message = decode(
+    async fn send_message(
+        &self,
+        conversation_id: String,
+        text: String,
+    ) -> anyhow::Result<uuid::Uuid> {
+        let message: wisp_protocol::Message = decode(
             self.request(reqwest::Method::POST, "/v1/messages")
                 .json(&SendMessageRequest {
                     context: None,
@@ -303,7 +307,7 @@ impl ServerApi {
                 .await?,
         )
         .await?;
-        Ok(())
+        Ok(message.id)
     }
 
     async fn mark_conversation_read(&self, conversation_id: String) -> anyhow::Result<()> {
@@ -527,6 +531,7 @@ async fn ensure_ok(response: reqwest::Response) -> anyhow::Result<()> {
 }
 
 struct LinkedServer {
+    refresh_operation: Mutex<()>,
     view: ServerView,
     api: ServerApi,
     privacy: privacy::Privacy,
@@ -552,6 +557,7 @@ struct Daemon {
     events: broadcast::Sender<DaemonEnvelope>,
     media: MediaManager,
     media_reconcile: Mutex<()>,
+    refresh_operation: Mutex<()>,
     primary_connected: AtomicBool,
     voice_recovery_blocked: AtomicBool,
     local_voice_left: AtomicBool,
@@ -599,6 +605,7 @@ impl Daemon {
             events,
             media,
             media_reconcile: Mutex::new(()),
+            refresh_operation: Mutex::new(()),
             primary_connected: AtomicBool::new(true),
             voice_recovery_blocked: AtomicBool::new(true),
             local_voice_left: AtomicBool::new(true),
@@ -760,7 +767,7 @@ impl Daemon {
             .await;
         let _cache_operation = self.chat_images.cache_operation.lock().await;
         {
-            let current = self.state.read().await;
+            let mut current = self.state.write().await;
             for conversation in &incoming.conversations {
                 if conversation.history_cleared_at.is_some()
                     && current
@@ -797,12 +804,11 @@ impl Daemon {
             } else {
                 ConnectionState::Joining
             };
+            incoming.seq = self.next_seq(incoming.seq);
+            self.decorate_snapshot(&mut incoming).await;
+            *current = incoming.clone();
         }
-        let seq = self.next_seq(incoming.seq);
-        incoming.seq = seq;
-        self.decorate_snapshot(&mut incoming).await;
-        *self.state.write().await = incoming.clone();
-        self.emit(event_name, json!({"snapshot": incoming}), seq);
+        self.emit(event_name, json!({"snapshot": incoming}), incoming.seq);
     }
 
     fn next_seq(&self, minimum: u64) -> u64 {
@@ -871,6 +877,7 @@ impl Daemon {
     }
 
     async fn refresh(&self, event_name: &str) -> anyhow::Result<()> {
+        let _refresh = self.refresh_operation.lock().await;
         let mut snapshot = self.api.snapshot().await?;
         Self::refresh_room_admissions(&self.api, &self.privacy, &mut snapshot).await;
         self.merge_server_snapshot(snapshot, event_name).await;
@@ -882,6 +889,7 @@ impl Daemon {
         server: &Arc<LinkedServer>,
         event_name: &str,
     ) -> anyhow::Result<()> {
+        let _refresh = server.refresh_operation.lock().await;
         let mut snapshot = server.api.snapshot().await?;
         let membership_removed = !snapshot.server_member
             && *self.voice_server_id.read().await == server.view.id
@@ -900,12 +908,7 @@ impl Daemon {
             .await;
         server.connected.store(true, Ordering::Release);
         *server.state.write().await = snapshot;
-        let mut aggregate = self.state.read().await.clone();
-        let seq = self.next_seq(aggregate.seq);
-        aggregate.seq = seq;
-        self.decorate_snapshot(&mut aggregate).await;
-        *self.state.write().await = aggregate.clone();
-        self.emit(event_name, json!({"snapshot": aggregate}), seq);
+        self.publish_server_state(event_name).await;
         Ok(())
     }
 
@@ -2096,11 +2099,11 @@ impl Daemon {
             "send_message" => {
                 let conversation_id = string_arg(&command.args, "conversation_id")?;
                 let text = string_arg(&command.args, "text")?;
-                self.send_chat_text(conversation_id, text).await?;
+                let message_id = self.send_chat_text(conversation_id, text).await?;
                 if let Err(error) = self.refresh("message_created").await {
                     warn!(%error, "message sent but snapshot refresh failed");
                 }
-                Ok(None)
+                Ok(Some(json!({"message_id": message_id})))
             }
             "send_voice_invite" => {
                 let mut request: wisp_protocol::InviteToRoom =
@@ -2628,7 +2631,7 @@ impl Daemon {
         server: &LinkedServer,
         conversation_id: String,
         text: String,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<uuid::Uuid> {
         let Some(vault) = server.privacy.active()? else {
             return server.api.send_message(conversation_id, text).await;
         };
@@ -2650,7 +2653,7 @@ impl Daemon {
                 attachment: None,
             },
         )?;
-        let _: wisp_protocol::Message = decode(
+        let message: wisp_protocol::Message = decode(
             server
                 .api
                 .request(reqwest::Method::POST, "/v1/e2ee/messages")
@@ -2659,7 +2662,7 @@ impl Daemon {
                 .await?,
         )
         .await?;
-        Ok(())
+        Ok(message.id)
     }
 
     async fn change_group_membership(
@@ -2988,13 +2991,13 @@ impl Daemon {
                 None
             }
             "send_message" => {
-                Self::send_linked_chat_text(
+                let message_id = Self::send_linked_chat_text(
                     server,
                     string_arg(&args, "conversation_id")?,
                     opaque_string_arg(&args, "text")?,
                 )
                 .await?;
-                None
+                Some(json!({"message_id": message_id}))
             }
             "mark_conversation_read" => {
                 server
@@ -3670,6 +3673,18 @@ impl Daemon {
         self.publish_current(event_name).await;
     }
 
+    async fn publish_server_state(&self, event_name: &str) {
+        // Keep aggregation atomic with media/chat updates. Decorating a clone
+        // before taking the write lock can overwrite a newer message or mute.
+        let snapshot = {
+            let mut state = self.state.write().await;
+            self.decorate_snapshot(&mut state).await;
+            state.seq = self.next_seq(state.seq);
+            state.clone()
+        };
+        self.emit(event_name, json!({"snapshot": snapshot}), snapshot.seq);
+    }
+
     async fn publish_current(&self, event_name: &str) {
         let snapshot = {
             let mut state = self.state.write().await;
@@ -3838,7 +3853,7 @@ async fn serve_client(stream: UnixStream, daemon: Arc<Daemon>) -> anyhow::Result
                             continue;
                         }
                     };
-                    if matches!(command.name.as_str(), "chat_typing" | "send_reply" | "forward_message" | "send_attachment_message" | "send_image_message" | "save_chat_file" | "import_chat_files" | "paste_clipboard" | "soundboard_upload" | "soundboard_play" | "soundboard_preview") {
+                    if matches!(command.name.as_str(), "chat_typing" | "send_message" | "send_reply" | "forward_message" | "send_attachment_message" | "send_image_message" | "save_chat_file" | "import_chat_files" | "paste_clipboard" | "soundboard_upload" | "soundboard_play" | "soundboard_preview") {
                         if transfers.len() >= 8 {
                             write_envelope(&mut writer, &DaemonEnvelope::failure(command.id, "transfers_busy", "Too many active transfers")).await?;
                         } else {
@@ -3976,15 +3991,9 @@ async fn synchronize_server(daemon: Arc<Daemon>) {
         }
         daemon.primary_connected.store(false, Ordering::Release);
         daemon.suspend_voice(&daemon.primary_server.id).await;
-        let mut aggregate = daemon.state.read().await.clone();
-        aggregate.seq = daemon.next_seq(aggregate.seq);
-        daemon.decorate_snapshot(&mut aggregate).await;
-        *daemon.state.write().await = aggregate.clone();
-        daemon.emit(
-            "server_connection_changed",
-            json!({"snapshot": aggregate}),
-            aggregate.seq,
-        );
+        daemon
+            .publish_server_state("server_connection_changed")
+            .await;
         attempt = attempt.saturating_add(1).min(6);
         let base = 250 * 2_u64.pow(attempt);
         let jitter = u64::from(daemon.profile.bytes().fold(0_u8, u8::wrapping_add)) * 3;
@@ -4048,16 +4057,9 @@ async fn synchronize_linked_server(daemon: Arc<Daemon>, server: Arc<LinkedServer
         }
         server.connected.store(false, Ordering::Release);
         daemon.suspend_voice(&server.view.id).await;
-        let mut aggregate = daemon.state.read().await.clone();
-        let seq = daemon.next_seq(aggregate.seq);
-        aggregate.seq = seq;
-        daemon.decorate_snapshot(&mut aggregate).await;
-        *daemon.state.write().await = aggregate.clone();
-        daemon.emit(
-            "server_connection_changed",
-            json!({"snapshot": aggregate}),
-            seq,
-        );
+        daemon
+            .publish_server_state("server_connection_changed")
+            .await;
         attempt = attempt.saturating_add(1).min(6);
         let jitter = u64::from(server.view.id.bytes().fold(0_u8, u8::wrapping_add)) * 3;
         tokio::time::sleep(Duration::from_millis(
@@ -5247,6 +5249,7 @@ fn start_linked_accounts(
                         api.account_registry
                             .clone_from(&daemon.api.account_registry);
                         let server = Arc::new(LinkedServer {
+                            refresh_operation: Mutex::new(()),
                             view: account_view(&account, true),
                             privacy: privacy::Privacy::new(
                                 &api.base_url,

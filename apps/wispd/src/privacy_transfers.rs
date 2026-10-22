@@ -129,7 +129,7 @@ impl Daemon {
         &self,
         conversation_id: String,
         text: String,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<Uuid> {
         if self.privacy.active()?.is_none() {
             return self.api.send_message(conversation_id, text).await;
         }
@@ -145,7 +145,7 @@ impl Daemon {
                 attachment: None,
             },
         )?;
-        let _: Message = decode(
+        let message: Message = decode(
             self.api
                 .request(reqwest::Method::POST, "/v1/e2ee/messages")
                 .json(&request)
@@ -153,7 +153,7 @@ impl Daemon {
                 .await?,
         )
         .await?;
-        Ok(())
+        Ok(message.id)
     }
 
     pub(super) async fn edit_encrypted_message(

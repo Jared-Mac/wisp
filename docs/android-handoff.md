@@ -247,3 +247,28 @@ Invitation menu follow-up: the desktop popup repositions when its link/QR conten
 grows or the window resizes, keeping all actions within the viewport. Source:
 `components/ServerSelector.qml`; headless real-QML validation covers direct friend
 selection, link/QR expansion and a narrow window. No protocol or schema changes.
+
+## Queued: desktop send feedback and stream/chat reliability (2026-10-21)
+
+Status: **Deferred; do not port until an Android batch is requested.**
+
+- Desktop text messages/replies appear immediately with Sending status; confirmed
+  IDs reconcile the local row. Failed/uncertain sends retain the draft and offer
+  Retry for review, without automatic duplicate retransmission. Attachments keep
+  their existing upload queue/progress behavior.
+- Local daemon `send_message` now returns `{message_id}` for primary/linked servers
+  (matching existing reply acknowledgements). No HTTP API or schema change; older
+  clients may ignore the added result.
+- Ignore stale snapshot sequence numbers within a connection; reset on reconnect.
+  Serialize server refreshes and preserve local media state when publishing them.
+  Keep chat models stable during audio/video telemetry, and avoid repeated privacy
+  refresh work when server data has not changed.
+- Wait for a confirmed video subscription before opening its viewer; an earlier
+  queued snapshot must not immediately close a newly requested stream. Clipboard
+  responses belong only to the initiating composer/request.
+- Sources: `apps/wispd/src/{main,privacy_transfers}.rs`,
+  `quickshell/app/WispBridge.qml`, `components/{ChatComposer,MessageFeed}.qml`.
+- Validation: isolated daemon concurrency/send tests; ChatReliability.qml covers
+  clipboard ownership, snapshot ordering, telemetry identity, immediate sends,
+  ack-before/after-snapshot, failure/retry and disconnect. Stream lifecycle, chat
+  workspace, replies/pins and unread regressions also pass.

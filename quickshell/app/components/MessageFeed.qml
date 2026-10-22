@@ -150,6 +150,7 @@ Rectangle {
       implicitHeight: Math.max(transcript.implicitHeight, root.chatAvatars && !sameAuthor ? root.theme.space(32) : 0) + contentTop + bottomInset
       readonly property bool startsUnread: !!root.unreadBoundary && root.unreadBoundary.firstId===String(modelData.id)
       required property var modelData
+      readonly property bool pendingDelivery: !!modelData.delivery_status
       readonly property bool isImage: modelData.content_type === "image/png"
       readonly property bool isFile: modelData.content_type === "application/octet-stream"
       readonly property var serverInvitation: Markup.serverInvitation(modelData)
@@ -208,6 +209,7 @@ Rectangle {
       }
       Row {
         id: actionToolbar
+        visible: !message.pendingDelivery
         anchors.right:parent.right; anchors.rightMargin:root.softGroups ? root.theme.space(8) : 0
         y:message.contentTop-root.theme.space(root.compactChat ? 22 : message.sameAuthor ? 16 : 0)
         z:5; spacing:root.theme.space(3)
@@ -456,7 +458,26 @@ Rectangle {
         font.family: root.theme.font.family; font.pixelSize: root.theme.font.body
       }
       }
-      ReactionBar {id:reactionBar;allowed:!message.isInvitation;actionHost:actionToolbar;revealActions:messageHover.hovered || actionHover.hovered || optionsButton.activeFocus || messageMenu.opened; width:parent.width;bridge:root.bridge;theme:root.theme;serverId:message.serverId;messageId:String(message.modelData.id)}
+      Row {
+        visible: message.pendingDelivery
+        spacing: root.theme.spacing.sm
+        Text {
+          text: message.modelData.delivery_status === "failed" ? "Delivery not confirmed" : message.modelData.delivery_status === "sent" ? "Sent" : "Sending…"
+          color: message.modelData.delivery_status === "failed" ? root.theme.accent : root.theme.muted
+          font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
+        }
+        ChatButton {
+          theme:root.theme; text:"Retry…"; visible:message.modelData.delivery_status === "failed"
+          enabled:!root.bridge.draftFor(root.conversationId).trim() || root.bridge.draftFor(root.conversationId).trim()===message.copyText
+          ToolTip.visible:hovered; ToolTip.text:"Restore your message to review and send again. Check the chat first to avoid sending it twice."
+          onClicked: {root.bridge.recoverOutgoing(root.conversationId);root.replyRequested()}
+        }
+      }
+      ChatButton {
+        theme:root.theme; text:"Dismiss"; visible:message.modelData.delivery_status === "failed"
+        onClicked:root.bridge.outgoingMessages=root.bridge.replaceConversationEntry(root.bridge.outgoingMessages,root.conversationId,undefined)
+      }
+      ReactionBar {id:reactionBar;allowed:!message.isInvitation && !message.pendingDelivery;actionHost:actionToolbar;revealActions:messageHover.hovered || actionHover.hovered || optionsButton.activeFocus || messageMenu.opened; width:parent.width;bridge:root.bridge;theme:root.theme;serverId:message.serverId;messageId:String(message.modelData.id)}
       Repeater {
         model:Markup.youtube(message.copyText)
         VideoEmbed {required property string modelData;theme:root.theme;videoId:modelData;onBrowserRequested:url=>linkFeedback.open(url)}

@@ -93,6 +93,7 @@ async fn member_directory_commands_use_the_selected_server_account() {
     daemon.linked_servers.write().await.insert(
         "linked".into(),
         Arc::new(LinkedServer {
+            refresh_operation: Mutex::new(()),
             privacy: privacy::Privacy::new(&linked_api.base_url, member),
             api: linked_api,
             view: linked_view,
@@ -813,6 +814,7 @@ async fn rejected_room_admission_does_not_discard_primary_or_linked_snapshots() 
     );
     daemon.privacy = primary_privacy;
     let linked = Arc::new(LinkedServer {
+        refresh_operation: Mutex::new(()),
         privacy: linked_privacy,
         api: linked_api,
         view: linked_view,
@@ -1018,4 +1020,150 @@ async fn friend_server_invitations_are_encrypted_and_require_friendship() {
         "Rejected recipient created an orphan invitation"
     );
     task.abort();
+}
+
+#[tokio::test]
+async fn server_aggregation_preserves_concurrent_local_updates() {
+    let (url, server_task) = isolated_server().await;
+    let (api, snapshot) = ServerApi::connect_with_auth(
+        url.clone(),
+        AuthMethod::Development {
+            profile: "Owner".into(),
+        },
+    )
+    .await
+    .unwrap();
+    let primary = ServerView {
+        id: "primary".into(),
+        name: "Primary".into(),
+        url,
+        connected: true,
+    };
+    let (media, _) = MediaManager::new(false, None);
+    let daemon = Arc::new(Daemon::new(
+        "Owner".into(),
+        primary.clone(),
+        vec![primary],
+        api,
+        snapshot,
+        None,
+        media,
+        false,
+        Duration::from_secs(30),
+        ShortcutManager::from_environment(),
+    ));
+    // Pause decoration at a real await point. The former read/clone/decorate/
+    // write sequence allowed another operation's changes to be overwritten here.
+    let catalog = daemon.linked_servers.write().await;
+    let publishing = {
+        let daemon = daemon.clone();
+        tokio::spawn(async move { daemon.publish_server_state("fixture_catalog").await })
+    };
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if daemon.state.try_read().is_err() {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("aggregation must own the state until decoration completes");
+    let updating = {
+        let daemon = daemon.clone();
+        tokio::spawn(async move {
+            daemon
+                .set_local_media(
+                    |s| {
+                        s.self_state.muted = true;
+                        s.self_state.media.audio.input_level = 37;
+                    },
+                    "fixture_media",
+                )
+                .await;
+        })
+    };
+    drop(catalog);
+    publishing.await.unwrap();
+    updating.await.unwrap();
+    let current = daemon.state.read().await;
+    assert!(current.self_state.muted);
+    assert_eq!(current.self_state.media.audio.input_level, 37);
+    drop(current);
+    // Snapshot refreshes may run beside media updates, but preserve their state.
+    let (first, second, _) = tokio::join!(
+        daemon.refresh("fixture_refresh_one"),
+        daemon.refresh("fixture_refresh_two"),
+        daemon.publish_server_state("fixture_catalog_two"),
+    );
+    first.unwrap();
+    second.unwrap();
+    assert!(daemon.state.read().await.self_state.muted);
+    assert_eq!(
+        daemon.state.read().await.self_state.media.audio.input_level,
+        37
+    );
+    // A post-send refresh can be delayed by another refresh. The IPC socket
+    // must still deliver status/events instead of queueing them behind Send.
+    let conversation = daemon.api.create_direct("MemberA".into()).await.unwrap();
+    let refreshing = daemon.refresh_operation.lock().await;
+    let (client, server) = UnixStream::pair().unwrap();
+    let serving = {
+        let daemon = daemon.clone();
+        tokio::spawn(async move { serve_client(server, daemon).await })
+    };
+    let (reader, mut writer) = client.into_split();
+    let mut lines = BufReader::new(reader).lines();
+    for command in [
+        CommandEnvelope::new(
+            "send-fixture",
+            "send_message",
+            json!({
+                "conversation_id":conversation.id, "text":"Isolated responsiveness fixture"
+            }),
+        ),
+        CommandEnvelope::new("status-fixture", "status", json!({})),
+    ] {
+        let mut encoded = serde_json::to_vec(&command).unwrap();
+        encoded.push(b'\n');
+        writer.write_all(&encoded).await.unwrap();
+    }
+    let status = tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            let message: Value =
+                serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+            if message["id"] == "status-fixture" {
+                break message;
+            }
+        }
+    })
+    .await
+    .expect("status must not wait behind a send's refresh");
+    assert_eq!(status["ok"], true);
+    drop(refreshing);
+    let sent = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let message: Value =
+                serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+            if message["id"] == "send-fixture" {
+                break message;
+            }
+        }
+    })
+    .await
+    .expect("send must finish after the refresh is released");
+    assert_eq!(sent["ok"], true);
+    assert_eq!(
+        daemon
+            .state
+            .read()
+            .await
+            .messages
+            .iter()
+            .filter(|m| m.conversation_id == conversation.id)
+            .count(),
+        1
+    );
+    serving.abort();
+    server_task.abort();
 }
