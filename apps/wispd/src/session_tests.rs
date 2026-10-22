@@ -1091,7 +1091,7 @@ async fn server_aggregation_preserves_concurrent_local_updates() {
     assert_eq!(current.self_state.media.audio.input_level, 37);
     drop(current);
     // Snapshot refreshes may run beside media updates, but preserve their state.
-    let (first, second, _) = tokio::join!(
+    let (first, second, ()) = tokio::join!(
         daemon.refresh("fixture_refresh_one"),
         daemon.refresh("fixture_refresh_two"),
         daemon.publish_server_state("fixture_catalog_two"),
@@ -1103,6 +1103,11 @@ async fn server_aggregation_preserves_concurrent_local_updates() {
         daemon.state.read().await.self_state.media.audio.input_level,
         37
     );
+    assert_responsive_send(daemon).await;
+    server_task.abort();
+}
+
+async fn assert_responsive_send(daemon: Arc<Daemon>) {
     // A post-send refresh can be delayed by another refresh. The IPC socket
     // must still deliver status/events instead of queueing them behind Send.
     let conversation = daemon.api.create_direct("MemberA".into()).await.unwrap();
@@ -1165,5 +1170,4 @@ async fn server_aggregation_preserves_concurrent_local_updates() {
         1
     );
     serving.abort();
-    server_task.abort();
 }
