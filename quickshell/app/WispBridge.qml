@@ -1072,6 +1072,7 @@ Item {
       && JSON.stringify(next.server_states)===serverStateData
     if (telemetryOnly) {
       snapshot = next
+    reconcileOutgoingMessages()
       openReadyMediaViews()
       applyMediaSnapshotEffects(previous,next,eventName)
       return
@@ -1086,6 +1087,7 @@ Item {
     })
     unreadMarkers.observe(previousFlat, nextFlat, eventName, next)
     snapshot = next
+    reconcileOutgoingMessages()
     openReadyMediaViews()
     typing.reconcile()
     Qt.callLater(function() { friendships.sync(eventName || "") })
@@ -1167,6 +1169,17 @@ Item {
     return null
   }
 
+  function reconcileOutgoingMessages() {
+    var next={}, changed=false
+    Object.keys(outgoingMessages).forEach(function(key) {
+      var item=outgoingMessages[key]
+      if (item.status==="sent" && item.messageId && messages.some(function(m) {
+        return String(m.id)===item.messageId && String(m.conversation_id)===item.message.conversation_id
+      })) changed=true
+      else next[key]=item
+    })
+    if (changed) outgoingMessages=next
+  }
   function messagesFor(id) {
     var result = []
     if (!id) return result
@@ -1562,6 +1575,7 @@ Item {
       messageMutationFinished(action.messageId, action.kind, !!message.ok,
         message.error ? String(message.error.message || "Could not update message") : "")
     } else if (action.kind === "clear") {
+      if (message.ok) outgoingMessages=replaceConversationEntry(outgoingMessages,action.conversationId,undefined)
       historyClearFinished(action.conversationId, !!message.ok, message.error ? String(message.error.message || "Could not clear history") : "")
     } else if (action.kind === "newChat") {
       var created = !!message.ok && !!value.id
@@ -1582,6 +1596,7 @@ Item {
         var outgoing=conversationValue(outgoingMessages,conversationId,null)
         if (outgoing) outgoingMessages=replaceConversationEntry(outgoingMessages,conversationId,
           Object.assign({},outgoing,{status:message.ok ? "sent" : "failed",messageId:message.ok ? String(value.message_id || "") : ""}))
+        reconcileOutgoingMessages()
       }
 
       if (message.ok) {

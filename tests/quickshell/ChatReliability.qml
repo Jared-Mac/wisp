@@ -103,6 +103,11 @@ ShellRoot {
     test.check(bridge.messagesFor(chat).filter(function(m){return m.payload==="Immediate message"}).length===1,"snapshot before acknowledgement does not duplicate pending message")
     bridge.finishRequest({id:send.id,ok:true,value:{message_id:"delivered-id"}})
     test.check(bridge.messagesFor(chat).filter(function(m){return m.payload==="Immediate message"}).length===1 && !bridge.messagesFor(chat).slice(-1)[0].delivery_status,"exact acknowledgement reconciles to authoritative message")
+    test.check(!bridge.conversationValue(bridge.outgoingMessages,chat,null),"confirmed row is retired once authoritative history arrives")
+    var removed=JSON.parse(JSON.stringify(bridge.snapshot));removed.seq++
+    removed.server_states[0].messages=removed.server_states[0].messages.filter(function(m){return m.id!=="delivered-id"})
+    bridge.applySnapshot(removed,"message_deleted")
+    test.check(!bridge.messagesFor(chat).some(function(m){return m.payload==="Immediate message"}),"deleting a confirmed message cannot resurrect its local placeholder")
     bridge.setDraft(chat,"Try again")
     bridge.sendComposedMessage(chat);send=bridge.sent.slice(-1)[0]
     bridge.finishRequest({id:send.id,ok:false,error:{message:"Fixture offline"}})

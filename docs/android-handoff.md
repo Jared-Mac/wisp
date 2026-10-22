@@ -253,7 +253,8 @@ selection, link/QR expansion and a narrow window. No protocol or schema changes.
 Status: **Deferred; do not port until an Android batch is requested.**
 
 - Desktop text messages/replies appear immediately with Sending status; confirmed
-  IDs reconcile the local row. Failed/uncertain sends retain the draft and offer
+  IDs reconcile and retire the local row; deletion/history clearing must never
+  resurrect an optimistic placeholder. Failed/uncertain sends retain the draft and offer
   Retry for review, without automatic duplicate retransmission. Attachments keep
   their existing upload queue/progress behavior.
 - Local daemon `send_message` now returns `{message_id}` for primary/linked servers
