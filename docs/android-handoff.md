@@ -273,3 +273,26 @@ Status: **Deferred; do not port until an Android batch is requested.**
   clipboard ownership, snapshot ordering, telemetry identity, immediate sends,
   ack-before/after-snapshot, failure/retry and disconnect. Stream lifecycle, chat
   workspace, replies/pins and unread regressions also pass.
+
+## Queued: plugin documents and Valheim modpacks (2026-10-25)
+
+- Desktop adds a Wasm plugin host and a Valheim modpack plugin. Members explicitly
+  share immutable pack revisions as retained, encrypted `.wisp-plugin.json`
+  attachments in an existing DM/group/server channel. Import and local profile
+  installation each require a local user action. Wisp servers never run mods.
+- Compatibility: no server schema change and no new chat content type. Existing
+  Android clients retain ordinary file-download behavior. Envelope format 1 has
+  `plugin`, `plugin_version`, `title`, and `data`; the authenticated attachment
+  message supplies author/audience. Pack data includes exact dependency strings,
+  archive SHA-256/size, revision, and parent digest. Never trust self-claimed
+  authors or automatically install/execute anything from a document.
+- A later owner-requested Android batch may add read-only pack inspection and
+  plugin document handling; desktop profile installation is Linux-specific and
+  is not an Android game installation feature. No Android port is requested now.
+- Sources: `crates/wisp-plugins/`, `apps/wispd/src/plugins.rs`,
+  `apps/wispd/src/plugin_downloads.rs`, `quickshell/app/WispPlugins.qml`,
+  `quickshell/app/components/PluginsPage.qml`,
+  `examples/plugins/shared-modpacks/`, `docs/plugin-system.md`.
+- Validation: sandbox/package/archive Rust tests, four-theme QML scope/action
+  tests, and the isolated two-account encrypted-sharing fixture in
+  `scripts/test-plugins.py`. Record results with the eventual release.

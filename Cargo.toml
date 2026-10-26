@@ -2,6 +2,7 @@
 members = [
   "crates/wisp-protocol",
   "crates/wisp-crypto",
+  "crates/wisp-plugins",
   "apps/wispd",
   "apps/wisp-server",
   "apps/wispctl",

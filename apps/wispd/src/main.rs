@@ -21,6 +21,8 @@ mod friendships;
 mod media;
 mod message_actions;
 mod network;
+mod plugin_downloads;
+mod plugins;
 // Run the patched transport's deterministic dialer regressions in the workspace
 // test suite without resolving a separate lockfile for the vendored package.
 #[cfg(test)]
@@ -568,6 +570,7 @@ struct Daemon {
     shortcut: ShortcutManager,
     shortcut_operation: Mutex<()>,
     media_enabled: bool,
+    plugin_operation: Mutex<()>,
 }
 
 impl Daemon {
@@ -616,6 +619,7 @@ impl Daemon {
             shortcut,
             shortcut_operation: Mutex::new(()),
             media_enabled,
+            plugin_operation: Mutex::new(()),
         }
     }
 
@@ -1641,6 +1645,9 @@ impl Daemon {
 
     #[allow(clippy::too_many_lines)]
     async fn execute_command(&self, command: &CommandEnvelope) -> anyhow::Result<Option<Value>> {
+        if command.name.starts_with("plugin_") {
+            return self.plugin_command(command).await;
+        }
         if command.name == "server_ping" {
             let id = command.args["server_id"]
                 .as_str()
@@ -3853,7 +3860,7 @@ async fn serve_client(stream: UnixStream, daemon: Arc<Daemon>) -> anyhow::Result
                             continue;
                         }
                     };
-                    if matches!(command.name.as_str(), "chat_typing" | "send_message" | "send_reply" | "forward_message" | "send_attachment_message" | "send_image_message" | "save_chat_file" | "import_chat_files" | "paste_clipboard" | "soundboard_upload" | "soundboard_play" | "soundboard_preview") {
+                    if command.name.starts_with("plugin_") || matches!(command.name.as_str(), "chat_typing" | "send_message" | "send_reply" | "forward_message" | "send_attachment_message" | "send_image_message" | "save_chat_file" | "import_chat_files" | "paste_clipboard" | "soundboard_upload" | "soundboard_play" | "soundboard_preview") {
                         if transfers.len() >= 8 {
                             write_envelope(&mut writer, &DaemonEnvelope::failure(command.id, "transfers_busy", "Too many active transfers")).await?;
                         } else {
@@ -5286,9 +5293,20 @@ fn start_linked_accounts(
     }
 }
 
-#[tokio::main]
+fn main() -> anyhow::Result<()> {
+    // A guest worker starts before Tokio or desktop services, keeping its
+    // resource budget independent of media and account initialization.
+    if std::env::args().nth(1).as_deref() == Some("--plugin-worker") {
+        return plugins::worker();
+    }
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?
+        .block_on(run())
+}
+
 #[allow(clippy::too_many_lines)]
-async fn main() -> anyhow::Result<()> {
+async fn run() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| "wispd=info".into()))
         .init();

@@ -14,6 +14,7 @@ Button {
   property bool showLayout: false
   signal layoutRequested()
   readonly property bool useWordmark: showWordmark
+  signal pluginsRequested()
   signal settingsRequested()
   signal newRoomRequested()
   signal homeRequested()
@@ -134,6 +135,12 @@ Button {
       ThemeControlStyle { theme: root.theme; control: styledControl2 }
       objectName: "identitySettings"
       text: "Settings"; onTriggered: root.settingsRequested()
+    }
+    MenuItem {
+      id: pluginItem
+      ThemeControlStyle { theme: root.theme; control: pluginItem }
+      objectName: "identityPlugins"
+      text: "Plugins"; onTriggered: root.pluginsRequested()
     }
     MenuItem {
     id: styledControl3

@@ -89,6 +89,12 @@ jobs:
       - name: Fetch locked dependencies
         run: cargo fetch --locked
 
+      - name: Build and test Valheim plugin
+        run: |
+          rustup target add wasm32-unknown-unknown
+          bash scripts/build-valheim-plugin.sh
+          cargo test --locked --manifest-path examples/plugins/shared-modpacks/Cargo.toml
+
       - name: Check formatting
         run: cargo fmt --all -- --check
 
@@ -147,6 +153,9 @@ jobs:
 
       - name: Build release binaries
         run: cargo build --workspace --release --locked
+
+      - name: Test plugin lifecycle with isolated clients
+        run: python3 scripts/test-plugins.py
 
       - name: Test invitation server discovery
         run: |

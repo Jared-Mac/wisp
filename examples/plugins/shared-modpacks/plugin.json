@@ -1,0 +1,8 @@
+{
+  "api": 1,
+  "id": "games.valheim",
+  "name": "Valheim Modpacks",
+  "version": "0.1.0",
+  "description": "Share pinned Valheim modpacks with friends or a server channel. Resolve Thunderstore dependencies and create separate BepInEx profiles.",
+  "permissions": ["documents", "thunderstore", "managed_files"]
+}

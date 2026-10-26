@@ -23,6 +23,13 @@ struct Args {
 #[derive(Debug, Subcommand)]
 enum Command {
     Status,
+    /// Invoke the local plugin API (list, inspect, install, open, action, resolve, share, import, apply, enable, remove).
+    Plugin {
+        #[arg(value_parser = ["list", "inspect", "install", "open", "action", "resolve", "share", "import", "apply", "enable", "remove"])]
+        operation: String,
+        #[arg(default_value = "{}", value_parser = plugin_arguments)]
+        args: Value,
+    },
     Privacy {
         #[command(subcommand)]
         command: PrivacyCommand,
@@ -182,6 +189,9 @@ impl Command {
     #[allow(clippy::too_many_lines)]
     fn envelope(&self) -> CommandEnvelope {
         let (name, args) = match self {
+            Self::Plugin { operation, args } => {
+                return CommandEnvelope::new("ctl", format!("plugin_{operation}"), args.clone());
+            }
             Self::Status => ("status", json!({})),
             Self::Privacy { command } => match command {
                 PrivacyCommand::Status => ("privacy_status", json!({})),
@@ -314,6 +324,14 @@ impl Command {
     }
 }
 
+fn plugin_arguments(value: &str) -> Result<Value, String> {
+    let args: Value = serde_json::from_str(value).map_err(|error| error.to_string())?;
+    if !args.is_object() {
+        return Err("Plugin arguments must be a JSON object".into());
+    }
+    Ok(args)
+}
+
 fn socket_path() -> anyhow::Result<PathBuf> {
     let runtime = std::env::var_os("XDG_RUNTIME_DIR").context("XDG_RUNTIME_DIR is not set")?;
     Ok(PathBuf::from(runtime).join("wisp/wispd.sock"))
@@ -370,4 +388,19 @@ fn print_value(value: &Value) -> anyhow::Result<()> {
     }
     println!("{}", serde_json::to_string_pretty(value)?);
     Ok(())
+}
+
+#[cfg(test)]
+mod plugin_tests {
+    use super::*;
+    #[test]
+    fn cli_plugin_arguments_are_parsed_as_an_object() {
+        let args =
+            Args::try_parse_from(["wispctl", "plugin", "inspect", r#"{"path":"/tmp/package"}"#])
+                .unwrap();
+        let command = args.command.envelope();
+        assert_eq!(command.name, "plugin_inspect");
+        assert_eq!(command.args["path"], "/tmp/package");
+        assert!(Args::try_parse_from(["wispctl", "plugin", "inspect", "[]"]).is_err());
+    }
 }

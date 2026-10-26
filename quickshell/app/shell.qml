@@ -242,6 +242,11 @@ ShellRoot {
 
   IpcHandler {
     target: "dev.wisp.bridge"
+    // Keep routine health checks small even after a large history loads.
+    function health(): string {
+      return JSON.stringify({connected: bridge.daemonConnected, error: bridge.lastError,
+        self_status: bridge.selfStatusLabel})
+    }
     function status(): string {
       return JSON.stringify({
         "connected": bridge.daemonConnected,

@@ -10,6 +10,8 @@ import "TransferProgress.js" as TransferProgress
 Item {
   id: root
 
+  readonly property alias plugins: plugins
+  WispPlugins { id: plugins; bridge: root }
   readonly property alias updates: updates
   WispUpdates { id: updates; bridge: root }
   property string clientName: "quickshell"
@@ -59,6 +61,7 @@ Item {
   onDaemonConnectedChanged: {
     if (!daemonConnected) serverPings=({})
     if (!daemonConnected) transferProgress=({})
+    if (!daemonConnected) plugins.reset()
     if (!daemonConnected) friendships.reset()
     if (!daemonConnected) typing.reset()
     if (!daemonConnected) messageActions.disconnected()
@@ -1264,7 +1267,7 @@ Item {
       return
     }
     var avatarImageReply = message.type === "result" && (requests[message.id] || {}).kind === "avatar" && (requests[message.id] || {}).action === "image"
-    var handledReply = message.type === "result" && ["voiceRecovery", "soundboard", "serverPing", "accountSetup", "typing"].indexOf((requests[message.id] || {}).kind) >= 0
+    var handledReply = message.type === "result" && ["plugins", "voiceRecovery", "soundboard", "serverPing", "accountSetup", "typing"].indexOf((requests[message.id] || {}).kind) >= 0
     if (message.type === "result") finishRequest(message)
     if (message.type === "result" && !handledReply && !avatarImageReply && message.ok !== true && message.error) {
       lastError = String(message.error.message || "Wisp command failed")
@@ -1444,6 +1447,7 @@ Item {
     var action = requests[message.id]
     if (!action) return
     delete requests[message.id]
+    if (action.kind === "plugins") { plugins.finish(message,action); return }
     if (action.kind === "accountSetup") { accountSetup.finish(message,action); return }
     var value = message.value || ({})
     var conversationId = action.conversationId

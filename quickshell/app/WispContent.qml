@@ -211,6 +211,7 @@ FocusScope {
         onLayoutRequested: layoutMenu.open()
         onHomeRequested: root.goHome()
         onSettingsRequested: if (!root.settingsOpen) root.toggleSettings()
+        onPluginsRequested: { root.currentPage="plugins"; scrollView.contentY=0 }
         onNewRoomRequested: identityRoomManager.createRoom()
       }
 
@@ -366,6 +367,15 @@ FocusScope {
           visible: root.bridge.voiceRecovery.pending; theme: root.theme; text: "cancel"
           onClicked: root.bridge.voiceRecovery.cancel("", true)
         }
+      }
+
+      Loader {
+        id: pluginsLoader
+        active: root.currentPage === "plugins"
+        visible: active
+        width: Math.min(parent.width, root.theme.space(820))
+        x: (parent.width-width)/2
+        sourceComponent: PluginsPage { width: pluginsLoader.width; bridge: root.bridge; theme: root.theme }
       }
 
       Loader {

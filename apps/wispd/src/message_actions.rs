@@ -15,24 +15,24 @@ use wisp_protocol::{
     Message, MessageContext, ReplyReference, SendImageMessageRequest, SendMessageRequest,
 };
 
-enum Session<'a> {
+pub(super) enum Session<'a> {
     Primary(&'a Daemon),
     Linked(Arc<LinkedServer>),
 }
 impl Session<'_> {
-    fn api(&self) -> &ServerApi {
+    pub(super) fn api(&self) -> &ServerApi {
         match self {
             Self::Primary(d) => &d.api,
             Self::Linked(s) => &s.api,
         }
     }
-    fn privacy(&self) -> &Privacy {
+    pub(super) fn privacy(&self) -> &Privacy {
         match self {
             Self::Primary(d) => &d.privacy,
             Self::Linked(s) => &s.privacy,
         }
     }
-    async fn message(&self, id: Uuid) -> anyhow::Result<Message> {
+    pub(super) async fn message(&self, id: Uuid) -> anyhow::Result<Message> {
         let raw: Message = decode(
             self.api()
                 .request(reqwest::Method::GET, &format!("/v1/messages/{id}"))
@@ -120,7 +120,7 @@ fn forwarding_context(original: &Message) -> MessageContext {
 }
 
 impl Daemon {
-    async fn message_session(&self, id: &str) -> anyhow::Result<Session<'_>> {
+    pub(super) async fn message_session(&self, id: &str) -> anyhow::Result<Session<'_>> {
         if id.is_empty() || id == self.primary_server.id {
             return Ok(Session::Primary(self));
         }
@@ -444,7 +444,7 @@ async fn download(
 }
 
 #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
-async fn send_content(
+pub(super) async fn send_content(
     session: &Session<'_>,
     conversation_id: &str,
     text: String,

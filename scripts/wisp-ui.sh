@@ -185,6 +185,9 @@ case "$surface" in
   status)
     call_ui dev.wisp.bridge status
     ;;
+  health)
+    call_ui dev.wisp.bridge health
+    ;;
   quit)
     quit_action=quit
     quit_args=()
@@ -223,7 +226,7 @@ case "$surface" in
     call_ui dev.wisp.app desktop
     ;;
   *)
-    echo "usage: wisp-ui {app|panel} ACTION | {open|toggle|status|quit}" >&2
+    echo "usage: wisp-ui {app|panel} ACTION | {open|toggle|status|health|quit}" >&2
     exit 2
     ;;
 esac

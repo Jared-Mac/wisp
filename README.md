@@ -10,6 +10,13 @@ Server members can upload and play short clips from **Settings → Soundboard**
 or the call controls. Each server has its own library. Importing requires
 `ffmpeg`; see [soundboards](docs/soundboard.md) for formats and controls.
 
+## Wisp plugins
+
+The first application plugin manages shared Valheim modpacks with pinned
+Thunderstore packages, encrypted pack revisions, and separate local BepInEx
+profiles. Open **Wisp → Plugins**. See [the plugin guide](docs/plugin-system.md)
+for installation, the Wasm SDK, permissions, and current limitations.
+
 ## Omarchy plugin
 
 Install the [Wisp bar plugin](https://github.com/Jared-Mac/omarchy-wisp) after
