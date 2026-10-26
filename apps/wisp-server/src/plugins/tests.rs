@@ -120,3 +120,133 @@ async fn catalog_is_member_only_and_admin_managed_with_verified_packages() {
         StatusCode::NOT_FOUND
     );
 }
+
+#[tokio::test]
+async fn server_workspace_is_shared_and_cannot_be_published_by_members() {
+    let state = AppState::new(test_config()).await.unwrap();
+    sqlx::query("INSERT INTO server_identity(id,owner_user_id) VALUES(1,?)")
+        .bind(TEST_OWNER_ID)
+        .execute(&state.pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE users SET username=lower(display_name) WHERE username IS NULL")
+        .execute(&state.pool)
+        .await
+        .unwrap();
+    let app = router(state.clone());
+    let path = "/v1/server/plugins/games.valheim/workspace";
+    assert_eq!(
+        request(&app, "POST", path, TEST_MEMBER_A_ID, json!({}))
+            .await
+            .status(),
+        StatusCode::NOT_FOUND
+    );
+    let digest = wisp_plugins::catalog::entry("games.valheim")
+        .unwrap()
+        .digest;
+    request(
+        &app,
+        "PUT",
+        "/v1/server/plugins/games.valheim",
+        TEST_OWNER_ID,
+        json!({"enabled":true,"digest":digest}),
+    )
+    .await;
+    let owner = value(request(&app, "POST", path, TEST_OWNER_ID, json!({})).await).await;
+    let member = value(request(&app, "POST", path, TEST_MEMBER_A_ID, json!({})).await).await;
+    assert_eq!(owner["conversation_id"], member["conversation_id"]);
+    assert_eq!(owner["can_publish"], true);
+    assert_eq!(member["can_publish"], false);
+    let id = owner["conversation_id"].as_str().unwrap();
+    assert!(
+        super::authorize_publish(&state.pool, id, TEST_OWNER_ID.parse().unwrap())
+            .await
+            .is_ok()
+    );
+    assert!(
+        super::authorize_publish(&state.pool, id, TEST_MEMBER_A_ID.parse().unwrap())
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        request(
+            &app,
+            "DELETE",
+            &format!("/v1/server/channels/{id}"),
+            TEST_OWNER_ID,
+            json!({})
+        )
+        .await
+        .status(),
+        StatusCode::BAD_REQUEST
+    );
+    sqlx::query("UPDATE users SET server_member=0 WHERE id=?")
+        .bind(TEST_MEMBER_A_ID)
+        .execute(&state.pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        request(&app, "POST", path, TEST_MEMBER_A_ID, json!({}))
+            .await
+            .status(),
+        StatusCode::FORBIDDEN
+    );
+    sqlx::query("INSERT OR IGNORE INTO conversation_members(conversation_id,user_id,joined_at,role) VALUES(?,?,?,'admin')")
+        .bind(id).bind(TEST_OWNER_ID).bind(Utc::now().to_rfc3339()).execute(&state.pool).await.unwrap();
+    let legacy = value(request(&app, "GET", "/v1/snapshot", TEST_OWNER_ID, json!({})).await).await;
+    assert!(
+        !legacy["conversations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|c| c["id"] == id)
+    );
+    let modern = value(
+        request(
+            &app,
+            "GET",
+            "/v1/snapshot?plugin_workspaces=1",
+            TEST_OWNER_ID,
+            json!({}),
+        )
+        .await,
+    )
+    .await;
+    assert!(
+        modern["conversations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|c| c["id"] == id)
+    );
+    // Removing/re-enabling the plugin does not destroy its pack history.
+    request(
+        &app,
+        "PUT",
+        "/v1/server/plugins/games.valheim",
+        TEST_OWNER_ID,
+        json!({"enabled":false,"digest":digest}),
+    )
+    .await;
+    assert!(
+        super::authorize_publish(&state.pool, id, TEST_OWNER_ID.parse().unwrap())
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        request(&app, "POST", path, TEST_OWNER_ID, json!({}))
+            .await
+            .status(),
+        StatusCode::NOT_FOUND
+    );
+    request(
+        &app,
+        "PUT",
+        "/v1/server/plugins/games.valheim",
+        TEST_OWNER_ID,
+        json!({"enabled":true,"digest":digest}),
+    )
+    .await;
+    let restored = value(request(&app, "POST", path, TEST_OWNER_ID, json!({})).await).await;
+    assert_eq!(restored["conversation_id"], owner["conversation_id"]);
+}

@@ -15,6 +15,7 @@ Column {
   readonly property var filtered: mods.filter(function(m){return (!search.text || (m.name+" "+m.author+" "+m.version).toLowerCase().indexOf(search.text.toLowerCase())>=0) && (sourceFilter.currentIndex===0 || (sourceFilter.currentIndex===1 ? !m.local : m.local))})
   readonly property var selected: mods.filter(function(m){return m.id===root.selectedId})[0] || null
   readonly property bool resolved: (view.files || []).length>0 && !plugins.dirty
+  readonly property bool editable: !plugins.serverPack || plugins.canPublish
   readonly property bool wide: width>=theme.space(740)
   property string selectedId: ""
   property int tab: 0
@@ -61,7 +62,7 @@ Column {
       Text {text:"ACTIVE PACK";font.letterSpacing:1.2;color:root.theme.muted;font.family:root.theme.font.family;font.pixelSize:root.theme.font.caption}
       TextField {
         id:packName;objectName:"pluginField-title";width:parent.width
-        text:String(root.plugins.fields.title || "");placeholderText:"Name your modpack";readOnly:root.plugins.busy || !root.plugins.view
+        text:String(root.plugins.fields.title || "");placeholderText:"Name your modpack";readOnly:!root.editable || root.plugins.busy || !root.plugins.view
         font.family:root.theme.font.family;font.pixelSize:root.theme.space(22);font.weight:Font.DemiBold
         selectByMouse:true;Accessible.name:"Pack name"
         onTextEdited:root.plugins.setField("title",text)
@@ -74,18 +75,23 @@ Column {
         ComboBox {
           id:scopeChoice;objectName:"pluginConversation";Layout.fillWidth:true;enabled:!root.plugins.busy
           model:root.scopes.map(function(c){return c.label});currentIndex:root.scopeIndex()
-          Accessible.name:"Pack conversation";ThemeControlStyle {theme:root.theme;control:scopeChoice}
+          Accessible.name:"Pack scope";ThemeControlStyle {theme:root.theme;control:scopeChoice}
           onActivated:root.changeScope(root.scopes[currentIndex].id)
         }
         Text {visible:root.wide;text:root.mods.length+" mods · "+root.mods.filter(function(m){return m.local}).length+" private";color:root.theme.muted;font.family:root.theme.font.family;font.pixelSize:root.theme.font.caption}
       }
       Flow {
         width:parent.width;spacing:root.theme.spacing.sm
-        ChatButton {objectName:"pluginSave";theme:root.theme;text:"Save changes";primary:root.plugins.dirty;visible:root.plugins.dirty;enabled:!root.plugins.busy;onClicked:root.plugins.action("save")}
-        ChatButton {objectName:"pluginResolve";theme:root.theme;text:root.resolved ? "Recheck dependencies" : "Resolve mods";enabled:!root.plugins.busy && !root.plugins.dirty && root.mods.length>0;onClicked:root.plugins.request("plugin_resolve",{})}
+        ChatButton {objectName:"pluginSave";theme:root.theme;text:"Save changes";primary:root.plugins.dirty;visible:root.plugins.dirty && root.editable;enabled:!root.plugins.busy;onClicked:root.plugins.action("save")}
+        ChatButton {objectName:"pluginResolve";theme:root.theme;visible:root.editable;text:root.resolved ? "Recheck dependencies" : "Resolve mods";enabled:!root.plugins.busy && !root.plugins.dirty && root.mods.length>0;onClicked:root.plugins.request("plugin_resolve",{})}
         ChatButton {objectName:"pluginApply";theme:root.theme;text:"Install profile…";primary:root.resolved;enabled:!root.plugins.busy && root.resolved;onClicked:root.profileRequested()}
-        ChatButton {objectName:"pluginShare";theme:root.theme;text:"Share pack…";enabled:!root.plugins.busy && root.resolved && !!root.view.document && !!root.plugins.conversation;onClicked:root.shareRequested();ToolTip.visible:hovered && !enabled;ToolTip.text:!root.plugins.conversation ? "Choose a conversation to share this pack." : "Save and resolve the pack before sharing."}
+        ChatButton {objectName:"pluginShare";theme:root.theme;text:root.plugins.serverPack ? "Publish to server…" : "Share pack…";visible:root.editable;enabled:!root.plugins.busy && root.resolved && !!root.view.document && !!root.plugins.conversation;onClicked:root.shareRequested();ToolTip.visible:hovered && !enabled;ToolTip.text:!root.plugins.conversation ? "Choose a conversation to share this pack." : "Save and resolve the pack before sharing."}
       }
+      Flow {width:parent.width;spacing:root.theme.spacing.sm;visible:root.plugins.serverPack
+        ChatButton {objectName:"pluginSeedPersonal";theme:root.theme;text:"Use personal draft";visible:root.editable && root.mods.length===0;enabled:!root.plugins.busy && !root.plugins.dirty;onClicked:root.plugins.request("plugin_seed_personal",{})}
+        ChatButton {objectName:"pluginLoadServer";theme:root.theme;text:"Load published server pack";visible:root.plugins.updateAvailable || root.plugins.serverDraft;enabled:!root.plugins.busy && !root.plugins.dirty;onClicked:loadServer.open()}
+      }
+      Text {width:parent.width;visible:root.plugins.serverPack;text:root.editable ? (root.plugins.serverDraft ? "Server draft · publish when ready so members receive this revision." : "Server pack · admins publish revisions; members choose when to install.") : "Server pack · managed by your server admins. Installing only changes your PC.";wrapMode:Text.Wrap;color:root.theme.muted;font.family:root.theme.font.family;font.pixelSize:root.theme.font.caption}
       Text {
         width:parent.width;wrapMode:Text.Wrap;color:root.plugins.dirty ? root.theme.accent : root.theme.muted;font.family:root.theme.font.family;font.pixelSize:root.theme.font.caption
         text:root.plugins.dirty ? "Unsaved changes · save before resolving or installing." : root.resolved ? "Dependencies resolved · ready to install or share." : "Add your mods, then resolve their dependencies to prepare the pack."
@@ -112,8 +118,8 @@ Column {
       width:parent.width;spacing:root.theme.spacing.sm
       TextField {id:search;objectName:"modSearch";width:Math.min(root.theme.space(260),parent.width);placeholderText:"Search this pack…";selectByMouse:true;Accessible.name:"Search mods";ThemeControlStyle {theme:root.theme;control:search}}
       ComboBox {id:sourceFilter;width:root.theme.space(154);model:["All sources","Thunderstore","Private ZIPs"];Accessible.name:"Filter mod source";ThemeControlStyle {theme:root.theme;control:sourceFilter}}
-      ChatButton {objectName:"modAddPublic";theme:root.theme;text:"Add mod…";enabled:!root.plugins.busy && !!root.plugins.view;onClicked:{dependency.text="";addMod.open()}}
-      ChatButton {objectName:"pluginAddArchive";theme:root.theme;text:"Add private ZIP…";enabled:!root.plugins.busy && !root.plugins.dirty && !!root.plugins.view;onClicked:root.archiveRequested()}
+      ChatButton {objectName:"modAddPublic";theme:root.theme;text:"Add mod…";enabled:root.editable && !root.plugins.busy && !!root.plugins.view;onClicked:{dependency.text="";addMod.open()}}
+      ChatButton {objectName:"pluginAddArchive";theme:root.theme;text:"Add private ZIP…";enabled:root.editable && !root.plugins.busy && !root.plugins.dirty && !!root.plugins.view;onClicked:root.archiveRequested()}
     }
     Rectangle {
       visible:root.plugins.archiveReview!==null;width:parent.width;height:archiveReview.implicitHeight+root.theme.spacing.md*2
@@ -175,12 +181,12 @@ Column {
           Text {width:parent.width;text:root.selected ? "Version "+root.selected.version+"\n"+root.selected.source+(root.selected.size ? " · "+Mods.size(root.selected.size) : "") : "View its version, source and package details here.";wrapMode:Text.Wrap;color:root.theme.muted;font.family:root.theme.font.family;font.pixelSize:root.theme.font.body}
           Text {width:parent.width;visible:!!root.selected;text:root.selected ? root.selected.id : "";wrapMode:Text.WrapAnywhere;color:root.theme.muted;font.family:root.theme.font.family;font.pixelSize:root.theme.font.caption}
           Text {width:parent.width;visible:!!root.selected && !root.selected.direct && !root.selected.local;text:"Required by this pack. Dependencies are managed when you resolve mods.";wrapMode:Text.Wrap;color:root.theme.muted;font.family:root.theme.font.family;font.pixelSize:root.theme.font.caption}
-          ChatButton {objectName:"modRemoveSelected";theme:root.theme;text:"Remove from pack";destructive:true;visible:!!root.selected && (root.selected.direct || root.selected.local);enabled:!root.plugins.busy && (!root.selected || !root.selected.local || !root.plugins.dirty);onClicked:removeMod.open()}
+          ChatButton {objectName:"modRemoveSelected";theme:root.theme;text:"Remove from pack";destructive:true;visible:!!root.selected && (root.selected.direct || root.selected.local);enabled:root.editable && !root.plugins.busy && (!root.selected || !root.selected.local || !root.plugins.dirty);onClicked:removeMod.open()}
         }
       }
     }
     ChatButton {theme:root.theme;text:root.advanced ? "Hide advanced editor" : "Advanced · edit dependency list";onClicked:root.advanced=!root.advanced}
-    TextArea {id:rawPackages;objectName:"pluginField-packages";visible:root.advanced;width:parent.width;wrapMode:TextEdit.Wrap;textFormat:TextEdit.PlainText;selectByMouse:true;readOnly:root.plugins.busy
+    TextArea {id:rawPackages;objectName:"pluginField-packages";visible:root.advanced;width:parent.width;wrapMode:TextEdit.Wrap;textFormat:TextEdit.PlainText;selectByMouse:true;readOnly:!root.editable || root.plugins.busy
       text:String(root.plugins.fields.packages || "");Accessible.name:"Exact Thunderstore dependency versions";placeholderText:"Team-Package-1.2.3, one per line"
       font.family:root.theme.font.family;font.pixelSize:root.theme.font.body;ThemeControlStyle {theme:root.theme;control:rawPackages}
       onTextChanged:if(root.plugins.view && text!==String(root.plugins.fields.packages || ""))root.plugins.setField("packages",text)
@@ -189,9 +195,9 @@ Column {
   Column {
     width:parent.width;spacing:root.theme.spacing.md;visible:root.tab===1
     Text {text:"Shared packs";color:root.theme.foreground;font.family:root.theme.font.family;font.pixelSize:root.theme.font.title;font.weight:Font.DemiBold}
-    Text {width:parent.width;text:!root.plugins.conversation ? "Choose a conversation above to see its shared modpacks." : "Import a shared revision to review its mods, then install it on this PC.";wrapMode:Text.Wrap;color:root.theme.muted;font.family:root.theme.font.family;font.pixelSize:root.theme.font.body}
-    Text {width:parent.width;visible:!!root.plugins.conversation && root.plugins.shared.length===0;text:"No packs in loaded chat history. Refresh after someone shares a revision.";wrapMode:Text.Wrap;color:root.theme.muted;font.family:root.theme.font.family;font.pixelSize:root.theme.font.caption}
-    Repeater {model:root.plugins.shared
+    Text {width:parent.width;text:root.plugins.serverPack ? "The published pack loads automatically. Admin drafts stay local until published. New members may need an admin to republish for their membership." : !root.plugins.conversation ? "Choose a conversation above to see its shared modpacks." : "Import a shared revision to review its mods, then install it on this PC.";wrapMode:Text.Wrap;color:root.theme.muted;font.family:root.theme.font.family;font.pixelSize:root.theme.font.body}
+    Text {width:parent.width;visible:!root.plugins.serverPack && !!root.plugins.conversation && root.plugins.shared.length===0;text:"No packs in loaded chat history. Refresh after someone shares a revision.";wrapMode:Text.Wrap;color:root.theme.muted;font.family:root.theme.font.family;font.pixelSize:root.theme.font.caption}
+    Repeater {model:root.plugins.serverPack ? [] : root.plugins.shared
       Rectangle {required property var modelData;width:parent.width;height:sharedRow.implicitHeight+root.theme.spacing.md*2;color:root.theme.surface;radius:root.theme.cornerRadius
         Column {id:sharedRow;x:root.theme.spacing.md;y:x;width:parent.width-2*x;spacing:root.theme.spacing.sm
           Text {width:parent.width;text:"Shared by "+modelData.author;wrapMode:Text.Wrap;textFormat:Text.PlainText;color:root.theme.foreground;font.family:root.theme.font.family;font.pixelSize:root.theme.font.body;font.weight:Font.DemiBold}
@@ -223,6 +229,11 @@ Column {
     ThemeControlStyle {theme:root.theme;control:removeMod;outline:true}
     Text {width:parent.width;text:root.selected ? "Remove "+root.selected.name+" from the draft? Previously installed profiles are kept." : "";wrapMode:Text.Wrap;color:root.theme.foreground}
     onAccepted:root.removeSelected()
+  }
+  Dialog {id:loadServer;width:Math.min(root.width,420);title:"Load published server pack?";modal:true;standardButtons:Dialog.Ok | Dialog.Cancel
+    ThemeControlStyle {theme:root.theme;control:loadServer;outline:true}
+    Text {width:Math.min(root.width,400);wrapMode:Text.Wrap;text:"Replace this local server draft with the published pack? Personal drafts and installed profiles will be kept.";color:root.theme.foreground}
+    onAccepted:root.plugins.request("plugin_load_server",{})
   }
   Dialog {id:scopeWarning;objectName:"scopeWarningDialog";parent:Overlay.overlay;x:parent ? (parent.width-width)/2 : 0;y:parent ? Math.max(0,(parent.height-height)/2) : 0;title:"Discard unsaved changes?";modal:true;width:Math.min(parent ? parent.width-root.theme.space(24) : root.width,root.theme.space(420));standardButtons:Dialog.Discard | Dialog.Cancel
     ThemeControlStyle {theme:root.theme;control:scopeWarning;outline:true}

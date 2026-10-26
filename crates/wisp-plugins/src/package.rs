@@ -48,6 +48,10 @@ pub struct Installed {
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Instance {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shared_revision: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub draft_changed: bool,
     pub generation: u64,
     #[serde(default)]
     pub state: Value,
@@ -221,6 +225,7 @@ mod tests {
                     state: serde_json::json!({"name":"pack"}),
                     folder: None,
                     archives: Vec::new(),
+                    ..Instance::default()
                 },
             )
             .unwrap();

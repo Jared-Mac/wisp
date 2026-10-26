@@ -98,7 +98,7 @@ pub(super) async fn settings(
     let categories = sqlx::query("SELECT id,name,position FROM channel_categories ORDER BY position,name COLLATE NOCASE")
         .fetch_all(&state.pool).await.map_err(ApiError::internal)?
         .into_iter().map(|row| json!({"id":row.get::<String,_>("id"),"name":row.get::<String,_>("name"),"position":row.get::<i64,_>("position")})).collect::<Vec<_>>();
-    let channels = sqlx::query("SELECT sc.conversation_id,c.label,sc.category_id,sc.position,sc.visibility,(SELECT json_group_array(user_id) FROM channel_allowed_users WHERE conversation_id=sc.conversation_id) member_ids FROM server_channels sc JOIN conversations c ON c.id=sc.conversation_id ORDER BY sc.position,c.label COLLATE NOCASE")
+    let channels = sqlx::query("SELECT sc.conversation_id,c.label,sc.category_id,sc.position,sc.visibility,(SELECT json_group_array(user_id) FROM channel_allowed_users WHERE conversation_id=sc.conversation_id) member_ids FROM server_channels sc JOIN conversations c ON c.id=sc.conversation_id WHERE sc.conversation_id NOT LIKE 'plugin:%' ORDER BY sc.position,c.label COLLATE NOCASE")
         .fetch_all(&state.pool).await.map_err(ApiError::internal)?
         .into_iter().map(|row| json!({"id":row.get::<String,_>("conversation_id"),"name":row.get::<String,_>("label"),"category_id":row.get::<Option<String>,_>("category_id"),"position":row.get::<i64,_>("position"),"visibility":row.get::<String,_>("visibility"),"member_ids":serde_json::from_str::<Value>(&row.get::<String,_>("member_ids")).unwrap_or(json!([]))})).collect::<Vec<_>>();
     let rooms = sqlx::query("SELECT c.id,s.name,s.private,s.category_id,EXISTS(SELECT 1 FROM hangouts h WHERE h.spot_id=s.id AND h.ended_at IS NULL) active FROM spots s JOIN conversations c ON c.spot_id=s.id ORDER BY s.name COLLATE NOCASE")
@@ -371,6 +371,12 @@ pub(super) async fn update_channel(
     Json(request): Json<UpdateServerChannelRequest>,
 ) -> Result<Json<Value>, ApiError> {
     require_manager(&state, &headers).await?;
+    if id.starts_with("plugin:") {
+        return Err(ApiError::bad_request(
+            "plugin_workspace",
+            "Manage this workspace from Plugins",
+        ));
+    }
     let name = valid_name(&request.name, 80)?;
     ensure_category(&state.pool, request.category_id.as_deref()).await?;
     if let Some(visibility) = request.visibility.as_deref() {
@@ -431,6 +437,12 @@ pub(super) async fn delete_channel(
     Path(id): Path<String>,
 ) -> Result<Json<Value>, ApiError> {
     require_manager(&state, &headers).await?;
+    if id.starts_with("plugin:") {
+        return Err(ApiError::bad_request(
+            "plugin_workspace",
+            "Manage this workspace from Plugins",
+        ));
+    }
     let changed = sqlx::query("DELETE FROM conversations WHERE id=? AND EXISTS(SELECT 1 FROM server_channels WHERE conversation_id=?)")
         .bind(&id).bind(&id).execute(&state.pool).await.map_err(ApiError::internal)?;
     if changed.rows_affected() == 0 {

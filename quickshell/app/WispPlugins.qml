@@ -8,6 +8,11 @@ Item {
   property string conversation: ""
   property string server: ""
   property bool serverMode: false
+  readonly property bool serverPack: serverMode && conversation==="@server"
+  property bool canPublish: true
+  property bool serverDraft: false
+  property bool updateAvailable: false
+  property string serverRevision: ""
   readonly property bool dirty: !!view && (view.fields || []).some(function(f){return String(fields[f.id] || "")!==String(f.value || "")})
   property var review: null
   property var archiveReview: null
@@ -24,7 +29,7 @@ Item {
   function reset() { epoch++; busy=false; view=null; shared=[]; review=null;archiveReview=null;selected="";folder="";folderUrl="";feedback="";serverMode=false }
   function request(name,args) {
     if (busy) return false
-    var values=Object.assign({},bridge.scopeForConversation(conversation),{server_id:server || String(bridge.activeServer.id || ""),plugin_id:selected,generation:generation},args || {})
+    var values=Object.assign({},bridge.scopeForConversation(conversation),{server_id:server || String(bridge.activeServer.id || ""),plugin_id:selected,generation:generation,server_pack:serverPack,conversation_id:serverPack ? "" : String(bridge.scopeForConversation(conversation).conversation_id || "")},args || {})
     var id=bridge.send(name,values)
     if (!id) { feedback="Wisp is disconnected.";return false }
     busy=true; feedback=name==="plugin_resolve" ? "Resolving and verifying Thunderstore packages…" : name==="plugin_apply" ? "Preparing your local profile…" : "Working…"
@@ -35,7 +40,7 @@ Item {
   function open(id,scope) { if(busy)return;selected=id;conversation=scope;if(!serverMode)server=String(bridge.scopeForConversation(scope).server_id);view=null;shared=[];archiveReview=null;folder="";folderUrl="";if(id)request("plugin_open",{}) }
   function openServer(entry,serverId) {
     if(busy)return
-    reset();serverMode=true;server=serverId;selected=entry.manifest.id;conversation=""
+    reset();serverMode=true;server=serverId;selected=entry.manifest.id;conversation="@server"
     request("plugin_server_prepare",{digest:entry.installed_digest || entry.digest})
   }
   function setField(id,value) { var next=Object.assign({},fields);next[id]=value;fields=next }
@@ -59,6 +64,7 @@ Item {
     if(action.command==="plugin_remove") {selected="";view=null;shared=[];folder="";return}
     if(action.command==="plugin_enable") {view=null;return}
     if(value.view!==undefined) {
+      canPublish=value.can_publish!==false;serverDraft=!!value.server_draft;updateAvailable=!!value.update_available;serverRevision=String(value.server_revision || "")
       view=value.view;generation=Number(value.generation);digest=String(value.digest);folder=String(value.folder || "");folderUrl=String(value.folder_url || "");shared=value.shared || []
       var values={};(view.fields || []).forEach(function(f){values[f.id]=String(f.value || "")});fields=values
     }

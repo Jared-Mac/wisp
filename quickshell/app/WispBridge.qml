@@ -482,7 +482,7 @@ Item {
     states.forEach(function(state) {
       ChatLogic.visibleConversations(state.conversations || [],state.hangouts || []).forEach(function(c) { conversations.push(root.scopedConversation(state.server,c)) })
       var stateMessages=state.messages || [],stateInvitations=state.room_invitations || []
-      stateMessages.forEach(function(m) { messages.push(root.scopedMessage(state.server,m)) })
+      stateMessages.filter(function(m){return String(m.conversation_id).indexOf("plugin:")!==0}).forEach(function(m) { messages.push(root.scopedMessage(state.server,m)) })
       stateInvitations.forEach(function(i) { invitations.push(Object.assign({},i,{server_id:String(state.server.id)})) })
     })
     return {conversations:conversations,messages:messages,room_invitations:invitations}

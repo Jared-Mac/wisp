@@ -132,7 +132,7 @@ impl Daemon {
         };
         let packages = packages()?;
         let args = &command.args;
-        let name = command.name.as_str();
+        let mut name = command.name.as_str();
         ensure!(
             serde_json::to_vec(args)?.len() <= MAX_JSON,
             "Plugin command exceeds limit"
@@ -243,7 +243,45 @@ impl Daemon {
         let session = self
             .message_session(args["server_id"].as_str().unwrap_or_default())
             .await?;
-        let conversation_id = args["conversation_id"].as_str().unwrap_or_default();
+        let server_pack = args["server_pack"].as_bool().unwrap_or(false);
+        let workspace: Value = if server_pack {
+            let value = crate::decode(
+                session
+                    .api()
+                    .request(
+                        reqwest::Method::POST,
+                        &format!("/v1/server/plugins/{id}/workspace"),
+                    )
+                    .send()
+                    .await?,
+            )
+            .await?;
+            match &session {
+                message_actions::Session::Primary(_) => {
+                    self.refresh("plugin_workspace").await?;
+                }
+                message_actions::Session::Linked(server) => {
+                    self.refresh_linked(server, "plugin_workspace").await?;
+                }
+            }
+            value
+        } else {
+            Value::Null
+        };
+        let can_publish = !server_pack || workspace["can_publish"].as_bool().unwrap_or(false);
+        if server_pack && !matches!(name, "plugin_open" | "plugin_apply" | "plugin_load_server") {
+            ensure!(
+                can_publish,
+                "Only server admins can change or publish the server pack"
+            );
+        }
+        let conversation_id = if server_pack {
+            workspace["conversation_id"]
+                .as_str()
+                .context("Server workspace unavailable")?
+        } else {
+            args["conversation_id"].as_str().unwrap_or_default()
+        };
         let snapshot = match &session {
             message_actions::Session::Primary(d) => d.state.read().await.clone(),
             message_actions::Session::Linked(s) => s.state.read().await.clone(),
@@ -269,6 +307,28 @@ impl Daemon {
                 "This plugin view changed. Reopen it before continuing"
             );
         }
+        let latest = workspace["latest_message_id"].as_str();
+        let mut imported_message = args["message_id"].as_str().map(str::to_owned);
+        if server_pack
+            && (name == "plugin_load_server"
+                || (name == "plugin_open"
+                    && !instance.draft_changed
+                    && latest.is_some()
+                    && latest != instance.shared_revision.as_deref()))
+        {
+            imported_message = Some(
+                latest
+                    .context("No server pack has been published for your membership yet")?
+                    .to_owned(),
+            );
+            name = "plugin_import";
+        }
+        if server_pack && name == "plugin_import" {
+            ensure!(
+                imported_message.as_deref() == latest,
+                "Load the current published server revision"
+            );
+        }
         let mut request = Request {
             api: 1,
             event: "open".into(),
@@ -277,10 +337,34 @@ impl Daemon {
             state: instance.state.clone(),
             document: None,
         };
-        let mut feedback = String::new();
+        let mut feedback = if server_pack && latest.is_none() && !can_publish {
+            "No server pack is available to your membership yet. Ask a server admin to publish it."
+                .into()
+        } else {
+            String::new()
+        };
         let mut completed = None;
         match name {
             "plugin_open" => {}
+            "plugin_seed_personal" => {
+                ensure!(
+                    server_pack && can_publish,
+                    "Choose the server pack as an admin first"
+                );
+                let personal_scope = serde_json::to_string(&(
+                    session.api().base_url.clone(),
+                    snapshot.self_state.user.id,
+                    "",
+                ))?;
+                let personal = packages.instance(&id, &personal_scope)?;
+                ensure!(
+                    !personal.state.is_null(),
+                    "No saved personal draft is available"
+                );
+                instance.archives = personal.archives;
+                request.state = personal.state;
+                feedback = "Personal draft copied. Resolve and publish to make it available to the server.".into();
+            }
             "plugin_inspect_archive" | "plugin_add_archive" => {
                 ensure!(
                     installed
@@ -358,7 +442,12 @@ impl Daemon {
                     "Document permission is required"
                 );
                 let message = session
-                    .message(string_arg(args, "message_id")?.parse()?)
+                    .message(
+                        imported_message
+                            .as_deref()
+                            .context("Choose a shared pack")?
+                            .parse()?,
+                    )
                     .await?;
                 ensure!(
                     !conversation_id.is_empty()
@@ -433,6 +522,10 @@ impl Daemon {
                 request.event = "import".into();
                 request.document = Some(document.data);
                 request.fields = json!({"document_hash":document_hash});
+                if server_pack {
+                    instance.shared_revision = imported_message.clone();
+                    instance.draft_changed = false;
+                }
                 feedback = format!(
                     "Imported from {}. Review before installing.",
                     message.sender.display_name
@@ -489,6 +582,12 @@ impl Daemon {
                     feedback = format!("Profile ready: {}", folder.display());
                     instance.folder = Some(folder);
                 } else {
+                    if server_pack {
+                        ensure!(
+                            latest.is_none() || latest == instance.shared_revision.as_deref(),
+                            "The server pack changed. Load its current revision before publishing your changes."
+                        );
+                    }
                     ensure!(
                         !conversation_id.is_empty(),
                         "Choose a friend group or server channel before sharing"
@@ -553,6 +652,10 @@ impl Daemon {
                             let _ = self.refresh_linked(server, "message_created").await;
                         }
                     }
+                    if server_pack {
+                        instance.shared_revision = Some(sent.id.to_string());
+                        instance.draft_changed = false;
+                    }
                     feedback = format!(
                         "Shared this revision in the selected conversation ({}).",
                         sent.id
@@ -570,6 +673,18 @@ impl Daemon {
         };
         files::authorize_private(&response.view.files, &instance.archives)?;
         files::authorize_private(&response.view.archives, &instance.archives)?;
+        if server_pack
+            && matches!(
+                name,
+                "plugin_action"
+                    | "plugin_add_archive"
+                    | "plugin_remove_archive"
+                    | "plugin_resolve"
+                    | "plugin_seed_personal"
+            )
+        {
+            instance.draft_changed = true;
+        }
         instance.state = response.state;
         instance.generation = instance
             .generation
@@ -592,7 +707,7 @@ impl Daemon {
             )
             .collect();
         Ok(Some(
-            json!({"view":response.view,"generation":instance.generation,"digest":digest,"folder":instance.folder,"folder_url":instance.folder.as_ref().and_then(|p|url::Url::from_directory_path(p).ok().map(|url|url.to_string())),"shared":shared,"feedback":feedback}),
+            json!({"server_pack":server_pack,"can_publish":can_publish,"server_revision":instance.shared_revision,"server_draft":instance.draft_changed,"update_available":name!="plugin_share" && server_pack && latest.is_some() && latest!=instance.shared_revision.as_deref(),"view":response.view,"generation":instance.generation,"digest":digest,"folder":instance.folder,"folder_url":instance.folder.as_ref().and_then(|p|url::Url::from_directory_path(p).ok().map(|url|url.to_string())),"shared":shared,"feedback":feedback}),
         ))
     }
 }

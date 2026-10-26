@@ -62,8 +62,10 @@ ShellRoot {
     test.check(prepare.name==="plugin_server_prepare" && prepare.args.server_id==="server-two" && !prepare.args.path,"opening a server plugin needs no folder picker")
     reply({installed:{manifest:manifest},plugins:[{manifest:manifest,enabled:true}]})
     var opened=bridge.sent[bridge.sent.length-1]
-    test.check(opened.name==="plugin_open" && opened.args.server_id==="server-two","prepared plugin opens in its originating server")
-    reply({view:view,generation:9,digest:"abc",shared:[]})
+    test.check(opened.name==="plugin_open" && opened.args.server_id==="server-two" && opened.args.server_pack && opened.args.conversation_id==="","prepared plugin defaults to the whole server without a channel")
+    reply({view:view,generation:9,digest:"abc",shared:[],server_pack:true,can_publish:false});input.wait(40)
+    test.check(bridge.plugins.serverPack && !test.find(page,"modAddPublic",[]).enabled && !test.find(page,"pluginShare",[]).visible,"members view the shared server pack without admin editing controls")
+    test.check(page.scopes[0].id==="@server","whole-server scope is listed first")
     bridge.plugins.open("games.valheim","")
     test.check(bridge.sent[bridge.sent.length-1].args.server_id==="server-two","personal draft refresh preserves server scope")
     reply({view:view,generation:9,digest:"abc",shared:[]})

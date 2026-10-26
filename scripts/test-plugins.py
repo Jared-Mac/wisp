@@ -63,6 +63,7 @@ with tempfile.TemporaryDirectory(prefix='wisp-plugins-test-') as temporary:
             call(who,'plugin_install',{'path':package,'digest':review['digest']})
         # Admin adds one catalog plugin; members open it without selecting local files.
         with sqlite3.connect(root/'server.sqlite3') as db:
+            db.execute("UPDATE users SET username=lower(display_name) WHERE username IS NULL")
             db.execute("INSERT INTO server_identity(id,owner_user_id) SELECT 1,id FROM users WHERE display_name='Owner'")
         catalog=call('owner','plugin_server_catalog')
         assert catalog['can_manage'] and not catalog['catalog'][0]['enabled']
@@ -162,6 +163,36 @@ with tempfile.TemporaryDirectory(prefix='wisp-plugins-test-') as temporary:
             # Server only stores the encrypted attachment, not pack contents.
             assert b'Our Valheim modpack' not in (root/'server.sqlite3').read_bytes()
             print('PASS: Thunderstore pin -> verified profile -> encrypted share -> peer import; scope isolation',flush=True)
+        # The default server workspace is shared independently of chat channels.
+        personal=call('owner','plugin_open',{'plugin_id':'games.valheim'})
+        personal=call('owner','plugin_action',{'plugin_id':'games.valheim','generation':personal['generation'],'action':'save','fields':{'title':'Keep my personal draft','packages':''}})
+        server_base={'plugin_id':'games.valheim','server_pack':True}
+        server_pack=call('owner','plugin_open',server_base)
+        assert server_pack['can_publish'] and server_pack['server_pack']
+        server_pack=call('owner','plugin_seed_personal',server_base|{'generation':server_pack['generation']})
+        assert any(f['value']=='Keep my personal draft' for f in server_pack['view']['fields'])
+        archive.write_bytes(original)
+        server_pack=call('owner','plugin_add_archive',server_base|{'generation':server_pack['generation'],'path':str(archive),'sha256':review['artifact']['sha256']})
+        server_pack=call('owner','plugin_resolve',server_base|{'generation':server_pack['generation']})
+        server_pack=call('owner','plugin_share',server_base|{'generation':server_pack['generation']})
+        assert not server_pack['server_draft'] and not server_pack['update_available']
+        peer=call('member','plugin_open',server_base)
+        assert not peer['can_publish'] and peer['server_revision']==server_pack['server_revision']
+        assert peer['view']['files']==server_pack['view']['files']
+        rejected(lambda:call('member','plugin_action',server_base|{'generation':peer['generation'],'action':'save','fields':{'title':'Unauthorized','packages':''}}))
+        rejected(lambda:call('member','plugin_share',server_base|{'generation':peer['generation']}))
+        parent=root/'server-member-profiles';parent.mkdir()
+        peer=call('member','plugin_apply',server_base|{'generation':peer['generation'],'digest':peer['digest'],'path':str(parent)})
+        assert (Path(peer['folder'])/'BepInEx/plugins/Local-Foundation/Foundation.dll').read_bytes()==payload
+        server_pack=call('owner','plugin_action',server_base|{'generation':server_pack['generation'],'action':'save','fields':{'title':'Unpublished server edits','packages':''}})
+        owner_again=call('owner','plugin_open',server_base)
+        assert owner_again['server_draft'] and any(f['value']=='Unpublished server edits' for f in owner_again['view']['fields'])
+        peer_again=call('member','plugin_open',server_base)
+        assert any(f['value']=='Keep my personal draft' for f in peer_again['view']['fields'])
+        personal_again=call('owner','plugin_open',{'plugin_id':'games.valheim'})
+        assert any(f['value']=='Keep my personal draft' for f in personal_again['view']['fields'])
+        assert personal_again['view']['archives']==[]
+        print('PASS: default encrypted server pack, automatic peer load/install, admin-only edits, unpublished draft and personal scope preservation',flush=True)
         call('owner','plugin_enable',{'plugin_id':'games.valheim','enabled':False})
         rejected(lambda:call('owner','plugin_open',base))
         call('owner','plugin_enable',{'plugin_id':'games.valheim','enabled':True})

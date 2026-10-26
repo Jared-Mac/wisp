@@ -377,3 +377,24 @@ Status: **Deferred. No Android release or port requested.**
   narrow-width rendering, add/version/remove presentation checks, real-daemon
   main-shortcut test and two-client encrypted private-pack install lifecycle.
 - Deferred context only; do not start an Android port or release.
+
+## Queued: default server-wide modpack (2026-10-26)
+
+Server plugin managers default to one shared server pack, rather than a chosen
+chat. Admins explicitly publish encrypted revisions; members automatically load
+the latest revision they can decrypt and choose whether to install. Personal and
+channel drafts remain separate. Admin unpublished drafts survive refresh; loading
+the published pack explicitly replaces only the local server draft. A personal
+draft can be copied without altering the original. Private ZIPs stay encrypted.
+Schema 37 adds plugin_workspaces, backed by reserved `plugin:<id>` encrypted
+server channels and existing signed rosters. POST `/v1/server/plugins/{id}/workspace`
+returns conversation_id, latest_message_id and can_publish. Publishing is checked
+server-side against current admin membership and plugin enablement. Normal HTTP
+and initial WebSocket snapshots hide internal channels; updated native clients
+request `/v1/snapshot?plugin_workspaces=1` for crypto synchronization and filter
+internal channels/messages from chat UI. Future members need an admin to republish
+for their expanded encryption roster; historical plaintext is never exposed.
+Sources: apps/wisp-server/src/plugins.rs, apps/wispd/src/plugins.rs,
+quickshell/app/WispPlugins.qml and components/ValheimModManager.qml. Coverage:
+server access tests, two-client encrypted publish/import/install tests, personal
+and unpublished draft preservation, headless UI defaults. Android stays deferred.

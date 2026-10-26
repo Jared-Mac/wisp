@@ -22,7 +22,7 @@ Column {
     var server=(bridge.servers || []).filter(function(s){return String(s.id)===String(c.server_id)})[0]
     return String(c.label || "Conversation") + (server ? " · "+server.name : "") + (c.server_channel ? " · server channel" : " · friends")
   }
-  property var scopes: [{id:"",label:"Personal draft"}].concat((bridge.conversations || []).filter(function(c){return !root.plugins.serverMode || String(c.server_id)===root.plugins.server}).map(function(c){return {id:String(c.id),label:root.conversationLabel(c)}}))
+  property var scopes: (root.plugins.serverMode ? [{id:"@server",label:"Server pack · all members"},{id:"",label:"Personal draft"}] : [{id:"",label:"Personal draft"}]).concat((bridge.conversations || []).filter(function(c){return !root.plugins.serverMode || String(c.server_id)===root.plugins.server}).map(function(c){return {id:String(c.id),label:root.conversationLabel(c)}}))
   readonly property var selectedPackage: plugins.installed.filter(function(p){return p.manifest.id===root.plugins.selected})[0] || null
   readonly property bool supportsArchives: !!selectedPackage && (selectedPackage.manifest.permissions || []).indexOf("local_archives")>=0
   spacing: theme.spacing.md
@@ -160,9 +160,9 @@ Column {
   FolderDialog {id:packagePicker;title:"Choose a plugin folder containing plugin.json and plugin.wasm";onAccepted:root.plugins.inspect(selectedFolder)}
   FolderDialog {id:profilePicker;title:"Choose a folder for a new, separate game profile";onAccepted:root.plugins.apply(selectedFolder)}
   FileDialog {id:archivePicker;title:"Choose a private mod ZIP containing manifest.json";nameFilters:["Mod packages (*.zip)"];onAccepted:root.plugins.inspectArchive(selectedFile)}
-  Dialog {id:shareDialog;ThemeControlStyle {theme:root.theme;control:shareDialog;outline:true}
-    title:"Share this pack revision?";modal:true;standardButtons:Dialog.Ok | Dialog.Cancel
-    Text {width:Math.min(root.width,400);wrapMode:Text.Wrap;text:"Send the locked modpack, including any private ZIP contents, to everyone in the selected conversation. Each person chooses whether to install it.";color:root.theme.foreground}
+  Dialog {id:shareDialog;width:Math.min(root.width,420);ThemeControlStyle {theme:root.theme;control:shareDialog;outline:true}
+    title:root.plugins.serverPack ? "Publish this server pack?" : "Share this pack revision?";modal:true;standardButtons:Dialog.Ok | Dialog.Cancel
+    Text {width:Math.min(root.width,400);wrapMode:Text.Wrap;text:root.plugins.serverPack ? "Publish this revision for every current server member, including private ZIP contents. Each person chooses whether to install it." : "Send the locked modpack, including any private ZIP contents, to everyone in the selected conversation. Each person chooses whether to install it.";color:root.theme.foreground}
     onAccepted:root.plugins.request("plugin_share",{})
   }
   Dialog {id:removeDialog;ThemeControlStyle {theme:root.theme;control:removeDialog;outline:true}

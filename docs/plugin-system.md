@@ -244,3 +244,19 @@ or touches real conversations.
 Primary references: [Wasmi](https://github.com/wasmi-labs/wasmi),
 [Thunderstore package format](https://wiki.thunderstore.io/mods/creating-a-package),
 and [BepInExPack Valheim](https://thunderstore.io/c/valheim/p/denikson/BepInExPack_Valheim/).
+
+
+### Server-wide packs
+
+Opening a server's Valheim plugin selects **Server pack · all members** by default.
+Admins edit a local server draft, resolve it and **Publish to server**. Members see
+the current published revision and may install it on their own PC. **Use personal
+draft** copies an existing saved personal draft into an empty server draft; the
+original remains available. The scope selector retains personal and conversation
+packs for optional targeted sharing. Publishing never installs mods or launches
+games on another member's machine.
+
+The transport is an internal encrypted server channel, hidden from chat navigation
+and legacy snapshots. Admin publishing is enforced by the server. Saved unpublished
+drafts survive refresh and a newer published revision is not silently overwritten.
+New members may require an admin to republish for their expanded signed roster.

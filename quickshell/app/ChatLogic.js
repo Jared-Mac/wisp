@@ -14,6 +14,7 @@ function visibleConversations(conversations, hangouts) {
     activeHangouts["hangout:" + String(hangout.id)] = true
   })
   return (conversations || []).filter(function(conversation) {
+    if (String(conversation.id).indexOf("plugin:")===0) return false
     if (String(conversation.kind) !== "hangout" || conversation.spot_id)
       return true
     // Temporary call chats are useful while the call is live, or afterward

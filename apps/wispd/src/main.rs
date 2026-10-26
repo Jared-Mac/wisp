@@ -209,7 +209,7 @@ impl ServerApi {
 
     async fn snapshot(&self) -> anyhow::Result<Snapshot> {
         decode(
-            self.request(reqwest::Method::GET, "/v1/snapshot")
+            self.request(reqwest::Method::GET, "/v1/snapshot?plugin_workspaces=1")
                 .send()
                 .await?,
         )

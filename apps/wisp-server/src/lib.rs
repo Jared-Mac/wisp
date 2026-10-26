@@ -796,6 +796,10 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/server/plugins", get(plugins::list))
         .route("/v1/server/plugins/{id}", put(plugins::update))
         .route("/v1/server/plugins/{id}/package", get(plugins::package))
+        .route(
+            "/v1/server/plugins/{id}/workspace",
+            post(plugins::workspace),
+        )
         .route("/v1/server/admins", post(server_management::set_admin))
         .route(
             "/v1/server/members/moderate",
@@ -1680,12 +1684,25 @@ async fn revoke_device(
     Ok(Json(json!({"ok": true})))
 }
 
+fn hide_plugin_workspaces(snapshot: &mut Snapshot) {
+    snapshot
+        .conversations
+        .retain(|c| !c.id.starts_with("plugin:"));
+    snapshot
+        .messages
+        .retain(|m| !m.conversation_id.starts_with("plugin:"));
+}
 async fn snapshot(
     State(state): State<AppState>,
     headers: HeaderMap,
+    Query(options): Query<std::collections::HashMap<String, String>>,
 ) -> Result<Json<Snapshot>, ApiError> {
     let user_id = authenticate_headers(&state, &headers).await?;
-    Ok(Json(state.snapshot(user_id).await?))
+    let mut snapshot = state.snapshot(user_id).await?;
+    if options.get("plugin_workspaces").map(String::as_str) != Some("1") {
+        hide_plugin_workspaces(&mut snapshot);
+    }
+    Ok(Json(snapshot))
 }
 
 async fn set_presence(
@@ -2090,6 +2107,7 @@ async fn persist_message(
 ) -> Result<Message, ApiError> {
     account_membership::require_unblocked_chat(&state.pool, sender_id, &request.conversation_id)
         .await?;
+    plugins::authorize_publish(&state.pool, &request.conversation_id, sender_id).await?;
     validate_message_context(state, sender_id, &request).await?;
     let sender = find_user(&state.pool, &sender_id.to_string()).await?;
     let message = Message {
@@ -2690,7 +2708,8 @@ async fn event_socket(
     state.set_connected(user_id, true).await;
     let (mut sender, mut receiver) = socket.split();
     let mut events = state.events.subscribe();
-    if let Ok(snapshot) = state.snapshot(user_id).await {
+    if let Ok(mut snapshot) = state.snapshot(user_id).await {
+        hide_plugin_workspaces(&mut snapshot);
         let initial = ServerEvent {
             seq: snapshot.seq,
             name: "snapshot".into(),
