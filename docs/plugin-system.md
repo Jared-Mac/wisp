@@ -260,3 +260,35 @@ The transport is an internal encrypted server channel, hidden from chat navigati
 and legacy snapshots. Admin publishing is enforced by the server. Saved unpublished
 drafts survive refresh and a newer published revision is not silently overwritten.
 New members may require an admin to republish for their expanded signed roster.
+
+### Installed server-pack status and sync
+
+The manager's **This PC** panel compares its managed profile with the published
+server pack. It distinguishes **Up to date**, **Update available**, **Local
+changes**, **Profile missing**, **Not installed**, and unavailable/unpublished
+states. Matching is based on the locked artifact plan and the receipt's actual
+file hashes, including detecting missing and added files. It does not claim that
+a running game loaded that profile or that other players are synced.
+
+Opening the manager and pressing **Check** verifies local files. A 30-second timer
+while the manager is visible checks the latest server revision; unchanged revisions
+reuse the timestamped local check without scanning files again. New revisions are
+resolved independently of the editable draft, so polling cannot replace unsaved
+or unpublished edits. This is advisory verification of a user-owned profile, not
+an anti-cheat or attestation mechanism.
+
+**Install server pack** asks for a parent folder once. **Sync / update** reuses it,
+downloads/verifies the published artifacts and creates or reuses a matching
+profile. Changed profiles remain intact; repair creates a verified sibling. Old
+profiles remain available for rollback. Clear or corrupt private-archive caches
+are recovered from the authenticated encrypted publication. Restart the game
+using the new profile after syncing. Wisp never launches the game automatically.
+
+IPC adds `plugin_sync_status` (`server_pack:true`, optional `verify:true`) and
+`plugin_sync` (`generation`, `sync_revision`, `sync_digest`, optional `path` for
+first installation). Sync rejects a stale publication before installing and checks
+again afterward. It updates only the saved folder/generation, preserving draft
+state. The host stores a bounded `sync.json` sidecar next to the scoped instance;
+existing instance, receipt, guest, encrypted document and server schemas are
+unchanged. Tests cover real encrypted revisions, actual file changes, cached-check
+behavior, stale sync requests, cache restoration, safe repair and draft preservation.

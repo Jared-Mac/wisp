@@ -14,6 +14,8 @@ Item {
   property bool updateAvailable: false
   property string serverRevision: ""
   readonly property bool dirty: !!view && (view.fields || []).some(function(f){return String(fields[f.id] || "")!==String(f.value || "")})
+  property var syncStatus: ({})
+  property bool checkingSync: false
   property var review: null
   property var archiveReview: null
   property var view: null
@@ -26,18 +28,18 @@ Item {
   property string feedback: ""
   property bool busy: false
   property int epoch: 0
-  function reset() { epoch++; busy=false; view=null; shared=[]; review=null;archiveReview=null;selected="";folder="";folderUrl="";feedback="";serverMode=false }
+  function reset() { epoch++; busy=false; view=null; shared=[]; review=null;archiveReview=null;selected="";folder="";folderUrl="";feedback="";serverMode=false;syncStatus={};checkingSync=false }
   function request(name,args) {
     if (busy) return false
     var values=Object.assign({},bridge.scopeForConversation(conversation),{server_id:server || String(bridge.activeServer.id || ""),plugin_id:selected,generation:generation,server_pack:serverPack,conversation_id:serverPack ? "" : String(bridge.scopeForConversation(conversation).conversation_id || "")},args || {})
     var id=bridge.send(name,values)
     if (!id) { feedback="Wisp is disconnected.";return false }
-    busy=true; feedback=name==="plugin_resolve" ? "Resolving and verifying Thunderstore packages…" : name==="plugin_apply" ? "Preparing your local profile…" : "Working…"
+    busy=true; checkingSync=name==="plugin_sync_status"; if(!checkingSync)feedback=name==="plugin_resolve" ? "Resolving and verifying Thunderstore packages…" : (name==="plugin_apply" || name==="plugin_sync") ? "Preparing your local profile…" : "Working…"
     bridge.requests[id]={kind:"plugins",epoch:epoch,command:name}
     return true
   }
   function refresh() { request("plugin_list",{}) }
-  function open(id,scope) { if(busy)return;selected=id;conversation=scope;if(!serverMode)server=String(bridge.scopeForConversation(scope).server_id);view=null;shared=[];archiveReview=null;folder="";folderUrl="";if(id)request("plugin_open",{}) }
+  function open(id,scope) { if(busy)return;selected=id;conversation=scope;if(!serverMode)server=String(bridge.scopeForConversation(scope).server_id);syncStatus={};view=null;shared=[];archiveReview=null;folder="";folderUrl="";if(id)request("plugin_open",{}) }
   function openServer(entry,serverId) {
     if(busy)return
     reset();serverMode=true;server=serverId;selected=entry.manifest.id;conversation="@server"
@@ -48,14 +50,32 @@ Item {
   function inspect(path) { request("plugin_inspect",{path:String(path)}) }
   function install() { if(review)request("plugin_install",{path:review.path,digest:review.digest}) }
   function apply(path) { request("plugin_apply",{path:String(path),digest:digest}) }
+  function checkSync(verify) { if(serverPack && view && !busy)request("plugin_sync_status",{verify:!!verify}) }
+  function sync(path) {
+    var args={sync_revision:syncStatus.revision,sync_digest:syncStatus.digest}
+    if(path)args.path=String(path)
+    if(syncStatus.can_sync)request("plugin_sync",args)
+  }
   function inspectArchive(path) { if(!dirty)request("plugin_inspect_archive",{path:String(path)}) }
   function addArchive() { if(archiveReview && !dirty)request("plugin_add_archive",{path:archiveReview.path,sha256:archiveReview.artifact.sha256}) }
   function finish(message,action) {
     if(action.epoch!==epoch)return
-    busy=false
-    if(!message.ok) {feedback=String((message.error || {}).message || "Plugin operation failed.");return}
+    busy=false;checkingSync=false
+    if(!message.ok) {if(action.command==="plugin_sync_status" || action.command==="plugin_sync")syncStatus={state:"unknown",detail:"Could not check the server pack. Try Check again."};feedback=String((message.error || {}).message || "Plugin operation failed.");return}
     var value=message.value || {}
+    if(value.sync_status!==undefined)syncStatus=value.sync_status || ({})
+    if(action.command==="plugin_sync_status") {
+      updateAvailable=!!syncStatus.revision && syncStatus.revision!==serverRevision
+      return
+    }
     feedback=value.feedback || "Ready."
+    if(action.command==="plugin_sync") {
+      generation=Number(value.generation);folder=String(value.folder || "");folderUrl=String(value.folder_url || "")
+      // Show the new mod versions after syncing, unless this editor holds work
+      // that must remain separate from the published installation.
+      if(!dirty && !serverDraft)open(selected,conversation)
+      return
+    }
     if(value.plugins!==undefined)installed=value.plugins
     if(value.archive_review!==undefined) {archiveReview=value.archive_review;return}
     if(action.command==="plugin_add_archive")archiveReview=null

@@ -111,6 +111,93 @@ async fn invoke(
     // kill_on_drop also covers timeout and oversized output.
     result
 }
+mod sync;
+async fn shared_document(
+    session: &message_actions::Session<'_>,
+    packages: &Packages,
+    installed: &Installed,
+    id: &str,
+    conversation_id: &str,
+    message_id: &str,
+) -> anyhow::Result<(Document, Vec<files::Artifact>, String, String)> {
+    let message = session.message(message_id.parse()?).await?;
+    ensure!(
+        !conversation_id.is_empty()
+            && message.conversation_id == conversation_id
+            && message.encryption_version == 1
+            && message.content_type == "application/octet-stream",
+        "Choose an encrypted plugin document in this conversation"
+    );
+    let content = session.privacy().content(message.id)?;
+    let attachment = content
+        .attachment
+        .context("Missing authenticated attachment")?;
+    let bundle = content.payload["file_name"]
+        .as_str()
+        .is_some_and(|n| n.ends_with(".wisp-plugin.zip"));
+    let limit = if bundle {
+        bundles::MAX_BUNDLE
+    } else {
+        MAX_JSON
+    };
+    ensure!(
+        attachment.plaintext_bytes <= limit as u64
+            && attachment.ciphertext_bytes <= (limit + 1024 * 1024) as u64,
+        "Shared document exceeds limit"
+    );
+    let file = super::privacy_transfers::receive_attachment(
+        session.api(),
+        session
+            .privacy()
+            .active()?
+            .context("Encryption is not ready")?,
+        message.id,
+        attachment,
+        |_, _| {},
+    )
+    .await?;
+    let path = file.path().to_owned();
+    let (document, archives, document_hash) = tokio::task::spawn_blocking(move || {
+        let bytes = read_bounded(&path, limit)?;
+        let (document, archives) = if bundle {
+            bundles::decode(&bytes)?
+        } else {
+            (Document::parse(&bytes)?, Vec::new())
+        };
+        Ok::<_, anyhow::Error>((document, archives, hash(&bytes)))
+    })
+    .await??;
+    ensure!(
+        document.plugin == id,
+        "Shared document requires a different plugin"
+    );
+    ensure!(
+        archives.is_empty()
+            || installed
+                .manifest
+                .permissions
+                .contains(&Permission::LocalArchives),
+        "Update this plugin and review its local-archive permission before importing a private pack"
+    );
+    let authorized = archives
+        .iter()
+        .map(|(artifact, _)| artifact.clone())
+        .collect();
+    let cache = packages.root.join("cache");
+    tokio::task::spawn_blocking(move || {
+        for (_, bytes) in archives {
+            super::plugin_downloads::cache_bytes(&cache, &bytes, files::Source::Local)?;
+        }
+        Ok::<_, anyhow::Error>(())
+    })
+    .await??;
+    Ok((
+        document,
+        authorized,
+        document_hash,
+        message.sender.display_name,
+    ))
+}
 impl Daemon {
     #[allow(clippy::too_many_lines)]
     pub(super) async fn plugin_command(
@@ -256,12 +343,14 @@ impl Daemon {
                     .await?,
             )
             .await?;
-            match &session {
-                message_actions::Session::Primary(_) => {
-                    self.refresh("plugin_workspace").await?;
-                }
-                message_actions::Session::Linked(server) => {
-                    self.refresh_linked(server, "plugin_workspace").await?;
+            if name != "plugin_sync_status" {
+                match &session {
+                    message_actions::Session::Primary(_) => {
+                        self.refresh("plugin_workspace").await?;
+                    }
+                    message_actions::Session::Linked(server) => {
+                        self.refresh_linked(server, "plugin_workspace").await?;
+                    }
                 }
             }
             value
@@ -269,7 +358,16 @@ impl Daemon {
             Value::Null
         };
         let can_publish = !server_pack || workspace["can_publish"].as_bool().unwrap_or(false);
-        if server_pack && !matches!(name, "plugin_open" | "plugin_apply" | "plugin_load_server") {
+        if server_pack
+            && !matches!(
+                name,
+                "plugin_open"
+                    | "plugin_apply"
+                    | "plugin_load_server"
+                    | "plugin_sync_status"
+                    | "plugin_sync"
+            )
+        {
             ensure!(
                 can_publish,
                 "Only server admins can change or publish the server pack"
@@ -301,13 +399,117 @@ impl Daemon {
             conversation_id,
         ))?;
         let mut instance = packages.instance(&id, &scope)?;
-        if name != "plugin_open" {
+        if !matches!(name, "plugin_open" | "plugin_sync_status") {
             ensure!(
                 args["generation"].as_u64() == Some(instance.generation),
                 "This plugin view changed. Reopen it before continuing"
             );
         }
         let latest = workspace["latest_message_id"].as_str();
+        if name == "plugin_sync_status" {
+            ensure!(server_pack, "Select the server pack first");
+            let status = sync::status(
+                &session,
+                &packages,
+                &installed,
+                &id,
+                &scope,
+                conversation_id,
+                latest,
+                &instance,
+                args["verify"].as_bool().unwrap_or(false),
+            )
+            .await?;
+            return Ok(Some(json!({"sync_status":status})));
+        }
+        if name == "plugin_sync" {
+            ensure!(server_pack, "Select the server pack first");
+            ensure!(
+                installed
+                    .manifest
+                    .permissions
+                    .contains(&Permission::ManagedFiles),
+                "Managed-file permission is required"
+            );
+            let plan = sync::published(
+                &session,
+                &packages,
+                &installed,
+                &id,
+                &scope,
+                conversation_id,
+                latest,
+                &instance,
+            )
+            .await?
+            .context("No server pack is published for your membership yet")?;
+            ensure!(
+                args["sync_revision"].as_str() == Some(&plan.revision)
+                    && args["sync_digest"].as_str() == Some(&files::plan_digest(&plan.files)?),
+                "The server pack changed. Check its status before syncing."
+            );
+            let parent = if let Some(path) = args["path"].as_str() {
+                local_path(path)?
+            } else {
+                instance
+                    .folder
+                    .as_ref()
+                    .and_then(|p| p.parent())
+                    .context("Choose where to install your first server profile")?
+                    .to_path_buf()
+            };
+            sync::restore_private(&session, &packages, &installed, &id, conversation_id, &plan)
+                .await?;
+            tokio::time::timeout(
+                Duration::from_secs(300),
+                super::plugin_downloads::obtain(&plan.files, &packages.root.join("cache")),
+            )
+            .await
+            .context("Package downloads timed out")??;
+            let cache = packages.root.join("cache");
+            let folder = tokio::task::spawn_blocking(move || {
+                files::sync_profile(&parent, &plan.files, &cache)
+            })
+            .await??;
+            instance.folder = Some(folder);
+            instance.generation = instance
+                .generation
+                .checked_add(1)
+                .context("Plugin state generation overflow")?;
+            packages.save(&id, &scope, &instance)?;
+            // Installation has already succeeded. A connection loss during the
+            // final check must not discard the new generation/path in the UI.
+            let status = async {
+            let fresh: Value = crate::decode(
+                session
+                    .api()
+                    .request(
+                        reqwest::Method::POST,
+                        &format!("/v1/server/plugins/{id}/workspace"),
+                    )
+                    .send()
+                    .await?,
+            )
+            .await?;
+            sync::status(
+                &session,
+                &packages,
+                &installed,
+                &id,
+                &scope,
+                conversation_id,
+                fresh["latest_message_id"].as_str(),
+                &instance,
+                true,
+            )
+            .await
+            }.await.unwrap_or_else(|_| json!({"state":"unknown","detail":"Profile installed, but the final server check failed. Press Check to verify."}));
+            return Ok(Some(
+                json!({"sync_status":status,"generation":instance.generation,"folder":instance.folder,
+                "folder_url":instance.folder.as_ref().and_then(|p|url::Url::from_directory_path(p).ok().map(|u|u.to_string())),
+                "feedback":"Server profile synced. Previous profiles and your draft were kept. Launch the game with the new profile."}),
+            ));
+        }
         let mut imported_message = args["message_id"].as_str().map(str::to_owned);
         if server_pack
             && (name == "plugin_load_server"
@@ -441,84 +643,18 @@ impl Daemon {
                         .contains(&Permission::Documents),
                     "Document permission is required"
                 );
-                let message = session
-                    .message(
-                        imported_message
-                            .as_deref()
-                            .context("Choose a shared pack")?
-                            .parse()?,
-                    )
-                    .await?;
-                ensure!(
-                    !conversation_id.is_empty()
-                        && message.conversation_id == conversation_id
-                        && message.encryption_version == 1
-                        && message.content_type == "application/octet-stream",
-                    "Choose an encrypted plugin document in this conversation"
-                );
-                let content = session.privacy().content(message.id)?;
-                let attachment = content
-                    .attachment
-                    .context("Missing authenticated attachment")?;
-                let bundle = content.payload["file_name"]
-                    .as_str()
-                    .is_some_and(|n| n.ends_with(".wisp-plugin.zip"));
-                let limit = if bundle {
-                    bundles::MAX_BUNDLE
-                } else {
-                    MAX_JSON
-                };
-                ensure!(
-                    attachment.plaintext_bytes <= limit as u64
-                        && attachment.ciphertext_bytes <= (limit + 1024 * 1024) as u64,
-                    "Shared document exceeds limit"
-                );
-                let file = super::privacy_transfers::receive_attachment(
-                    session.api(),
-                    session
-                        .privacy()
-                        .active()?
-                        .context("Encryption is not ready")?,
-                    message.id,
-                    attachment,
-                    |_, _| {},
+                let (document, archives, document_hash, author) = shared_document(
+                    &session,
+                    &packages,
+                    &installed,
+                    &id,
+                    conversation_id,
+                    imported_message
+                        .as_deref()
+                        .context("Choose a shared pack")?,
                 )
                 .await?;
-                let path = file.path().to_owned();
-                let (document, archives, document_hash) = tokio::task::spawn_blocking(move || {
-                    let bytes = read_bounded(&path, limit)?;
-                    let (document, archives) = if bundle {
-                        bundles::decode(&bytes)?
-                    } else {
-                        (Document::parse(&bytes)?, Vec::new())
-                    };
-                    Ok::<_, anyhow::Error>((document, archives, hash(&bytes)))
-                })
-                .await??;
-                ensure!(
-                    document.plugin == id,
-                    "Shared document requires a different plugin"
-                );
-                ensure!(
-                    archives.is_empty()
-                        || installed
-                            .manifest
-                            .permissions
-                            .contains(&Permission::LocalArchives),
-                    "Update this plugin and review its local-archive permission before importing a private pack"
-                );
-                instance.archives = archives
-                    .iter()
-                    .map(|(artifact, _)| artifact.clone())
-                    .collect();
-                let cache = packages.root.join("cache");
-                tokio::task::spawn_blocking(move || {
-                    for (_, bytes) in archives {
-                        super::plugin_downloads::cache_bytes(&cache, &bytes, files::Source::Local)?;
-                    }
-                    Ok::<_, anyhow::Error>(())
-                })
-                .await??;
+                instance.archives = archives;
                 request.event = "import".into();
                 request.document = Some(document.data);
                 request.fields = json!({"document_hash":document_hash});
@@ -526,10 +662,7 @@ impl Daemon {
                     instance.shared_revision = imported_message.clone();
                     instance.draft_changed = false;
                 }
-                feedback = format!(
-                    "Imported from {}. Review before installing.",
-                    message.sender.display_name
-                );
+                feedback = format!("Imported from {}. Review before installing.", author);
             }
             "plugin_resolve" | "plugin_apply" | "plugin_share" => {
                 let rendered = invoke(&packages, &installed, request.clone()).await?;
@@ -706,8 +839,15 @@ impl Daemon {
                 |m| json!({"id":m.id,"author":m.sender.display_name,"name":m.payload["file_name"]}),
             )
             .collect();
+        let sync_status = if server_pack {
+            sync::status(&session,&packages,&installed,&id,&scope,conversation_id,
+                if name=="plugin_share" {instance.shared_revision.as_deref()} else {latest},&instance,matches!(name,"plugin_open" | "plugin_import" | "plugin_apply" | "plugin_share")).await
+                .unwrap_or_else(|_|json!({"state":"unknown","detail":"Could not verify the published server pack. Check again."}))
+        } else {
+            Value::Null
+        };
         Ok(Some(
-            json!({"server_pack":server_pack,"can_publish":can_publish,"server_revision":instance.shared_revision,"server_draft":instance.draft_changed,"update_available":name!="plugin_share" && server_pack && latest.is_some() && latest!=instance.shared_revision.as_deref(),"view":response.view,"generation":instance.generation,"digest":digest,"folder":instance.folder,"folder_url":instance.folder.as_ref().and_then(|p|url::Url::from_directory_path(p).ok().map(|url|url.to_string())),"shared":shared,"feedback":feedback}),
+            json!({"sync_status":sync_status,"server_pack":server_pack,"can_publish":can_publish,"server_revision":instance.shared_revision,"server_draft":instance.draft_changed,"update_available":name!="plugin_share" && server_pack && latest.is_some() && latest!=instance.shared_revision.as_deref(),"view":response.view,"generation":instance.generation,"digest":digest,"folder":instance.folder,"folder_url":instance.folder.as_ref().and_then(|p|url::Url::from_directory_path(p).ok().map(|url|url.to_string())),"shared":shared,"feedback":feedback}),
         ))
     }
 }

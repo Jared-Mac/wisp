@@ -398,3 +398,27 @@ Sources: apps/wisp-server/src/plugins.rs, apps/wispd/src/plugins.rs,
 quickshell/app/WispPlugins.qml and components/ValheimModManager.qml. Coverage:
 server access tests, two-client encrypted publish/import/install tests, personal
 and unpublished draft preservation, headless UI defaults. Android stays deferred.
+
+## Queued: installed server-pack status and sync (2026-10-26)
+
+- Desktop now shows whether its managed Valheim profile matches the published
+  server pack. Status distinguishes current, update available, local modifications,
+  missing/not installed, unpublished and verification unavailable. This is local
+  profile verification, not other-player or running-game attestation.
+- Opening / Check hashes profile files; a 30-second visible-manager poll detects
+  server revisions without overwriting drafts or repeatedly hashing unchanged
+  installations. Explicit Sync installs the published plan into a separate/reused
+  profile, preserves previous/local changes and unpublished drafts, and pins the
+  reviewed revision/digest. First install asks for a parent folder once.
+- No HTTP API, DB migration, guest or encrypted bundle changes. Native IPC adds
+  `plugin_sync_status` (verify flag) and `plugin_sync` (generation, sync_revision,
+  sync_digest, optional first-install path). Local `sync.json` is a host sidecar.
+- Sources: `apps/wispd/src/plugins.rs`, `plugins/sync.rs`,
+  `crates/wisp-plugins/src/files.rs`, `quickshell/app/WispPlugins.qml`,
+  `components/ValheimModManager.qml`, `components/PluginsPage.qml`.
+- Validation: native profile tamper/missing/update/repair tests, encrypted
+  two-client revision and cache recovery tests, themed headless UI preserving
+  unsaved edits and rejecting stale status. Windows host receives the same flow.
+- Android queue only: do not execute desktop game mods on Android or begin porting
+  until a batch is requested. A future Android pack viewer may display revisions;
+  local desktop installation status is not broadcast to mobile or other members.

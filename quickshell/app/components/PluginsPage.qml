@@ -10,6 +10,7 @@ Column {
   readonly property var plugins: bridge.plugins
   property bool developerTools: false
   property bool catalogShown: false
+  property bool syncingProfile: false
   readonly property bool valheimSelected: plugins.selected === "games.valheim"
   readonly property bool managerShowing: valheimSelected && !catalogShown
   Connections {target:root.plugins;function onSelectedChanged(){root.catalogShown=false}}
@@ -33,7 +34,8 @@ Column {
       width:managerLoader.width;bridge:root.bridge;theme:root.theme;scopes:root.scopes
       onCatalogRequested:root.catalogShown=true
       onArchiveRequested:archivePicker.open()
-      onProfileRequested:profilePicker.open()
+      onProfileRequested:{root.syncingProfile=false;profilePicker.open()}
+      onSyncRequested:{if(root.plugins.syncStatus.needs_folder){root.syncingProfile=true;profilePicker.open()}else root.plugins.sync("")}
       onShareRequested:shareDialog.open()
     }
   }
@@ -130,7 +132,7 @@ Column {
       ChatButton {objectName:"pluginAddArchive";theme:root.theme;text:"Add private mod ZIP…";visible:root.supportsArchives;enabled:!root.plugins.busy && !root.plugins.dirty;onClicked:archivePicker.open()}
       ChatButton {objectName:"pluginResolve";theme:root.theme;text:"Resolve dependencies";visible:!!root.plugins.view && ((root.plugins.view.packages || []).length>0 || (root.plugins.view.archives || []).length>0);enabled:!root.plugins.busy && !root.plugins.dirty;onClicked:root.plugins.request("plugin_resolve",{})}
       ChatButton {objectName:"pluginShare";theme:root.theme;text:"Share this revision…";visible:!!root.plugins.view && !!root.plugins.view.document;enabled:!root.plugins.busy && !root.plugins.dirty && root.plugins.conversation!=="";onClicked:shareDialog.open()}
-      ChatButton {objectName:"pluginApply";theme:root.theme;text:"Install local profile…";visible:!!root.plugins.view && (root.plugins.view.files || []).length>0;enabled:!root.plugins.busy && !root.plugins.dirty;onClicked:profilePicker.open()}
+      ChatButton {objectName:"pluginApply";theme:root.theme;text:"Install local profile…";visible:!!root.plugins.view && (root.plugins.view.files || []).length>0;enabled:!root.plugins.busy && !root.plugins.dirty;onClicked:{root.syncingProfile=false;profilePicker.open()}}
     }
     Column {
       visible:root.plugins.archiveReview!==null;width:parent.width;spacing:root.theme.spacing.sm
@@ -158,7 +160,7 @@ Column {
     }
   }
   FolderDialog {id:packagePicker;title:"Choose a plugin folder containing plugin.json and plugin.wasm";onAccepted:root.plugins.inspect(selectedFolder)}
-  FolderDialog {id:profilePicker;title:"Choose a folder for a new, separate game profile";onAccepted:root.plugins.apply(selectedFolder)}
+  FolderDialog {id:profilePicker;title:"Choose a folder for a new, separate game profile";onAccepted:{if(root.syncingProfile)root.plugins.sync(selectedFolder);else root.plugins.apply(selectedFolder);root.syncingProfile=false}}
   FileDialog {id:archivePicker;title:"Choose a private mod ZIP containing manifest.json";nameFilters:["Mod packages (*.zip)"];onAccepted:root.plugins.inspectArchive(selectedFile)}
   Dialog {id:shareDialog;width:Math.min(root.width,420);ThemeControlStyle {theme:root.theme;control:shareDialog;outline:true}
     title:root.plugins.serverPack ? "Publish this server pack?" : "Share this pack revision?";modal:true;standardButtons:Dialog.Ok | Dialog.Cancel

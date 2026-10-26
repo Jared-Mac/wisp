@@ -26,6 +26,11 @@ Column {
   signal archiveRequested()
   signal profileRequested()
   signal shareRequested()
+  signal syncRequested()
+  readonly property var sync: plugins.syncStatus || ({})
+  readonly property string syncLabel: ({up_to_date:"Up to date",update_available:"Update available",modified:"Local changes",missing:"Profile missing",not_installed:"Not installed",no_pack:"Not published",unknown:"Not verified"})[sync.state] || "Checking installation…"
+  Timer {interval:30000;repeat:true;running:root.visible && root.plugins.serverPack && !!root.plugins.view;onTriggered:root.plugins.checkSync(false)}
+  onVisibleChanged:if(visible)plugins.checkSync(true)
   function scopeIndex(){return Math.max(0,scopes.findIndex(function(c){return c.id===root.plugins.conversation}))}
   function changeScope(id) {
     if(id===plugins.conversation)return
@@ -84,7 +89,7 @@ Column {
         width:parent.width;spacing:root.theme.spacing.sm
         ChatButton {objectName:"pluginSave";theme:root.theme;text:"Save changes";primary:root.plugins.dirty;visible:root.plugins.dirty && root.editable;enabled:!root.plugins.busy;onClicked:root.plugins.action("save")}
         ChatButton {objectName:"pluginResolve";theme:root.theme;visible:root.editable;text:root.resolved ? "Recheck dependencies" : "Resolve mods";enabled:!root.plugins.busy && !root.plugins.dirty && root.mods.length>0;onClicked:root.plugins.request("plugin_resolve",{})}
-        ChatButton {objectName:"pluginApply";theme:root.theme;text:"Install profile…";primary:root.resolved;enabled:!root.plugins.busy && root.resolved;onClicked:root.profileRequested()}
+        ChatButton {objectName:"pluginApply";theme:root.theme;text:root.plugins.serverPack ? "Install draft…" : "Install profile…";visible:!root.plugins.serverPack || (root.editable && root.plugins.serverDraft);primary:root.resolved && !root.plugins.serverPack;enabled:!root.plugins.busy && root.resolved;onClicked:root.profileRequested()}
         ChatButton {objectName:"pluginShare";theme:root.theme;text:root.plugins.serverPack ? "Publish to server…" : "Share pack…";visible:root.editable;enabled:!root.plugins.busy && root.resolved && !!root.view.document && !!root.plugins.conversation;onClicked:root.shareRequested();ToolTip.visible:hovered && !enabled;ToolTip.text:!root.plugins.conversation ? "Choose a conversation to share this pack." : "Save and resolve the pack before sharing."}
       }
       Flow {width:parent.width;spacing:root.theme.spacing.sm;visible:root.plugins.serverPack
@@ -96,6 +101,20 @@ Column {
         width:parent.width;wrapMode:Text.Wrap;color:root.plugins.dirty ? root.theme.accent : root.theme.muted;font.family:root.theme.font.family;font.pixelSize:root.theme.font.caption
         text:root.plugins.dirty ? "Unsaved changes · save before resolving or installing." : root.resolved ? "Dependencies resolved · ready to install or share." : "Add your mods, then resolve their dependencies to prepare the pack."
       }
+    }
+  }
+  Rectangle {
+    visible:root.plugins.serverPack;width:parent.width;height:syncContent.implicitHeight+root.theme.spacing.md*2
+    color:root.theme.surface;radius:root.theme.cornerRadius;border.width:1;border.color:root.sync.state==="up_to_date" ? root.theme.alpha(root.theme.accent,0.5) : root.theme.separator
+    Column {
+      id:syncContent;x:root.theme.spacing.md;y:x;width:parent.width-2*x;spacing:root.theme.spacing.sm
+      Text {objectName:"pluginSyncStatus";text:"THIS PC · "+root.syncLabel;color:root.theme.foreground;font.family:root.theme.font.family;font.pixelSize:root.theme.font.body;font.weight:Font.DemiBold}
+      Text {width:parent.width;text:String(root.sync.detail || "Checking your installed profile against the published server pack.");wrapMode:Text.Wrap;color:root.theme.muted;font.family:root.theme.font.family;font.pixelSize:root.theme.font.caption}
+      Flow {width:parent.width;spacing:root.theme.spacing.sm
+        ChatButton {objectName:"pluginSync";theme:root.theme;text:root.sync.state==="not_installed" ? "Install server pack…" : root.sync.state==="modified" || root.sync.state==="missing" ? "Sync fresh profile" : "Sync / update";visible:!!root.sync.can_sync && root.sync.state!=="up_to_date";primary:true;enabled:!root.plugins.busy;onClicked:root.syncRequested()}
+        ChatButton {objectName:"pluginCheckSync";theme:root.theme;text:root.plugins.checkingSync ? "Checking…" : "Check";enabled:!root.plugins.busy;onClicked:root.plugins.checkSync(true)}
+      }
+      Text {width:parent.width;visible:!!root.sync.checked_at;text:root.sync.checked_at ? "Files checked "+new Date(root.sync.checked_at*1000).toLocaleTimeString()+" · Server changes checked every 30 seconds while open." : "";wrapMode:Text.Wrap;color:root.theme.muted;font.family:root.theme.font.family;font.pixelSize:root.theme.font.caption}
     }
   }
   RowLayout {
@@ -210,10 +229,10 @@ Column {
   Column {
     width:parent.width;spacing:root.theme.spacing.md;visible:root.tab===2
     Text {text:"Local installation";color:root.theme.foreground;font.family:root.theme.font.family;font.pixelSize:root.theme.font.title;font.weight:Font.DemiBold}
-    Text {width:parent.width;text:root.plugins.folder ? "A profile has been saved on this PC. Install again after changing the pack to create a profile for the new revision." : "No local profile saved for this draft. Resolve the pack, then choose Install profile.";wrapMode:Text.Wrap;color:root.theme.muted;font.family:root.theme.font.family;font.pixelSize:root.theme.font.body}
+    Text {width:parent.width;text:root.plugins.serverPack ? String(root.sync.detail || "Check the installation status above.") : root.plugins.folder ? "A profile has been saved on this PC. Install again after changing the pack to create a profile for the new revision." : "No local profile saved for this draft. Resolve the pack, then choose Install profile.";wrapMode:Text.Wrap;color:root.theme.muted;font.family:root.theme.font.family;font.pixelSize:root.theme.font.body}
     TextArea {id:installedFolder;width:parent.width;visible:!!root.plugins.folder;readOnly:true;selectByMouse:true;text:root.plugins.folder;wrapMode:TextEdit.Wrap;textFormat:TextEdit.PlainText;Accessible.name:"Installed profile folder";font.family:root.theme.font.family;font.pixelSize:root.theme.font.caption;ThemeControlStyle {theme:root.theme;control:installedFolder}}
     ChatButton {theme:root.theme;text:"Open profile folder";visible:!!root.plugins.folderUrl;onClicked:Qt.openUrlExternally(root.plugins.folderUrl)}
-    Text {width:parent.width;text:"On Linux, start Valheim with this profile’s start_game_bepinex.sh and your absolute Valheim executable path. Game launching and live player sync status are not available here yet.";wrapMode:Text.Wrap;color:root.theme.muted;font.family:root.theme.font.family;font.pixelSize:root.theme.font.caption}
+    Text {width:parent.width;text:"On Linux, start Valheim with this profile’s start_game_bepinex.sh and your absolute Valheim executable path. The status above checks this managed profile, not the mods loaded by a running game. Restart the game using the new profile after syncing.";wrapMode:Text.Wrap;color:root.theme.muted;font.family:root.theme.font.family;font.pixelSize:root.theme.font.caption}
   }
   Dialog {id:addMod;objectName:"addModDialog";parent:Overlay.overlay;x:parent ? (parent.width-width)/2 : 0;y:parent ? Math.max(0,(parent.height-height)/2) : 0;title:"Add a Thunderstore mod";modal:true;width:Math.min(parent ? parent.width-root.theme.space(24) : root.width,root.theme.space(480));standardButtons:Dialog.Ok | Dialog.Cancel
     ThemeControlStyle {theme:root.theme;control:addMod;outline:true}

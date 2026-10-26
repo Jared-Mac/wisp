@@ -296,11 +296,13 @@ pub fn verify_profile(directory: &Path, digest: &str) -> anyhow::Result<()> {
             let path = entry.path();
             let relative = path
                 .strip_prefix(directory)?
-                .to_str()
-                .context("Invalid profile path")?;
+                .components()
+                .map(|part| part.as_os_str().to_str().context("Invalid profile path"))
+                .collect::<anyhow::Result<Vec<_>>>()?
+                .join("/");
             ensure!(
                 kind.is_file()
-                    && (relative == ".wisp-profile.json" || receipt.files.contains_key(relative)),
+                    && (relative == ".wisp-profile.json" || receipt.files.contains_key(&relative)),
                 "Profile contains added files; choose a new folder to preserve local changes"
             );
         }
@@ -314,9 +316,40 @@ pub fn verify_profile(directory: &Path, digest: &str) -> anyhow::Result<()> {
     }
     Ok(())
 }
+/// Compare a managed installation with the published plan. A different receipt
+/// means an update is available; matching receipts still require file hashing.
+#[must_use]
+pub fn profile_state(directory: &Path, digest: &str) -> &'static str {
+    match fs::symlink_metadata(directory) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return "missing",
+        Err(_) => return "unknown",
+        Ok(meta) if !meta.is_dir() => return "modified",
+        Ok(_) => {}
+    }
+    let receipt = read_bounded(&directory.join(".wisp-profile.json"), 4 * 1024 * 1024)
+        .and_then(|bytes| Ok(serde_json::from_slice::<Receipt>(&bytes)?));
+    match receipt {
+        Ok(receipt) if receipt.digest != digest => "update_available",
+        Ok(_) if verify_profile(directory, digest).is_ok() => "up_to_date",
+        _ => "modified",
+    }
+}
+/// Sync never overwrites a locally modified profile. Keep it for rollback and
+/// create/reuse a verified sibling if the canonical destination was changed.
+pub fn sync_profile(parent: &Path, files: &[Artifact], cache: &Path) -> anyhow::Result<PathBuf> {
+    install(parent, files, cache, true)
+}
 /// All archives must already be downloaded into the content-addressed cache.
 /// Existing game directories are never modified, and no downloaded code runs.
 pub fn install_profile(parent: &Path, files: &[Artifact], cache: &Path) -> anyhow::Result<PathBuf> {
+    install(parent, files, cache, false)
+}
+fn install(
+    parent: &Path,
+    files: &[Artifact],
+    cache: &Path,
+    repair: bool,
+) -> anyhow::Result<PathBuf> {
     ensure!(!files.is_empty(), "Resolve a modpack first");
     let digest = plan_digest(files)?;
     ensure!(
@@ -324,10 +357,23 @@ pub fn install_profile(parent: &Path, files: &[Artifact], cache: &Path) -> anyho
         "Choose an existing profile parent folder"
     );
     let parent = fs::canonicalize(parent)?;
-    let destination_dir = parent.join(format!("wisp-profile-{}", &digest[..16]));
-    if destination_dir.exists() {
-        verify_profile(&destination_dir, &digest)?;
-        return Ok(destination_dir);
+    let base = format!("wisp-profile-{}", &digest[..16]);
+    let mut destination_dir = parent.join(&base);
+    let mut suffix = 0;
+    while fs::symlink_metadata(&destination_dir).is_ok() {
+        if verify_profile(&destination_dir, &digest).is_ok() {
+            return Ok(destination_dir);
+        }
+        ensure!(
+            repair,
+            "Installed profile has local changes; choose Sync to preserve them and create a fresh profile"
+        );
+        suffix += 1;
+        ensure!(
+            suffix <= 10_000,
+            "Too many saved profiles; choose another folder"
+        );
+        destination_dir = parent.join(format!("{base}-sync-{suffix}"));
     }
     let staging = tempfile::tempdir_in(&parent)?;
     let mut receipt = Receipt {
@@ -490,6 +536,51 @@ mod tests {
         fs::write(cache.path().join(&a.sha256), bytes).unwrap();
         assert!(install_profile(root.path(), &[a], cache.path()).is_err());
         assert_eq!(fs::read_dir(root.path()).unwrap().count(), 0);
+    }
+    #[test]
+    fn sync_checks_bytes_and_preserves_modified_and_previous_profiles() {
+        let root = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        let bytes = archive(&[("mod.dll", b"version one")]);
+        let mut artifact = Artifact {
+            package: "Team-Mod-1.0.0".into(),
+            sha256: hash(&bytes),
+            size: bytes.len() as u64,
+            source: Source::Thunderstore,
+        };
+        fs::write(cache.path().join(&artifact.sha256), bytes).unwrap();
+        let plan = [artifact.clone()];
+        let digest = plan_digest(&plan).unwrap();
+        let old = sync_profile(root.path(), &plan, cache.path()).unwrap();
+        assert_eq!(profile_state(&old, &digest), "up_to_date");
+        let mod_file = "BepInEx/plugins/Team-Mod/mod.dll";
+        fs::write(old.join(mod_file), b"user edit").unwrap();
+        assert_eq!(profile_state(&old, &digest), "modified");
+        let fresh = sync_profile(root.path(), &plan, cache.path()).unwrap();
+        assert_ne!(old, fresh);
+        assert_eq!(profile_state(&fresh, &digest), "up_to_date");
+        assert_eq!(fs::read(old.join(mod_file)).unwrap(), b"user edit");
+        assert_eq!(
+            sync_profile(root.path(), &plan, cache.path()).unwrap(),
+            fresh
+        );
+        fs::write(fresh.join("extra.dll"), b"extra").unwrap();
+        assert_eq!(profile_state(&fresh, &digest), "modified");
+        fs::remove_file(fresh.join("extra.dll")).unwrap();
+        fs::remove_file(fresh.join(mod_file)).unwrap();
+        assert_eq!(profile_state(&fresh, &digest), "modified");
+        let bytes = archive(&[("mod.dll", b"version two")]);
+        artifact.package = "Team-Mod-2.0.0".into();
+        artifact.sha256 = hash(&bytes);
+        artifact.size = bytes.len() as u64;
+        fs::write(cache.path().join(&artifact.sha256), bytes).unwrap();
+        let digest = plan_digest(std::slice::from_ref(&artifact)).unwrap();
+        assert_eq!(profile_state(&old, &digest), "update_available");
+        let new = sync_profile(root.path(), &[artifact], cache.path()).unwrap();
+        assert_eq!(profile_state(&new, &digest), "up_to_date");
+        fs::remove_dir_all(&new).unwrap();
+        assert_eq!(profile_state(&new, &digest), "missing");
+        assert_eq!(fs::read(old.join(mod_file)).unwrap(), b"user edit");
     }
 }
 

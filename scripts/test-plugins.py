@@ -192,6 +192,50 @@ with tempfile.TemporaryDirectory(prefix='wisp-plugins-test-') as temporary:
         personal_again=call('owner','plugin_open',{'plugin_id':'games.valheim'})
         assert any(f['value']=='Keep my personal draft' for f in personal_again['view']['fields'])
         assert personal_again['view']['archives']==[]
+        # Status polling never replaces a local draft, and sync always uses the
+        # published plan, even when an admin has unpublished edits.
+        assert peer_again['sync_status']['state']=='up_to_date'
+        installed_peer=Path(peer_again['folder'])
+        mod_path='BepInEx/plugins/Local-Foundation/Foundation.dll'
+        (installed_peer/mod_path).write_bytes(b'modified by tester')
+        status=call('member','plugin_sync_status',server_base|{'verify':True})['sync_status']
+        assert status['state']=='modified'
+        def sync_args(current,status):
+            return server_base|{'generation':current['generation'],'sync_revision':status['revision'],'sync_digest':status['digest']}
+        (root/'member/data/wisp/plugins/cache/private'/review['artifact']['sha256']).unlink()
+        repaired=call('member','plugin_sync',sync_args(peer_again,status))
+        assert repaired['sync_status']['state']=='up_to_date' and Path(repaired['folder'])!=installed_peer
+        assert (installed_peer/mod_path).read_bytes()==b'modified by tester'
+        assert (Path(repaired['folder'])/mod_path).read_bytes()==payload
+        # A real new archive, not just a pack rename, changes the installation.
+        newer_payload=b'new version of the private mod'
+        with zipfile.ZipFile(archive,'w') as package_zip:
+            package_zip.writestr('manifest.json',json.dumps({'name':'Foundation','version_number':'0.2.0','dependencies':[]}))
+            package_zip.writestr('BepInEx/plugins/Foundation.dll',newer_payload)
+        review2=call('owner','plugin_inspect_archive',server_base|{'generation':owner_again['generation'],'path':str(archive)})['archive_review']
+        revision2=call('owner','plugin_add_archive',server_base|{'generation':owner_again['generation'],'path':str(archive),'sha256':review2['artifact']['sha256']})
+        revision2=call('owner','plugin_resolve',server_base|{'generation':revision2['generation']})
+        revision2=call('owner','plugin_share',server_base|{'generation':revision2['generation']})
+        rejected(lambda:call('member','plugin_sync',sync_args(repaired,status)))
+        fresh_status=call('member','plugin_sync_status',server_base|{'verify':False})['sync_status']
+        assert fresh_status['state']=='update_available' and fresh_status['revision']!=status['revision']
+        updated=call('member','plugin_sync',sync_args(repaired,fresh_status))
+        assert updated['sync_status']['state']=='up_to_date'
+        assert (Path(updated['folder'])/mod_path).read_bytes()==newer_payload
+        assert (Path(repaired['folder'])/mod_path).read_bytes()==payload
+        draft=call('owner','plugin_action',server_base|{'generation':revision2['generation'],'action':'save','fields':{'title':'Do not overwrite my draft','packages':''}})
+        owner_status=call('owner','plugin_sync_status',server_base|{'verify':True})['sync_status']
+        assert owner_status['state']=='not_installed'
+        owner_parent=root/'server-owner-profiles';owner_parent.mkdir()
+        synced=call('owner','plugin_sync',sync_args(draft,owner_status)|{'path':str(owner_parent)})
+        assert synced['sync_status']['state']=='up_to_date'
+        preserved=call('owner','plugin_open',server_base)
+        assert preserved['server_draft'] and any(f['value']=='Do not overwrite my draft' for f in preserved['view']['fields'])
+        assert (Path(synced['folder'])/mod_path).read_bytes()==newer_payload
+        shutil.rmtree(updated['folder'])
+        missing=call('member','plugin_sync_status',server_base|{'verify':True})['sync_status']
+        assert missing['state']=='missing'
+        print('PASS: actual file checks, update detection without importing, stale-sync rejection, repair/rollback and unpublished draft preservation',flush=True)
         print('PASS: default encrypted server pack, automatic peer load/install, admin-only edits, unpublished draft and personal scope preservation',flush=True)
         call('owner','plugin_enable',{'plugin_id':'games.valheim','enabled':False})
         rejected(lambda:call('owner','plugin_open',base))

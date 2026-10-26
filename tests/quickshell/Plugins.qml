@@ -66,6 +66,28 @@ ShellRoot {
     reply({view:view,generation:9,digest:"abc",shared:[],server_pack:true,can_publish:false});input.wait(40)
     test.check(bridge.plugins.serverPack && !test.find(page,"modAddPublic",[]).enabled && !test.find(page,"pluginShare",[]).visible,"members view the shared server pack without admin editing controls")
     test.check(page.scopes[0].id==="@server","whole-server scope is listed first")
+    bridge.plugins.canPublish=true
+    bridge.plugins.setField("title","Keep these unsaved edits")
+    bridge.plugins.checkSync(true)
+    test.check(bridge.sent[bridge.sent.length-1].name==="plugin_sync_status" && bridge.sent[bridge.sent.length-1].args.verify,"Check requests real file verification")
+    reply({sync_status:{state:"update_available",revision:"new-server-revision",digest:"new-plan",can_sync:true,needs_folder:false}});input.wait(30)
+    test.check(bridge.plugins.dirty && bridge.plugins.fields.title==="Keep these unsaved edits","polling preserves unsaved fields")
+    test.check(test.find(page,"pluginSync",[]).visible,"server update exposes Sync button")
+    test.find(page,"pluginSync",[]).clicked()
+    var sync=bridge.sent[bridge.sent.length-1]
+    test.check(sync.name==="plugin_sync" && sync.args.sync_revision==="new-server-revision" && sync.args.sync_digest==="new-plan" && !sync.args.path,"Sync pins reviewed server revision and reuses installed parent")
+    reply({generation:10,folder:"/new/profile",folder_url:"file:///new/profile",sync_status:{state:"up_to_date",revision:"new-server-revision",digest:"new-plan",can_sync:true,checked_at:1}});input.wait(30)
+    test.check(bridge.plugins.generation===10 && bridge.plugins.dirty && bridge.plugins.fields.title==="Keep these unsaved edits","sync updates installation without replacing editable draft")
+    test.check(!test.find(page,"pluginSync",[]).visible && test.find(page,"pluginSyncStatus",[]).text.indexOf("Up to date")>=0,"verified match is visible without redundant update button")
+    bridge.plugins.checkSync(true)
+    var failedCheck=bridge.sent[bridge.sent.length-1]
+    bridge.finishRequest({id:failedCheck.id,ok:false,error:{message:"Server unavailable"}});input.wait(20)
+    test.check(bridge.plugins.syncStatus.state==="unknown","failed check clears stale success status")
+    bridge.plugins.setField("title",view.fields[0].value);bridge.plugins.serverDraft=false
+    bridge.plugins.syncStatus={state:"update_available",revision:"next",digest:"next-plan",can_sync:true,needs_folder:false}
+    bridge.plugins.sync("");reply({generation:11,folder:"/newer/profile",sync_status:{state:"up_to_date"}})
+    test.check(bridge.sent[bridge.sent.length-1].name==="plugin_open","sync refreshes the mod list when no draft edits need preservation")
+    reply({view:view,generation:12,digest:"next-plan",server_pack:true,can_publish:false,sync_status:{state:"up_to_date"}})
     bridge.plugins.open("games.valheim","")
     test.check(bridge.sent[bridge.sent.length-1].args.server_id==="server-two","personal draft refresh preserves server scope")
     reply({view:view,generation:9,digest:"abc",shared:[]})
