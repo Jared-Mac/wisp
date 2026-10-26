@@ -386,7 +386,7 @@ the latest revision they can decrypt and choose whether to install. Personal and
 channel drafts remain separate. Admin unpublished drafts survive refresh; loading
 the published pack explicitly replaces only the local server draft. A personal
 draft can be copied without altering the original. Private ZIPs stay encrypted.
-Schema 37 adds plugin_workspaces, backed by reserved `plugin:<id>` encrypted
+Schemas 37–38 add and record plugin_workspaces, backed by reserved `plugin:<id>` encrypted
 server channels and existing signed rosters. POST `/v1/server/plugins/{id}/workspace`
 returns conversation_id, latest_message_id and can_publish. Publishing is checked
 server-side against current admin membership and plugin enablement. Normal HTTP

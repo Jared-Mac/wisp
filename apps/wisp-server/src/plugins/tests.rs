@@ -124,6 +124,20 @@ async fn catalog_is_member_only_and_admin_managed_with_verified_packages() {
 #[tokio::test]
 async fn server_workspace_is_shared_and_cannot_be_published_by_members() {
     let state = AppState::new(test_config()).await.unwrap();
+    let ledger: i64 = sqlx::query_scalar("SELECT MAX(version) FROM schema_migrations")
+        .fetch_one(&state.pool)
+        .await
+        .unwrap();
+    let applied: i64 =
+        sqlx::query_scalar("SELECT MAX(version) FROM _sqlx_migrations WHERE success=1")
+            .fetch_one(&state.pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        ledger, applied,
+        "Compatibility and SQLx schema ledgers must agree"
+    );
+
     sqlx::query("INSERT INTO server_identity(id,owner_user_id) VALUES(1,?)")
         .bind(TEST_OWNER_ID)
         .execute(&state.pool)
