@@ -359,3 +359,21 @@ Status: **Deferred. No Android release or port requested.**
 - This is queued context only. Do not port or release until an Android batch is requested.
 - Desktop integration follow-up: start catalog preparation before mounting the
   plugin page, so its initial refresh cannot consume the opening action.
+
+## 2026-10-26 · Dedicated Valheim mod manager (deferred)
+
+- Opening Valheim Modpacks now opens a dedicated manager rather than the generic
+  plugin catalog/editor. Catalog administration lives behind **All plugins**.
+- Manager has a searchable source-filtered mod list, exact versions and dependency
+  labels, selection details, private ZIP review, adding/replacing a pinned public
+  version, deliberate removal, and Mods / Shared packs / Installation tabs.
+- Pack name and edits remain drafts until Save. Changing conversations with unsaved
+  edits requires discard confirmation. Import/share/install still require explicit
+  user actions. Resolved packages are not claimed to be installed or player-synced.
+- UI-only; no API, schema, guest manifest/module or encrypted format changes.
+  Uses existing plugin commands. Other plugin IDs retain the generic renderer.
+- Sources: `quickshell/app/components/ValheimModManager.qml`, `PluginsPage.qml`,
+  `quickshell/app/ModpackLogic.js`. Validation: four themed headless fixtures,
+  narrow-width rendering, add/version/remove presentation checks, real-daemon
+  main-shortcut test and two-client encrypted private-pack install lifecycle.
+- Deferred context only; do not start an Android port or release.

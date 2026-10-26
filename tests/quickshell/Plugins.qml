@@ -4,13 +4,14 @@ import QtTest
 import Quickshell
 import "app" as Wisp
 import "app/components" as Components
+import "app/ModpackLogic.js" as Mods
 ShellRoot {
   id:test;property bool failed:false
   function check(ok,label){if(!ok){failed=true;console.error("PLUGINS_FAILED: "+label)}}
-  function find(item,name,seen){if(!item || seen.indexOf(item)>=0)return null;seen.push(item);if(item.objectName===name)return item;if(item.contentItem){var r=find(item.contentItem,name,seen);if(r)return r}for(var child of item.data || item.children || []){var r=find(child,name,seen);if(r)return r}return null}
+  function find(item,name,seen){if(!item || seen.indexOf(item)>=0)return null;seen.push(item);if(item.objectName===name)return item;if(item.contentItem){var r=find(item.contentItem,name,seen);if(r)return r}for(var child of Array.from(item.data || []).concat(Array.from(item.children || []))){var r=find(child,name,seen);if(r)return r}return null}
   Wisp.WispTheme {id:theme;profile:Quickshell.env("WISP_TEST_THEME") || "soft_graphite"}
   Wisp.WispBridge {id:bridge;property var sent:[];function send(name,args){var id="fixture-"+sent.length;sent.push({name:name,args:args,id:id});return id}}
-  FloatingWindow {id:window;visible:true;implicitWidth:720;implicitHeight:980;color:theme.background
+  FloatingWindow {id:window;visible:true;implicitWidth:Number(Quickshell.env("WISP_PLUGINS_WIDTH") || 980);implicitHeight:980;color:theme.background
     ScrollView {anchors.fill:parent;contentWidth:availableWidth;Item {id:card;width:parent.width;height:page.implicitHeight+24;Rectangle {anchors.fill:parent;color:theme.background}
     Components.PluginsPage {id:page;width:parent.width-24;x:12;y:12;bridge:bridge;theme:theme}}}
   }
@@ -49,7 +50,13 @@ ShellRoot {
     test.check(!bridge.sent.some(function(c){return /^(join_|share$|camera$|send_|plugin_share|plugin_apply)/.test(c.name)}),"viewing and editing never publishes media, shares documents, or installs mods")
     var entry={manifest:manifest,digest:"d".repeat(64),installed_digest:"d".repeat(64),enabled:true}
     bridge.serverPlugins.catalog=[entry];bridge.serverPlugins.canManage=true;input.wait(40)
-    test.check(test.find(page,"serverPluginOpen",[]).visible,"server catalog exposes a direct Open button")
+    test.check(test.find(page,"valheimModManager",[])!==null,"Valheim opens its own manager")
+    test.check(test.find(page,"serverPluginOpen",[])===null,"catalog management is separate from the mod manager")
+    test.find(page,"modManagerCatalog",[]).clicked();input.wait(40)
+    test.check(test.find(page,"serverPluginOpen",[]).visible,"catalog is available through All plugins")
+    test.find(page,"serverPluginOpen",[]).clicked();input.wait(40)
+    reply({installed:{manifest:manifest},plugins:[{manifest:manifest,enabled:true}]})
+    reply({view:view,generation:9,digest:"abc",shared:[]});input.wait(40)
     bridge.plugins.openServer(entry,"server-two")
     var prepare=bridge.sent[bridge.sent.length-1]
     test.check(prepare.name==="plugin_server_prepare" && prepare.args.server_id==="server-two" && !prepare.args.path,"opening a server plugin needs no folder picker")
@@ -60,6 +67,33 @@ ShellRoot {
     bridge.plugins.open("games.valheim","")
     test.check(bridge.sent[bridge.sent.length-1].args.server_id==="server-two","personal draft refresh preserves server scope")
     reply({view:view,generation:9,digest:"abc",shared:[]})
+    view=Object.assign({},view,{files:view.files.concat([{package:"Local-Foundation-0.1.0",source:"local",sha256:"b".repeat(64),size:33957}])})
+    bridge.plugins.view=view;input.wait(30)
+    test.check(Mods.upsert("Team-Mod-1.0.0\nTeam-Other-1.0.0","Team-Mod-2.0.0")==="Team-Other-1.0.0\nTeam-Mod-2.0.0","changing a pinned version replaces the existing mod")
+    test.check(!Mods.validDependency("../bad") && Mods.validDependency("Team-Mod-1.2.3"),"mod entry validates exact dependency IDs")
+    test.check(Mods.mods({packages:["Team-Mod-1.0.0"],files:[{package:"Team-Mod-1.0.0"}]},"").length===0,"removed roots do not reappear as dependencies")
+    var manager=test.find(page,"valheimModManager",[])
+    test.check(!!manager,"manager restored after server prepare")
+    test.find(page,"modAddPublic",[]).clicked();input.wait(40)
+    var addDialog=test.find(window.contentItem,"addModDialog",[]), dependency=test.find(window.contentItem,"modDependencyInput",[])
+    test.check(!!addDialog && !addDialog.standardButton(Dialog.Ok).enabled,"add-mod dialog cannot submit an empty package")
+    dependency.text="Example-NewMod-1.0.0";input.wait(30)
+    test.check(addDialog.standardButton(Dialog.Ok).enabled,"valid package enables Add")
+    var previousPackages=bridge.plugins.fields.packages, previousRequests=bridge.sent.length
+    addDialog.accept();input.wait(30)
+    test.check(bridge.plugins.fields.packages.indexOf("Example-NewMod-1.0.0")>=0 && bridge.plugins.dirty && bridge.sent.length===previousRequests,"adding a public mod edits the draft without downloading or sharing")
+    bridge.plugins.setField("packages",previousPackages)
+    var search=test.find(page,"modSearch",[]);search.text="not-a-mod";input.wait(30)
+    test.check(manager.filtered.length===0,"mod search filters the list")
+    search.text="";input.wait(30)
+    test.check(manager.mods.length===2,"private ZIP and resolved dependency each appear once")
+    manager.selectedId="Local-Foundation-0.1.0";input.wait(30)
+    test.check(test.find(page,"modRemoveSelected",[]).visible,"private mod has a deliberate removal action")
+    page.width=360;input.wait(50)
+    test.check(!manager.wide && manager.width<=390,"manager adapts to tray width")
+    page.width=Qt.binding(function(){return card.width-24});input.wait(50)
+    var screenshot=Quickshell.env("WISP_PLUGINS_SCREENSHOT")
+    if(screenshot){card.grabToImage(function(image){image.saveToFile(screenshot)});input.wait(100)}
     var before=bridge.sent.length;bridge.serverPlugins.canManage=false;bridge.serverPlugins.setEnabled(entry,false)
     test.check(bridge.sent.length===before,"members cannot submit server catalog changes")
     var previousEpoch=bridge.serverPlugins.epoch;bridge.serverPlugins.reset()
@@ -67,8 +101,6 @@ ShellRoot {
     test.check(bridge.serverPlugins.catalog.length===0 && !bridge.serverPlugins.canManage,"stale replies cannot restore another server's plugins")
     bridge.plugins.reset()
     test.check(!bridge.plugins.selected && !bridge.plugins.view && !bridge.plugins.serverMode,"server changes clear the previous plugin editor")
-    var screenshot=Quickshell.env("WISP_PLUGINS_SCREENSHOT")
-    if(screenshot){card.grabToImage(function(image){image.saveToFile(screenshot)});input.wait(100)}
     console.log(test.failed ? "PLUGINS_FAILED" : "PLUGINS_OK");Qt.quit()
   }}
 }

@@ -55,6 +55,22 @@ not sandbox game mods. Game compatibility and client-only/server-only mod
 requirements still need to be checked for the chosen pack. Existing mod-manager
 profiles and user-edited configuration are not imported or merged automatically.
 
+## Valheim manager
+
+Opening the Valheim shortcut displays its own mod manager. **Mods** lists public,
+private and dependency packages with their exact versions; search or filter by
+source and select a mod for details. **Add mod** accepts a pinned Thunderstore ID
+and replaces an existing root version of that package. Private ZIPs retain their
+review step. Removing mods edits the pack and keeps installed profiles.
+
+Save draft changes, then **Resolve mods**, **Install profile**, or **Share pack**.
+**Shared packs** lists importable revisions in the selected conversation.
+**Installation** shows the saved local folder and launch guidance. “Resolved”
+means dependency resolution succeeded; it does not mean everyone installed the
+same pack. **All plugins** returns to server plugin administration. Exact package
+list editing is available under Advanced; hashes and file paths do not crowd the
+mod list. Other plugin IDs still use the generic plugin view.
+
 ## Private mod ZIPs
 
 A private ZIP uses the usual mod-package layout: `manifest.json` at the archive

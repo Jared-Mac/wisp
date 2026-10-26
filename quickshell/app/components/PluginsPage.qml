@@ -9,6 +9,15 @@ Column {
   required property var theme
   readonly property var plugins: bridge.plugins
   property bool developerTools: false
+  property bool catalogShown: false
+  readonly property bool valheimSelected: plugins.selected === "games.valheim"
+  readonly property bool managerShowing: valheimSelected && !catalogShown
+  Connections {target:root.plugins;function onSelectedChanged(){root.catalogShown=false}}
+  function openServer(entry) {
+    catalogShown=false
+    if(plugins.selected===entry.manifest.id && plugins.serverMode && plugins.server===bridge.serverPlugins.server && plugins.view)return
+    plugins.openServer(entry,bridge.serverPlugins.server)
+  }
   function conversationLabel(c) {
     var server=(bridge.servers || []).filter(function(s){return String(s.id)===String(c.server_id)})[0]
     return String(c.label || "Conversation") + (server ? " · "+server.name : "") + (c.server_channel ? " · server channel" : " · friends")
@@ -18,6 +27,19 @@ Column {
   readonly property bool supportsArchives: !!selectedPackage && (selectedPackage.manifest.permissions || []).indexOf("local_archives")>=0
   spacing: theme.spacing.md
   Component.onCompleted: { if(!plugins.selected)plugins.refresh(); bridge.serverPlugins.refresh() }
+  Loader {
+    id:managerLoader;width:parent.width;active:root.managerShowing;visible:active
+    sourceComponent:ValheimModManager {
+      width:managerLoader.width;bridge:root.bridge;theme:root.theme;scopes:root.scopes
+      onCatalogRequested:root.catalogShown=true
+      onArchiveRequested:archivePicker.open()
+      onProfileRequested:profilePicker.open()
+      onShareRequested:shareDialog.open()
+    }
+  }
+  Loader {
+    id:catalogLoader;width:parent.width;active:!root.managerShowing;visible:active
+    sourceComponent:Column {width:catalogLoader.width;spacing:root.theme.spacing.md
   Text {text:"Plugins";color:root.theme.foreground;font.family:root.theme.font.family;font.pixelSize:root.theme.font.title;font.weight:Font.DemiBold}
   Text {width:parent.width;text:"Plugins for " + root.bridge.activeServer.name;wrapMode:Text.Wrap;color:root.theme.muted;font.family:root.theme.font.family;font.pixelSize:root.theme.font.body}
   Flow {
@@ -38,13 +60,13 @@ Column {
         Text {width:parent.width;text:modelData.manifest.description;wrapMode:Text.Wrap;color:root.theme.muted;font.family:root.theme.font.family;font.pixelSize:root.theme.font.caption}
         Text {width:parent.width;text:"Uses shared pack attachments, Thunderstore downloads, local mod profiles and private ZIPs you select. Opening prepares the tool; game mods install only when you choose.";wrapMode:Text.Wrap;color:root.theme.muted;font.family:root.theme.font.family;font.pixelSize:root.theme.font.caption}
         Flow {width:parent.width;spacing:root.theme.spacing.sm
-          ChatButton {objectName:"serverPluginOpen";theme:root.theme;text:"Open";visible:modelData.enabled;enabled:!root.plugins.busy && !root.bridge.serverPlugins.busy;onClicked:root.plugins.openServer(modelData,root.bridge.serverPlugins.server)}
+          ChatButton {objectName:"serverPluginOpen";theme:root.theme;text:"Open";visible:modelData.enabled;enabled:!root.plugins.busy && !root.bridge.serverPlugins.busy;onClicked:root.openServer(modelData)}
           ChatButton {objectName:"serverPluginManage";theme:root.theme;text:!modelData.enabled ? "Add to server" : modelData.installed_digest!==modelData.digest ? "Update server plugin" : "Remove from server";visible:root.bridge.serverPlugins.canManage;enabled:!root.plugins.busy && !root.bridge.serverPlugins.busy;onClicked:root.bridge.serverPlugins.setEnabled(modelData,!modelData.enabled || modelData.installed_digest!==modelData.digest)}
         }
       }
     }
   }
-  CheckBox {text:"Developer tools · local plugins";width:parent.width;checked:root.developerTools;onToggled:root.developerTools=checked;ThemeControlStyle {theme:root.theme;control:parent}}
+  CheckBox {id:developerToggle;text:"Developer tools · local plugins";width:parent.width;checked:root.developerTools;onToggled:root.developerTools=checked;ThemeControlStyle {theme:root.theme;control:developerToggle}}
   Rectangle {
     visible:root.plugins.review!==null;width:parent.width;height:reviewContent.implicitHeight+root.theme.spacing.lg*2
     color:root.theme.surface;radius:root.theme.cornerRadius;border.color:root.theme.focusBorder;border.width:1
@@ -69,7 +91,7 @@ Column {
     onActivated:{root.plugins.serverMode=false;root.plugins.open(root.plugins.installed[currentIndex].manifest.id,root.plugins.conversation)}
   }
   ComboBox {
-    id:scopeChoice;objectName:"pluginConversation";visible:!!root.plugins.selected;width:parent.width;enabled:!root.plugins.busy
+    id:scopeChoice;objectName:"pluginConversation";visible:!!root.plugins.selected && !root.valheimSelected;width:parent.width;enabled:!root.plugins.busy
     model:root.scopes.map(function(c){return c.label})
     currentIndex:Math.max(0,root.scopes.findIndex(function(c){return c.id===root.plugins.conversation}))
     ThemeControlStyle {theme:root.theme;control:scopeChoice}
@@ -82,7 +104,7 @@ Column {
   }
   Text {objectName:"pluginFeedback";width:parent.width;text:root.plugins.feedback;visible:text.length>0;color:root.theme.muted;wrapMode:Text.Wrap;textFormat:Text.PlainText;font.family:root.theme.font.family;font.pixelSize:root.theme.font.body;Accessible.role:Accessible.AlertMessage}
   Column {
-    width:parent.width;spacing:root.theme.spacing.md;visible:root.plugins.view!==null
+    width:parent.width;spacing:root.theme.spacing.md;visible:root.plugins.view!==null && !root.valheimSelected
     Text {width:parent.width;text:root.plugins.view ? root.plugins.view.title : "";wrapMode:Text.Wrap;textFormat:Text.PlainText;color:root.theme.foreground;font.family:root.theme.font.family;font.pixelSize:root.theme.font.title}
     Text {width:parent.width;text:root.plugins.view ? root.plugins.view.description : "";wrapMode:Text.Wrap;textFormat:Text.PlainText;color:root.theme.muted;font.family:root.theme.font.family;font.pixelSize:root.theme.font.body}
     Repeater {
@@ -128,10 +150,12 @@ Column {
     ChatButton {theme:root.theme;text:"Open profile folder";visible:root.plugins.folderUrl!=="";onClicked:Qt.openUrlExternally(root.plugins.folderUrl)}
   }
   Column {
-    width:parent.width;spacing:root.theme.spacing.sm;visible:root.plugins.conversation!=="" && root.plugins.selected!==""
+    width:parent.width;spacing:root.theme.spacing.sm;visible:root.plugins.conversation!=="" && root.plugins.selected!=="" && !root.valheimSelected
     Text {text:"Shared in this conversation";color:root.theme.foreground;font.family:root.theme.font.family;font.pixelSize:root.theme.font.body;font.weight:Font.DemiBold}
     Text {width:parent.width;visible:root.plugins.shared.length===0;text:"Shared pack attachments from loaded chat history appear here. Refresh after someone shares a revision.";wrapMode:Text.Wrap;color:root.theme.muted;font.family:root.theme.font.family;font.pixelSize:root.theme.font.caption}
     Repeater {model:root.plugins.shared;delegate:ChatButton {required property var modelData;theme:root.theme;width:parent.width;text:"Import from "+modelData.author+" · "+modelData.name;enabled:!root.plugins.busy;onClicked:root.plugins.request("plugin_import",{message_id:modelData.id})}}
+  }
+    }
   }
   FolderDialog {id:packagePicker;title:"Choose a plugin folder containing plugin.json and plugin.wasm";onAccepted:root.plugins.inspect(selectedFolder)}
   FolderDialog {id:profilePicker;title:"Choose a folder for a new, separate game profile";onAccepted:root.plugins.apply(selectedFolder)}
