@@ -1,9 +1,9 @@
 # Wisp plugins · API 1
 
 The first plugin is **Valheim Modpacks**. It stores a draft per account and
-conversation, resolves exact Thunderstore versions, shares an encrypted lockfile
-with a friend, group, or server channel, and creates a separate local BepInEx
-profile. Sharing never installs anything on another member's computer.
+conversation, accepts private mod ZIPs, resolves exact Thunderstore versions,
+and shares an encrypted pack with a friend, group, or server channel. It creates
+a separate local BepInEx profile. Sharing never installs anything on another member's computer.
 
 This is the first usable platform release. Package discovery, automatic update
 feeds, background guest services, live collaborative documents, a Windows game
@@ -16,17 +16,23 @@ relay encrypted documents; they do not execute plugins or install Valheim mods.
    `bash scripts/build-valheim-plugin.sh`.
 2. Open **Wisp → Plugins → Install plugin**. Choose
    `target/plugins/games.valheim`, review the identity, permissions, and digest,
-   and install it.
+   and install it. For private ZIP support, both members need Wisp with this
+   feature and **Valheim Modpacks 0.2.0**. Rebuild/reinstall an older plugin and
+   review its new **private mod ZIPs you select** permission.
 3. Choose **Personal draft** or a friend/group/server-channel conversation.
    Enter exact Thunderstore dependency strings, one per line, such as
    `denikson-BepInExPack_Valheim-5.4.2351`. Keep BepInEx among the dependencies.
-   Save the draft, then select **Resolve dependencies**.
+   Save the draft. To include an unpublished mod, choose **Add private mod ZIP…**,
+   select its ZIP, review its name/version, dependencies, size, and hash, then
+   click **Add reviewed ZIP**. Select **Resolve dependencies** after adding mods.
+   No Thunderstore account, team, or public listing is needed for a private ZIP.
 4. Wisp recursively reads each downloaded package's `manifest.json`. Your root versions stay pinned.
    Dependency versions are minimums: Wisp selects the highest requirement it
    encounters, and refuses a root pin that is too old. Review the resulting package
    list and hashes.
 5. **Share this revision** sends an ordinary, retained encrypted attachment to
-   the selected conversation. Members import it from **Shared in this
+   the selected conversation, including the actual bytes of any private mods.
+   Members import it from **Shared in this
    conversation**, review it, then choose **Install local profile** themselves.
    Only loaded chat history is listed; older attachments remain normal files.
 6. Choose an existing parent directory. A new `wisp-profile-<digest>` directory
@@ -47,6 +53,30 @@ not sandbox game mods. Game compatibility and client-only/server-only mod
 requirements still need to be checked for the chosen pack. Existing mod-manager
 profiles and user-edited configuration are not imported or merged automatically.
 
+## Private mod ZIPs
+
+A private ZIP uses the usual mod-package layout: `manifest.json` at the archive
+root with `name`, `version_number`, and `dependencies`, plus mod files such as
+`BepInEx/plugins/Foundation.dll`. Public dependency strings in the manifest are
+resolved from Thunderstore; the private package itself stays inside Wisp.
+Wisp labels it `Local-Foundation-0.1.0` (using its manifest name and version).
+Private mods can depend on another included `Local-Name-Version` package.
+They cannot replace the official BepInEx loader.
+
+Private ZIPs are limited to **128 MiB combined per draft/shared pack**, with a
+1 GiB extracted profile limit. Inspection rejects unsafe paths, links, malformed
+manifests, conflicting paths, and excessive expansion before adding the file.
+Changing the ZIP after review requires another review. Removing a ZIP invalidates
+the draft's lock without deleting existing profiles or earlier shared revisions.
+
+The sender's ZIP path is never sent to peers. Private bytes are retained in a
+separate cache and admitted to a host-owned registry for that account and
+conversation. A plugin cannot share or install another draft's private files by
+guessing a hash. Recipients import the complete encrypted bundle, review its
+package list, and explicitly install their own profile. No mod code runs during
+inspection, sharing, import, or installation. This does not alter a mod's own
+solo/host/guest compatibility.
+
 ## Package and runtime
 
 A package folder contains `plugin.json` and `plugin.wasm`. The manifest is strict:
@@ -63,7 +93,7 @@ A package folder contains `plugin.json` and `plugin.wasm`. The manifest is stric
 ```
 
 IDs are namespaced lowercase identifiers. Versions use SemVer. Supported
-permissions are `documents`, `thunderstore`, and `managed_files`. The native
+permissions are `documents`, `thunderstore`, `managed_files`, and `local_archives`. The native
 install review approves the digest of the parsed manifest plus module bytes;
 a changed package requires a new review. Installed modules are verified on each
 invocation. Disabling blocks subsequent invocations; lifecycle changes wait for
@@ -78,12 +108,12 @@ The guest exports memory and two functions:
 
 Request JSON contains `api`, `event`, `action`, `fields`, `state`, and `document`.
 Response JSON contains `state` and `view`. Events are `open`, `action`, `import`,
-and `resolved`. Each invocation starts a fresh instance; `state` is the only
+`resolved`, `archive_added`, and `archive_removed`. Each invocation starts a fresh instance; `state` is the only
 persistent guest memory. The working example is in
 `examples/plugins/shared-modpacks/src/lib.rs`.
 
 A view declares `title`, `description`, `fields`, `actions`, `rows`, optional
-`document`, `packages`, and `files`. Wisp renders plain text and native controls.
+`document`, `packages`, `files`, and `archives`. Wisp renders plain text and native controls.
 Guests cannot provide QML, HTML, JavaScript, external links, dialogs, or native
 commands. The host alone renders installation and sharing controls. A view
 request is not permission to perform a side effect.
@@ -120,6 +150,17 @@ from the authenticated message, never the envelope. Import validates the
 plugin ID and file size before passing only the document data to the guest.
 Import does not install plugins, enable permissions, or execute game mods.
 
+Public-only revisions keep the original `.wisp-plugin.json` envelope and Valheim
+data format 1. Private revisions use `.wisp-plugin.zip`: a strict bundle-format-1
+`bundle.json` contains the document and its private artifact list, alongside
+`archives/<sha256>.zip` entries. Valheim data format 2 identifies a pack containing
+private archives. Each local artifact adds `source: "local"`; omitting `source`
+still means Thunderstore and preserves existing public-pack hashes. Import
+validates the complete bundle, exact artifact identity, size/hash, and archive
+structure before authorizing its private bytes. Extra/missing/duplicate files
+are rejected. Older clients can download the encrypted attachment normally;
+they need the updated plugin host to import it into the manager.
+
 Documents are immutable revisions. Editing a received Valheim pack creates a
 local draft for a subsequent revision; the document records its imported parent digest.
 Any member who can send in the conversation can share a fork. There is no
@@ -139,7 +180,7 @@ even if a subsequent connection or disk failure prevents acknowledgement.
 
 `wispctl plugin <operation> '<JSON arguments>'` exposes the same API. Operations:
 `list`, `inspect`, `install`, `open`, `action`, `resolve`, `share`, `import`,
-`apply`, `enable`, and `remove`. All scoped mutations take the generation from
+`apply`, `enable`, `remove`, `inspect_archive`, `add_archive`, and `remove_archive`. All scoped mutations take the generation from
 `open`; `apply` also takes the displayed plan digest and local parent path.
 Never put credentials in plugin arguments.
 
@@ -152,7 +193,9 @@ python3 scripts/test-plugins.py --online
 ```
 
 The integration fixture creates two isolated accounts, an ephemeral loopback
-server, and temporary profiles. It exercises encrypted pack sharing and import;
+server, and temporary profiles. Its default offline run inspects a private ZIP,
+shares/imports its encrypted bundle, installs identical peer files, checks draft
+isolation, rejects changed inputs, and restores a corrupted cache by reimport;
 `--online` downloads pinned public BepInEx and Jötunn archives. It never launches Valheim
 or touches real conversations.
 

@@ -315,3 +315,24 @@ Status: **Deferred. No Android release or port requested.**
 - Desktop-only: the private Quickshell build permanently disables unused
   Hyprland/i3 IPC modules and uses runtime cache revision `web2`, fixing Qt 6.12
   meta-type build failures. No Android changes are required for that build fix.
+
+## Queued: private ZIPs in shared plugin packs (2026-10-25)
+
+- Desktop Valheim Modpacks 0.2.0 can review local mod ZIPs and include them in a
+  retained, encrypted `.wisp-plugin.zip` attachment. Recipients explicitly import
+  and install; no public Thunderstore listing is required. Private archives are
+  admitted per account/conversation and never passed as bytes/paths to Wasm.
+- Compatibility: no server API/schema change. JSON-only format-1 packs keep their
+  existing encoding. Bundle format 1 uses `bundle.json` with document and private
+  artifact metadata, plus `archives/<sha256>.zip`; private Valheim documents use
+  data format 2 and artifact `source: "local"`. Public artifact source defaults
+  to Thunderstore. Normal Android attachment download remains compatible.
+- A future requested Android batch may inspect bundle metadata; do not execute
+  mods or automatically unpack attachments. Enforce 128 MiB private ZIPs combined,
+  exact hashes, package identity, allowed entries, and archive expansion limits.
+- Sources: `crates/wisp-plugins/src/{bundles,files,lib,package}.rs`,
+  `apps/wispd/src/{plugins,plugin_downloads}.rs`, `quickshell/app/WispPlugins.qml`,
+  `quickshell/app/components/PluginsPage.qml`, `examples/plugins/shared-modpacks/`.
+- Validation: bundle/archive sandbox tests, four-theme review/action UI tests,
+  isolated two-account private ZIP sharing/install tests, changed-file rejection,
+  corrupted-cache recovery, and draft isolation. No Android port/release requested.

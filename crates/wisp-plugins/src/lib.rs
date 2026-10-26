@@ -1,5 +1,6 @@
 //! Portable plugin contracts. Guest code has no WASI or host imports. The
 //! desktop owns every privileged operation and presents its own action UI.
+pub mod bundles;
 pub mod files;
 pub mod package;
 pub mod runtime;
@@ -19,6 +20,7 @@ pub enum Permission {
     Documents,
     ManagedFiles,
     Thunderstore,
+    LocalArchives,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -39,7 +41,7 @@ impl Manifest {
         text(&self.name, 80)?;
         text(&self.description, 500)?;
         semver::Version::parse(&self.version).context("Invalid plugin version")?;
-        ensure!(self.permissions.len() <= 3, "Duplicate plugin permissions");
+        ensure!(self.permissions.len() <= 4, "Duplicate plugin permissions");
         for (i, permission) in self.permissions.iter().enumerate() {
             ensure!(
                 !self.permissions[..i].contains(permission),
@@ -109,6 +111,8 @@ pub struct View {
     pub files: Vec<files::Artifact>,
     #[serde(default)]
     pub packages: Vec<String>,
+    #[serde(default)]
+    pub archives: Vec<files::Artifact>,
 }
 impl View {
     pub fn validate(&self, manifest: &Manifest) -> anyhow::Result<()> {
@@ -146,11 +150,27 @@ impl View {
             "Plugin has no document permission"
         );
         ensure!(
-            self.files.is_empty()
-                || (manifest.permissions.contains(&Permission::ManagedFiles)
-                    && manifest.permissions.contains(&Permission::Thunderstore)),
-            "Profile installation requires managed-file and Thunderstore permissions"
+            self.files.is_empty() || manifest.permissions.contains(&Permission::ManagedFiles),
+            "Profile installation requires managed-file permission"
         );
+        for file in self.files.iter().chain(&self.archives) {
+            let permission = if file.source == files::Source::Local {
+                Permission::LocalArchives
+            } else {
+                Permission::Thunderstore
+            };
+            ensure!(
+                manifest.permissions.contains(&permission),
+                "Plugin lacks permission for this archive source"
+            );
+        }
+        ensure!(
+            self.archives
+                .iter()
+                .all(|f| f.source == files::Source::Local),
+            "Private archives must have a local source"
+        );
+        files::validate_plan(&self.archives)?;
         ensure!(
             self.packages.len() <= 128
                 && (self.packages.is_empty()

@@ -4,7 +4,7 @@ Build release wispd, wisp-server and the Valheim guest first. --online additiona
 resolves the pinned BepInEx package from Thunderstore and installs a temp profile.
 No real accounts, game processes, or installed profiles are used.
 """
-import argparse,json,os,socket,subprocess,tempfile,time
+import argparse,json,os,socket,subprocess,tempfile,time,zipfile
 from pathlib import Path
 ROOT=Path(__file__).resolve().parent.parent
 parser=argparse.ArgumentParser(description=__doc__)
@@ -66,6 +66,50 @@ with tempfile.TemporaryDirectory(prefix='wisp-plugins-test-') as temporary:
         assert opened['view']['title']=='Valheim Modpacks'
         rejected(lambda:call('owner','plugin_action',base|{'generation':opened['generation']+1,'action':'save','fields':{}}))
         rejected(lambda:call('owner','plugin_open',base|{'conversation_id':'not-a-member'}))
+        # Private packages work offline and travel inside the encrypted share.
+        opened=call('owner','plugin_action',base|{'generation':opened['generation'],'action':'save','fields':{'title':'Private Foundation fixture','packages':''}})
+        archive=root/'Foundation-0.1.0.zip'
+        payload=b'private-foundation-fixture-do-not-execute'
+        with zipfile.ZipFile(archive,'w') as package_zip:
+            package_zip.writestr('manifest.json',json.dumps({'name':'Foundation','version_number':'0.1.0','dependencies':[]}))
+            package_zip.writestr('BepInEx/plugins/Foundation.dll',payload)
+        review=call('owner','plugin_inspect_archive',base|{'generation':opened['generation'],'path':str(archive)})['archive_review']
+        rejected(lambda:call('owner','plugin_add_archive',base|{'generation':opened['generation'],'path':str(archive),'sha256':'unreviewed'}))
+        original=archive.read_bytes();archive.write_bytes(original+b'changed-after-review')
+        rejected(lambda:call('owner','plugin_add_archive',base|{'generation':opened['generation'],'path':str(archive),'sha256':review['artifact']['sha256']}))
+        archive.write_bytes(original)
+        opened=call('owner','plugin_add_archive',base|{'generation':opened['generation'],'path':str(archive),'sha256':review['artifact']['sha256']})
+        assert len(opened['view']['archives'])==1 and opened['view']['files']==[]
+        archive.unlink()
+        opened=call('owner','plugin_resolve',base|{'generation':opened['generation']})
+        assert len(opened['view']['files'])==1 and opened['view']['files'][0]['source']=='local'
+        parent=root/'private-owner-profiles';parent.mkdir()
+        opened=call('owner','plugin_apply',base|{'generation':opened['generation'],'digest':opened['digest'],'path':str(parent)})
+        assert (Path(opened['folder'])/'BepInEx/plugins/Local-Foundation/Foundation.dll').read_bytes()==payload
+        opened=call('owner','plugin_share',base|{'generation':opened['generation']})
+        def private_shared():
+            view=call('member','plugin_open',base)
+            return view if view['shared'] else None
+        incoming=wait('encrypted private bundle',private_shared)
+        message_id=incoming['shared'][0]['id']
+        assert incoming['shared'][0]['name'].endswith('.wisp-plugin.zip')
+        imported=call('member','plugin_import',base|{'generation':incoming['generation'],'message_id':message_id})
+        assert imported['view']['files']==opened['view']['files'] and imported['digest']==opened['digest']
+        personal=call('member','plugin_open',{'plugin_id':'games.valheim'})
+        assert personal['view']['archives']==[] and personal['view']['files']==[]
+        parent=root/'private-member-profiles';parent.mkdir()
+        cache=root/'member/data/wisp/plugins/cache/private'/review['artifact']['sha256']
+        cache.write_bytes(b'corrupt-cache')
+        rejected(lambda:call('member','plugin_apply',base|{'generation':imported['generation'],'digest':imported['digest'],'path':str(parent)}))
+        imported=call('member','plugin_import',base|{'generation':imported['generation'],'message_id':message_id})
+        imported=call('member','plugin_apply',base|{'generation':imported['generation'],'digest':imported['digest'],'path':str(parent)})
+        assert (Path(imported['folder'])/'BepInEx/plugins/Local-Foundation/Foundation.dll').read_bytes()==payload
+        removed=call('member','plugin_remove_archive',base|{'generation':imported['generation'],'sha256':review['artifact']['sha256']})
+        assert removed['view']['archives']==[] and removed['view']['files']==[]
+        assert (Path(imported['folder'])/'BepInEx/plugins/Local-Foundation/Foundation.dll').read_bytes()==payload
+        for database in root.glob('server.sqlite3*'):
+            if database.is_file():assert payload not in database.read_bytes() and b'Private Foundation fixture' not in database.read_bytes()
+        print('PASS: reviewed private ZIP -> offline resolve -> encrypted bundle -> peer install; changed-file, corrupt-cache, scope and removal checks',flush=True)
         if args.online:
             opened=call('owner','plugin_action',base|{'generation':opened['generation'],'action':'save','fields':{'title':'Our Valheim modpack','packages':'denikson-BepInExPack_Valheim-5.4.2351\nValheimModding-Jotunn-2.30.2'}})
             opened=call('owner','plugin_resolve',base|{'generation':opened['generation']})
@@ -79,9 +123,9 @@ with tempfile.TemporaryDirectory(prefix='wisp-plugins-test-') as temporary:
             opened=call('owner','plugin_share',base|{'generation':opened['generation']})
             def shared():
                 view=call('member','plugin_open',base)
-                return view if view['shared'] else None
+                return view if len(view['shared'])>=2 else None
             incoming=wait('encrypted shared pack',shared)
-            imported=call('member','plugin_import',base|{'generation':incoming['generation'],'message_id':incoming['shared'][0]['id']})
+            imported=call('member','plugin_import',base|{'generation':incoming['generation'],'message_id':next(item['id'] for item in incoming['shared'] if item['id']!=message_id)})
             assert imported['view']['files']==opened['view']['files']
             assert imported['digest']==opened['digest']
             other=call('member','plugin_open',{'plugin_id':'games.valheim'})

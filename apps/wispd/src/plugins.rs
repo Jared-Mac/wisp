@@ -10,7 +10,7 @@ use std::{
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use wisp_plugins::{
-    Document, MAX_JSON, MAX_MODULE, Manifest, Permission, Request, Response, files,
+    Document, MAX_JSON, MAX_MODULE, Manifest, Permission, Request, Response, bundles, files,
     package::{Installed, Packages, hash, read_bounded},
 };
 use wisp_protocol::{CommandEnvelope, MessageContext};
@@ -203,6 +203,69 @@ impl Daemon {
         let mut completed = None;
         match name {
             "plugin_open" => {}
+            "plugin_inspect_archive" | "plugin_add_archive" => {
+                ensure!(
+                    installed
+                        .manifest
+                        .permissions
+                        .contains(&Permission::LocalArchives),
+                    "Update this plugin and review its local-archive permission first"
+                );
+                let path = local_path(&string_arg(args, "path")?)?;
+                let read_path = path.clone();
+                let (bytes, artifact, dependencies) = tokio::task::spawn_blocking(move || {
+                    let bytes = read_bounded(&read_path, bundles::MAX_PRIVATE_BYTES)?;
+                    let (artifact, dependencies) = files::local_archive(&bytes)?;
+                    Ok::<_, anyhow::Error>((bytes, artifact, dependencies))
+                })
+                .await??;
+                if name == "plugin_inspect_archive" {
+                    return Ok(Some(
+                        json!({"archive_review":{"path":path,"artifact":artifact,"dependencies":dependencies},"feedback":"Review this private ZIP before adding it. It stays local until you share a revision."}),
+                    ));
+                }
+                ensure!(
+                    args["sha256"].as_str() == Some(&artifact.sha256),
+                    "ZIP changed after review; select it again"
+                );
+                let key = files::package_key(&artifact.package)?;
+                instance
+                    .archives
+                    .retain(|f| files::package_key(&f.package).ok().as_ref() != Some(&key));
+                instance.archives.push(artifact.clone());
+                files::validate_plan(&instance.archives)?;
+                ensure!(
+                    instance.archives.iter().map(|f| f.size).sum::<u64>()
+                        <= bundles::MAX_PRIVATE_BYTES as u64,
+                    "Private ZIPs exceed 128 MiB per draft"
+                );
+                let cache = packages.root.join("cache");
+                tokio::task::spawn_blocking(move || {
+                    super::plugin_downloads::cache_bytes(&cache, &bytes, files::Source::Local)
+                })
+                .await??;
+                request.event = "archive_added".into();
+                request.document = Some(json!({"artifact":artifact,"dependencies":dependencies}));
+                feedback =
+                    "Private ZIP added. Resolve dependencies before sharing or installing.".into();
+            }
+            "plugin_remove_archive" => {
+                ensure!(
+                    installed
+                        .manifest
+                        .permissions
+                        .contains(&Permission::LocalArchives),
+                    "Local-archive permission is required"
+                );
+                let sha256 = string_arg(args, "sha256")?;
+                ensure!(
+                    instance.archives.iter().any(|f| f.sha256 == sha256),
+                    "Private archive is not in this draft"
+                );
+                instance.archives.retain(|f| f.sha256 != sha256);
+                request.event = "archive_removed".into();
+                request.fields = json!({"sha256":sha256});
+            }
             "plugin_action" => {
                 request.event = "action".into();
                 request.action = string_arg(args, "action")?;
@@ -230,9 +293,17 @@ impl Daemon {
                 let attachment = content
                     .attachment
                     .context("Missing authenticated attachment")?;
+                let bundle = content.payload["file_name"]
+                    .as_str()
+                    .is_some_and(|n| n.ends_with(".wisp-plugin.zip"));
+                let limit = if bundle {
+                    bundles::MAX_BUNDLE
+                } else {
+                    MAX_JSON
+                };
                 ensure!(
-                    attachment.plaintext_bytes <= MAX_JSON as u64
-                        && attachment.ciphertext_bytes <= (MAX_JSON + 64 * 1024) as u64,
+                    attachment.plaintext_bytes <= limit as u64
+                        && attachment.ciphertext_bytes <= (limit + 1024 * 1024) as u64,
                     "Shared document exceeds limit"
                 );
                 let file = super::privacy_transfers::receive_attachment(
@@ -246,15 +317,44 @@ impl Daemon {
                     |_, _| {},
                 )
                 .await?;
-                let bytes = read_bounded(file.path(), MAX_JSON)?;
-                let document = Document::parse(&bytes)?;
+                let path = file.path().to_owned();
+                let (document, archives, document_hash) = tokio::task::spawn_blocking(move || {
+                    let bytes = read_bounded(&path, limit)?;
+                    let (document, archives) = if bundle {
+                        bundles::decode(&bytes)?
+                    } else {
+                        (Document::parse(&bytes)?, Vec::new())
+                    };
+                    Ok::<_, anyhow::Error>((document, archives, hash(&bytes)))
+                })
+                .await??;
                 ensure!(
                     document.plugin == id,
                     "Shared document requires a different plugin"
                 );
+                ensure!(
+                    archives.is_empty()
+                        || installed
+                            .manifest
+                            .permissions
+                            .contains(&Permission::LocalArchives),
+                    "Update this plugin and review its local-archive permission before importing a private pack"
+                );
+                instance.archives = archives
+                    .iter()
+                    .map(|(artifact, _)| artifact.clone())
+                    .collect();
+                let cache = packages.root.join("cache");
+                tokio::task::spawn_blocking(move || {
+                    for (_, bytes) in archives {
+                        super::plugin_downloads::cache_bytes(&cache, &bytes, files::Source::Local)?;
+                    }
+                    Ok::<_, anyhow::Error>(())
+                })
+                .await??;
                 request.event = "import".into();
                 request.document = Some(document.data);
-                request.fields = json!({"document_hash":hash(&bytes)});
+                request.fields = json!({"document_hash":document_hash});
                 feedback = format!(
                     "Imported from {}. Review before installing.",
                     message.sender.display_name
@@ -263,20 +363,20 @@ impl Daemon {
             "plugin_resolve" | "plugin_apply" | "plugin_share" => {
                 let rendered = invoke(&packages, &installed, request.clone()).await?;
                 let view = rendered.view.clone();
+                files::authorize_private(&view.files, &instance.archives)?;
+                files::authorize_private(&view.archives, &instance.archives)?;
                 request.state = rendered.state.clone();
                 if name == "plugin_resolve" {
-                    ensure!(
-                        installed
-                            .manifest
-                            .permissions
-                            .contains(&Permission::Thunderstore),
-                        "Thunderstore permission is required"
-                    );
                     let files = tokio::time::timeout(
                         Duration::from_secs(300),
                         super::plugin_downloads::resolve(
                             &view.packages,
+                            &view.archives,
                             &packages.root.join("cache"),
+                            installed
+                                .manifest
+                                .permissions
+                                .contains(&Permission::Thunderstore),
                         ),
                     )
                     .await
@@ -328,19 +428,36 @@ impl Daemon {
                             .document
                             .context("This plugin has no shareable document yet")?,
                     };
-                    let bytes = serde_json::to_vec(&document)?;
-                    Document::parse(&bytes)?;
+                    let private: Vec<_> = view
+                        .files
+                        .iter()
+                        .filter(|f| f.source == files::Source::Local)
+                        .cloned()
+                        .collect();
+                    let extension = if private.is_empty() { "json" } else { "zip" };
+                    let cache = packages.root.join("cache");
+                    let title = document.title.clone();
+                    let bytes = tokio::task::spawn_blocking(move || {
+                        if private.is_empty() {
+                            let bytes = serde_json::to_vec(&document)?;
+                            Document::parse(&bytes)?;
+                            Ok(bytes)
+                        } else {
+                            bundles::encode(document, private, &cache)
+                        }
+                    })
+                    .await??;
                     let mut file = tempfile::NamedTempFile::new()?;
                     file.write_all(&bytes)?;
                     let draft = AttachmentDraft::from_temporary(
                         &file,
-                        format!("{}-{}.wisp-plugin.json", id, &hash(&bytes)[..12]),
+                        format!("{}-{}.wisp-plugin.{extension}", id, &hash(&bytes)[..12]),
                         false,
                     )?;
                     let sent = message_actions::send_content(
                         &session,
                         conversation_id,
-                        format!("{} · shared plugin document", document.title),
+                        format!("{title} · shared plugin document"),
                         MessageContext {
                             reply_to: None,
                             forwarded_from: None,
@@ -373,6 +490,8 @@ impl Daemon {
             Some(response) => response,
             None => invoke(&packages, &installed, request).await?,
         };
+        files::authorize_private(&response.view.files, &instance.archives)?;
+        files::authorize_private(&response.view.archives, &instance.archives)?;
         instance.state = response.state;
         instance.generation = instance
             .generation
@@ -386,9 +505,9 @@ impl Daemon {
             .filter(|m| {
                 m.conversation_id == conversation_id
                     && m.encryption_version == 1
-                    && m.payload["file_name"]
-                        .as_str()
-                        .is_some_and(|n| n.ends_with(".wisp-plugin.json"))
+                    && m.payload["file_name"].as_str().is_some_and(|n| {
+                        n.ends_with(".wisp-plugin.json") || n.ends_with(".wisp-plugin.zip")
+                    })
             })
             .map(
                 |m| json!({"id":m.id,"author":m.sender.display_name,"name":m.payload["file_name"]}),

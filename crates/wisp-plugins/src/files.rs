@@ -11,12 +11,37 @@ use std::{
 
 pub const MAX_ARCHIVE: usize = 256 * 1024 * 1024;
 pub const MAX_TOTAL: u64 = 1024 * 1024 * 1024;
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Source {
+    #[default]
+    Thunderstore,
+    Local,
+}
+impl Source {
+    #[allow(clippy::trivially_copy_pass_by_ref)] // serde's skip predicate takes a reference.
+    fn is_thunderstore(&self) -> bool {
+        *self == Self::Thunderstore
+    }
+}
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Artifact {
     pub package: String,
     pub sha256: String,
     pub size: u64,
+    #[serde(default, skip_serializing_if = "Source::is_thunderstore")]
+    pub source: Source,
+}
+/// Keep private bytes out of the public download cache, even when a guest
+/// supplies the same hash with a forged Thunderstore source.
+#[must_use]
+pub fn cache_path(cache: &Path, artifact: &Artifact) -> PathBuf {
+    if artifact.source == Source::Local {
+        cache.join("private").join(&artifact.sha256)
+    } else {
+        cache.join(&artifact.sha256)
+    }
 }
 pub fn package_parts(id: &str) -> anyhow::Result<(&str, &str, &str)> {
     let parts: Vec<_> = id.split('-').collect();
@@ -45,6 +70,10 @@ pub fn validate_plan(files: &[Artifact]) -> anyhow::Result<()> {
     let mut total = 0u64;
     for file in files {
         let (owner, name, _) = package_parts(&file.package)?;
+        ensure!(
+            file.source != Source::Local || owner == "Local",
+            "Invalid private package namespace"
+        );
         ensure!(
             names.insert(format!("{owner}-{name}").to_lowercase()),
             "Conflicting package versions"
@@ -152,6 +181,87 @@ fn destination(package: &str, path: &str) -> anyhow::Result<Option<String>> {
     );
     Ok(Some(format!("BepInEx/plugins/{owner}-{name}/{path}")))
 }
+
+/// Inspect a private mod ZIP without extracting or executing its contents.
+pub fn local_archive(bytes: &[u8]) -> anyhow::Result<(Artifact, Vec<String>)> {
+    ensure!(
+        bytes.len() <= crate::bundles::MAX_PRIVATE_BYTES,
+        "Private ZIP exceeds 128 MiB"
+    );
+    let manifest = archive_manifest(bytes).context(
+        "Choose a mod ZIP containing manifest.json with name, version_number, and dependencies",
+    )?;
+    let artifact = Artifact {
+        package: format!("Local-{}-{}", manifest.name, manifest.version_number),
+        sha256: hash(bytes),
+        size: bytes.len() as u64,
+        source: Source::Local,
+    };
+    validate_plan(std::slice::from_ref(&artifact))?;
+    let mut zip = zip::ZipArchive::new(Cursor::new(bytes))?;
+    let mut names = BTreeSet::new();
+    let mut total = 0_u64;
+    for i in 0..zip.len() {
+        let mut file = zip.by_index(i)?;
+        ensure!(
+            !file.is_symlink()
+                && file
+                    .unix_mode()
+                    .is_none_or(|m| matches!(m & 0o170_000, 0 | 0o100_000 | 0o040_000)),
+            "Archive links and special files are not supported"
+        );
+        if file.is_dir() || file.name().ends_with('\\') {
+            safe_relative(file.name().replace('\\', "/").trim_end_matches('/'))?;
+            continue;
+        }
+        if let Some(path) = destination(&artifact.package, file.name())? {
+            ensure!(
+                names.insert(path.to_lowercase()),
+                "Conflicting archive paths"
+            );
+        }
+        total = total
+            .checked_add(file.size())
+            .context("Archive size overflow")?;
+        ensure!(
+            file.size() <= MAX_ARCHIVE as u64 && total <= MAX_TOTAL,
+            "Extracted archive exceeds limits"
+        );
+        let size = file.size();
+        ensure!(
+            std::io::copy(&mut file.by_ref().take(size + 1), &mut std::io::sink())? == size,
+            "Archive size mismatch"
+        );
+    }
+    ensure!(!names.is_empty(), "ZIP contains no installable mod files");
+    Ok((artifact, manifest.dependencies))
+}
+
+pub fn unpacked_size(bytes: &[u8]) -> anyhow::Result<u64> {
+    let mut zip = zip::ZipArchive::new(Cursor::new(bytes))?;
+    ensure!(zip.len() <= 10_000, "Too many archive entries");
+    let mut total = 0_u64;
+    for i in 0..zip.len() {
+        total = total
+            .checked_add(zip.by_index(i)?.size())
+            .context("Archive size overflow")?;
+        ensure!(total <= MAX_TOTAL, "Extracted archive exceeds 1 GiB");
+    }
+    Ok(total)
+}
+
+/// Guests may reference private bytes only after a native user action admitted
+/// those exact bytes into this account/conversation's host-owned registry.
+pub fn authorize_private(files: &[Artifact], admitted: &[Artifact]) -> anyhow::Result<()> {
+    validate_plan(files)?;
+    for file in files.iter().filter(|f| f.source == Source::Local) {
+        ensure!(
+            admitted.contains(file),
+            "Private archive is not available in this draft; add its ZIP or import the complete shared pack"
+        );
+    }
+    Ok(())
+}
 #[derive(Serialize, Deserialize)]
 struct Receipt {
     digest: String,
@@ -228,7 +338,7 @@ pub fn install_profile(parent: &Path, files: &[Artifact], cache: &Path) -> anyho
     let mut total = 0u64;
     let mut entries = 0;
     for artifact in files {
-        let bytes = read_bounded(&cache.join(&artifact.sha256), MAX_ARCHIVE)?;
+        let bytes = read_bounded(&cache_path(cache, artifact), MAX_ARCHIVE)?;
         ensure!(
             bytes.len() as u64 == artifact.size && hash(&bytes) == artifact.sha256,
             "Package checksum mismatch"
@@ -288,6 +398,17 @@ pub fn install_profile(parent: &Path, files: &[Artifact], cache: &Path) -> anyho
 mod tests {
     use super::*;
     use std::io::Write;
+    #[test]
+    fn existing_public_locks_keep_their_serialized_bytes_and_digest() {
+        let legacy = format!(
+            r#"[{{"package":"Team-Mod-1.0.0","sha256":"{}","size":1}}]"#,
+            "a".repeat(64)
+        );
+        let files: Vec<Artifact> = serde_json::from_str(&legacy).unwrap();
+        assert_eq!(files[0].source, Source::Thunderstore);
+        assert_eq!(serde_json::to_string(&files).unwrap(), legacy);
+        assert_eq!(plan_digest(&files).unwrap(), hash(legacy.as_bytes()));
+    }
     fn archive(entries: &[(&str, &[u8])]) -> Vec<u8> {
         let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
         for (path, data) in entries {
@@ -306,6 +427,7 @@ mod tests {
             package: "Team-Mod-1.0.0".into(),
             sha256: "a".repeat(64),
             size: 1,
+            source: Source::Thunderstore,
         };
         let mut b = a.clone();
         b.package = "Team-Mod-2.0.0".into();
@@ -335,6 +457,7 @@ mod tests {
             package: "Team-Mod-1.0.0".into(),
             sha256: hash(&bytes),
             size: bytes.len() as u64,
+            source: Source::Thunderstore,
         };
         fs::write(cache.path().join(&a.sha256), bytes).unwrap();
         let path = install_profile(root.path(), std::slice::from_ref(&a), cache.path()).unwrap();
@@ -362,6 +485,7 @@ mod tests {
             package: "Team-Mod-1.0.0".into(),
             sha256: hash(&bytes),
             size: bytes.len() as u64,
+            source: Source::Thunderstore,
         };
         fs::write(cache.path().join(&a.sha256), bytes).unwrap();
         assert!(install_profile(root.path(), &[a], cache.path()).is_err());

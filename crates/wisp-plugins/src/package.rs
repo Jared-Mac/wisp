@@ -53,6 +53,8 @@ pub struct Instance {
     pub state: Value,
     #[serde(default)]
     pub folder: Option<PathBuf>,
+    #[serde(default)]
+    pub archives: Vec<crate::files::Artifact>,
 }
 #[derive(Clone)]
 pub struct Packages {
@@ -218,6 +220,7 @@ mod tests {
                     generation: 2,
                     state: serde_json::json!({"name":"pack"}),
                     folder: None,
+                    archives: Vec::new(),
                 },
             )
             .unwrap();

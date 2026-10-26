@@ -7,7 +7,7 @@ use std::{
     time::Duration,
 };
 use wisp_plugins::{
-    files::{Artifact, MAX_ARCHIVE, MAX_TOTAL, archive_manifest, package_parts},
+    files::{Artifact, MAX_ARCHIVE, MAX_TOTAL, Source, archive_manifest, package_parts},
     package::{hash, read_bounded},
 };
 
@@ -55,36 +55,73 @@ async fn download(id: &str) -> anyhow::Result<Vec<u8>> {
     }
     Ok(data)
 }
-fn cache_bytes(cache: &Path, bytes: &[u8]) -> anyhow::Result<String> {
+pub(super) fn cache_bytes(cache: &Path, bytes: &[u8], source: Source) -> anyhow::Result<String> {
     use std::io::Write;
-    std::fs::create_dir_all(cache)?;
+    let directory = if source == Source::Local {
+        cache.join("private")
+    } else {
+        cache.to_path_buf()
+    };
+    std::fs::create_dir_all(&directory)?;
     let digest = hash(bytes);
-    let path = cache.join(&digest);
-    if !path.exists() {
+    let path = directory.join(&digest);
+    if read_bounded(&path, MAX_ARCHIVE)
+        .is_ok_and(|cached| cached.len() == bytes.len() && hash(&cached) == digest)
+    {
+        return Ok(digest);
+    }
+    {
         let mut total = bytes.len() as u64;
-        for entry in std::fs::read_dir(cache)? {
-            total = total
-                .checked_add(entry?.metadata()?.len())
-                .context("Cache size overflow")?;
+        let mut directories = vec![cache.to_path_buf()];
+        while let Some(parent) = directories.pop() {
+            for entry in std::fs::read_dir(parent)? {
+                let entry = entry?;
+                if entry.path() == path {
+                    continue;
+                }
+                let metadata = entry.metadata()?;
+                if entry.file_type()?.is_dir() {
+                    ensure!(
+                        entry.path() == cache.join("private"),
+                        "Unexpected download-cache directory"
+                    );
+                    directories.push(entry.path());
+                } else {
+                    total = total
+                        .checked_add(metadata.len())
+                        .context("Cache size overflow")?;
+                }
+            }
         }
         ensure!(
             total <= 4 * MAX_TOTAL,
             "Plugin download cache is full (4 GiB). Remove unused cached archives before retrying"
         );
-        let mut file = tempfile::NamedTempFile::new_in(cache)?;
+        let mut file = tempfile::NamedTempFile::new_in(&directory)?;
         file.write_all(bytes)?;
         file.as_file().sync_all()?;
         file.persist(path)?;
     }
     Ok(digest)
 }
-pub(super) async fn resolve(roots: &[String], cache: &Path) -> anyhow::Result<Vec<Artifact>> {
+pub(super) async fn resolve(
+    roots: &[String],
+    private: &[Artifact],
+    cache: &Path,
+    allow_network: bool,
+) -> anyhow::Result<Vec<Artifact>> {
+    wisp_plugins::files::validate_plan(private)?;
+    let roots: Vec<_> = roots
+        .iter()
+        .cloned()
+        .chain(private.iter().map(|f| f.package.clone()))
+        .collect();
     ensure!(
         !roots.is_empty() && roots.len() <= 128,
         "Choose between 1 and 128 root packages"
     );
     let mut queue: VecDeque<_> = roots.iter().cloned().collect();
-    let mut selection = wisp_plugins::files::Selection::new(roots)?;
+    let mut selection = wisp_plugins::files::Selection::new(&roots)?;
     let mut archives = BTreeMap::new();
     let mut total = 0_u64;
     let mut downloads = 0;
@@ -95,7 +132,21 @@ pub(super) async fn resolve(roots: &[String], cache: &Path) -> anyhow::Result<Ve
         downloads += 1;
         ensure!(downloads <= 256, "Too many dependency version changes");
         let (_, name, version) = package_parts(&id)?;
-        let bytes = download(&id).await?;
+        let local = private.iter().find(|f| f.package == id);
+        let bytes = if let Some(file) = local {
+            let bytes = read_bounded(&wisp_plugins::files::cache_path(cache, file), MAX_ARCHIVE)?;
+            ensure!(
+                bytes.len() as u64 == file.size && hash(&bytes) == file.sha256,
+                "Private archive changed; add its ZIP again"
+            );
+            bytes
+        } else {
+            ensure!(
+                allow_network,
+                "Thunderstore permission is required to fetch this dependency"
+            );
+            download(&id).await?
+        };
         total += bytes.len() as u64;
         ensure!(total <= MAX_TOTAL, "Downloads exceed 1 GiB");
         let manifest = archive_manifest(&bytes)?;
@@ -104,10 +155,12 @@ pub(super) async fn resolve(roots: &[String], cache: &Path) -> anyhow::Result<Ve
             "Archive manifest does not match requested version"
         );
         queue.extend(manifest.dependencies.clone());
+        let source = local.map_or(Source::Thunderstore, |_| Source::Local);
         let artifact = Artifact {
             package: id.clone(),
-            sha256: cache_bytes(cache, &bytes)?,
+            sha256: cache_bytes(cache, &bytes, source)?,
             size: bytes.len() as u64,
+            source,
         };
         archives.insert(id, (artifact, manifest.dependencies));
     }
@@ -144,13 +197,17 @@ pub(super) async fn resolve(roots: &[String], cache: &Path) -> anyhow::Result<Ve
 pub(super) async fn obtain(files: &[Artifact], cache: &Path) -> anyhow::Result<()> {
     wisp_plugins::files::validate_plan(files)?;
     for file in files {
-        let path = cache.join(&file.sha256);
+        let path = wisp_plugins::files::cache_path(cache, file);
         if let Ok(bytes) = read_bounded(&path, MAX_ARCHIVE)
             && bytes.len() as u64 == file.size
             && hash(&bytes) == file.sha256
         {
             continue;
         }
+        ensure!(
+            file.source != Source::Local,
+            "Private archive is missing or damaged; import the shared pack or add its ZIP again"
+        );
         let bytes = download(&file.package).await?;
         ensure!(
             bytes.len() as u64 == file.size && hash(&bytes) == file.sha256,
@@ -164,11 +221,11 @@ pub(super) async fn obtain(files: &[Artifact], cache: &Path) -> anyhow::Result<(
             manifest.name == name && manifest.version_number == version,
             "Package identity mismatch"
         );
-        cache_bytes(cache, &bytes).context("Could not cache package")?;
+        cache_bytes(cache, &bytes, Source::Thunderstore).context("Could not cache package")?;
     }
     // All transitive dependencies must be explicitly pinned in a shared lock.
     for file in files {
-        let bytes = read_bounded(&cache.join(&file.sha256), MAX_ARCHIVE)?;
+        let bytes = read_bounded(&wisp_plugins::files::cache_path(cache, file), MAX_ARCHIVE)?;
         let manifest = archive_manifest(&bytes)?;
         let (_, name, version) = package_parts(&file.package)?;
         ensure!(
