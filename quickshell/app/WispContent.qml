@@ -432,10 +432,11 @@ FocusScope {
         Repeater {model:root.bridge.serverPlugins.enabledPlugins
           ChatButton {
             required property var modelData
+            objectName:"serverPluginShortcut"
             theme:root.theme;text:modelData.manifest.name;height:root.theme.space(30)
             width:Math.min(implicitWidth,parent.width)
             enabled:!root.bridge.plugins.busy
-            onClicked:{root.currentPage="plugins";scrollView.contentY=0;root.bridge.plugins.openServer(modelData,root.bridge.serverPlugins.server)}
+            onClicked:{root.bridge.plugins.openServer(modelData,root.bridge.serverPlugins.server);root.currentPage="plugins";scrollView.contentY=0}
           }
         }
       }

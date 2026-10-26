@@ -357,3 +357,5 @@ Status: **Deferred. No Android release or port requested.**
   `WispContent.qml`. Validation: membership/admin/digest/revocation API tests,
   local two-client catalog setup and encrypted pack lifecycle, themed headless UI.
 - This is queued context only. Do not port or release until an Android batch is requested.
+- Desktop integration follow-up: start catalog preparation before mounting the
+  plugin page, so its initial refresh cannot consume the opening action.

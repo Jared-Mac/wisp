@@ -4,7 +4,7 @@ Build release wispd, wisp-server and the Valheim guest first. --online additiona
 resolves the pinned BepInEx package from Thunderstore and installs a temp profile.
 No real accounts, game processes, or installed profiles are used.
 """
-import argparse,json,os,socket,sqlite3,subprocess,tempfile,time,zipfile
+import argparse,json,os,shutil,socket,sqlite3,subprocess,tempfile,time,zipfile
 from pathlib import Path
 ROOT=Path(__file__).resolve().parent.parent
 parser=argparse.ArgumentParser(description=__doc__)
@@ -80,6 +80,16 @@ with tempfile.TemporaryDirectory(prefix='wisp-plugins-test-') as temporary:
         rejected(lambda:call('member','plugin_server_prepare',catalog_args))
         call('owner','plugin_server_enable',catalog_args|{'enabled':True})
         print('PASS: admin catalog enable -> member prepare without folders -> verified code; revoked/unreviewed packages rejected',flush=True)
+        if shutil.which('qs'):
+            ui=root/'catalog-ui';ui.mkdir()
+            shutil.copytree(ROOT/'quickshell/app',ui/'app')
+            shutil.copy2(ROOT/'tests/quickshell/ServerPlugins.qml',ui/'shell.qml')
+            ui_env=env|{'WISP_SOCKET':str(root/'member.sock'),'XDG_CONFIG_HOME':str(root/'member/config'),'QT_QPA_PLATFORM':'offscreen','QT_QUICK_BACKEND':'software'}
+            result=subprocess.run(['qs','--path',str(ui)],env=ui_env,capture_output=True,text=True,timeout=25)
+            output=result.stdout+result.stderr
+            assert result.returncode==0 and 'SERVER_PLUGINS_OK' in output and not any(error in output for error in ['SERVER_PLUGINS_FAILED','TypeError','ReferenceError','Binding loop']), output
+            print('PASS: real daemon + headless main-view shortcut opens plugin editor on first click',flush=True)
+
         base={'plugin_id':'games.valheim','conversation_id':conversation}
         opened=call('owner','plugin_open',base)
         assert opened['view']['title']=='Valheim Modpacks'

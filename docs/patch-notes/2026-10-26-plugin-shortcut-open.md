@@ -1,0 +1,1 @@
+- The main-view plugin shortcut opens its editor directly on the first click.
