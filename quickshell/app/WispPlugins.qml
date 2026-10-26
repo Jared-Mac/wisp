@@ -7,6 +7,7 @@ Item {
   property string selected: ""
   property string conversation: ""
   property string server: ""
+  property bool serverMode: false
   readonly property bool dirty: !!view && (view.fields || []).some(function(f){return String(fields[f.id] || "")!==String(f.value || "")})
   property var review: null
   property var archiveReview: null
@@ -20,7 +21,7 @@ Item {
   property string feedback: ""
   property bool busy: false
   property int epoch: 0
-  function reset() { epoch++; busy=false; view=null; shared=[]; review=null;archiveReview=null }
+  function reset() { epoch++; busy=false; view=null; shared=[]; review=null;archiveReview=null;selected="";folder="";folderUrl="";feedback="";serverMode=false }
   function request(name,args) {
     if (busy) return false
     var values=Object.assign({},bridge.scopeForConversation(conversation),{server_id:server || String(bridge.activeServer.id || ""),plugin_id:selected,generation:generation},args || {})
@@ -31,7 +32,12 @@ Item {
     return true
   }
   function refresh() { request("plugin_list",{}) }
-  function open(id,scope) { if(busy)return;selected=id;conversation=scope;server=String(bridge.scopeForConversation(scope).server_id);view=null;shared=[];archiveReview=null;folder="";folderUrl="";if(id)request("plugin_open",{}) }
+  function open(id,scope) { if(busy)return;selected=id;conversation=scope;if(!serverMode)server=String(bridge.scopeForConversation(scope).server_id);view=null;shared=[];archiveReview=null;folder="";folderUrl="";if(id)request("plugin_open",{}) }
+  function openServer(entry,serverId) {
+    if(busy)return
+    reset();serverMode=true;server=serverId;selected=entry.manifest.id;conversation=""
+    request("plugin_server_prepare",{digest:entry.installed_digest || entry.digest})
+  }
   function setField(id,value) { var next=Object.assign({},fields);next[id]=value;fields=next }
   function action(id) { request("plugin_action",{action:id,fields:fields}) }
   function inspect(path) { request("plugin_inspect",{path:String(path)}) }
@@ -49,7 +55,7 @@ Item {
     if(value.archive_review!==undefined) {archiveReview=value.archive_review;return}
     if(action.command==="plugin_add_archive")archiveReview=null
     if(action.command==="plugin_inspect") {review=value;feedback="Review this plugin before installing.";return}
-    if(action.command==="plugin_install") {review=null;open(String(value.installed.manifest.id),conversation);return}
+    if(action.command==="plugin_install" || action.command==="plugin_server_prepare") {review=null;open(String(value.installed.manifest.id),conversation);return}
     if(action.command==="plugin_remove") {selected="";view=null;shared=[];folder="";return}
     if(action.command==="plugin_enable") {view=null;return}
     if(value.view!==undefined) {

@@ -117,10 +117,19 @@ impl Daemon {
         &self,
         command: &CommandEnvelope,
     ) -> anyhow::Result<Option<Value>> {
-        let _operation = self
-            .plugin_operation
-            .try_lock()
-            .context("Another plugin operation is running; try again when it finishes")?;
+        // Catalog reads/settings are independent of a local mod download or install.
+        let _operation = if matches!(
+            command.name.as_str(),
+            "plugin_server_catalog" | "plugin_server_enable"
+        ) {
+            None
+        } else {
+            Some(
+                self.plugin_operation
+                    .try_lock()
+                    .context("Another plugin operation is running; try again when it finishes")?,
+            )
+        };
         let packages = packages()?;
         let args = &command.args;
         let name = command.name.as_str();
@@ -128,6 +137,75 @@ impl Daemon {
             serde_json::to_vec(args)?.len() <= MAX_JSON,
             "Plugin command exceeds limit"
         );
+        if matches!(
+            name,
+            "plugin_server_catalog" | "plugin_server_enable" | "plugin_server_prepare"
+        ) {
+            let session = self
+                .message_session(args["server_id"].as_str().unwrap_or_default())
+                .await?;
+            let api = session.api();
+            if name == "plugin_server_catalog" {
+                return Ok(Some(
+                    crate::decode(
+                        api.request(reqwest::Method::GET, "/v1/server/plugins")
+                            .send()
+                            .await?,
+                    )
+                    .await?,
+                ));
+            }
+            let id = string_arg(args, "plugin_id")?;
+            wisp_plugins::identifier(&id)?;
+            if name == "plugin_server_enable" {
+                let enabled = args["enabled"]
+                    .as_bool()
+                    .context("Choose enabled or disabled")?;
+                return Ok(Some(
+                    crate::decode(
+                        api.request(reqwest::Method::PUT, &format!("/v1/server/plugins/{id}"))
+                            .json(&json!({"enabled":enabled,"digest":string_arg(args,"digest")?}))
+                            .send()
+                            .await?,
+                    )
+                    .await?,
+                ));
+            }
+            let digest = string_arg(args, "digest")?;
+            // Check this client's reviewed catalog before asking the server for any module.
+            wisp_plugins::catalog::module(&id, &digest)?;
+            let mut response = api
+                .request(
+                    reqwest::Method::GET,
+                    &format!("/v1/server/plugins/{id}/package"),
+                )
+                .send()
+                .await?;
+            ensure!(
+                response.status().is_success(),
+                "This server plugin is unavailable. Refresh the plugin list."
+            );
+            ensure!(
+                response
+                    .headers()
+                    .get("x-wisp-plugin-digest")
+                    .and_then(|h| h.to_str().ok())
+                    == Some(digest.as_str()),
+                "Server plugin changed; refresh before opening"
+            );
+            let mut bytes = Vec::new();
+            while let Some(chunk) = response.chunk().await? {
+                ensure!(
+                    bytes.len() + chunk.len() <= MAX_MODULE,
+                    "Server plugin exceeds size limit"
+                );
+                bytes.extend_from_slice(&chunk);
+            }
+            let installed = wisp_plugins::catalog::prepare(&packages, &id, &digest, &bytes)?;
+            return Ok(Some(
+                json!({"installed":installed,"plugins":packages.list()?}),
+            ));
+        }
         match name {
             "plugin_list" => return Ok(Some(json!({"plugins":packages.list()?}))),
             "plugin_inspect" => {

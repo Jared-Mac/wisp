@@ -8,22 +8,43 @@ Column {
   required property var bridge
   required property var theme
   readonly property var plugins: bridge.plugins
+  property bool developerTools: false
   function conversationLabel(c) {
     var server=(bridge.servers || []).filter(function(s){return String(s.id)===String(c.server_id)})[0]
     return String(c.label || "Conversation") + (server ? " · "+server.name : "") + (c.server_channel ? " · server channel" : " · friends")
   }
-  property var scopes: [{id:"",label:"Personal draft"}].concat((bridge.conversations || []).map(function(c){return {id:String(c.id),label:root.conversationLabel(c)}}))
+  property var scopes: [{id:"",label:"Personal draft"}].concat((bridge.conversations || []).filter(function(c){return !root.plugins.serverMode || String(c.server_id)===root.plugins.server}).map(function(c){return {id:String(c.id),label:root.conversationLabel(c)}}))
   readonly property var selectedPackage: plugins.installed.filter(function(p){return p.manifest.id===root.plugins.selected})[0] || null
   readonly property bool supportsArchives: !!selectedPackage && (selectedPackage.manifest.permissions || []).indexOf("local_archives")>=0
   spacing: theme.spacing.md
-  Component.onCompleted: plugins.refresh()
+  Component.onCompleted: { if(!plugins.selected)plugins.refresh(); bridge.serverPlugins.refresh() }
   Text {text:"Plugins";color:root.theme.foreground;font.family:root.theme.font.family;font.pixelSize:root.theme.font.title;font.weight:Font.DemiBold}
-  Text {width:parent.width;text:"Shared tools for your friends and servers";wrapMode:Text.Wrap;color:root.theme.muted;font.family:root.theme.font.family;font.pixelSize:root.theme.font.body}
+  Text {width:parent.width;text:"Plugins for " + root.bridge.activeServer.name;wrapMode:Text.Wrap;color:root.theme.muted;font.family:root.theme.font.family;font.pixelSize:root.theme.font.body}
   Flow {
     width:parent.width;spacing:root.theme.spacing.sm
-    ChatButton {theme:root.theme;text:"Install plugin…";enabled:!root.plugins.busy;onClicked:packagePicker.open()}
-    ChatButton {theme:root.theme;text:"Refresh";enabled:!root.plugins.busy;onClicked:root.plugins.selected ? root.plugins.open(root.plugins.selected,root.plugins.conversation) : root.plugins.refresh()}
+    ChatButton {visible:root.developerTools;theme:root.theme;text:"Install from folder…";enabled:!root.plugins.busy;onClicked:packagePicker.open()}
+    ChatButton {theme:root.theme;text:"Refresh";enabled:!root.plugins.busy;onClicked:{root.bridge.serverPlugins.refresh();root.plugins.selected ? root.plugins.open(root.plugins.selected,root.plugins.conversation) : root.plugins.refresh()}}
   }
+  Text {width:parent.width;text:root.bridge.serverPlugins.canManage ? "Add a tool from the Wisp catalog. It will appear on the main view for every server member." : "Open a tool enabled by this server’s administrators.";wrapMode:Text.Wrap;color:root.theme.muted;font.family:root.theme.font.family;font.pixelSize:root.theme.font.body}
+  Text {width:parent.width;visible:!!text;text:root.bridge.serverPlugins.feedback;wrapMode:Text.Wrap;color:root.theme.muted;font.family:root.theme.font.family;font.pixelSize:root.theme.font.caption}
+  Repeater {
+    model:root.bridge.serverPlugins.catalog
+    delegate:Rectangle {
+      required property var modelData
+      width:parent.width;height:catalogCard.implicitHeight+root.theme.spacing.md*2
+      radius:root.theme.cornerRadius;color:root.theme.surface
+      Column {id:catalogCard;x:root.theme.spacing.md;y:x;width:parent.width-x*2;spacing:root.theme.spacing.sm
+        Text {width:parent.width;text:modelData.manifest.name+" · "+modelData.manifest.version+(modelData.enabled ? " · Added to server" : "");wrapMode:Text.Wrap;color:root.theme.foreground;font.family:root.theme.font.family;font.pixelSize:root.theme.font.body;font.weight:Font.DemiBold}
+        Text {width:parent.width;text:modelData.manifest.description;wrapMode:Text.Wrap;color:root.theme.muted;font.family:root.theme.font.family;font.pixelSize:root.theme.font.caption}
+        Text {width:parent.width;text:"Uses shared pack attachments, Thunderstore downloads, local mod profiles and private ZIPs you select. Opening prepares the tool; game mods install only when you choose.";wrapMode:Text.Wrap;color:root.theme.muted;font.family:root.theme.font.family;font.pixelSize:root.theme.font.caption}
+        Flow {width:parent.width;spacing:root.theme.spacing.sm
+          ChatButton {objectName:"serverPluginOpen";theme:root.theme;text:"Open";visible:modelData.enabled;enabled:!root.plugins.busy && !root.bridge.serverPlugins.busy;onClicked:root.plugins.openServer(modelData,root.bridge.serverPlugins.server)}
+          ChatButton {objectName:"serverPluginManage";theme:root.theme;text:!modelData.enabled ? "Add to server" : modelData.installed_digest!==modelData.digest ? "Update server plugin" : "Remove from server";visible:root.bridge.serverPlugins.canManage;enabled:!root.plugins.busy && !root.bridge.serverPlugins.busy;onClicked:root.bridge.serverPlugins.setEnabled(modelData,!modelData.enabled || modelData.installed_digest!==modelData.digest)}
+        }
+      }
+    }
+  }
+  CheckBox {text:"Developer tools · local plugins";width:parent.width;checked:root.developerTools;onToggled:root.developerTools=checked;ThemeControlStyle {theme:root.theme;control:parent}}
   Rectangle {
     visible:root.plugins.review!==null;width:parent.width;height:reviewContent.implicitHeight+root.theme.spacing.lg*2
     color:root.theme.surface;radius:root.theme.cornerRadius;border.color:root.theme.focusBorder;border.width:1
@@ -40,22 +61,22 @@ Column {
     }
   }
   ComboBox {
-    id:pluginChoice;objectName:"pluginChoice";width:parent.width;enabled:!root.plugins.busy
+    id:pluginChoice;objectName:"pluginChoice";visible:root.developerTools;width:parent.width;enabled:!root.plugins.busy
     model:root.plugins.installed.map(function(p){return p.manifest.name+(p.enabled ? "" : " · disabled")})
     currentIndex:root.plugins.installed.findIndex(function(p){return p.manifest.id===root.plugins.selected})
     displayText:currentIndex<0 ? "Choose an installed plugin" : currentText
     ThemeControlStyle {theme:root.theme;control:pluginChoice}
-    onActivated:root.plugins.open(root.plugins.installed[currentIndex].manifest.id,root.plugins.conversation)
+    onActivated:{root.plugins.serverMode=false;root.plugins.open(root.plugins.installed[currentIndex].manifest.id,root.plugins.conversation)}
   }
   ComboBox {
-    id:scopeChoice;objectName:"pluginConversation";width:parent.width;enabled:!root.plugins.busy
+    id:scopeChoice;objectName:"pluginConversation";visible:!!root.plugins.selected;width:parent.width;enabled:!root.plugins.busy
     model:root.scopes.map(function(c){return c.label})
     currentIndex:Math.max(0,root.scopes.findIndex(function(c){return c.id===root.plugins.conversation}))
     ThemeControlStyle {theme:root.theme;control:scopeChoice}
     onActivated:root.plugins.open(root.plugins.selected,root.scopes[currentIndex].id)
   }
   Flow {
-    visible:root.selectedPackage!==null;width:parent.width;spacing:root.theme.spacing.sm
+    visible:root.developerTools && !root.plugins.serverMode && root.selectedPackage!==null;width:parent.width;spacing:root.theme.spacing.sm
     ChatButton {theme:root.theme;text:root.selectedPackage && root.selectedPackage.enabled ? "Disable plugin" : "Enable plugin";enabled:!root.plugins.busy;onClicked:root.plugins.request("plugin_enable",{enabled:!root.selectedPackage.enabled})}
     ChatButton {theme:root.theme;text:"Remove plugin";enabled:!root.plugins.busy;onClicked:removeDialog.open()}
   }

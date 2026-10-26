@@ -5,20 +5,22 @@ conversation, accepts private mod ZIPs, resolves exact Thunderstore versions,
 and shares an encrypted pack with a friend, group, or server channel. It creates
 a separate local BepInEx profile. Sharing never installs anything on another member's computer.
 
-This is the first usable platform release. Package discovery, automatic update
+This is the first usable platform release. An external marketplace, automatic update
 feeds, background guest services, live collaborative documents, a Windows game
 launcher, and remote game-server deployment are not implemented. Wisp servers
 relay encrypted documents; they do not execute plugins or install Valheim mods.
 
 ## Try the Valheim plugin
 
-1. Install the Rust `wasm32-unknown-unknown` target once, then run
-   `bash scripts/build-valheim-plugin.sh`.
-2. Open **Wisp → Plugins → Install plugin**. Choose
-   `target/plugins/games.valheim`, review the identity, permissions, and digest,
-   and install it. For private ZIP support, both members need Wisp with this
-   feature and **Valheim Modpacks 0.2.0**. Rebuild/reinstall an older plugin and
-   review its new **private mod ZIPs you select** permission.
+1. On the main Wisp view, choose **Plugins**. A server owner or administrator
+   selects **Add to server** beside **Valheim Modpacks** in the repository-backed
+   catalog. Everyone in that server can now see its shortcut on the main view.
+2. Click **Valheim Modpacks** (or **Open** on its catalog card). Wisp downloads
+   and verifies the reviewed package from the selected server, then opens it.
+   There is no plugin-folder picker. Opening does not install game mods, launch
+   a game, join voice or share a document. Both client and server need the catalog
+   release; unknown versions prompt a client update. **Developer tools** retains
+   manual folder installation for local development only.
 3. Choose **Personal draft** or a friend/group/server-channel conversation.
    Enter exact Thunderstore dependency strings, one per line, such as
    `denikson-BepInExPack_Valheim-5.4.2351`. Keep BepInEx among the dependencies.
@@ -76,6 +78,30 @@ guessing a hash. Recipients import the complete encrypted bundle, review its
 package list, and explicitly install their own profile. No mod code runs during
 inspection, sharing, import, or installation. This does not alter a mod's own
 solo/host/guest compatibility.
+
+## Server catalog API
+
+Schema 36 adds `server_plugins` (ID, approved digest, enabling admin and timestamp).
+`GET /v1/server/plugins` returns `{catalog, can_manage}` to members only.
+`PUT /v1/server/plugins/{id}` accepts `{enabled, digest}` from an admin/owner;
+unknown IDs, stale approvals, outsiders and non-admin mutations are rejected.
+`GET /v1/server/plugins/{id}/package` serves only an enabled package with
+`X-Wisp-Plugin-Digest`. No private packs, local file paths or member install state
+are stored in this registry. Removing a server plugin removes its shortcut and
+future package access, preserving members' existing profiles and drafts.
+
+The daemon commands are `plugin_server_catalog`, `plugin_server_enable`, and
+`plugin_server_prepare`, scoped by `server_id`. The UI refreshes on server changes,
+server plugin events and every 30 seconds while connected. Late replies cannot
+populate another server's view. Prepare verifies the exact code against the
+client's reviewed catalog before caching; it never accepts a server-supplied URL.
+Catalog packaging/update instructions are in `plugins/catalog/README.md`.
+
+A server plugin is shared availability, not a claim that members' installed game
+mods are synchronized. Packs still belong to individual conversation drafts and
+are exchanged as encrypted revisions. The page lists exact resolved mods, shared
+revisions and local installation location. Live per-member sync status is not
+implemented.
 
 ## Package and runtime
 

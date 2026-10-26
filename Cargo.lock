@@ -7970,6 +7970,7 @@ dependencies = [
  "tracing-subscriber",
  "uuid",
  "wisp-crypto",
+ "wisp-plugins",
  "wisp-protocol",
  "zeroize",
 ]

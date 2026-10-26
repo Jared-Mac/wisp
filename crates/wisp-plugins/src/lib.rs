@@ -1,6 +1,7 @@
 //! Portable plugin contracts. Guest code has no WASI or host imports. The
 //! desktop owns every privileged operation and presents its own action UI.
 pub mod bundles;
+pub mod catalog;
 pub mod files;
 pub mod package;
 pub mod runtime;

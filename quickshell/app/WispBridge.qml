@@ -10,6 +10,8 @@ import "TransferProgress.js" as TransferProgress
 Item {
   id: root
 
+  readonly property alias serverPlugins: serverPlugins
+  WispServerPlugins { id: serverPlugins; bridge: root }
   readonly property alias plugins: plugins
   WispPlugins { id: plugins; bridge: root }
   readonly property alias updates: updates
@@ -62,6 +64,7 @@ Item {
     if (!daemonConnected) serverPings=({})
     if (!daemonConnected) transferProgress=({})
     if (!daemonConnected) plugins.reset()
+    if (!daemonConnected) serverPlugins.reset()
     if (!daemonConnected) friendships.reset()
     if (!daemonConnected) typing.reset()
     if (!daemonConnected) messageActions.disconnected()
@@ -1261,13 +1264,14 @@ Item {
       if (["pins_changed","message_deleted","message_updated","conversation_changed","group_members_changed","server_settings_changed","server_reconnected"].indexOf(message.name)>=0) messageActions.invalidate()
       if (message.name === "emojis_changed") chatExtras.invalidate()
       if (message.name === "soundboard_changed") soundboard.invalidate()
+      if (message.name === "server_plugins_changed") serverPlugins.refresh()
       if (message.name === "account_avatar_changed") avatars.invalidate()
       applySnapshot(message.payload.snapshot, message.name)
       if (["server_settings_changed","server_membership_changed"].indexOf(message.name)>=0 && canManageServer) refreshServerSettings()
       return
     }
     var avatarImageReply = message.type === "result" && (requests[message.id] || {}).kind === "avatar" && (requests[message.id] || {}).action === "image"
-    var handledReply = message.type === "result" && ["plugins", "voiceRecovery", "soundboard", "serverPing", "accountSetup", "typing"].indexOf((requests[message.id] || {}).kind) >= 0
+    var handledReply = message.type === "result" && ["serverPlugins", "plugins", "voiceRecovery", "soundboard", "serverPing", "accountSetup", "typing"].indexOf((requests[message.id] || {}).kind) >= 0
     if (message.type === "result") finishRequest(message)
     if (message.type === "result" && !handledReply && !avatarImageReply && message.ok !== true && message.error) {
       lastError = String(message.error.message || "Wisp command failed")
@@ -1447,6 +1451,7 @@ Item {
     var action = requests[message.id]
     if (!action) return
     delete requests[message.id]
+    if (action.kind === "serverPlugins") { serverPlugins.finish(message,action); return }
     if (action.kind === "plugins") { plugins.finish(message,action); return }
     if (action.kind === "accountSetup") { accountSetup.finish(message,action); return }
     var value = message.value || ({})

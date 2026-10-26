@@ -14,7 +14,8 @@ or the call controls. Each server has its own library. Importing requires
 
 The first application plugin manages shared Valheim modpacks with pinned
 Thunderstore packages, encrypted pack revisions, and separate local BepInEx
-profiles. Open **Wisp → Plugins**. See [the plugin guide](docs/plugin-system.md)
+profiles. Server admins choose **Plugins → Add to server**; members open the
+plugin directly from the main view without selecting a plugin folder. See [the plugin guide](docs/plugin-system.md)
 for installation, the Wasm SDK, permissions, and current limitations.
 
 ## Omarchy plugin

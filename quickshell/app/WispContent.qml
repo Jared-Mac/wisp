@@ -424,6 +424,21 @@ FocusScope {
         color: root.theme.accent; font.family: root.theme.font.family; font.pixelSize: root.theme.font.caption
       }
 
+      Flow {
+        objectName:"serverPluginShortcuts"
+        width:parent.width;spacing:root.theme.spacing.sm
+        visible:root.showingChats && root.bridge.serverPlugins.available
+        ChatButton {theme:root.theme;text:"Plugins";height:root.theme.space(30);onClicked:{root.currentPage="plugins";scrollView.contentY=0}}
+        Repeater {model:root.bridge.serverPlugins.enabledPlugins
+          ChatButton {
+            required property var modelData
+            theme:root.theme;text:modelData.manifest.name;height:root.theme.space(30)
+            width:Math.min(implicitWidth,parent.width)
+            enabled:!root.bridge.plugins.busy
+            onClicked:{root.currentPage="plugins";scrollView.contentY=0;root.bridge.plugins.openServer(modelData,root.bridge.serverPlugins.server)}
+          }
+        }
+      }
       Loader {
         id: dashboardLoader
         visible: root.showingChats

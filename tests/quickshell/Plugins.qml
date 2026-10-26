@@ -47,6 +47,26 @@ ShellRoot {
     test.check(bridge.plugins.view===null,"disconnect rejects stale plugin replies")
     bridge.plugins.open("games.valheim","");reply({view:view,generation:5,digest:"abc",shared:[]});input.wait(40)
     test.check(!bridge.sent.some(function(c){return /^(join_|share$|camera$|send_|plugin_share|plugin_apply)/.test(c.name)}),"viewing and editing never publishes media, shares documents, or installs mods")
+    var entry={manifest:manifest,digest:"d".repeat(64),installed_digest:"d".repeat(64),enabled:true}
+    bridge.serverPlugins.catalog=[entry];bridge.serverPlugins.canManage=true;input.wait(40)
+    test.check(test.find(page,"serverPluginOpen",[]).visible,"server catalog exposes a direct Open button")
+    bridge.plugins.openServer(entry,"server-two")
+    var prepare=bridge.sent[bridge.sent.length-1]
+    test.check(prepare.name==="plugin_server_prepare" && prepare.args.server_id==="server-two" && !prepare.args.path,"opening a server plugin needs no folder picker")
+    reply({installed:{manifest:manifest},plugins:[{manifest:manifest,enabled:true}]})
+    var opened=bridge.sent[bridge.sent.length-1]
+    test.check(opened.name==="plugin_open" && opened.args.server_id==="server-two","prepared plugin opens in its originating server")
+    reply({view:view,generation:9,digest:"abc",shared:[]})
+    bridge.plugins.open("games.valheim","")
+    test.check(bridge.sent[bridge.sent.length-1].args.server_id==="server-two","personal draft refresh preserves server scope")
+    reply({view:view,generation:9,digest:"abc",shared:[]})
+    var before=bridge.sent.length;bridge.serverPlugins.canManage=false;bridge.serverPlugins.setEnabled(entry,false)
+    test.check(bridge.sent.length===before,"members cannot submit server catalog changes")
+    var previousEpoch=bridge.serverPlugins.epoch;bridge.serverPlugins.reset()
+    bridge.serverPlugins.finish({ok:true,value:{catalog:[entry],can_manage:true}},{epoch:previousEpoch,server:bridge.serverPlugins.server,command:"plugin_server_catalog"})
+    test.check(bridge.serverPlugins.catalog.length===0 && !bridge.serverPlugins.canManage,"stale replies cannot restore another server's plugins")
+    bridge.plugins.reset()
+    test.check(!bridge.plugins.selected && !bridge.plugins.view && !bridge.plugins.serverMode,"server changes clear the previous plugin editor")
     var screenshot=Quickshell.env("WISP_PLUGINS_SCREENSHOT")
     if(screenshot){card.grabToImage(function(image){image.saveToFile(screenshot)});input.wait(100)}
     console.log(test.failed ? "PLUGINS_FAILED" : "PLUGINS_OK");Qt.quit()

@@ -336,3 +336,24 @@ Status: **Deferred. No Android release or port requested.**
 - Validation: bundle/archive sandbox tests, four-theme review/action UI tests,
   isolated two-account private ZIP sharing/install tests, changed-file rejection,
   corrupted-cache recovery, and draft isolation. No Android port/release requested.
+
+## 2026-10-26 · Server plugin catalog and main-view entry points (deferred)
+
+- Admins add/remove reviewed catalog tools for a server; members open a main-view
+  shortcut with no plugin-folder picker. The current desktop tool is Valheim
+  Modpacks 0.2.0. Opening only caches/opens the sandboxed tool; mod installation
+  and sharing remain explicit. No live member sync status is claimed.
+- Schema 36 adds `server_plugins`. Member-authenticated GET
+  `/v1/server/plugins` returns `{catalog:[{manifest,digest,installed_digest,enabled}],can_manage}`.
+  Admin PUT `/v1/server/plugins/{id}` accepts `{enabled,digest}`; package GET
+  `/v1/server/plugins/{id}/package` requires enabled state. Event:
+  `server_plugins_changed`. Existing APIs and encrypted pack formats remain compatible.
+- Android must not automatically execute downloaded guest/game code. Decide its
+  catalog UI/pack-viewing support in the requested future batch; old apps can
+  ignore this optional API. Desktop pins code to its shipped repository catalog.
+- Sources: `plugins/catalog/`, `crates/wisp-plugins/src/catalog.rs`,
+  `apps/wisp-server/src/plugins.rs`, `apps/wispd/src/plugins.rs`,
+  `quickshell/app/WispServerPlugins.qml`, `components/PluginsPage.qml`,
+  `WispContent.qml`. Validation: membership/admin/digest/revocation API tests,
+  local two-client catalog setup and encrypted pack lifecycle, themed headless UI.
+- This is queued context only. Do not port or release until an Android batch is requested.

@@ -25,7 +25,7 @@ enum Command {
     Status,
     /// Invoke the local plugin API (list, inspect, install, open, action, resolve, share, import, apply, enable, remove).
     Plugin {
-        #[arg(value_parser = ["list", "inspect", "install", "open", "action", "resolve", "share", "import", "apply", "enable", "remove"])]
+        #[arg(value_parser = ["list", "inspect", "install", "open", "action", "resolve", "share", "import", "apply", "enable", "remove", "server_catalog", "server_enable", "server_prepare"])]
         operation: String,
         #[arg(default_value = "{}", value_parser = plugin_arguments)]
         args: Value,

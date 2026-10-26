@@ -4,7 +4,7 @@ Build release wispd, wisp-server and the Valheim guest first. --online additiona
 resolves the pinned BepInEx package from Thunderstore and installs a temp profile.
 No real accounts, game processes, or installed profiles are used.
 """
-import argparse,json,os,socket,subprocess,tempfile,time,zipfile
+import argparse,json,os,socket,sqlite3,subprocess,tempfile,time,zipfile
 from pathlib import Path
 ROOT=Path(__file__).resolve().parent.parent
 parser=argparse.ArgumentParser(description=__doc__)
@@ -61,6 +61,25 @@ with tempfile.TemporaryDirectory(prefix='wisp-plugins-test-') as temporary:
             review=call(who,'plugin_inspect',{'path':package})
             rejected(lambda:call(who,'plugin_install',{'path':package,'digest':'unreviewed'}))
             call(who,'plugin_install',{'path':package,'digest':review['digest']})
+        # Admin adds one catalog plugin; members open it without selecting local files.
+        with sqlite3.connect(root/'server.sqlite3') as db:
+            db.execute("INSERT INTO server_identity(id,owner_user_id) SELECT 1,id FROM users WHERE display_name='Owner'")
+        catalog=call('owner','plugin_server_catalog')
+        assert catalog['can_manage'] and not catalog['catalog'][0]['enabled']
+        entry=catalog['catalog'][0]
+        catalog_args={'plugin_id':entry['manifest']['id'],'digest':entry['digest']}
+        rejected(lambda:call('member','plugin_server_enable',catalog_args|{'enabled':True}))
+        rejected(lambda:call('owner','plugin_server_prepare',catalog_args))
+        call('owner','plugin_server_enable',catalog_args|{'enabled':True})
+        assert call('member','plugin_server_catalog')['catalog'][0]['enabled']
+        call('member','plugin_remove',{'plugin_id':'games.valheim'})
+        prepared=call('member','plugin_server_prepare',catalog_args)
+        assert prepared['installed']['digest']==entry['digest']
+        rejected(lambda:call('member','plugin_server_prepare',catalog_args|{'digest':'a'*64}))
+        call('owner','plugin_server_enable',catalog_args|{'enabled':False})
+        rejected(lambda:call('member','plugin_server_prepare',catalog_args))
+        call('owner','plugin_server_enable',catalog_args|{'enabled':True})
+        print('PASS: admin catalog enable -> member prepare without folders -> verified code; revoked/unreviewed packages rejected',flush=True)
         base={'plugin_id':'games.valheim','conversation_id':conversation}
         opened=call('owner','plugin_open',base)
         assert opened['view']['title']=='Valheim Modpacks'

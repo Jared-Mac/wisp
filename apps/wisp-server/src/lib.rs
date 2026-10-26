@@ -22,6 +22,7 @@ mod member_moderation;
 #[cfg(test)]
 mod message_actions_tests;
 mod message_pins;
+mod plugins;
 #[cfg(test)]
 mod presence_tests;
 mod privacy;
@@ -792,6 +793,9 @@ pub fn router(state: AppState) -> Router {
             "/v1/server/settings",
             get(server_management::settings).patch(server_management::update_profile),
         )
+        .route("/v1/server/plugins", get(plugins::list))
+        .route("/v1/server/plugins/{id}", put(plugins::update))
+        .route("/v1/server/plugins/{id}/package", get(plugins::package))
         .route("/v1/server/admins", post(server_management::set_admin))
         .route(
             "/v1/server/members/moderate",
