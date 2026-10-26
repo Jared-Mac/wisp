@@ -243,7 +243,9 @@ async fn heartbeat_expires_an_unresponsive_socket_but_keeps_a_responsive_client(
     .await
     .expect("silent TCP peers must not remain online indefinitely");
     drop(silent);
-    let (mut responsive, _) = tokio_tungstenite::connect_async(&address).await.unwrap();
+    let (stream, _) = tokio_tungstenite::connect_async(&address).await.unwrap();
+    // Linux and Windows both discard the write half and only poll incoming events.
+    let (_, mut responsive) = stream.split();
     let alive = tokio::time::timeout(Duration::from_millis(300), async {
         while let Some(message) = responsive.next().await {
             let message = message.unwrap();
