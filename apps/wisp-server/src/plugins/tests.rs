@@ -122,6 +122,7 @@ async fn catalog_is_member_only_and_admin_managed_with_verified_packages() {
 }
 
 #[tokio::test]
+#[allow(clippy::too_many_lines)] // One end-to-end membership/publication lifecycle.
 async fn server_workspace_is_shared_and_cannot_be_published_by_members() {
     let state = AppState::new(test_config()).await.unwrap();
     let ledger: i64 = sqlx::query_scalar("SELECT MAX(version) FROM schema_migrations")

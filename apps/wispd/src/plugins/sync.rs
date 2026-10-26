@@ -1,6 +1,12 @@
 //! Published-pack tracking is separate from the editable guest state. Polling
 //! never imports over a draft or hashes the installation again unnecessarily.
-use super::*;
+use super::{
+    Installed, MAX_JSON, Packages, PathBuf, Permission, Request, Value, files, hash, invoke,
+    message_actions, read_bounded, shared_document,
+};
+use anyhow::ensure;
+use serde::{Deserialize, Serialize};
+use serde_json::json;
 use wisp_plugins::package::{Instance, write_json};
 
 #[derive(Clone, Serialize, Deserialize)]

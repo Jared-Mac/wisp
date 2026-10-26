@@ -662,7 +662,7 @@ impl Daemon {
                     instance.shared_revision = imported_message.clone();
                     instance.draft_changed = false;
                 }
-                feedback = format!("Imported from {}. Review before installing.", author);
+                feedback = format!("Imported from {author}. Review before installing.");
             }
             "plugin_resolve" | "plugin_apply" | "plugin_share" => {
                 let rendered = invoke(&packages, &installed, request.clone()).await?;
