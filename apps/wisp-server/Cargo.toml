@@ -31,6 +31,7 @@ zeroize = "1.8"
 lettre = { version = "0.11.23", default-features = false, features = ["builder", "smtp-transport", "tokio1"] }
 
 [dev-dependencies]
+tokio-tungstenite.workspace = true
 age = { version = "0.11.3", default-features = false }
 tower = { version = "0.5", features = ["util"] }
 

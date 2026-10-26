@@ -163,6 +163,28 @@ pub(super) async fn moderate(
 }
 
 async fn remove_participant(state: &AppState, room: &str, user: &str) -> Result<(), ApiError> {
+    let response = room_request(
+        state,
+        room,
+        "RemoveParticipant",
+        json!({"room":room,"identity":user}),
+    )
+    .await?;
+    if response.status().is_success() || response.status() == reqwest::StatusCode::NOT_FOUND {
+        return Ok(());
+    }
+    Err(ApiError::conflict(
+        "media_unavailable",
+        "Voice disconnect is pending",
+    ))
+}
+
+pub(super) async fn room_request(
+    state: &AppState,
+    room: &str,
+    method: &str,
+    body: Value,
+) -> Result<reqwest::Response, ApiError> {
     let now = Utc::now().timestamp();
     let header = URL_SAFE_NO_PAD.encode(br#"{"alg":"HS256","typ":"JWT"}"#);
     let claims = json!({"iss":state.config.livekit_api_key,"nbf":now-5,"exp":now+60,"video":{"roomAdmin":true,"room":room}});
@@ -179,26 +201,19 @@ async fn remove_participant(state: &AppState, room: &str, user: &str) -> Result<
         .livekit_url
         .replacen("wss://", "https://", 1)
         .replacen("ws://", "http://", 1);
-    let response = reqwest::Client::builder()
+    reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(3))
         .build()
         .map_err(ApiError::internal)?
         .post(format!(
-            "{}/twirp/livekit.RoomService/RemoveParticipant",
+            "{}/twirp/livekit.RoomService/{method}",
             origin.trim_end_matches('/')
         ))
         .bearer_auth(token)
-        .json(&json!({"room":room,"identity":user}))
+        .json(&body)
         .send()
         .await
-        .map_err(|_| ApiError::conflict("media_unavailable", "Voice disconnect is pending"))?;
-    if response.status().is_success() || response.status() == reqwest::StatusCode::NOT_FOUND {
-        return Ok(());
-    }
-    Err(ApiError::conflict(
-        "media_unavailable",
-        "Voice disconnect is pending",
-    ))
+        .map_err(|_| ApiError::conflict("media_unavailable", "Voice service is unavailable"))
 }
 
 async fn disconnect_pending(state: &AppState, user: Option<Uuid>) -> Result<(), ApiError> {

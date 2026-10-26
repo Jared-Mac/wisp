@@ -296,3 +296,22 @@ Status: **Deferred; do not port until an Android batch is requested.**
 - Validation: sandbox/package/archive Rust tests, four-theme QML scope/action
   tests, and the isolated two-account encrypted-sharing fixture in
   `scripts/test-plugins.py`. Record results with the eventual release.
+
+## Queued: offline voice membership cleanup (2026-10-25)
+
+Status: **Deferred. No Android release or port requested.**
+
+- The server now sends standard WebSocket Ping frames every 15 seconds and expires
+  unresponsive control sockets after 45 seconds. Keep the WebSocket implementation's
+  standard Pong handling enabled; no new application message or HTTP API is needed.
+- After the last control connection closes, preserve voice membership for at least
+  30 seconds. Retire it only after LiveKit confirms the participant is absent.
+  Active media, other connected devices, recent joins, reconnects during the check,
+  and media API failures preserve membership. Empty rooms are ended and remaining
+  clients receive the existing `hangout_changed` event. No schema migration.
+- Sources: `apps/wisp-server/src/voice_presence.rs`, `lib.rs`,
+  `member_moderation.rs`, `main.rs`. Tests cover multiple devices, reconnection
+  races, new memberships, failed media queries and silent/responsive sockets.
+- Desktop-only: the private Quickshell build permanently disables unused
+  Hyprland/i3 IPC modules and uses runtime cache revision `web2`, fixing Qt 6.12
+  meta-type build failures. No Android changes are required for that build fix.

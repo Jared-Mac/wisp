@@ -14,7 +14,7 @@ if ! pkg-config --atleast-version=6.8 Qt6WebEngineQuick || ! pkg-config --exists
   exit 0
 fi
 qt_version=$(pkg-config --modversion Qt6Core)
-runtime_version="0.3.1-qt$qt_version-web1"
+runtime_version="0.3.1-qt$qt_version-web2"
 bin_root=${XDG_BIN_HOME:-$HOME/.local/bin}
 state_root=${XDG_STATE_HOME:-$HOME/.local/state}/wisp
 cache_root=${XDG_CACHE_HOME:-$HOME/.cache}/wisp/web-runtime/$runtime_version
@@ -33,10 +33,13 @@ if [[ ! -x "$cache_root/build/src/quickshell" ]]; then
   # Qt WebEngine needs argv[0] and shared GL contexts. Upstream 0.3.1 passes
   # argc=0, which makes Chromium terminate the application during initialization.
   sed -i 's/auto qArgC = 0;/QCoreApplication::setAttribute(Qt::AA_ShareOpenGLContexts);\n\tauto qArgC = 1;/' "$cache_root/source/src/launch/launch.cpp"
+  # Wisp does not import either compositor IPC module. Their mutually recursive
+  # meta-types fail with Qt 6.12; keep them out of every fresh runtime build.
   cmake -S "$cache_root/source" -B "$cache_root/build" -G Ninja \
     -DCMAKE_BUILD_TYPE=Release -DDISTRIBUTOR=Wisp -DCRASH_HANDLER=OFF \
     -DUSE_JEMALLOC=OFF -DSERVICE_PIPEWIRE=OFF -DSERVICE_PAM=OFF \
-    -DSERVICE_POLKIT=OFF -DBLUETOOTH=OFF -DNETWORK=OFF -DSCREENCOPY=OFF
+    -DSERVICE_POLKIT=OFF -DBLUETOOTH=OFF -DNETWORK=OFF -DSCREENCOPY=OFF \
+    -DHYPRLAND_IPC=OFF -DI3_IPC=OFF
   cmake --build "$cache_root/build" --parallel "${WISP_BUILD_JOBS:-4}"
 fi
 if [[ -f "$bin_root/wisp-quickshell" ]]; then

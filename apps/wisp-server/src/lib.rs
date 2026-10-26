@@ -42,6 +42,7 @@ mod storage_cleanup;
 mod text_tests;
 mod typing;
 mod voice_moderation;
+mod voice_presence;
 
 use argon2::{
     Argon2, PasswordHash, PasswordHasher, PasswordVerifier,
@@ -60,7 +61,7 @@ use axum::{
 };
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{Duration as ChronoDuration, Utc};
-use futures_util::{SinkExt, StreamExt};
+use futures_util::StreamExt;
 use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -154,6 +155,7 @@ struct PendingKnock {
 #[derive(Debug, Clone, Default)]
 struct RuntimeUser {
     connections: usize,
+    disconnected_at: Option<Instant>,
 }
 
 #[derive(Debug)]
@@ -293,20 +295,29 @@ impl AppState {
     async fn set_connected(&self, user_id: UserId, connected: bool) {
         let mut runtime = self.runtime.write().await;
         let user = runtime.users.entry(user_id).or_default();
+        let was_online = user.connections > 0;
         if connected {
             user.connections += 1;
-            runtime.connected_clients += 1;
+            user.disconnected_at = None;
         } else {
             user.connections = user.connections.saturating_sub(1);
+            if was_online && user.connections == 0 {
+                user.disconnected_at = Some(Instant::now());
+            }
+        }
+        let online = user.connections > 0;
+        if connected {
+            runtime.connected_clients += 1;
+        } else {
             runtime.connected_clients = runtime.connected_clients.saturating_sub(1);
         }
         drop(runtime);
-        if !connected {
+        if !online {
             typing::disconnected(self, user_id).await;
         }
         self.emit(
             "presence_changed",
-            json!({"user_id": user_id, "online": connected}),
+            json!({"user_id": user_id, "online": online}),
         )
         .await;
     }
@@ -2654,10 +2665,24 @@ async fn events(
         }
         authenticate_token(&state, token).await?
     };
-    Ok(ws.on_upgrade(move |socket| event_socket(state, user_id, socket, query.typing)))
+    Ok(ws.on_upgrade(move |socket| {
+        event_socket(
+            state,
+            user_id,
+            socket,
+            query.typing,
+            Duration::from_secs(15),
+        )
+    }))
 }
 
-async fn event_socket(state: AppState, user_id: UserId, socket: WebSocket, typing_enabled: bool) {
+async fn event_socket(
+    state: AppState,
+    user_id: UserId,
+    socket: WebSocket,
+    typing_enabled: bool,
+    heartbeat_interval: Duration,
+) {
     state.set_connected(user_id, true).await;
     let (mut sender, mut receiver) = socket.split();
     let mut events = state.events.subscribe();
@@ -2668,19 +2693,25 @@ async fn event_socket(state: AppState, user_id: UserId, socket: WebSocket, typin
             occurred_at: Utc::now(),
             payload: json!(snapshot),
         };
-        if sender
-            .send(WsMessage::Text(
-                serde_json::to_string(&initial).unwrap_or_default().into(),
-            ))
-            .await
-            .is_err()
+        if !voice_presence::send_frame(
+            &mut sender,
+            WsMessage::Text(serde_json::to_string(&initial).unwrap_or_default().into()),
+        )
+        .await
         {
             state.set_connected(user_id, false).await;
             return;
         }
     }
+    let mut heartbeat = tokio::time::interval(heartbeat_interval);
+    heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut last_pong = Instant::now();
     loop {
         tokio::select! {
+            _ = heartbeat.tick() => {
+                if last_pong.elapsed() >= heartbeat_interval * 3
+                    || !voice_presence::send_frame(&mut sender, WsMessage::Ping(Vec::new().into())).await { break; }
+            }
             event = events.recv() => match event {
                 Ok(event) => {
                     if event.name == "chat_typing" && (!typing_enabled || !typing::visible(&state, &event, user_id).await) { continue; }
@@ -2689,7 +2720,7 @@ async fn event_socket(state: AppState, user_id: UserId, socket: WebSocket, typin
                         ServerEvent { name: "account_changed".into(), payload: json!({"changed":true}), ..event }
                     };
                     let Ok(text) = serde_json::to_string(&event) else { continue };
-                    if sender.send(WsMessage::Text(text.into())).await.is_err() { break; }
+                    if !voice_presence::send_frame(&mut sender, WsMessage::Text(text.into())).await { break; }
                 }
                 Err(broadcast::error::RecvError::Lagged(skipped)) => debug!(skipped, "event client lagged"),
                 Err(broadcast::error::RecvError::Closed) => break,
@@ -2697,8 +2728,9 @@ async fn event_socket(state: AppState, user_id: UserId, socket: WebSocket, typin
             message = receiver.next() => match message {
                 Some(Ok(WsMessage::Close(_)) | Err(_)) | None => break,
                 Some(Ok(WsMessage::Ping(bytes))) => {
-                    if sender.send(WsMessage::Pong(bytes)).await.is_err() { break; }
+                    if !voice_presence::send_frame(&mut sender, WsMessage::Pong(bytes)).await { break; }
                 }
+                Some(Ok(WsMessage::Pong(_))) => last_pong = Instant::now(),
                 _ => {}
             }
         }
