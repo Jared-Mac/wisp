@@ -93,7 +93,10 @@ fn policy(leases: &Leases, user: UserId, manual: Presence, now: Instant) -> Poli
     }
 }
 
-async fn identity(state: &AppState, headers: &HeaderMap) -> Result<(UserId, Uuid), ApiError> {
+pub(super) async fn identity(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> Result<(UserId, Uuid), ApiError> {
     let user = authenticate_headers(state, headers).await?;
     let token = headers
         .get("authorization")

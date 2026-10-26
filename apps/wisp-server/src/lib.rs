@@ -797,6 +797,10 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/server/plugins/{id}", put(plugins::update))
         .route("/v1/server/plugins/{id}/package", get(plugins::package))
         .route(
+            "/v1/server/plugins/{id}/sync",
+            get(plugins::member_sync::list).put(plugins::member_sync::report),
+        )
+        .route(
             "/v1/server/plugins/{id}/workspace",
             post(plugins::workspace),
         )

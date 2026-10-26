@@ -28,6 +28,15 @@ Column {
   signal shareRequested()
   signal syncRequested()
   readonly property var sync: plugins.syncStatus || ({})
+  readonly property var members: sync.members_available ? (sync.members || []) : []
+  readonly property int syncedMembers: members.filter(function(m){return m.status==="up_to_date"}).length
+  function memberStatusLabel(state) { return ({up_to_date:"Synced",update_available:"Needs update",modified:"Local changes",missing:"Profile missing",not_installed:"Not installed",unknown:"Not checked yet",needs_check:"Pack changed · recheck needed",stale:"Check is out of date",awaiting_access:"Waiting for pack access",mixed:"Mixed device statuses",no_pack:"No published pack"})[state] || "Unknown" }
+  function memberColor(state) { return state==="up_to_date" ? theme.accent : ["update_available","modified","missing","needs_check","mixed"].indexOf(state)>=0 ? theme.warning : theme.muted }
+  function checkedLabel(at) {
+    var age=Math.max(0,Number(sync.server_time || Date.now()/1000)-Number(at || 0))
+    if(!at)return "Not checked"
+    return age<60 ? "Checked just now" : age<3600 ? "Checked "+Math.floor(age/60)+"m ago" : age<86400 ? "Checked "+Math.floor(age/3600)+"h ago" : "Checked "+Math.floor(age/86400)+"d ago"
+  }
   readonly property string syncLabel: ({up_to_date:"Up to date",update_available:"Update available",modified:"Local changes",missing:"Profile missing",not_installed:"Not installed",no_pack:"Not published",unknown:"Not verified"})[sync.state] || "Checking installation…"
   Timer {interval:30000;repeat:true;running:root.visible && root.plugins.serverPack && !!root.plugins.view;onTriggered:root.plugins.checkSync(false)}
   onVisibleChanged:if(visible)plugins.checkSync(true)
@@ -35,7 +44,7 @@ Column {
   function changeScope(id) {
     if(id===plugins.conversation)return
     if(plugins.dirty){nextScope=id;scopeWarning.open()}
-    else {selectedId="";plugins.open(plugins.selected,id)}
+    else {selectedId="";tab=0;plugins.open(plugins.selected,id)}
     scopeChoice.currentIndex=Qt.binding(function(){return root.scopeIndex()})
   }
   function removeSelected() {
@@ -120,8 +129,8 @@ Column {
   RowLayout {
     width:parent.width
     Flow {Layout.fillWidth:true;spacing:root.theme.spacing.sm
-      Repeater {model:["Mods", "Shared packs", "Installation"]
-        ChatButton {required property string modelData;required property int index;theme:root.theme;text:modelData;primary:root.tab===index;onClicked:root.tab=index}
+      Repeater {model:root.plugins.serverPack ? ["Mods", "Shared packs", "Installation", "Members"+(root.sync.members_available ? " · "+root.syncedMembers+"/"+root.members.length+" synced" : "")] : ["Mods", "Shared packs", "Installation"]
+        ChatButton {required property string modelData;required property int index;objectName:index===3 ? "pluginMembersTab" : "";theme:root.theme;text:modelData;primary:root.tab===index;onClicked:root.tab=index}
       }
     }
     ChatButton {theme:root.theme;text:"Refresh";iconOnly:!root.wide;forceIcon:true;enabled:!root.plugins.busy && !root.plugins.dirty;onClicked:root.plugins.open(root.plugins.selected,root.plugins.conversation)}
@@ -234,6 +243,26 @@ Column {
     ChatButton {theme:root.theme;text:"Open profile folder";visible:!!root.plugins.folderUrl;onClicked:Qt.openUrlExternally(root.plugins.folderUrl)}
     Text {width:parent.width;text:"On Linux, start Valheim with this profile’s start_game_bepinex.sh and your absolute Valheim executable path. The status above checks this managed profile, not the mods loaded by a running game. Restart the game using the new profile after syncing.";wrapMode:Text.Wrap;color:root.theme.muted;font.family:root.theme.font.family;font.pixelSize:root.theme.font.caption}
   }
+  Column {
+    objectName:"pluginMemberList";width:parent.width;spacing:root.theme.spacing.md;visible:root.plugins.serverPack && root.tab===3
+    Text {text:"Server member sync";font.family:root.theme.font.family;font.pixelSize:root.theme.font.title;font.weight:Font.DemiBold;color:root.theme.foreground}
+    Text {width:parent.width;wrapMode:Text.Wrap;text:"Members report their installed profile when they open this manager, check or sync. These are last-checked results, not the mods loaded by a running game. Checks older than 24 hours are marked out of date.";font.family:root.theme.font.family;font.pixelSize:root.theme.font.caption;color:root.theme.muted}
+    Text {width:parent.width;wrapMode:Text.Wrap;visible:!root.sync.members_available;text:root.sync.members_detail || "Member statuses are unavailable. Press Check to refresh.";font.family:root.theme.font.family;font.pixelSize:root.theme.font.body;color:root.theme.muted}
+    Repeater {model:root.members
+      Rectangle {
+        id:memberCard;required property var modelData;objectName:"pluginMember-"+modelData.user_id
+        width:parent.width;height:memberContent.implicitHeight+root.theme.spacing.md*2;color:root.theme.surface;radius:root.theme.cornerRadius
+        Column {id:memberContent;x:root.theme.spacing.md;y:x;width:parent.width-2*x;spacing:root.theme.spacing.sm
+          Text {width:parent.width;text:memberCard.modelData.display_name;wrapMode:Text.Wrap;textFormat:Text.PlainText;font.family:root.theme.font.family;font.pixelSize:root.theme.font.body;font.weight:Font.DemiBold;color:root.theme.foreground}
+          Text {width:parent.width;text:root.memberStatusLabel(memberCard.modelData.status);wrapMode:Text.Wrap;font.family:root.theme.font.family;font.pixelSize:root.theme.font.body;color:root.memberColor(memberCard.modelData.status)}
+          Repeater {model:memberCard.modelData.devices || []
+            Text {required property var modelData;width:parent.width;text:(({windows:"Windows",linux:"Linux",macos:"macOS",android:"Android"})[modelData.platform] || "Other")+((memberCard.modelData.devices || []).length>1 ? " · "+root.memberStatusLabel(modelData.status) : "")+" · "+root.checkedLabel(modelData.checked_at);wrapMode:Text.Wrap;font.family:root.theme.font.family;font.pixelSize:root.theme.font.caption;color:root.theme.muted}
+          }
+          Text {visible:!(memberCard.modelData.devices || []).length && memberCard.modelData.status==="unknown";width:parent.width;wrapMode:Text.Wrap;text:"This member has not checked a profile with a supported client yet.";font.family:root.theme.font.family;font.pixelSize:root.theme.font.caption;color:root.theme.muted}
+        }
+      }
+    }
+  }
   Dialog {id:addMod;objectName:"addModDialog";parent:Overlay.overlay;x:parent ? (parent.width-width)/2 : 0;y:parent ? Math.max(0,(parent.height-height)/2) : 0;title:"Add a Thunderstore mod";modal:true;width:Math.min(parent ? parent.width-root.theme.space(24) : root.width,root.theme.space(480));standardButtons:Dialog.Ok | Dialog.Cancel
     ThemeControlStyle {theme:root.theme;control:addMod;outline:true}
     Column {width:parent.width;spacing:root.theme.spacing.md
@@ -257,6 +286,6 @@ Column {
   Dialog {id:scopeWarning;objectName:"scopeWarningDialog";parent:Overlay.overlay;x:parent ? (parent.width-width)/2 : 0;y:parent ? Math.max(0,(parent.height-height)/2) : 0;title:"Discard unsaved changes?";modal:true;width:Math.min(parent ? parent.width-root.theme.space(24) : root.width,root.theme.space(420));standardButtons:Dialog.Discard | Dialog.Cancel
     ThemeControlStyle {theme:root.theme;control:scopeWarning;outline:true}
     Text {width:parent.width;text:"Save this pack first if you want to keep your edits before changing conversations.";wrapMode:Text.Wrap;color:root.theme.foreground}
-    onDiscarded:{root.selectedId="";root.plugins.open(root.plugins.selected,root.nextScope)}
+    onDiscarded:{root.selectedId="";root.tab=0;root.plugins.open(root.plugins.selected,root.nextScope)}
   }
 }

@@ -292,3 +292,24 @@ state. The host stores a bounded `sync.json` sidecar next to the scoped instance
 existing instance, receipt, guest, encrypted document and server schemas are
 unchanged. Tests cover real encrypted revisions, actual file changes, cached-check
 behavior, stale sync requests, cache restoration, safe repair and draft preservation.
+
+### Server member status
+
+The **Members** tab shows the last check reported by each member's supported
+clients. Each PC has its own status; a synced Linux installation cannot hide an
+outdated Windows installation. Only members whose reporting PCs all match are
+counted as fully synced. Unreported clients remain unknown. Old-revision reports
+say **Pack changed · recheck needed**, since a new publication may contain unchanged
+mod files. A confirmed file-plan mismatch says **Needs update**. Checks expire to
+stale after 24 hours. These statuses describe managed profiles, not running games.
+
+Schema 39 adds bounded device reports. GET/PUT `/v1/server/plugins/{id}/sync` is
+server-member-only and requires an enabled plugin. PUT binds identity to the bearer
+session, validates the latest encrypted publication and recipient access, and stores
+only its revision, status, OS and check timestamp. Cached polls preserve the original
+check time; older reports cannot overwrite newer checks. Device names, local paths,
+file lists and mod contents never leave the PC. Revocation filters devices from the
+roster; membership removal and plugin removal clear their reports. Up to eight
+reporting devices are retained per member/plugin. Names resolve from current user
+records, so public-name changes do not break the reports. Installation and drafts
+remain usable when an older server does not support reporting.

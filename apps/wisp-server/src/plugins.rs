@@ -172,5 +172,7 @@ pub(super) async fn authorize_publish(
     Ok(())
 }
 
+pub(super) mod member_sync;
+
 #[cfg(test)]
 mod tests;

@@ -195,11 +195,19 @@ with tempfile.TemporaryDirectory(prefix='wisp-plugins-test-') as temporary:
         # Status polling never replaces a local draft, and sync always uses the
         # published plan, even when an admin has unpublished edits.
         assert peer_again['sync_status']['state']=='up_to_date'
+        def member_status(status, name):
+            assert status['members_available'], status
+            return next(m for m in status['members'] if m['display_name']==name)['status']
+        assert member_status(peer_again['sync_status'],'MemberA')=='up_to_date'
+        assert member_status(peer_again['sync_status'],'Owner')=='not_installed'
+        owner_roster=call('owner','plugin_sync_status',server_base|{'verify':False})['sync_status']
+        assert member_status(owner_roster,'MemberA')=='up_to_date'
         installed_peer=Path(peer_again['folder'])
         mod_path='BepInEx/plugins/Local-Foundation/Foundation.dll'
         (installed_peer/mod_path).write_bytes(b'modified by tester')
         status=call('member','plugin_sync_status',server_base|{'verify':True})['sync_status']
         assert status['state']=='modified'
+        assert member_status(status,'MemberA')=='modified'
         def sync_args(current,status):
             return server_base|{'generation':current['generation'],'sync_revision':status['revision'],'sync_digest':status['digest']}
         (root/'member/data/wisp/plugins/cache/private'/review['artifact']['sha256']).unlink()
@@ -216,11 +224,14 @@ with tempfile.TemporaryDirectory(prefix='wisp-plugins-test-') as temporary:
         revision2=call('owner','plugin_add_archive',server_base|{'generation':owner_again['generation'],'path':str(archive),'sha256':review2['artifact']['sha256']})
         revision2=call('owner','plugin_resolve',server_base|{'generation':revision2['generation']})
         revision2=call('owner','plugin_share',server_base|{'generation':revision2['generation']})
+        assert member_status(revision2['sync_status'],'MemberA')=='needs_check'
         rejected(lambda:call('member','plugin_sync',sync_args(repaired,status)))
         fresh_status=call('member','plugin_sync_status',server_base|{'verify':False})['sync_status']
         assert fresh_status['state']=='update_available' and fresh_status['revision']!=status['revision']
+        assert member_status(fresh_status,'MemberA')=='update_available'
         updated=call('member','plugin_sync',sync_args(repaired,fresh_status))
         assert updated['sync_status']['state']=='up_to_date'
+        assert member_status(updated['sync_status'],'MemberA')=='up_to_date'
         assert (Path(updated['folder'])/mod_path).read_bytes()==newer_payload
         assert (Path(repaired['folder'])/mod_path).read_bytes()==payload
         draft=call('owner','plugin_action',server_base|{'generation':revision2['generation'],'action':'save','fields':{'title':'Do not overwrite my draft','packages':''}})
@@ -235,6 +246,8 @@ with tempfile.TemporaryDirectory(prefix='wisp-plugins-test-') as temporary:
         shutil.rmtree(updated['folder'])
         missing=call('member','plugin_sync_status',server_base|{'verify':True})['sync_status']
         assert missing['state']=='missing'
+        assert member_status(missing,'MemberA')=='missing'
+        print('PASS: member reports cross clients, current-pack recheck, modifications, updates and sync visibility',flush=True)
         print('PASS: actual file checks, update detection without importing, stale-sync rejection, repair/rollback and unpublished draft preservation',flush=True)
         print('PASS: default encrypted server pack, automatic peer load/install, admin-only edits, unpublished draft and personal scope preservation',flush=True)
         call('owner','plugin_enable',{'plugin_id':'games.valheim','enabled':False})

@@ -88,6 +88,14 @@ ShellRoot {
     bridge.plugins.sync("");reply({generation:11,folder:"/newer/profile",sync_status:{state:"up_to_date"}})
     test.check(bridge.sent[bridge.sent.length-1].name==="plugin_open","sync refreshes the mod list when no draft edits need preservation")
     reply({view:view,generation:12,digest:"next-plan",server_pack:true,can_publish:false,sync_status:{state:"up_to_date"}})
+    bridge.plugins.syncStatus={state:"up_to_date",members_available:true,server_time:1000,members:[{user_id:"member-a",display_name:"Renamed member",status:"up_to_date",devices:[{platform:"linux",status:"up_to_date",checked_at:900}]},{user_id:"member-b",display_name:"Unknown member",status:"unknown",devices:[]},{user_id:"member-c",display_name:"Two PCs",status:"mixed",devices:[{platform:"linux",status:"up_to_date",checked_at:900},{platform:"windows",status:"update_available",checked_at:900}]}]}
+    input.wait(30);test.find(page,"pluginMembersTab",[]).clicked();input.wait(30)
+    test.check(test.find(page,"pluginMemberList",[]).visible && test.find(page,"pluginMember-member-a",[]).visible,"member sync has an accessible dedicated view")
+    test.check(test.find(page,"valheimModManager",[]).syncedMembers===1,"unknown or mixed PCs are not counted as fully synced members")
+    page.width=360;input.wait(30)
+    test.check(test.find(page,"pluginMember-member-c",[]).width<=360,"member rows adapt to tray width")
+    page.width=Qt.binding(function(){return card.width-24})
+    test.find(page,"valheimModManager",[]).tab=0
     bridge.plugins.open("games.valheim","")
     test.check(bridge.sent[bridge.sent.length-1].args.server_id==="server-two","personal draft refresh preserves server scope")
     reply({view:view,generation:9,digest:"abc",shared:[]})

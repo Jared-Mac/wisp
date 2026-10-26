@@ -422,3 +422,31 @@ and unpublished draft preservation, headless UI defaults. Android stays deferred
 - Android queue only: do not execute desktop game mods on Android or begin porting
   until a batch is requested. A future Android pack viewer may display revisions;
   local desktop installation status is not broadcast to mobile or other members.
+
+## Queued: server-member modpack status (2026-10-26)
+
+- A Members tab in the desktop Valheim manager shows per-member and per-PC
+  last-checked installation states. Unknown/older clients are never marked as
+  needing an update. A new published revision marks previous reports as needing
+  recheck; actual mismatches say Needs update. Checks older than 24 hours are stale.
+- GET `/v1/server/plugins/{id}/sync` returns `{members:[{user_id,display_name,
+  status,devices:[{platform,status,checked_at}]}],has_pack,server_time,
+  stale_after_seconds}`. PUT accepts `{revision,status,platform,checked_at}`.
+  User/device identity comes exclusively from the authenticated session; reports
+  require current membership, plugin enablement and access to the current pack.
+  Current display names are resolved by stable user ID. Revoked devices disappear;
+  leaving/kicking/banning clears reports, as does removing the plugin.
+- Schema 39 adds `plugin_sync_reports` and membership cleanup. Reports contain no
+  local paths, device names, installed file lists or mod contents. Up to eight
+  reporting devices per member/plugin are retained. These are advisory client
+  reports, not game-process inspection, anti-cheat, or server-attested file hashes.
+- Desktop reports on manager open, Check and Sync; its 30-second visible-manager
+  check refreshes the member roster without making cached file checks look newer.
+  Older servers leave local verification functional and show the member feature
+  unavailable. Android must not claim desktop mods are installed on mobile.
+- Sources: `apps/wisp-server/src/plugins/member_sync.rs`, `device_activity.rs`,
+  `migrations/0039_plugin_sync_reports.sql`, `apps/wispd/src/plugins/sync.rs`,
+  `quickshell/app/components/ValheimModManager.qml`.
+- Tests cover device identity, forged actors, expired/revoked access, new revisions,
+  cached check timestamps, multiple PCs, rename/leave cleanup, real encrypted
+  two-client reports and four-theme/narrow-width member UI. Android remains deferred.

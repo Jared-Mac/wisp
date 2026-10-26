@@ -145,7 +145,7 @@ pub(super) async fn restore_private(
     Ok(())
 }
 #[allow(clippy::too_many_arguments)]
-pub(super) async fn status(
+async fn local_status(
     session: &message_actions::Session<'_>,
     packages: &Packages,
     installed: &Installed,
@@ -225,4 +225,57 @@ pub(super) async fn status(
         "checked_at":tracking.verified.as_ref().map(|v|v.checked_at),"can_sync":true,
         "needs_folder":instance.folder.as_ref().and_then(|p|p.parent()).is_none_or(|p| !p.is_dir())}),
     )
+}
+
+/// Publish only the check result, revision, timestamp and OS, never local paths
+/// or mod contents. An older server must not break local installation checks.
+#[allow(clippy::too_many_arguments)]
+pub(super) async fn status(
+    session: &message_actions::Session<'_>,
+    packages: &Packages,
+    installed: &Installed,
+    id: &str,
+    scope: &str,
+    conversation: &str,
+    latest: Option<&str>,
+    instance: &Instance,
+    verify: bool,
+) -> anyhow::Result<Value> {
+    let mut local = local_status(
+        session,
+        packages,
+        installed,
+        id,
+        scope,
+        conversation,
+        latest,
+        instance,
+        verify,
+    )
+    .await?;
+    let endpoint = format!("/v1/server/plugins/{id}/sync");
+    let result = async {
+        if let Some(revision) = local["revision"].as_str() {
+            let response = session.api().request(reqwest::Method::PUT,&endpoint).json(&json!({
+                "revision":revision,"status":local["state"],"platform":std::env::consts::OS,
+                "checked_at":local["checked_at"].as_u64().unwrap_or_else(||std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs())
+            })).send().await?;
+            if response.status()!=reqwest::StatusCode::CONFLICT && response.status()!=reqwest::StatusCode::FORBIDDEN {
+                return crate::decode::<Value>(response).await;
+            }
+            // Publication/membership can change while hashing. The roster will
+            // show recheck/access status instead of accepting a stale success.
+        }
+        crate::decode::<Value>(session.api().request(reqwest::Method::GET,&endpoint).send().await?).await
+    }.await;
+    if let Ok(roster) = result {
+        local["members"] = roster["members"].clone();
+        local["members_available"] = json!(true);
+        local["server_time"] = roster["server_time"].clone();
+    } else {
+        local["members_available"] = json!(false);
+        local["members_detail"] =
+            json!("Member statuses are unavailable. Check the connection or update the server.");
+    }
+    Ok(local)
 }
